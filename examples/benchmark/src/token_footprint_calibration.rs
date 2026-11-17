@@ -422,6 +422,7 @@ mod calibration {
 
     fn server_config() -> McpServerConfig {
         McpServerConfig {
+            startup: None,
             text_fit: None,
             publication_defaults: Default::default(),
             widget_transition_ms: tze_hud_config::tokens::resolve_motion_duration_ms(
@@ -536,7 +537,7 @@ mod calibration {
         }
     }
 
-    pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
+    pub(crate) async fn run() -> Result<(), Box<dyn std::error::Error>> {
         let output_path = parse_output_path();
         let runtime = HeadlessRuntime::new(headless_config()).await?;
         prepare_scene(&runtime).await;

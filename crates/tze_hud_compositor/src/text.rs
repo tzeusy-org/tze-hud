@@ -27,8 +27,8 @@
 //!
 //! - `Clip` — the `TextBounds` rectangle hard-clips rendered glyphs.
 //! - `Ellipsis` — measured word-boundary truncation with the ellipsis glyph
-//!   included in the shaped-width budget, implemented in [`crate::overflow`]
-//!   (hud-5jbra.3).  Grapheme-cluster fallback applies when no word boundary
+//!   included in the shaped-width budget, implemented in [`crate::overflow`].
+//!   Grapheme-cluster fallback applies when no word boundary
 //!   fits.  Whole-line vertical visibility is enforced: no partially clipped
 //!   glyph rows.
 
@@ -44,7 +44,7 @@ use tze_hud_scene::types::{
 };
 use wgpu::{Device, MultisampleState, Queue};
 
-use crate::fonts::{FontConfig, ResolvedFonts, build_font_system};
+use crate::fonts::{FontConfig, ResolvedFonts, build_font_system_with_diagnostics};
 use crate::overflow::{self, TruncationResult, TruncationViewport};
 
 /// Default line-height multiplier: `line_height_px = font_size_px × this`.
@@ -67,7 +67,7 @@ pub(crate) const LINE_HEIGHT_MULTIPLIER: f32 = tze_hud_scene::types::TEXT_LINE_H
 ///
 /// `viewport_mode` distinguishes head-anchored from tail-anchored truncation:
 /// the same content at the same geometry produces different display text
-/// depending on which anchor mode is active (spec tasks 3.2 and 3.3).
+/// depending on which anchor mode is active.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct TruncationKey {
     /// BLAKE3 hash of the content string (32 bytes).
@@ -137,21 +137,19 @@ impl TruncationKey {
 /// pipeline by [`TruncationCache::prime`] and looked up in O(1) on the frame
 /// path via [`TruncationCache::get_by_key`].
 ///
-/// This enforces the "stable-shape-caching" contract from RFC 0013 §3.4 and
-/// §4.2, Phase-1 design §3: truncation is called only when content or geometry
+/// Truncation is called only when content or geometry
 /// changes — never on every frame.
 ///
 /// Mirrors [`crate::markdown::MarkdownCache`] in structure and ownership model.
 ///
-/// # Stale-by-content fallback (hud-n3mq0)
+/// # Stale-by-content fallback
 ///
 /// The exact-key entries above are only ever populated by [`prime`], which runs
 /// off the render path (commit-time / cadence-gated geometry change).  During a
 /// fast resize drag the adaptive cadence gate *defers* re-priming, so the
 /// render path can see a cache miss for the newest geometry's key.  Rather than
 /// shaping inline on the frame loop (the exact O(n) cost the cache exists to
-/// avoid — see RFC 0013 §3.4 doctrine "the runtime must never block on
-/// per-frame shaping"), the render path falls back to the most-recently-primed
+/// avoid), the render path falls back to the most-recently-primed
 /// truncation for the *same content* at slightly-old geometry.  That stale
 /// result is still a VALID truncation (no partial-glyph rows, ellipsis intact),
 /// just computed for bounds that are one cadence tick behind.  The deferred
@@ -168,7 +166,7 @@ pub(crate) struct TruncationCache {
     /// nearest-geometry truncation on a cadence-deferred render-path miss.
     by_content: HashMap<[u8; 32], TruncationKey>,
     /// `max_truncation_input_bytes` bound for the viewport-adjacent-window
-    /// truncation fallback (spec.md §324/§331).  When a single uncached
+    /// truncation fallback. When a single uncached
     /// truncation would shape more than this many bytes, [`TruncationCache::prime`]
     /// restricts the shaped input to a viewport-adjacent window of whole source
     /// lines (`overflow::viewport_adjacent_input`) instead of the full retained
@@ -217,7 +215,7 @@ impl TruncationCache {
 
     /// Returns `true` if no entries are cached.
     #[inline]
-    #[allow(dead_code)] // used in tests; companion to len()
+    #[cfg(test)]
     pub(crate) fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
@@ -234,7 +232,7 @@ impl TruncationCache {
 
     /// Render-path fallback: return the most-recently-primed truncation for the
     /// **same content** at slightly-old geometry, when the exact-geometry key is
-    /// not yet primed (a cadence-deferred frame — hud-n3mq0).
+    /// not yet primed (a cadence-deferred frame — ).
     ///
     /// O(1): one `content_hash` index lookup plus one entries lookup.  Does **no**
     /// shaping — it never calls [`overflow::truncate_for_ellipsis`].  The returned
@@ -264,12 +262,11 @@ impl TruncationCache {
     ///
     /// - [`TruncationViewport::HeadAnchored`] (default) — calls
     ///   [`overflow::truncate_for_ellipsis`].  Used for static tiles and
-    ///   scrolled-back viewports (spec task 3.3 append-stability guarantee).
+    ///   scrolled-back viewports.
     ///
     /// - [`TruncationViewport::TailAnchored`] — calls
     ///   [`overflow::truncate_tail_anchored`].  Used for follow-tail streaming
-    ///   transcripts whose viewport is at the tail (spec task 3.2 whole-line
-    ///   advancement guarantee).
+    ///   transcripts whose viewport is at the tail.
     ///
     /// Call this at content-commit time, **not** on the frame path.
     #[allow(clippy::too_many_arguments)]
@@ -288,7 +285,7 @@ impl TruncationCache {
     ) -> &'a TruncationResult {
         // Track the most-recently-primed key for this content so a later
         // cadence-deferred render-path miss can fall back to the nearest
-        // geometry's truncation instead of shaping inline (hud-n3mq0).  Updated
+        // geometry's truncation instead of shaping inline. Updated
         // on every prime call (hit or miss) so the freshest geometry wins.
         self.by_content.insert(key.content_hash(), key);
         let max_truncation_input_bytes = self.max_truncation_input_bytes;
@@ -301,7 +298,7 @@ impl TruncationCache {
             let weight = Weight(font_weight.clamp(100, 900));
             let base_attrs = Attrs::new().family(family).weight(weight);
             let line_height = font_size_px * line_height_multiplier;
-            // Viewport-adjacent-window fallback (spec.md §324/§331): when the
+            // Viewport-adjacent-window fallback: when the
             // committed content would shape an input larger than the configured
             // `max_truncation_input_bytes` bound, restrict the shaped input to a
             // viewport-adjacent window of whole source lines so a single uncached
@@ -379,7 +376,7 @@ pub(crate) struct TextRasterizer {
     renderer: TextRenderer,
     /// Second glyphon renderer sharing `atlas`, prepared and replayed AFTER every
     /// other pass so runtime chrome text (the system card) cannot be covered by
-    /// content, widgets, focus rings, menus or the safe-mode overlay (hud-w5zon).
+    /// content, widgets, focus rings, menus or the safe-mode overlay.
     overlay_renderer: TextRenderer,
     /// Grip menu text, replayed after its plate and before final system chrome.
     menu_renderer: TextRenderer,
@@ -397,6 +394,7 @@ pub(crate) struct TextRasterizer {
     uploaded_fonts: Vec<([u8; 32], Arc<Vec<u8>>)>,
     /// Family each font role resolved to.
     resolved_fonts: ResolvedFonts,
+    font_warnings: tze_hud_scene::startup_diagnostics::StartupWarnings,
     /// Truncation result cache for `TextOverflow::Ellipsis` items.
     ///
     /// Keyed on `(content_hash, bounds_width, bounds_height, font_size_px,
@@ -404,21 +402,20 @@ pub(crate) struct TextRasterizer {
     /// [`TextRasterizer::prime_truncation_cache`]; the frame path looks up
     /// pre-computed results in O(1) via [`TruncationCache::get_by_key`].
     ///
-    /// This satisfies the Phase-1 stable-shape-caching contract (RFC 0013
-    /// §3.4, §4.2): `truncate_for_ellipsis` is called exactly once per
+    /// `truncate_for_ellipsis` is called exactly once per
     /// content/geometry change, never on every frame.
     pub(crate) truncation_cache: TruncationCache,
     /// Cumulative count of `shape_until_scroll` invocations on the per-frame
-    /// `prepare_text_items` path (hud-991cj).
+    /// `prepare_text_items` path.
     ///
     /// This is the measurement lever for the scroll-flicker fix: a `Buffer` is
     /// shaped only when its content/geometry/font changed, so on a pure scroll
     /// (offset changes but shape inputs do not) this counter must stay flat once
     /// a shaped-buffer cache lands. Incremented immediately before each frame-path
     /// `shape_until_scroll`; read via [`TextRasterizer::shape_call_count`].
-    #[allow(dead_code)] // read only by the hud-991cj scroll-reshape benchmark
+    #[cfg(any(test, feature = "dev-mode"))]
     pub(crate) shape_call_count: u64,
-    /// Shaped-buffer reuse cache (hud-991cj): owned glyphon `Buffer`s keyed by a
+    /// Shaped-buffer reuse cache: owned glyphon `Buffer`s keyed by a
     /// content-and-geometry `ShapeKey` (BLAKE3 of every input that affects the
     /// shaped glyphs — see [`shape_key_for_item`]). The **scroll offset is
     /// deliberately NOT in the key** — a Clip pane's shaped output is
@@ -459,8 +456,8 @@ enum TextLayer {
 /// bounded `TextItem` in the render path).
 ///
 /// [`Wrap::WordOrGlyph`] wraps at word boundaries **and** falls back to breaking
-/// a single token at the glyph level when that token is wider than the line box
-/// (hud-n0x4u). Plain [`Wrap::Word`] would leave such an unbreakable token on one
+/// a single token at the glyph level when that token is wider than the line box.
+/// Plain [`Wrap::Word`] would leave such an unbreakable token on one
 /// over-long line whose tail is then clipped away by the box scissor — the owner
 /// could type a 200-char run of `asdasd…` and never see the end. `WordOrGlyph` is
 /// a strict superset of `Word` (identical for text that already fits), so this is
@@ -529,8 +526,7 @@ pub(crate) fn single_line_width(
 /// Extracted so the render constructors (`TextItem::from_text_markdown_node` /
 /// `_cached`) and the vertical-flow measurement
 /// (`crate::vertical_flow::flow_child_height`) compute the wrap width and vertical
-/// padding from the SAME formula and cannot drift (hud-yfj8u; the drift class
-/// hud-3xdlf fixed for the height math).
+/// padding from the same formula so their measurements cannot drift.
 pub(crate) fn text_content_box_margins(
     bounds_width: f32,
     bounds_height: f32,
@@ -547,7 +543,7 @@ pub(crate) fn text_content_box_margins(
 /// `wrap_width`, reproducing the SAME shaping the render path uses for a
 /// `TextMarkdownNode` — [`TextItem::from_text_markdown_cached`] +
 /// [`TextRasterizer::build_and_shape_buffer`]'s styled-run branch — rather
-/// than a second, independently-drifting reimplementation (hud-3xdlf).
+/// than a second, independently-drifting reimplementation.
 ///
 /// Three things this deliberately does that [`composer_wrap_line_widths`]
 /// (the composer/plain-text measurement path) does not, because the render
@@ -580,8 +576,7 @@ pub(crate) fn text_content_box_margins(
 /// Measure the rendered height (px) of an ALREADY-PARSED markdown node — the
 /// commit-time cached [`crate::markdown::ParsedMarkdown`] the render path consumes
 /// via [`TextItem::from_text_markdown_cached`] — WITHOUT re-parsing on the frame
-/// path (hud-5wx09; text-stream-portals §"per-frame flow measurement MUST consume
-/// the commit-time cached parsed representation … MUST NOT re-parse").
+/// path. Per-frame flow measurement consumes the commit-time parsed representation.
 ///
 /// This is the parse-free core of [`measure_markdown_content_height`]: it consumes
 /// `parsed.plain_text`, `parsed.spans`, and `parsed.line_height_multiplier`
@@ -642,7 +637,7 @@ pub(crate) fn measure_markdown_content_height_cached(
 ///
 /// The steady-state flow-measurement path looks up the commit-time cached
 /// [`crate::markdown::ParsedMarkdown`] and calls the `_cached` variant with zero
-/// per-frame parsing (hud-5wx09). This re-parsing variant is invoked ONLY when the
+/// per-frame parsing. This re-parsing variant is invoked ONLY when the
 /// cache does not yet hold the node's content — a cold first frame or a node added
 /// mid-frame — which is a one-time fill on content change, not a per-frame parse
 /// of unchanged content, and mirrors the render path's own inline parse-on-miss
@@ -670,7 +665,7 @@ pub(crate) fn measure_markdown_content_height(
 /// markdown syntax NOT stripped — wrapped to `wrap_width`, reproducing the
 /// render path's shaping for a `TextMarkdownNode` that carries pixel-bearing
 /// `color_runs` ([`TextItem::from_text_markdown_node`]'s raw-content branch,
-/// hud-ysyis).
+/// ).
 ///
 /// That render constructor deliberately does two things
 /// [`measure_markdown_content_height`] does not, mirrored here:
@@ -746,7 +741,8 @@ impl TextRasterizer {
         font_config: &FontConfig,
     ) -> Self {
         let font_config = font_config.clone().normalized();
-        let (font_system, resolved_fonts) = build_font_system(&font_config);
+        let (font_system, resolved_fonts, font_warnings) =
+            build_font_system_with_diagnostics(&font_config);
 
         tracing::info!(
             font_face_count = font_system.db().faces().count(),
@@ -782,7 +778,9 @@ impl TextRasterizer {
             loaded_font_ids: HashSet::new(),
             uploaded_fonts: Vec::new(),
             resolved_fonts,
+            font_warnings,
             truncation_cache: TruncationCache::new(),
+            #[cfg(any(test, feature = "dev-mode"))]
             shape_call_count: 0,
             shape_cache: HashMap::new(),
             overlay_shape_cache: HashMap::new(),
@@ -792,11 +790,11 @@ impl TextRasterizer {
         }
     }
 
-    /// Cumulative number of per-frame `shape_until_scroll` calls (hud-991cj).
+    /// Cumulative number of per-frame `shape_until_scroll` calls.
     /// Used by the scroll-reshape benchmark/regression to prove a pure scroll
     /// performs zero re-shapes once the shaped-buffer cache is in place.
     #[inline]
-    #[allow(dead_code)] // used by the hud-991cj scroll-reshape benchmark
+    #[cfg(any(test, feature = "dev-mode"))]
     pub(crate) fn shape_call_count(&self) -> u64 {
         self.shape_call_count
     }
@@ -840,7 +838,7 @@ impl TextRasterizer {
         // A new face can change font fallback / substitution for text that was
         // already shaped, so every cached shaped buffer is now potentially stale
         // (the ShapeKey does not capture FontSystem state). Drop the cache; it is
-        // rebuilt from the next frame's items on the miss path (hud-991cj).
+        // rebuilt from the next frame's items on the miss path.
         self.shape_cache.clear();
         self.overlay_shape_cache.clear();
         self.affordance_shape_cache.clear();
@@ -856,6 +854,10 @@ impl TextRasterizer {
     #[inline]
     pub(crate) fn resolved_fonts(&self) -> &ResolvedFonts {
         &self.resolved_fonts
+    }
+
+    pub(crate) fn font_warnings(&self) -> &tze_hud_scene::startup_diagnostics::StartupWarnings {
+        &self.font_warnings
     }
 
     /// Agent-uploaded fonts loaded so far, as `(resource_id, bytes)` in load
@@ -886,7 +888,7 @@ impl TextRasterizer {
         self.viewport.update(queue, Resolution { width, height });
     }
 
-    /// Measure the composer draft for horizontal caret-follow (hud-zlfi4).
+    /// Measure the composer draft for horizontal caret-follow.
     ///
     /// Shapes `text` as a single unwrapped line with the sans-serif composer font
     /// and returns `(caret_x, content_width)` in physical pixels, both measured
@@ -948,7 +950,7 @@ impl TextRasterizer {
     }
 
     /// Measure the single-line composer draft's [`tze_hud_input::ComposerVisualLayout`]
-    /// (hud-hxhnt finding 1) — a one-row visual layout so the runtime's pointer
+    /// (finding 1) — a one-row visual layout so the runtime's pointer
     /// hit-test (`composer_pointer_byte_offset`) can map a click to a real
     /// glyph-geometry byte offset via `ComposerVisualLayout::byte_at_point` instead
     /// of falling back to a crude linear byte-fraction guess.
@@ -1013,8 +1015,7 @@ impl TextRasterizer {
         }
     }
 
-    /// Measure a composer draft under WORD WRAP for the multi-line profile
-    /// (hud-nx7yq.1).
+    /// Measure a composer draft under WORD WRAP for the multi-line profile.
     ///
     /// Shapes `text` wrapped to `wrap_width` (the composer's interior width) with
     /// the sans-serif composer font and returns `(total_lines, caret_line)`:
@@ -1024,7 +1025,7 @@ impl TextRasterizer {
     ///   byte; the last line when the caret is at or past the end).
     ///
     /// `caret_byte` is snapped down to a valid UTF-8 boundary, so agent-provided
-    /// offsets never panic. `text` is the RAW draft text (hud-hxhnt): the caret is
+    /// offsets never panic. `text` is the RAW draft text: the caret is
     /// a chrome-layer quad now, not an inserted glyph, so the rendered text is
     /// always the raw draft and this measures the same string — the box sizing and
     /// the render never disagree, and a zero-width caret at a wrap boundary clips
@@ -1033,7 +1034,7 @@ impl TextRasterizer {
     /// Same wrap parameters as the render path (`bounds_width = wrap_width`,
     /// [`WRAPPED_TEXT_WRAP`]), so the line counts agree — including the
     /// break-anywhere fallback that keeps an over-long unbreakable token on
-    /// multiple in-box lines instead of one clipped line (hud-n0x4u). Runs once
+    /// multiple in-box lines instead of one clipped line. Runs once
     /// per frame only while a multi-line composer is active — off the transcript
     /// hot path.
     pub(crate) fn measure_composer_wrapped(
@@ -1059,7 +1060,7 @@ impl TextRasterizer {
         // the render path produces (collect_composer_text_item sets
         // bounds_width = wrap_width; build_and_shape_buffer uses the same
         // WRAPPED_TEXT_WRAP), so an over-long unbreakable token wraps here exactly
-        // as it paints and the box height / caret line stay in sync (hud-n0x4u).
+        // as it paints and the box height / caret line stay in sync.
         buf.set_size(&mut self.font_system, Some(wrap_width.max(1.0)), None);
         buf.set_wrap(&mut self.font_system, WRAPPED_TEXT_WRAP);
         let base_attrs = Attrs::new().family(Family::SansSerif).weight(Weight(400));
@@ -1086,7 +1087,7 @@ impl TextRasterizer {
 
     /// Mutable access to the rasterizer's `FontSystem` — the SAME font system the
     /// render path shapes glyphs with, so it carries any agent-uploaded fonts
-    /// loaded via `load_font_data` (hud-9gopx). Exposed so the vertical-flow
+    /// loaded via `load_font_data`. Exposed so the vertical-flow
     /// pre-pass (`renderer::…::prime_vertical_flow_layout`) can measure flow child
     /// heights against the real render fonts instead of a fresh bundled font
     /// system, keeping "measured == painted" true for uploaded fonts too.
@@ -1112,7 +1113,7 @@ impl TextRasterizer {
     }
 
     /// Measure the composer draft's wrapped VISUAL-LINE layout for soft-wrap
-    /// vertical caret movement (hud-21o6x).
+    /// vertical caret movement.
     ///
     /// Shapes the RAW draft text (no caret glyph — the caret is a rendering
     /// artifact; navigation is over raw bytes) wrapped to `wrap_width` with the
@@ -1140,7 +1141,7 @@ impl TextRasterizer {
         // Same break-anywhere policy as the render + caret-line paths
         // (WRAPPED_TEXT_WRAP) so visual-row byte ranges for Up/Down navigation
         // match the painted wrap, including glyph-level breaks inside an over-long
-        // token (hud-n0x4u).
+        // token.
         buf.set_wrap(&mut self.font_system, WRAPPED_TEXT_WRAP);
         let base_attrs = Attrs::new().family(Family::SansSerif).weight(Weight(400));
         buf.set_text(&mut self.font_system, text, base_attrs, Shaping::Advanced);
@@ -1199,7 +1200,7 @@ impl TextRasterizer {
             text_len: text.len(),
             // The caller (`prime_composer_scroll_offset`) fills this from its own
             // `composer_input_box` geometry after measuring, so the input box
-            // stays single-sourced by the compositor (hud-lw60x).
+            // stays single-sourced by the compositor.
             input_box: None,
             // Multi-line profile wraps rather than scrolling horizontally.
             h_scroll_px: 0.0,
@@ -1215,11 +1216,10 @@ impl TextRasterizer {
     ///
     /// The `viewport` field on each `TextItem` drives truncation-mode selection:
     /// - [`TruncationViewport::TailAnchored`] items call
-    ///   [`overflow::truncate_tail_anchored`] (spec task 3.2 — newest content
+    ///   [`overflow::truncate_tail_anchored`] (newest content
     ///   always visible for follow-tail streaming transcripts).
     /// - [`TruncationViewport::HeadAnchored`] items call
-    ///   [`overflow::truncate_for_ellipsis`] (default / scrolled-back viewports,
-    ///   spec task 3.3 append-stability guarantee).
+    ///   [`overflow::truncate_for_ellipsis`] (default / scrolled-back viewports).
     ///
     /// Returns the set of live [`TruncationKey`]s so the caller can evict stale
     /// entries with [`TruncationCache::evict_except`].
@@ -1268,7 +1268,7 @@ impl TextRasterizer {
     ///
     /// After shaping, computes pixel-exact inline backdrop quads from
     /// `StyledRunItem::background_color` fields using `layout_runs()` glyph
-    /// position data (Phase 2, hud-9ieev).  The caller must render these quads
+    /// position data (Phase 2). The caller must render these quads
     /// in a flat-rect pass immediately before the glyphon text pass so that
     /// backdrop quads appear behind the glyphs.
     ///
@@ -1284,7 +1284,7 @@ impl TextRasterizer {
         self.prepare_layer(TextLayer::Content, device, queue, items)
     }
 
-    /// Prepare runtime chrome text for the final overlay pass (hud-w5zon); replay
+    /// Prepare runtime chrome text for the final overlay pass; replay
     /// it with [`TextRasterizer::render_overlay_text_pass`]. Independent of the
     /// content layer's prepared state.
     pub(crate) fn prepare_overlay_text_items(
@@ -1337,7 +1337,7 @@ impl TextRasterizer {
         // Items without outline produce 1 TextArea each.
         // We build all Buffers first, then construct TextArea references.
 
-        // Phase 0 (hud-5jbra.3 / hud-wgq7j): resolve ellipsis-truncated text
+        // Phase 0: resolve ellipsis-truncated text
         // strings from the truncation cache.
         //
         // The cache is primed outside the frame loop by `prime_truncation_cache`
@@ -1345,7 +1345,7 @@ impl TextRasterizer {
         // On a warm path (after at least one commit), a cache hit is one BLAKE3
         // hash to reconstruct the key plus one HashMap lookup — zero shaping work.
         //
-        // The render path NEVER shapes inline (hud-n3mq0).  Truncation is an O(n)
+        // The render path NEVER shapes inline. Truncation is an O(n)
         // operation and the cache exists precisely to keep it off the frame loop.
         // On a cache miss we resolve in priority order, all O(1) and shaping-free:
         //
@@ -1355,8 +1355,8 @@ impl TextRasterizer {
         //      Still a valid truncation (no torn glyphs, ellipsis intact), just
         //      one cadence tick behind.  The deferred off-path prime
         //      (`Compositor::prime_truncation_cache`) fills the correct entry for
-        //      a subsequent frame — graceful degradation, not a bug (RFC 0013
-        //      §3.4 doctrine: arrival ≠ presentation; never block the frame loop).
+        //      a subsequent frame — graceful degradation, not a bug (
+        // rule: arrival ≠ presentation; never block the frame loop).
         //   3. True cold start (this content never primed at ANY geometry):
         //      `None` → the buffer below renders `item.text` clipped to bounds by
         //      `set_size`, which glyphon clips without partial-glyph rows.
@@ -1385,11 +1385,11 @@ impl TextRasterizer {
         // For truncated (Ellipsis) items the effective runs are the resliced
         // versions; for non-truncated items they are item.styled_runs as-is.
         // compute_inline_backdrop_quads uses these instead of item.styled_runs
-        // so that glyph↔run byte-offset matching is always correct (hud-9ieev).
+        // so that glyph↔run byte-offset matching is always correct.
         let mut effective_styled_runs_per_item: Vec<Vec<StyledRunItem>> =
             Vec::with_capacity(items.len());
 
-        // Phase 1 shaped-buffer cache (hud-991cj): move the whole cache out and
+        // Phase 1 shaped-buffer cache: move the whole cache out and
         // rebuild it from THIS frame's items. Each item's `ShapeKey` hashes every
         // input that affects the shaped glyphs (original + effective/truncated
         // text, bounds, font, weight, alignment, overflow, viewport, line-height,
@@ -1416,7 +1416,7 @@ impl TextRasterizer {
             // backdrop quads (their pixel positions shift with scroll), so this
             // pure run-computation runs on both the cache-hit and cache-miss
             // paths — split from the set_text/shape work that only runs on a miss.
-            // THE SUBTLETY (hud-991cj): the interleave of run-computation with
+            // THE SUBTLETY: the interleave of run-computation with
             // set_text+shape is untangled here so a hit does zero shaping while
             // pinned behaviors (styled runs, truncation reslicing, backdrop quads)
             // still reproduce byte-for-byte.
@@ -1439,7 +1439,7 @@ impl TextRasterizer {
         // present this frame) are freed here.
         drop(old_cache);
 
-        // Inline backdrop quads (Phase 2, hud-9ieev): compute pixel-exact rects
+        // Inline backdrop quads (Phase 2): compute pixel-exact rects
         // from glyph layout data.  Must happen here, between buffer shaping and
         // the TextArea construction below that borrows from `buffers`.
         // `compute_inline_backdrop_quads` only iterates buffers immutably.
@@ -1447,7 +1447,7 @@ impl TextRasterizer {
         // Pass `effective_styled_runs_per_item` (which uses the resliced styled
         // runs for truncated items) so that glyph↔byte-offset matching is correct
         // even when the buffer was shaped with different byte offsets than the
-        // original `item.styled_runs` (hud-9ieev Thread 3 fix).
+        // original `item.styled_runs` (Thread 3 fix).
         let inline_backdrop_quads =
             compute_inline_backdrop_quads(items, &buffers, &effective_styled_runs_per_item);
 
@@ -1629,7 +1629,7 @@ impl TextRasterizer {
         );
         // Break-anywhere wrap: word boundaries first, glyph-level fallback for a
         // single token wider than the box so its tail stays visible instead of
-        // overflowing into the clip scissor (hud-n0x4u). Shared with the composer
+        // overflowing into the clip scissor. Shared with the composer
         // / echo measurement helpers via WRAPPED_TEXT_WRAP so counts agree.
         buf.set_wrap(&mut self.font_system, WRAPPED_TEXT_WRAP);
         let family = match item.font_family {
@@ -1646,7 +1646,7 @@ impl TextRasterizer {
         let effective_text: &str = truncated.unwrap_or(&item.text);
 
         if !item.styled_runs.is_empty() {
-            // Phase-1 markdown styled-run path (hud-5jbra.2).
+            // Phase-1 markdown styled-run path.
             //
             // `styled_runs` carry per-span weight, italic, monospace, and
             // optional color from the parse cache.  We build `(text_slice,
@@ -1654,8 +1654,8 @@ impl TextRasterizer {
             //
             // When ellipsis truncation was applied, byte offsets in `styled_runs`
             // must be remapped to the truncated string's coordinate system
-            // (hud-so7zu). HeadAnchored: "{prefix}…" (clamp at prefix_len).
-            // TailAnchored: "…\n{tail}" (leading ellipsis, hud-fe4ik — offsets
+            //. HeadAnchored: "{prefix}…" (clamp at prefix_len).
+            // TailAnchored: "…\n{tail}" (leading ellipsis, — offsets
             // shifted; see `reslice_styled_runs_tail_anchored`).
             if let Some(truncated_str) = truncated {
                 let resliced = reslice_styled_runs_for_item(item, truncated_str);
@@ -1708,7 +1708,7 @@ impl TextRasterizer {
             // base_attrs carries no color_opt and run attrs carry explicit Colors.
             //
             // When ellipsis truncation was applied, remap color_run byte offsets
-            // to the truncated string's coordinate system (hud-so7zu / hud-fe4ik).
+            // to the truncated string's coordinate system.
             if let Some(truncated_str) = truncated {
                 let resliced = if truncated_str == &*item.text {
                     // Text fit without truncation — preserve original color runs.
@@ -1750,10 +1750,12 @@ impl TextRasterizer {
         for line in buf.lines.iter_mut() {
             line.set_align(Some(ct_align));
         }
-        // Measurement lever for hud-991cj: every per-frame shape is counted so the
-        // scroll benchmark/regression can prove a pure scroll (unchanged shape
-        // inputs, cache hit) performs zero re-shapes.
-        self.shape_call_count += 1;
+        // Tests and dev-mode work observation count every per-frame shape to prove a pure scroll (unchanged
+        // shape inputs, cache hit) performs zero re-shapes.
+        #[cfg(any(test, feature = "dev-mode"))]
+        {
+            self.shape_call_count += 1;
+        }
         buf.shape_until_scroll(&mut self.font_system, false);
         self.note_glyph_misses(&buf);
         buf
@@ -1868,7 +1870,7 @@ impl TextRasterizer {
 
 // ─── TextItem ─────────────────────────────────────────────────────────────────
 
-/// A pixel-exact backdrop quad for an inline code span (Phase 2, hud-9ieev).
+/// A pixel-exact backdrop quad for an inline code span (Phase 2).
 ///
 /// Positioned from actual glyph layout data (start/end advance, line_top/line_height
 /// from cosmic-text's `LayoutRun`) after `shape_until_scroll`.  The color comes
@@ -1890,7 +1892,7 @@ pub(crate) struct InlineBackdropQuad {
     pub(crate) color: [u8; 4],
 }
 
-/// Compute the shaped-buffer cache key for `item` (hud-991cj).
+/// Compute the shaped-buffer cache key for `item`.
 ///
 /// The key is a BLAKE3 digest over EVERY input that changes the shaped glyphs —
 /// the original text and the effective (post-truncation) text, bounds, font
@@ -2005,8 +2007,7 @@ fn shape_key_for_item(item: &TextItem, effective_text: &str) -> [u8; 32] {
     *h.finalize().as_bytes()
 }
 
-/// Effective (resliced) styled runs used for a frame's inline backdrop quads
-/// (hud-991cj).
+/// Effective (resliced) styled runs used for a frame's inline backdrop quads.
 ///
 /// Mirrors exactly what [`TextRasterizer::build_and_shape_buffer`] feeds to
 /// `set_rich_text`, computed separately so the backdrop-quad path runs on BOTH
@@ -2063,7 +2064,7 @@ fn effective_styled_runs_for_item(item: &TextItem, truncated: Option<&str>) -> V
 /// Quads are clipped to each item's `clip_pixel_x/y + clip_bounds_width/height`
 /// before being returned, so they never bleed outside the item's `TextBounds`.
 /// Extend a per-visual-line selection quad toward the box edges for the standard
-/// multi-line text-selection shape (hud-scgyw).
+/// multi-line text-selection shape.
 ///
 /// `clip_x0`/`clip_x1` are the box interior left/right (the text item's clip
 /// bounds). `continues_left` means the selection began on a previous visual line
@@ -2136,7 +2137,7 @@ pub(crate) fn compute_inline_backdrop_quads(
         // With `Shaping::Advanced` (rustybuzz), `LayoutGlyph::start` and `end`
         // are byte offsets within the `BufferLine` text (the `start_run` offset
         // is already included).  We can therefore map each glyph directly to its
-        // full-text byte range as `line_offset + glyph.start .. line_offset + glyph.end`.
+        // full-text byte range as `line_offset + glyph.start.. line_offset + glyph.end`.
         //
         // (Under the old `Shaping::Basic`/shape_skip mode `start` was a char index
         // within the word being shaped, not a byte offset — that required the
@@ -2150,7 +2151,7 @@ pub(crate) fn compute_inline_backdrop_quads(
         for run in buf.layout_runs() {
             let line_offset = line_byte_offsets.get(run.line_i).copied().unwrap_or(0);
 
-            // Full-text byte span of THIS visual line (hud-scgyw): the min/max glyph
+            // Full-text byte span of THIS visual line: the min/max glyph
             // byte over the run. Used to decide, for a `fill_line_width` selection
             // run, whether the selection continues onto the previous/next line so
             // the highlight can extend to the box edge (standard text-selection
@@ -2225,7 +2226,7 @@ pub(crate) fn compute_inline_backdrop_quads(
 
                 // Flush any in-progress quad after scanning all glyphs in this run.
                 if let Some(mut q) = current_quad.take() {
-                    // Full-width selection shape (hud-scgyw): when this selection run
+                    // Full-width selection shape: when this selection run
                     // continues from the previous visual line, extend the highlight
                     // left to the box edge; when it continues onto the next line,
                     // extend right to the box edge. Interior lines get both → a
@@ -2327,8 +2328,7 @@ pub struct TextItem {
     /// `TextItem::from_text_markdown_node` when `color_runs` are present.
     /// Zone-derived `TextItem`s always carry an empty slice (no run support yet).
     pub color_runs: Box<[ColorRunItem]>,
-    /// Markdown-derived styled runs from the Phase-1 parse cache
-    /// (hud-5jbra.2).
+    /// Markdown-derived styled runs from the Phase-1 parse cache.
     ///
     /// When non-empty these runs take precedence over `color_runs` for
     /// determining per-span font weight, italic style, and font family.
@@ -2342,9 +2342,9 @@ pub struct TextItem {
     ///
     /// Controls which lines are shown when the text overflows the bounds:
     /// - [`TruncationViewport::HeadAnchored`] (default) — show the FIRST
-    ///   `max_lines` (static tiles, scrolled-back viewports, spec task 3.3).
+    ///   `max_lines` (static tiles, scrolled-back viewports).
     /// - [`TruncationViewport::TailAnchored`] — show the LAST `max_lines`
-    ///   (follow-tail streaming tiles at the tail, spec task 3.2).
+    ///   (follow-tail streaming tiles at the tail).
     ///
     /// Set by `collect_text_items_from_node` / `collect_ellipsis_text_items_from_node`
     /// based on the tile's current `follow_tail_at_tail` state in the scene.
@@ -2391,7 +2391,7 @@ pub struct StyledRunItem {
     /// at the token-defined size.
     pub size_scale: Option<f32>,
     /// When `true`, a multi-line `background_color` run is drawn as a standard
-    /// text-selection shape rather than tight per-glyph quads (hud-scgyw): the
+    /// text-selection shape rather than tight per-glyph quads: the
     /// first visual line is highlighted from the selection start to the line's
     /// right edge, fully-interior lines span the FULL box width, and the last
     /// line runs from the box's left edge to the selection end.
@@ -2421,13 +2421,13 @@ pub struct ColorRunItem {
 /// and never paint. A node carrying *only* such sentinels is rendering-equivalent
 /// to one with empty `color_runs`, so it can still take the cached/styled
 /// markdown path. Use this predicate — never `color_runs.is_empty()` — to decide
-/// whether the lossy raw-content path is required. (hud-9v3t6)
+/// whether the lossy raw-content path is required.
 pub(crate) fn markdown_node_has_pixel_runs(node: &TextMarkdownNode) -> bool {
     node.color_runs.iter().any(|r| r.start_byte < r.end_byte)
 }
 
 /// Token-resolved accent for an active transcript-tail streaming cursor, if this
-/// node carries the streaming-cursor tail marker (hud-zlq2v).
+/// node carries the streaming-cursor tail marker.
 ///
 /// The projection adapter (`streaming_cursor_color_runs` in
 /// `tze_hud_portal::render`) signals an active tail cursor with a
@@ -2490,8 +2490,8 @@ fn intersect_clip_box(a: ClipBox, b: ClipBox) -> ClipBox {
 /// the pre-promotion behavior byte-for-byte. When `Some`, the part region is the
 /// per-part containment envelope that keeps one part's content (e.g. an
 /// overlong transcript) from painting over a sibling part's region (e.g. the
-/// composer strip) — the render-side meaning of "one scene node per part"
-/// (hud-s4lrw). The part region is a *clip* envelope only; it deliberately does
+/// composer strip) — the render-side meaning of "one scene node per part".
+/// The part region is a *clip* envelope only; it deliberately does
 /// **not** alter the wrap/truncation measure (`bounds_width`), so the
 /// shaped-buffer and truncation caches stay keyed exactly as before (PR #1007
 /// perf invariant).
@@ -2537,7 +2537,7 @@ impl TextItem {
     /// In the Phase-1 render path the compositor now always goes through
     /// [`TextItem::from_text_markdown_cached`] (primed at commit-time by
     /// `Compositor::prime_markdown_cache`).  The renderer's cache-miss
-    /// fallback (hud-xcp9b) parses inline via `parse_markdown_subset` rather
+    /// fallback parses inline via `parse_markdown_subset` rather
     /// than falling through to this constructor, so the lossy strip path is no
     /// longer reachable from the render pipeline.
     ///
@@ -2634,7 +2634,7 @@ impl TextItem {
     }
 
     /// Build a `TextItem` from a `TextMarkdownNode` using a pre-parsed
-    /// [`ParsedMarkdown`] from the [`MarkdownCache`] (Phase-1 hud-5jbra.2).
+    /// [`ParsedMarkdown`] from the [`MarkdownCache`] (Phase-1 ).
     ///
     /// This is the replacement for `from_text_markdown_node` in the Phase-1
     /// markdown path.  The `plain_text` and `styled_runs` from the cache are
@@ -2668,7 +2668,7 @@ impl TextItem {
         // reference no content bytes and are simply dropped here, exactly as
         // `from_text_markdown_node` would filter them out.  This lets nodes that
         // carry only lifecycle/stale sentinels keep the cached/styled markdown
-        // path (hud-9v3t6).  Assert in debug builds so genuine misuse — passing
+        // path. Assert in debug builds so genuine misuse — passing
         // pixel runs whose offsets index the un-stripped raw content — is caught
         // early without any release overhead.
         debug_assert!(
@@ -2700,7 +2700,7 @@ impl TextItem {
         let h = (node.bounds.height - margin_y * 2.0).max(1.0);
 
         // Convert ParsedMarkdown spans to StyledRunItems — shared with the
-        // vertical-flow measurement seam (hud-3xdlf) via
+        // vertical-flow measurement seam via
         // `markdown_spans_to_styled_runs` so a measured height is built from
         // the identical run set the render path paints, not a second,
         // independently-drifting reimplementation of this filter/clamp logic.
@@ -2756,7 +2756,7 @@ impl TextItem {
         scale: f32,
     ) -> Self {
         // Margin: prefer margin_horizontal/margin_vertical; fall back to margin_px;
-        // then fall back to 8 dp.  Per spec §Extended RenderingPolicy: margin_horizontal
+        // then fall back to 8 dp. margin_horizontal
         // "overrides margin_px for the horizontal axis. When None, falls back to margin_px."
         // Policy fields are already pixels; only the dp fallbacks need `scale`.
         let margin_h = policy
@@ -3002,12 +3002,11 @@ pub(crate) fn color_run_spans<'t, 'a>(
 ///
 /// A span whose byte range is empty after clamping to `text.len()`, or whose
 /// start/end does not land on a UTF-8 char boundary, is dropped — exactly the
-/// filter [`TextItem::from_text_markdown_cached`] applies inline before
-/// hud-3xdlf factored it out here.
+/// filter used by [`TextItem::from_text_markdown_cached`].
 ///
 /// Shared by [`TextItem::from_text_markdown_cached`] (the render path) and
-/// [`measure_markdown_content_height`] (the vertical-flow measurement seam,
-/// hud-3xdlf) so both build the identical run set from the identical parse —
+/// [`measure_markdown_content_height`] (the vertical-flow measurement seam)
+/// so both build the identical run set from the identical parse —
 /// a second, independently-drifting reimplementation of this filter/clamp/
 /// convert logic is exactly the "measured != painted" bug class this sharing
 /// exists to prevent.
@@ -3221,7 +3220,7 @@ pub(crate) fn reslice_color_runs(
 ///
 /// `truncate_tail_anchored` normally emits `"…\n{tail}"` (multi-line window),
 /// whose prefix is `ELLIPSIS` + `'\n'`.  The degenerate `max_lines == 1` case
-/// (hud-qoq52, option (b)) instead emits a single inline-leading-ellipsis line
+/// instead emits a single inline-leading-ellipsis line
 /// `"…{tail}"` with **no** newline, whose prefix is just `ELLIPSIS`.  Returns
 /// `None` when `truncated_str` does not begin with `ELLIPSIS` at all (caller
 /// then treats the runs as unremappable).
@@ -3241,7 +3240,7 @@ fn tail_anchored_leading_bytes(truncated_str: &str) -> Option<usize> {
 ///
 /// `truncate_tail_anchored` produces a leading-ellipsis output:
 /// `"…\n{visible_tail}"` (multi-line) or `"…{visible_tail}"` (the single-line
-/// `max_lines == 1` case, hud-qoq52).  The original `styled_runs` byte offsets are
+/// `max_lines == 1` case). The original `styled_runs` byte offsets are
 /// relative to the **original** text; they must be shifted to become relative
 /// to `effective_text` (= the leading-ellipsis truncated string).
 ///
@@ -3381,7 +3380,7 @@ pub(crate) fn reslice_color_runs_tail_anchored(
 /// Compute the "widest" effective measurement weight and font family for a
 /// `TextItem` that has [`StyledRunItem`]s.
 ///
-/// Used when priming the truncation cache for items with styled runs (hud-so7zu).
+/// Used when priming the truncation cache for items with styled runs.
 /// Styled runs may include bold (weight=700) or monospace spans that are wider
 /// than the base font.  If the truncation measurement uses only the base attrs,
 /// bold/monospace text wraps to more lines than measured, causing the fit
@@ -3432,7 +3431,7 @@ pub(crate) fn effective_truncation_key(item: &TextItem) -> Option<TruncationKey>
     if item.overflow != TextOverflow::Ellipsis {
         return None;
     }
-    // (hud-so7zu) Use effective measurement attrs from styled runs.
+    // Use effective measurement attrs from styled runs.
     let (meas_weight, meas_mono) =
         styled_runs_effective_measurement(&item.styled_runs, item.font_weight);
     let meas_family = if meas_mono {
@@ -3544,7 +3543,7 @@ fn linear_to_srgb_u8(linear: f32) -> u8 {
 mod tests {
     use super::*;
 
-    // ── portal_part_clip_rect (hud-s4lrw) ──────────────────────────────────
+    // ── portal_part_clip_rect ──────────────────────────────────
     // Pure CPU geometry: the per-part clip envelope for multi-node portals.
 
     /// With no declared part, the clip is exactly the content∩tile intersection
@@ -3614,7 +3613,7 @@ mod tests {
         assert_eq!(clip, (200.0, 100.0, 300.0, 50.0));
     }
 
-    /// hud-n0x4u repro (pure CPU): a single unbroken token far wider than the box
+    /// repro (pure CPU): a single unbroken token far wider than the box
     /// must fall back to glyph-level (break-anywhere) wrapping so every visual line
     /// fits inside `wrap_width` and no content is left on one over-long line whose
     /// tail the box scissor would clip.
@@ -4072,7 +4071,7 @@ mod tests {
         }
     }
 
-    // ── TruncationCache tests (hud-wgq7j) ────────────────────────────────────
+    // ── TruncationCache tests ────────────────────────────────────
     //
     // These tests verify the stable-shape-caching contract: `truncate_for_ellipsis`
     // is called exactly once per content/geometry change and zero times on
@@ -4243,7 +4242,7 @@ mod tests {
         );
     }
 
-    /// hud-n3mq0: a cadence-deferred render-path miss for new geometry must be
+    /// a cadence-deferred render-path miss for new geometry must be
     /// served by `get_stale_by_content` (the previous geometry's valid
     /// truncation) — NEVER by an inline shape on the frame loop.
     ///
@@ -4326,7 +4325,7 @@ mod tests {
         );
     }
 
-    /// hud-n3mq0: the stale-by-content index tracks the *most recent* primed
+    /// the stale-by-content index tracks the *most recent* primed
     /// geometry, so the freshest available truncation is reused on a later miss.
     #[test]
     fn truncation_stale_by_content_tracks_latest_primed_geometry() {
@@ -4385,7 +4384,7 @@ mod tests {
         );
     }
 
-    /// hud-n3mq0: cold start (content never primed at any geometry) returns
+    /// cold start (content never primed at any geometry) returns
     /// `None` — the render path then renders untruncated-clipped text, still
     /// shaping nothing on the truncation path.
     #[test]
@@ -4398,7 +4397,7 @@ mod tests {
         );
     }
 
-    /// hud-n3mq0: `evict_except` must keep `by_content` consistent — a content
+    /// `evict_except` must keep `by_content` consistent — a content
     /// hash whose only entries were evicted must no longer resolve via the
     /// stale fallback (no dangling key pointing at an evicted entry).
     #[test]
@@ -4664,11 +4663,11 @@ mod tests {
         );
     }
 
-    // ── Mid-drag re-truncation tests (hud-ghhxa — spec §6b.3) ─────────────────
+    // ── Mid-drag re-truncation tests ─────────────────
     //
     // These tests verify that when a portal tile's bounds change during a resize
     // drag, the TruncationCache correctly re-resolves at each new intermediate
-    // geometry.  The key invariant from spec §6b.3: "pane re-layout under the
+    // geometry. The key invariant: "pane re-layout under the
     // overflow contract at every intermediate geometry."
     //
     // Because TruncationCache is keyed on bounds (bounds_width_bits /
@@ -4683,7 +4682,7 @@ mod tests {
     /// Priming at a narrower intermediate geometry produces a separate cache
     /// entry with truncation that fits within the new (narrower) bounds.
     ///
-    /// This is the core §6b.3 invariant: at each intermediate geometry during
+    /// This is the core invariant: at each intermediate geometry during
     /// a resize, the overflow contract is re-applied to the new bounds.
     #[test]
     fn intermediate_resize_geometry_re_resolves_truncation() {
@@ -4876,7 +4875,7 @@ mod tests {
     /// at two different widths produces two different keys (so the cache miss
     /// mechanism that drives intermediate-geometry re-resolution is sound).
     ///
-    /// This is the structural guarantee underlying the entire §6b.3 re-truncation
+    /// This is the structural guarantee underlying the entire re-truncation
     /// design: the TruncationCache already invalidates naturally on bounds change
     /// because bounds are part of the key.
     #[test]
@@ -4936,7 +4935,7 @@ mod tests {
         );
     }
 
-    // ── hud-so7zu: styled/color run reslice tests ─────────────────────────────
+    // ──: styled/color run reslice tests ─────────────────────────────
 
     /// reslice_styled_runs: runs entirely before content_end_byte are preserved.
     #[test]
@@ -5097,7 +5096,7 @@ mod tests {
         assert_eq!(result[0].color, [0, 128, 255, 255], "color preserved");
     }
 
-    // ── hud-so7zu: styled_runs_effective_measurement tests ───────────────────
+    // ──: styled_runs_effective_measurement tests ───────────────────
 
     /// Base case: no styled runs → returns base_weight and no monospace.
     #[test]
@@ -5191,7 +5190,7 @@ mod tests {
         assert!(!mono);
     }
 
-    // ── hud-fe4ik: tail-anchored styled-run reslice tests ────────────────────
+    // ──: tail-anchored styled-run reslice tests ────────────────────
     //
     // `truncate_tail_anchored` emits LEADING-ellipsis output ("…\n{tail}"),
     // so styled_run byte offsets (relative to original text) must be shifted
@@ -5230,7 +5229,7 @@ mod tests {
         // "line2\nline3": l-i-n-e-2 = 5, \n = 1, l-i-n-e-3 = 5 → 11 bytes
         // tail_origin = 17 - 11 = 6 ✓ ("line1\n" = 6 bytes)
         // leading_bytes = 3 + 1 = 4
-        // bold run [6..11] ("line2") in original → [6-6+4 .. 11-6+4] = [4..9]
+        // bold run [6..11] ("line2") in original → [6-6+4.. 11-6+4] = [4..9]
         // In "…\nline2\nline3": bytes [4..9] = "line2" ✓
         let runs = vec![StyledRunItem {
             start_byte: 6,
@@ -5266,7 +5265,7 @@ mod tests {
         );
     }
 
-    /// Single-line `max_lines == 1` output (hud-qoq52, option (b)): the
+    /// Single-line `max_lines == 1` output: the
     /// tail-anchored result is `"…{newest line}"` with NO newline.  The reslice
     /// must use a `leading_bytes` of `ELLIPSIS.len()` (3), not `ELLIPSIS.len()+1`
     /// (4), or it would slice off the first content byte and mis-shift offsets.
@@ -5374,7 +5373,7 @@ mod tests {
     /// Multiple runs: only runs on the visible tail survive; their offsets are
     /// correct addresses into the leading-ellipsis effective text.
     ///
-    /// This is the primary regression test for hud-fe4ik: before the fix,
+    /// This pins clipping for leading-ellipsis output: before the fix,
     /// `content_end` would equal `truncated.len()` (strip_suffix failing on
     /// leading-ellipsis output), no clipping would occur, and the original
     /// offsets (0..5 and 6..11) would be applied verbatim to "…\nline2\nline3".
@@ -5511,7 +5510,7 @@ mod tests {
         );
     }
 
-    // ── hud-jrr72: no-truncation short-circuit tests ──────────────────────────
+    // ──: no-truncation short-circuit tests ──────────────────────────
     //
     // Regression: when the cache returns Some(truncated_str) but truncated_str
     // equals the original text (it fit without truncation), the code must NOT
@@ -5624,7 +5623,7 @@ mod tests {
         assert_eq!(resliced[0].end_byte, 3, "run end must be unshifted");
     }
 
-    // ── hud-dhb4s: #708 end-to-end regression tests ──────────────────────────
+    // ──: #708 end-to-end regression tests ──────────────────────────
     //
     // These tests exercise the ACTUAL call-site functions extracted from the
     // pipeline that #708 fixed:
@@ -6180,7 +6179,7 @@ mod tests {
         }
     }
 
-    /// Phase 2 (hud-9ieev): `compute_inline_backdrop_quads` returns a quad for a
+    /// Phase 2: `compute_inline_backdrop_quads` returns a quad for a
     /// `StyledRunItem` with `background_color` set, using actual glyph layout data.
     ///
     /// Constructs a `Buffer` for the text "hello code world" where the word "code"
@@ -6268,13 +6267,13 @@ mod tests {
         // the backdrop computation.
         assert!(
             buf.layout_runs().count() > 0,
-            "hud-9ieev: buffer produced no layout runs — shape_until_scroll may not have worked; \
+            "buffer produced no layout runs — shape_until_scroll may not have worked; \
              lines={}",
             buf.lines.len()
         );
         assert!(
             buf.layout_runs().map(|r| r.glyphs.len()).sum::<usize>() > 0,
-            "hud-9ieev: layout runs exist but contain no glyphs"
+            "layout runs exist but contain no glyphs"
         );
 
         // Pass effective_styled_runs as the new third argument.  This test uses
@@ -6285,7 +6284,7 @@ mod tests {
         // At least one quad must be returned for the "code" span.
         assert!(
             !quads.is_empty(),
-            "hud-9ieev: expected at least one backdrop quad for the 'code' styled run, got none; \
+            "expected at least one backdrop quad for the 'code' styled run, got none; \
              sr_start={code_start}, sr_end={code_end}"
         );
 
@@ -6293,7 +6292,7 @@ mod tests {
         for (i, q) in quads.iter().enumerate() {
             assert_eq!(
                 q.color, bg_color,
-                "hud-9ieev: quad[{i}] has wrong color {:?}, expected {:?}",
+                "quad[{i}] has wrong color {:?}, expected {:?}",
                 q.color, bg_color
             );
         }
@@ -6302,28 +6301,20 @@ mod tests {
         let first = &quads[0];
         assert!(
             first.x >= pixel_x,
-            "hud-9ieev: quad x ({}) must be >= item pixel_x ({pixel_x}); \
+            "quad x ({}) must be >= item pixel_x ({pixel_x}); \
              the 'code' span starts after 'hello ' so it can't be at the item origin",
             first.x
         );
-        assert!(
-            first.w > 0.0,
-            "hud-9ieev: quad width ({}) must be positive",
-            first.w
-        );
-        assert!(
-            first.h > 0.0,
-            "hud-9ieev: quad height ({}) must be positive",
-            first.h
-        );
+        assert!(first.w > 0.0, "quad width ({}) must be positive", first.w);
+        assert!(first.h > 0.0, "quad height ({}) must be positive", first.h);
         assert!(
             first.y >= pixel_y,
-            "hud-9ieev: quad y ({}) must be >= item pixel_y ({pixel_y})",
+            "quad y ({}) must be >= item pixel_y ({pixel_y})",
             first.y
         );
     }
 
-    // ─── Multi-line composer selection highlight (hud-scgyw) ─────────────────
+    // ─── Multi-line composer selection highlight ─────────────────
 
     /// Pure three-part-shape math: a single-line selection is untouched; the
     /// first line extends to the right edge; the last line to the left edge; a
@@ -6495,7 +6486,7 @@ mod tests {
 
     /// A selection that spans a HARD newline (Ctrl+Enter draft) also produces the
     /// full-width-interior shape — the byte-offset accounting across BufferLines
-    /// (`line_byte_offsets`) keeps the per-line quads correct (hud-scgyw).
+    /// (`line_byte_offsets`) keeps the per-line quads correct.
     #[test]
     fn multiline_selection_across_hard_newline_fills_interior() {
         let mut fs = crate::fonts::bundled_font_system();
@@ -6569,7 +6560,7 @@ mod tests {
         );
     }
 
-    // ── max_truncation_input_bytes wiring (hud-59p2z) ─────────────────────────
+    // ── max_truncation_input_bytes wiring ─────────────────────────
 
     /// The setter updates the cache's bound; a fresh cache starts at the
     /// compositor default (4096).

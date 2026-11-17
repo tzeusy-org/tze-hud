@@ -106,8 +106,6 @@ pub(crate) fn apply_contention<R: ContentionRecord>(
                     // At max key capacity — evict the oldest entry so the new key
                     // can take its place.  "Oldest" is the front of the
                     // insertion-ordered Vec (index 0).
-                    // Spec: openspec/changes/exemplar-status-bar/tasks.md §2.5
-                    //   "oldest evicted, 32 remain"
                     publishes.remove(0);
                 }
                 publishes.push(record);

@@ -21,7 +21,7 @@ pub(super) fn build_runtime_context(cfg: &WindowedConfig) -> SharedRuntimeContex
 
 /// Start network services (gRPC) on a dedicated Tokio multi-thread runtime.
 ///
-/// Returns `(network_rt, handles, ..., grpc_bound_addrs)`:
+/// Returns `(network_rt, handles,..., grpc_bound_addrs)`:
 /// - `network_rt` is `Some(NetworkRuntime)` when `grpc_port != 0`; `None` if
 ///   all services are disabled (port 0 disables gRPC).
 /// - `handles` contains join handles for each spawned server task.
@@ -39,7 +39,7 @@ pub(super) fn build_runtime_context(cfg: &WindowedConfig) -> SharedRuntimeContex
 /// The listeners are bound *eagerly* (before the serve task is spawned) so a
 /// port conflict fails startup fast and the returned `grpc_bound_addrs` reflect
 /// listeners that are genuinely up — rather than an address the serve task
-/// might fail to bind asynchronously (hud-ylwqc).
+/// might fail to bind asynchronously.
 ///
 /// ## Errors
 ///
@@ -93,7 +93,7 @@ pub(super) fn start_network_services_with_render_wake(
         );
         // Compositor-only mode: no session, so no present-ack subscriber. The
         // compositor thread still drains the present-ack queue (bounded memory)
-        // but has no sender to broadcast on (hud-4va6q).
+        // but has no sender to broadcast on.
         return Ok((None, Vec::new(), None, None, None, None, Vec::new()));
     }
 
@@ -190,14 +190,14 @@ fn start_enabled_network_services(
     //   on the input_event_tx channel after windowed input is processed.
     let element_repositioned_tx = service.element_repositioned_tx.clone();
     let input_event_tx = service.input_event_tx.clone();
-    // Present-ack broadcast sender (hud-4va6q): the compositor thread emits
+    // Present-ack broadcast sender: the compositor thread emits
     // `FramePresented` on this after each presented frame, mirroring the
     // headless runtime's producer. Cloned before the service moves into the
     // gRPC task; subscribers attach via HudSession::subscribe_frame_presented.
     let frame_presented_tx = service.frame_presented_tx.clone();
     let degradation_notices = service.degradation_notices.clone();
 
-    // Bind the listeners eagerly (hud-ylwqc). `std::net::TcpListener::bind` is
+    // Bind the listeners eagerly. `std::net::TcpListener::bind` is
     // synchronous and needs no reactor, so a port conflict fails startup fast
     // and the returned addresses belong to listeners that are genuinely up.
     // Loopback must bind; a Tailscale address that fails to bind is skipped.
@@ -366,7 +366,7 @@ async fn accept_into(
 }
 
 /// Render the non-secret startup banner printed to stdout once the network
-/// listeners are up (hud-ylwqc).
+/// listeners are up.
 ///
 /// The runtime otherwise emits nothing on stdout unless `TZE_HUD_LOG` is set
 /// (tracing is gated on that env var), so a fresh operator has no way to learn
@@ -427,7 +427,7 @@ pub(super) fn mcp_endpoint_url(addr: std::net::SocketAddr) -> String {
 }
 
 /// Render the human-readable **attach info** block printed by the native
-/// `--print-attach-info` flag (hud-b7c0m).
+/// `--print-attach-info` flag.
 ///
 /// This is the single source of truth for the attach block: the MCP endpoint
 /// URL, the bearer-PSK auth rule, and a paste-ready MCP client config
@@ -601,7 +601,7 @@ mod tests {
     }
 
     /// When `grpc_port == 0`, `start_network_services` must return `None` for
-    /// the runtime and an empty handle list (compositor-only mode, AC §2).
+    /// the runtime and an empty handle list (compositor-only mode).
     #[test]
     fn start_network_services_grpc_port_zero_returns_no_runtime() {
         let shared_state = make_shared_state();
@@ -619,7 +619,7 @@ mod tests {
         );
         assert!(
             present_tx.is_none(),
-            "grpc_port=0 has no session, so no present-ack sender (hud-4va6q)"
+            "grpc_port=0 has no session, so no present-ack sender"
         );
         assert!(
             grpc_addrs.is_empty(),
@@ -628,7 +628,7 @@ mod tests {
     }
 
     /// When `grpc_port != 0`, `start_network_services` must return `Some` for
-    /// the runtime and at least one spawned task handle (AC §1).
+    /// the runtime and at least one spawned task handle.
     #[test]
     fn start_network_services_nonzero_port_returns_runtime_and_handle() {
         let shared_state = make_shared_state();
@@ -662,7 +662,7 @@ mod tests {
         assert!(
             present_tx.is_some(),
             "non-zero grpc_port must expose the session present-ack sender so the \
-             compositor thread can broadcast FramePresented (hud-4va6q)"
+             compositor thread can broadcast FramePresented"
         );
         assert_eq!(
             grpc_addrs.first().map(|a| a.port()),

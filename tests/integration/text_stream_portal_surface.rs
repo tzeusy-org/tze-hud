@@ -1,4 +1,4 @@
-//! Resident raw-tile text stream portal pilot surface tests (hud-t98e.2).
+//! Resident raw-tile text stream portal pilot surface tests.
 //!
 //! Covers the phase-0 surface requirements:
 //! - collapsed + expanded portal surfaces built only from v1 node types
@@ -1021,11 +1021,10 @@ fn portal_typing_indicator_updates_use_transient_in_place_path() {
     );
 }
 
-// ─── Scroll-offset seam tests (hud-w5ih) ─────────────────────────────────────
+// ─── Scroll-offset seam tests ─────────────────────────────────────
 //
-// These tests cover the Transcript Interaction Contract and Bounded Transcript
-// Viewport requirements from openspec/specs/text-stream-portals/spec.md without
-// requiring live pointer events (hud-dih4 pointer capture not needed). They drive
+// These tests cover bounded transcript viewports without requiring live pointer
+// events or pointer capture. They drive
 // scroll state directly via InputProcessor::process_scroll_event and
 // set_tile_scroll_offset_local, bypassing the OS input path.
 
@@ -1328,7 +1327,7 @@ fn portal_adapter_append_preserves_user_scroll_position() {
     );
 }
 
-// ─── Click-to-focus + keyboard composer text mutation (hud-opkvq) ─────────────
+// ─── Click-to-focus + keyboard composer text mutation ─────────────
 //
 // These tests exercise the full click-to-focus → keyboard dispatch → text
 // mutation loop using only the input crate types (no windowed runtime required).

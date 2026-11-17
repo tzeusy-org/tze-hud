@@ -1,4 +1,4 @@
-//! Live appearance (hud-h51u7.5): the design tokens the HUD draws with,
+//! Live appearance: the design tokens the HUD draws with,
 //! changed while it runs by the control panel or by editing
 //! `[design_tokens]` in the config file.
 //!
@@ -441,8 +441,7 @@ fn without_scales(tokens: &DesignTokenMap) -> DesignTokenMap {
         .collect()
 }
 
-/// Watches the config file and applies `[design_tokens]` edits
-/// (hud-h51u7.5).
+/// Watches the config file and applies `[design_tokens]` edits.
 ///
 /// The watcher reports the config's directory (editors replace files by
 /// rename), filtered to the file, on a thread that blocks between events,

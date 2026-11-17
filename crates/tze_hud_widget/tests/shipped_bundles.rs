@@ -11,7 +11,7 @@ use tze_hud_scene::types::{
 use tze_hud_scene::{SceneGraph, validation::ValidationError};
 use tze_hud_widget::error::BundleError;
 use tze_hud_widget::loader::{
-    BundleScanResult, LoadedBundle, load_bundle_dir, load_bundle_dir_with_tokens, scan_bundle_dirs,
+    BundleScanResult, LoadedBundle, load_bundle_dir, load_bundle_dir_with_tokens,
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -724,7 +724,26 @@ fn wire_code_duplicate_type_and_siblings_still_load() {
     // A broken sibling must not stop the rest from loading.
     std::fs::create_dir_all(root.path().join("c")).unwrap();
 
-    let results = scan_bundle_dirs(&[root.path().to_path_buf()], &HashMap::new());
+    let (results, warnings) = tze_hud_widget::loader::scan_bundle_dirs_with_diagnostics(
+        &[
+            root.path().to_path_buf(),
+            root.path().join("private-missing-root"),
+        ],
+        &HashMap::new(),
+    );
+    assert_eq!(warnings.items().len(), 3);
+    assert!(
+        warnings
+            .items()
+            .iter()
+            .any(|w| w.code == "WIDGET_BUNDLE_ROOT_UNREADABLE")
+    );
+    assert!(
+        warnings
+            .items()
+            .iter()
+            .all(|w| w.subject.as_deref().unwrap().starts_with("root:"))
+    );
     let ok = results
         .iter()
         .filter(|r| matches!(r, BundleScanResult::Ok(_)))

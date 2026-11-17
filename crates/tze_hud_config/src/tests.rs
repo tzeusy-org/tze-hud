@@ -1,7 +1,6 @@
 //! Integration tests for `TzeHudConfig`.
 //!
-//! Each test corresponds to a WHEN/THEN scenario from the issue acceptance
-//! criteria (rig-j90m, rig-umgy) and `configuration/spec.md`.
+//! Each test checks parsing, resolution, or validation through the config loader.
 
 use crate::loader::TzeHudConfig;
 use tze_hud_scene::config::{ChordRole, ConfigErrorCode, ConfigLoader, Hotkey, ParseError};
@@ -12,11 +11,11 @@ fn parse_ok(toml: &str) -> TzeHudConfig {
     TzeHudConfig::parse(toml).expect("parse should succeed for this TOML")
 }
 
-// ── Spec §TOML Configuration Format ──────────────────────────────────────────
+// ── TOML Configuration Format ──────────────────────────────────────────
 
 /// WHEN valid TOML provided THEN parse succeeds.
 #[test]
-fn spec_valid_toml_accepted() {
+fn valid_toml_accepted() {
     let toml = r#"
 [runtime]
 profile = "full-display"
@@ -30,7 +29,7 @@ name = "Main"
 
 /// WHEN invalid TOML THEN parse error includes line and column.
 #[test]
-fn spec_parse_error_includes_line_column() {
+fn parse_error_includes_line_column() {
     let bad_toml = "this is not = valid toml [\n";
     let result = TzeHudConfig::parse(bad_toml);
     match result {
@@ -42,11 +41,11 @@ fn spec_parse_error_includes_line_column() {
     }
 }
 
-// ── Spec §Configuration File Resolution Order ─────────────────────────────────
+// ── Configuration File Resolution Order ─────────────────────────────────
 
 /// WHEN no config file found at any location THEN Err lists searched paths.
 #[test]
-fn spec_no_config_found_lists_searched_paths() {
+fn no_config_found_lists_searched_paths() {
     let result =
         TzeHudConfig::resolve_config_path(Some("/tmp/tze_hud_no_such_file_j90m_test.toml"));
     match result {
@@ -57,11 +56,11 @@ fn spec_no_config_found_lists_searched_paths() {
     }
 }
 
-// ── Spec §Minimal Valid Configuration ─────────────────────────────────────────
+// ── Minimal Valid Configuration ─────────────────────────────────────────
 
 /// WHEN minimal config (runtime + one tab) THEN freeze succeeds.
 #[test]
-fn spec_minimal_config_accepted() {
+fn minimal_config_accepted() {
     let toml = r#"
 [runtime]
 profile = "full-display"
@@ -81,7 +80,7 @@ name = "Home"
 
 /// WHEN config has [runtime] but no [[tabs]] THEN CONFIG_NO_TABS.
 #[test]
-fn spec_missing_tabs_rejected_with_config_no_tabs() {
+fn missing_tabs_rejected_with_config_no_tabs() {
     let toml = r#"
 [runtime]
 profile = "full-display"
@@ -94,11 +93,11 @@ profile = "full-display"
     assert!(has_no_tabs, "no [[tabs]] should produce CONFIG_NO_TABS");
 }
 
-// ── Spec §Layered Config Composition (v1-reserved) ────────────────────────────
+// ── Layered Config Composition (unsupported) ────────────────────────────
 
-/// WHEN config has `includes` field THEN startup error (post-v1 reserved).
+/// A config with an `includes` field is a startup error.
 #[test]
-fn spec_includes_field_rejected() {
+fn includes_field_rejected() {
     let toml = r#"
 includes = "/etc/tze_hud/base.toml"
 
@@ -119,11 +118,11 @@ name = "Main"
     );
 }
 
-// ── Spec §Structured Validation Error Collection ──────────────────────────────
+// ── Structured Validation Error Collection ──────────────────────────────
 
 /// WHEN multiple validation errors exist THEN all are reported together.
 #[test]
-fn spec_multiple_errors_collected() {
+fn multiple_errors_collected() {
     let toml = r#"
 [runtime]
 profile = "totally_unknown_profile"
@@ -144,11 +143,11 @@ name = "Dup"
     );
 }
 
-// ── Spec §Tab Configuration Validation ───────────────────────────────────────
+// ── Tab Configuration Validation ───────────────────────────────────────
 
 /// WHEN two tabs share name "Morning" THEN CONFIG_DUPLICATE_TAB_NAME.
 #[test]
-fn spec_duplicate_tab_name_rejected() {
+fn duplicate_tab_name_rejected() {
     let toml = r#"
 [runtime]
 profile = "full-display"
@@ -171,7 +170,7 @@ name = "Morning"
 
 /// WHEN two tabs both set default_tab = true THEN CONFIG_MULTIPLE_DEFAULT_TABS.
 #[test]
-fn spec_multiple_default_tabs_rejected() {
+fn multiple_default_tabs_rejected() {
     let toml = r#"
 [runtime]
 profile = "full-display"
@@ -194,25 +193,23 @@ default_tab = true
     );
 }
 
-// ── Spec §Reserved Fraction Validation ───────────────────────────────────────
+// ── Reserved Fraction Validation ───────────────────────────────────────
 
-// ── Spec §FPS Range Validation ────────────────────────────────────────────────
+// ── FPS Range Validation ────────────────────────────────────────────────
 
-// ── Spec §Scene Event Naming Convention ──────────────────────────────────────
+// ── Scene Event Naming Convention ──────────────────────────────────────
 
-// ── Spec §Widget Bundle Configuration (CONFIG_WIDGET_* error codes) ──────────
+// ── Widget bundle configuration (CONFIG_WIDGET_* error codes) ───────────────
 //
 // These tests verify that the TOML-level config validator produces the correct
 // CONFIG_WIDGET_* error codes for each error case when config is parsed via
 // TzeHudConfig::parse/validate.
 //
-// Source: configuration/spec.md §Widget Bundle Configuration,
-//         §Widget Instance Configuration (hud-mim2.7 acceptance criterion 11).
 
 /// WHEN [widget_bundles].paths contains a non-existent directory THEN
 /// CONFIG_WIDGET_BUNDLE_PATH_NOT_FOUND is produced.
 #[test]
-fn spec_widget_bundle_path_not_found_error() {
+fn widget_bundle_path_not_found_error() {
     let toml = r#"
 [runtime]
 profile = "full-display"
@@ -237,7 +234,7 @@ paths = ["/tmp/tze_hud_nonexistent_widget_bundle_dir_mim2_7_test"]
 /// WHEN [widget_bundles] is absent THEN no CONFIG_WIDGET_* errors are produced.
 /// An empty registry is a valid configuration.
 #[test]
-fn spec_absent_widget_bundles_no_error() {
+fn absent_widget_bundles_no_error() {
     let toml = r#"
 [runtime]
 profile = "full-display"
@@ -267,7 +264,7 @@ name = "Main"
 /// WHEN max_agent_bytes > max_total_bytes in [widget_runtime_assets]
 /// THEN CONFIG_WIDGET_ASSET_BUDGET_INVALID is produced.
 #[test]
-fn spec_widget_runtime_asset_budget_relationship_rejected() {
+fn widget_runtime_asset_budget_relationship_rejected() {
     let toml = r#"
 [runtime]
 profile = "full-display"
@@ -296,7 +293,7 @@ max_agent_bytes = 2048
 /// During config-only validation (no loaded types), a missing/empty widget_type
 /// field still produces an error because widget_type is required.
 #[test]
-fn spec_widget_instance_missing_type_produces_error() {
+fn widget_instance_missing_type_produces_error() {
     let toml = r#"
 [runtime]
 profile = "full-display"
@@ -319,19 +316,19 @@ name = "Main"
     );
 }
 
-// ── Spec §Schema Export ───────────────────────────────────────────────────────
+// ── Schema Export ───────────────────────────────────────────────────────
 
-// ── Spec §Display Profile headless - not extendable ──────────────────────────
+// ── Display Profile headless - not extendable ──────────────────────────
 
-// ── Spec §Profile Budget Escalation Prevention ────────────────────────────────
+// ── Profile Budget Escalation Prevention ────────────────────────────────
 
-// ── Spec §Profile Extends Conflict Detection ─────────────────────────────────
+// ── Profile Extends Conflict Detection ─────────────────────────────────
 
-// ── Spec §Display Profile full-display — freeze ───────────────────────────────
+// ── Display Profile full-display — freeze ───────────────────────────────
 
-/// WHEN profile = "full-display" THEN resolved profile has correct budget values (spec lines 55-56).
+/// WHEN profile = "full-display" THEN resolved profile has correct budget values.
 #[test]
-fn spec_full_display_profile_budget_values() {
+fn full_display_profile_budget_values() {
     let toml = r#"
 [runtime]
 profile = "full-display"
@@ -348,9 +345,9 @@ name = "T"
     assert_eq!(resolved.profile.min_fps, 30);
 }
 
-/// WHEN profile = "headless" THEN resolved profile has correct budget values (spec lines 63-65).
+/// WHEN profile = "headless" THEN resolved profile has correct budget values.
 #[test]
-fn spec_headless_profile_budget_values() {
+fn headless_profile_budget_values() {
     let toml = r#"
 [runtime]
 profile = "headless"
@@ -369,7 +366,7 @@ name = "T"
     assert_eq!(resolved.profile.name, "headless");
 }
 
-// ── Spec §Headless Virtual Display ───────────────────────────────────────────
+// ── Headless Virtual Display ───────────────────────────────────────────
 
 // ── [display_profile] is gone ─────────────────────────────────────────────────
 
@@ -507,7 +504,7 @@ allow = ["*"]
 
 /// WHEN minimal config frozen THEN tab_names contains the tab.
 #[test]
-fn spec_freeze_populates_tab_names() {
+fn freeze_populates_tab_names() {
     let toml = r#"
 [runtime]
 profile = "full-display"
@@ -522,7 +519,7 @@ name = "Dashboard"
 
 /// WHEN config has validation errors THEN freeze returns Err.
 #[test]
-fn spec_freeze_returns_err_on_validation_errors() {
+fn freeze_returns_err_on_validation_errors() {
     let toml = r#"
 [runtime]
 profile = "full-display"
@@ -532,7 +529,7 @@ profile = "full-display"
     assert!(result.is_err(), "freeze should fail when there are no tabs");
 }
 
-// ── Spec §Config Schema Version and Compatibility Policy ──────────────────────
+// ── Config Schema Version and Compatibility Policy ──────────────────────
 
 fn has_schema_version_error(errors: &[tze_hud_scene::config::ConfigError]) -> bool {
     errors
@@ -542,7 +539,7 @@ fn has_schema_version_error(errors: &[tze_hud_scene::config::ConfigError]) -> bo
 
 /// WHEN config omits schema_version THEN it is treated as current (no schema error).
 #[test]
-fn spec_absent_schema_version_defaults_to_current() {
+fn absent_schema_version_defaults_to_current() {
     let toml = r#"
 [runtime]
 profile = "full-display"
@@ -561,7 +558,7 @@ name = "Main"
 /// WHEN schema_version exceeds the supported max THEN CONFIG_SCHEMA_VERSION_UNSUPPORTED
 /// and the gate short-circuits the remaining field-level validation.
 #[test]
-fn spec_newer_schema_version_fails_closed() {
+fn newer_schema_version_fails_closed() {
     let toml = r#"
 schema_version = 999
 
@@ -591,7 +588,7 @@ name = "Main"
 
 /// WHEN schema_version is within the supported range THEN no schema-version error.
 #[test]
-fn spec_supported_schema_version_proceeds() {
+fn supported_schema_version_proceeds() {
     let toml = r#"
 schema_version = 1
 

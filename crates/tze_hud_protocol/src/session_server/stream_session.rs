@@ -1,8 +1,6 @@
 //! Per-session state types for the streaming session server.
 //!
 //! This module contains `StreamSession` (all per-session fields).
-//! Moved from `session_server/mod.rs` as Step SS-4 of the module split
-//! (docs/design/session-server-renderer-module-split-plan.md §3.4).
 
 use super::lifecycle::SessionState;
 use super::upload::UploadByteRateLimiter;
@@ -29,20 +27,20 @@ pub(super) struct StreamSession {
     pub(super) server_sequence: u64,
     pub(super) resume_token: Vec<u8>,
 
-    /// Current lifecycle state (RFC 0005 §1.1).
+    /// Current lifecycle state.
     pub(super) state: SessionState,
 
-    /// Last validated client-side sequence number (RFC 0005 §2.3).
+    /// Last validated client-side sequence number.
     /// Initialized to 1 during session init/resume (treating the handshake message as
     /// sequence 1). Each subsequent validated message must carry a strictly greater
     /// sequence number within `max_sequence_gap` of the previous.
     pub(super) last_client_sequence: u64,
 
-    /// Whether safe mode is active for this session (RFC 0005 §3.7).
+    /// Whether safe mode is active for this session.
     /// When true, Publish messages are rejected with SAFE_MODE_ACTIVE.
     pub(super) safe_mode_active: bool,
 
-    /// Per-session lease-operation correlation cache (RFC 0005 §5.3).
+    /// Per-session lease-operation correlation cache.
     ///
     /// Maps client sequence number → cached `LeaseResponse` payload.  On
     /// retransmit the server replays the cached response without re-applying
@@ -67,7 +65,7 @@ impl StreamSession {
         prev
     }
 
-    /// Validate an inbound client sequence number per RFC 0005 §2.3.
+    /// Validate an inbound client sequence number.
     ///
     /// Returns `Ok(())` if valid, or an error string with the appropriate
     /// SessionError code if the sequence is regressed or the gap is too large.
@@ -85,7 +83,7 @@ impl StreamSession {
                 ),
             ));
         }
-        // "gap" per spec (RFC 0005 §2.3) = seq − last_seq.
+        // "gap" = seq − last_seq.
         // Reject if gap > max_sequence_gap (default 100).
         // Example: last=5, seq=105 → gap=100 = max_gap → accepted (not strictly greater).
         //          last=5, seq=106 → gap=101 > max_gap=100 → rejected.

@@ -109,7 +109,8 @@ impl tze_hud_scene::TextFit for TextFitMeasurer {
             scene.display_area.width,
             scene.display_area.height,
         );
-        // A new card is the newest: it takes the first slot.
+        // Measure intrinsic text fit in one card; stack visibility is a
+        // separate question from whether its text fits inside that card.
         let record = ZonePublishRecord {
             publication_id: SceneId::new(),
             zone_name: zone.to_owned(),
@@ -125,11 +126,11 @@ impl tze_hud_scene::TextFit for TextFitMeasurer {
         };
         let slots = Compositor::zone_slot_layout_with_tokens(
             &zone_tokens,
+            scene,
             zone,
             std::slice::from_ref(&record),
             policy,
-            zh,
-            zw,
+            (zw, zh),
             &state.cards,
         );
         let Some((_, card)) = slots

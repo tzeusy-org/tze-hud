@@ -1,77 +1,11 @@
 use super::*;
 
-/// Idle render gate (hud-ilivg): the compositor frame loop skips the
-/// build/encode/present pass when the scene graph is unchanged since the last
-/// presented frame AND nothing is animating, but renders on any scene-version
-/// bump OR while an animation is in flight.
-///
-/// This pins the exact `dirty` predicate used by the windowed frame loop
-/// (`scene.version != last_rendered_scene_version || has_inflight_animation`)
-/// against all three acceptance cases:
-///   1. idle (no change, no animation)            -> skip
-///   2. scene-version bump                        -> render
-///   3. in-flight animation, version pinned       -> render (no freeze)
+/// Fade observation remains pure and diagnostic subscribers do not alter it.
+/// The runtime event-loop harness executes the production idle gate with a real
+/// offscreen backend; these private animation/trace assertions stay here.
 #[tokio::test]
-async fn idle_render_gate_skips_static_scene_renders_on_change_or_animation() {
+async fn zone_animation_observation_is_pure_with_and_without_diagnostics() {
     let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(720, 480).await);
-    // Windowed profile: scroll smoothing active (headless snaps and never
-    // registers a smoother, so enable it explicitly for this gate test).
-    compositor.scroll_smoothing_enabled = true;
-
-    let mut scene = SceneGraph::new(720.0, 480.0);
-    let tab_id = scene.create_tab("gate", 0).unwrap();
-    let lease_id = scene.grant_lease("gate", 120_000);
-    let tile_id = scene
-        .create_tile(
-            tab_id,
-            "gate",
-            lease_id,
-            Rect::new(0.0, 0.0, 400.0, 300.0),
-            1,
-        )
-        .unwrap();
-    scene
-        .register_tile_scroll_config(
-            tile_id,
-            tze_hud_scene::types::TileScrollConfig {
-                scrollable_x: false,
-                scrollable_y: true,
-                content_width: None,
-                content_height: Some(2000.0),
-            },
-        )
-        .unwrap();
-
-    // Observe the tile once: its smoother starts settled on the current offset
-    // (no initial jump), so nothing is animating.
-    compositor.update_scroll_smoothing(&scene);
-
-    // -- Case 1: idle -- scene unchanged, nothing animating -> SKIP. --
-    assert!(
-        !compositor.has_inflight_animation(&scene),
-        "a freshly-settled scene must report no in-flight animation"
-    );
-    let last_rendered = scene.version;
-    let dirty_idle = scene.version != last_rendered || compositor.has_inflight_animation(&scene);
-    assert!(
-        !dirty_idle,
-        "idle frame (no scene change, no animation) MUST skip render/present"
-    );
-    assert!(
-        compositor.take_work_counts().is_none(),
-        "no render invocation must not manufacture a sampled zero-work frame"
-    );
-
-    // -- Case 2: scene-version bump -> RENDER. --
-    // A scene diff / mutation bumps scene.version; the gate must not skip it.
-    scene.version += 1;
-    let dirty_versioned =
-        scene.version != last_rendered || compositor.has_inflight_animation(&scene);
-    assert!(
-        dirty_versioned,
-        "a scene-version bump MUST force a render even with no animation"
-    );
-
     #[derive(Clone, Default)]
     struct Sink(Arc<std::sync::Mutex<Vec<u8>>>);
     impl std::io::Write for Sink {
@@ -200,28 +134,6 @@ async fn idle_render_gate_skips_static_scene_renders_on_change_or_animation() {
             assert_eq!(fields["opacity"], 0.0);
         }
     }
-
-    compositor.zone_animation_states.clear();
-
-    // -- Case 3: in-flight animation, version pinned -> RENDER (no freeze). --
-    // Move the authoritative scroll target far away and advance the smoother one
-    // frame: it is now mid-flight (displayed offset still near 0, target 1500).
-    scene
-        .set_tile_scroll_offset_local(tile_id, 0.0, 1500.0)
-        .unwrap();
-    compositor.update_scroll_smoothing(&scene);
-    assert!(
-        compositor.has_inflight_animation(&scene),
-        "a mid-flight smooth-scroll catch-up must report an in-flight animation"
-    );
-    // Pin the gate's last-rendered version to the CURRENT version so the only
-    // possible source of dirtiness is the animation itself.
-    let pinned = scene.version;
-    let dirty_animating = scene.version != pinned || compositor.has_inflight_animation(&scene);
-    assert!(
-        dirty_animating,
-        "an in-flight animation MUST force a render even when scene.version is unchanged"
-    );
 }
 
 fn caret_test_draft() -> LocalComposerState {
@@ -588,7 +500,7 @@ async fn idle_with_notification_renders_only_at_fade() {
     assert_eq!(compositor.next_animation_deadline(), None);
 }
 
-/// Idle render gate — composer carve-out (hud-ilivg / hud-r3ax6).
+/// Idle render gate — composer carve-out.
 ///
 /// The local draft echo and the caret blink are driven off out-of-band state
 /// that never bumps `scene.version`. Before the idle gate the compositor thread
@@ -754,7 +666,7 @@ async fn idle_render_gate_renders_for_composer_echo_and_caret_blink() {
     assert!(!compositor.drain_local_composer_and_needs_render());
 
     // The viewer close-button hover target dirties the gate once per change and
-    // not while it stays put (hud-jm8nq.11: no per-frame redraw while idle).
+    // not while it stays put (no per-frame redraw while idle).
     *compositor.tile_close_hover_state.lock().unwrap() = Some(tile_id);
     assert!(compositor.drain_local_composer_and_needs_render());
     assert!(
@@ -762,6 +674,16 @@ async fn idle_render_gate_renders_for_composer_echo_and_caret_blink() {
         "an unchanged close-hover target must not keep the idle gate dirty"
     );
     *compositor.tile_close_hover_state.lock().unwrap() = None;
+    assert!(compositor.drain_local_composer_and_needs_render());
+    assert!(!compositor.drain_local_composer_and_needs_render());
+
+    *compositor.drag_handle_hover_state.lock().unwrap() = Some(tile_id);
+    assert!(compositor.drain_local_composer_and_needs_render());
+    assert!(
+        !compositor.drain_local_composer_and_needs_render(),
+        "same element remains idle"
+    );
+    *compositor.drag_handle_hover_state.lock().unwrap() = None;
     assert!(compositor.drain_local_composer_and_needs_render());
     assert!(!compositor.drain_local_composer_and_needs_render());
 }

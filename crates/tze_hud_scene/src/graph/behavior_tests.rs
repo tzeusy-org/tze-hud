@@ -9,7 +9,7 @@ use crate::types::{
 /// `remove_tile_and_nodes` populates `recently_removed_tile_ids`; draining
 /// that queue via `drain_removed_tile_ids` yields the removed tile ID.
 ///
-/// This is the scene-layer half of the hud-4tuw5 contract.  The windowed
+/// This is the scene-layer half of the contract. The windowed
 /// runtime drains this queue in `prune_portal_resize_states` to eagerly
 /// remove the tile's entry from `portal_resize_states`.
 #[test]
@@ -47,7 +47,7 @@ fn portal_resize_drain_queue_populated_by_remove_tile() {
     assert_eq!(
         removed_ids,
         vec![tile_id],
-        "drain queue must contain exactly the removed tile ID (hud-4tuw5)"
+        "drain queue must contain exactly the removed tile ID"
     );
 
     // Queue must be empty after drain (idempotent).

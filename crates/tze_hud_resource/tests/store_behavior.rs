@@ -1,5 +1,5 @@
 //! Public-API behavior of the asset store, pinned to docs/invariants.md §7
-//! (budgets are hard caps) and §8 (errors are affordances for the model).
+//! (budgets are hard caps) and (errors are affordances for the model).
 //!
 //! Everything goes through `ResourceStore`'s public upload calls. Uploads use
 //! raw RGBA8 or compact encoded fixtures; decoded accounting is `w * h * 4`.

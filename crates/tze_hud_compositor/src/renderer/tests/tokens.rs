@@ -72,7 +72,7 @@ fn composer_overlay_default_font_size_matches_readable_portal_default() {
 ///    `resolve_composer_overlay_tokens` so the compositor render path is driven
 ///    entirely by the token, with no hardcoded color values.
 ///
-/// CPU-only — no GPU required (hud-2axdq acceptance criterion).
+/// CPU-only — no GPU required (acceptance criterion).
 #[test]
 fn composer_at_capacity_token_is_distinct_from_background_and_propagates_override() {
     use std::collections::HashMap;
@@ -126,7 +126,7 @@ fn composer_at_capacity_token_is_distinct_from_background_and_propagates_overrid
     );
 }
 
-// ── Composer caret-color tokenization tests [hud-khfgx] ──────────────────
+// ── Composer caret-color tokenization tests ──────────────────
 
 /// The caret color defaults to the composer text color, so tokenizing the caret
 /// (vd-caret-selection-placeholder-not-tokenized) is a no-visual-regression change
@@ -195,7 +195,7 @@ fn composer_caret_color_token_override_propagates() {
     );
 }
 
-// ── Composer selection-range rendering tests [hud-bq0gl.9] ───────────────
+// ── Composer selection-range rendering tests ───────────────
 
 /// The default `selection_bg` token must have a non-zero alpha so selection
 /// highlights are actually visible when no `portal.composer.selection_color`
@@ -262,7 +262,7 @@ fn composer_selection_bg_token_override_propagates() {
     );
 }
 
-// Note (hud-hxhnt): the byte-offset-mapping test that used to live here
+// Note: the byte-offset-mapping test that used to live here
 // (`composer_selection_display_byte_offsets`) verified the +3-byte caret-glyph
 // shift arithmetic against the (now removed) `composer_display_text` glyph
 // insertion helper. That accounting no longer exists — the caret is a
@@ -272,7 +272,7 @@ fn composer_selection_bg_token_override_propagates() {
 // production `collect_composer_text_item` path instead of reimplementing the
 // arithmetic against a free-standing helper.
 
-// ── Tile background color token tests [hud-9wljr.10] ─────────────────────
+// ── Tile background color token tests ─────────────────────
 
 /// `resolve_tile_bg_token` returns the fallback when the token map is empty.
 ///

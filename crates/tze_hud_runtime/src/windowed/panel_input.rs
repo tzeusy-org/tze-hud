@@ -1,4 +1,4 @@
-//! The winit side of the control panel (hud-vniri.2): while the panel is open
+//! The winit side of the control panel: while the panel is open
 //! it owns the keyboard and the pointer over its surface. Keys, text, clicks
 //! and the wheel become [`PanelEvent`]s for the panel task; nothing reaches an
 //! agent. Points outside the panel pass through to the desktop. Opening takes
@@ -66,6 +66,10 @@ pub(super) fn panel_key(
         }
         if ctrl && !alt {
             match code {
+                KeyCode::KeyA => return Some(PanelKey::SelectAll),
+                KeyCode::KeyC => return Some(PanelKey::Copy),
+                KeyCode::KeyX => return Some(PanelKey::Cut),
+                KeyCode::KeyV => return Some(PanelKey::Paste),
                 KeyCode::Minus | KeyCode::NumpadSubtract => return Some(PanelKey::ZoomOut),
                 KeyCode::Equal | KeyCode::NumpadAdd => return Some(PanelKey::ZoomIn),
                 _ => {}
@@ -78,6 +82,8 @@ pub(super) fn panel_key(
     Some(match named {
         NamedKey::ArrowUp => PanelKey::Up,
         NamedKey::ArrowDown => PanelKey::Down,
+        NamedKey::ArrowLeft if shift => PanelKey::SelectLeft,
+        NamedKey::ArrowRight if shift => PanelKey::SelectRight,
         NamedKey::ArrowLeft => PanelKey::Left,
         NamedKey::ArrowRight => PanelKey::Right,
         NamedKey::Tab if shift => PanelKey::BackTab,
@@ -87,6 +93,8 @@ pub(super) fn panel_key(
         NamedKey::Escape => PanelKey::Escape,
         NamedKey::Backspace => PanelKey::Backspace,
         NamedKey::Delete => PanelKey::Delete,
+        NamedKey::Home if shift => PanelKey::SelectHome,
+        NamedKey::End if shift => PanelKey::SelectEnd,
         NamedKey::Home => PanelKey::Home,
         NamedKey::End => PanelKey::End,
         NamedKey::PageUp => PanelKey::PageUp,
@@ -387,9 +395,9 @@ pub(super) mod panel_task_tests {
         spawn_control_panel,
     };
     use crate::windowed::WindowedRuntimeState;
-    use std::sync::Arc;
     use std::sync::atomic::AtomicUsize;
     use std::sync::atomic::Ordering;
+    use std::sync::{Arc, Mutex};
     use std::time::Duration;
     use tze_hud_compositor::{ControlPanelModel, PanelHitTarget};
     use tze_hud_compositor::{PanelBody, PanelFocus, PanelPart, PanelTone};
@@ -397,12 +405,22 @@ pub(super) mod panel_task_tests {
     use tze_hud_scene::render_wake::RenderWakeNotifier;
     use tze_hud_scene::types::LeaseState;
 
+    #[derive(Default)]
+    struct TestClipboard {
+        text: Option<String>,
+        writes: Vec<String>,
+        reads: usize,
+        read_gate: Option<Arc<(Mutex<bool>, std::sync::Condvar)>>,
+        fail: bool,
+    }
+
     pub(in crate::windowed) struct Fixture {
         state: WindowedRuntimeState,
         pub(in crate::windowed) panel: ControlPanelHandle,
         wakes: Arc<AtomicUsize>,
         main_work: RenderWakeNotifier,
         main_work_calls: Arc<AtomicUsize>,
+        clipboard: Arc<Mutex<TestClipboard>>,
     }
 
     pub(in crate::windowed) fn fixture() -> Fixture {
@@ -432,7 +450,52 @@ pub(super) mod panel_task_tests {
             calls.fetch_add(1, Ordering::SeqCst);
             real_main_work.notify();
         });
+        let clipboard = Arc::new(Mutex::new(TestClipboard::default()));
         let deps = ControlPanelDeps {
+            clipboard: crate::clipboard::Clipboard {
+                read: {
+                    let clipboard = Arc::clone(&clipboard);
+                    Arc::new(move || {
+                        let (gate, result) = {
+                            let mut clipboard = clipboard.lock().unwrap();
+                            clipboard.reads += 1;
+                            (
+                                clipboard.read_gate.clone(),
+                                if clipboard.fail {
+                                    Err("Clipboard is busy".to_owned())
+                                } else {
+                                    Ok(clipboard.text.clone())
+                                },
+                            )
+                        };
+                        if let Some(gate) = gate {
+                            let (released, changed) = &*gate;
+                            let released = released.lock().unwrap();
+                            let (_released, timeout) = changed
+                                .wait_timeout_while(released, Duration::from_secs(5), |released| {
+                                    !*released
+                                })
+                                .unwrap();
+                            if timeout.timed_out() {
+                                return Err("Test clipboard gate timed out".into());
+                            }
+                        }
+                        result
+                    })
+                },
+                write: {
+                    let clipboard = Arc::clone(&clipboard);
+                    Arc::new(move |text| {
+                        let mut clipboard = clipboard.lock().unwrap();
+                        if clipboard.fail {
+                            return Err("Clipboard is busy".to_owned());
+                        }
+                        clipboard.text = Some(text.to_owned());
+                        clipboard.writes.push(text.to_owned());
+                        Ok(())
+                    })
+                },
+            },
             scene: Arc::clone(&state.shared_state.try_lock().expect("fresh state").scene),
             pause: PauseControl::new(
                 Arc::clone(&state.shared_state),
@@ -464,6 +527,7 @@ pub(super) mod panel_task_tests {
             wakes,
             main_work,
             main_work_calls,
+            clipboard,
         }
     }
 
@@ -1503,9 +1567,9 @@ pub(super) mod panel_task_tests {
         use crate::windowed::WinitApp;
         use tze_hud_compositor::PanelPart;
         use winit::event::MouseButton::{Middle, Right};
-        use winit::keyboard::{Key, KeyCode, NamedKey, PhysicalKey, SmolStr};
+        use winit::keyboard::{Key, KeyCode, ModifiersState, NamedKey, PhysicalKey, SmolStr};
 
-        struct TextRows;
+        struct TextRows(Arc<AtomicUsize>, Arc<Mutex<Vec<Edit>>>);
         impl Section for TextRows {
             fn id(&self) -> &'static str {
                 "text"
@@ -1535,13 +1599,20 @@ pub(super) mod panel_task_tests {
                     ]
                 })
             }
-            fn apply<'a>(&'a self, _: &'a str, _: Edit) -> BoxFuture<'a, Result<(), String>> {
+            fn apply<'a>(&'a self, _: &'a str, edit: Edit) -> BoxFuture<'a, Result<(), String>> {
+                self.0.fetch_add(1, Ordering::SeqCst);
+                self.1.lock().unwrap().push(edit);
                 Box::pin(async { Ok(()) })
             }
         }
+        let text_edits = Arc::new(AtomicUsize::new(0));
+        let text_values = Arc::new(Mutex::new(Vec::new()));
         let f = fixture_with(|deps| {
             let mut sections = default_sections(deps);
-            sections.push(Box::new(TextRows));
+            sections.push(Box::new(TextRows(
+                Arc::clone(&text_edits),
+                Arc::clone(&text_values),
+            )));
             sections
         });
         let panel = f.panel.clone();
@@ -1570,6 +1641,64 @@ pub(super) mod panel_task_tests {
             PanelPart::Body
         )));
         assert!(!panel.accepts_text(&PanelHitTarget::Panel));
+
+        let clipboard = Arc::clone(&f.clipboard);
+
+        // Winit sends ordinary Space as a named key, while letters are text.
+        // Rebuild after each letter so the first word really auto-focuses a row.
+        {
+            let mut query = String::new();
+            for character in "disclosure".chars() {
+                let (code, logical) = letter(&character.to_string());
+                assert!(app.panel_key_input(code, &logical, None, true));
+                assert!(app.panel_key_input(code, &logical, None, false));
+                query.push(character);
+                wait("query word", || {
+                    panel.current_model().is_some_and(|m| m.query == query)
+                })
+                .await;
+            }
+            let space = (
+                PhysicalKey::Code(KeyCode::Space),
+                Key::Named(NamedKey::Space),
+            );
+            assert!(app.panel_key_input(space.0, &space.1, Some(" "), true));
+            assert!(app.panel_key_input(space.0, &space.1, None, false));
+            let (code, logical) = letter("text");
+            assert!(app.panel_key_input(code, &logical, None, true));
+            assert!(app.panel_key_input(code, &logical, None, false));
+            wait("second query word", || {
+                panel
+                    .current_model()
+                    .is_some_and(|m| m.query.ends_with("text"))
+            })
+            .await;
+            let model = panel.current_model().unwrap();
+            assert_eq!(model.query, "disclosure text");
+            assert_eq!(
+                model.focus,
+                tze_hud_compositor::PanelFocus::Row("text.disclosure".into())
+            );
+            assert_eq!(text_edits.load(Ordering::SeqCst), 0);
+
+            // Explicit keyboard selection gives Space its row action again.
+            for named in [NamedKey::ArrowUp, NamedKey::ArrowDown, NamedKey::Space] {
+                let logical = Key::Named(named);
+                let physical =
+                    PhysicalKey::Unidentified(winit::keyboard::NativeKeyCode::Unidentified);
+                assert!(app.panel_key_input(physical, &logical, None, true));
+                assert!(app.panel_key_input(physical, &logical, None, false));
+            }
+            wait("explicit disclosure action", || {
+                text_edits.load(Ordering::SeqCst) == 1
+            })
+            .await;
+            panel.send(PanelEvent::Key(PanelKey::Escape));
+            wait("search cleared", || {
+                panel.current_model().is_some_and(|m| m.query.is_empty())
+            })
+            .await;
+        }
 
         // A typed key searches; its release is swallowed too.
         assert!(app.panel_key_input(code, &logical, None, true));
@@ -1695,6 +1824,312 @@ pub(super) mod panel_task_tests {
             !app.cursor_entry_armed(),
             "closed panel, empty scene: no raw-motion wakes"
         );
+
+        // Editing is local: the real key route changes the published field,
+        // while clipboard operations and selection never apply its setting.
+        let applied_before = text_edits.load(Ordering::SeqCst);
+        text_values.lock().unwrap().clear();
+        panel.send(PanelEvent::Chord(ChordRole::Panel));
+        wait("editor open", || panel.is_open()).await;
+        panel.send(PanelEvent::Click(PanelHitTarget::Row(
+            "text.field".into(),
+            PanelPart::Body,
+        )));
+        let field_value = || {
+            let model = panel.current_model()?;
+            let items = match model.body {
+                PanelBody::Sections(sections) => {
+                    sections.into_iter().flat_map(|s| s.items).collect()
+                }
+                PanelBody::Results { items, .. } => items,
+                _ => Vec::new(),
+            };
+            items.into_iter().find_map(|item| match item.control {
+                tze_hud_compositor::PanelControl::Field { text, caret }
+                    if item.id == "text.field" =>
+                {
+                    Some((text, caret))
+                }
+                _ => None,
+            })
+        };
+        wait("field selected", || {
+            field_value().is_some_and(|(_, c)| c.is_some_and(|c| c.cursor == 5 && c.anchor == 0))
+        })
+        .await;
+        let key = |app: &mut WinitApp, physical, logical, mods| {
+            app.state.modifiers = mods;
+            assert!(app.panel_key_input(PhysicalKey::Code(physical), &logical, None, true));
+            assert!(app.panel_key_input(PhysicalKey::Code(physical), &logical, None, false));
+            app.state.modifiers = ModifiersState::empty();
+        };
+        key(
+            &mut app,
+            KeyCode::KeyA,
+            Key::Character("a".into()),
+            ModifiersState::CONTROL,
+        );
+        key(
+            &mut app,
+            KeyCode::KeyC,
+            Key::Character("c".into()),
+            ModifiersState::CONTROL,
+        );
+        wait("copy selected value", || {
+            clipboard
+                .lock()
+                .unwrap()
+                .writes
+                .last()
+                .is_some_and(|s| s == "value")
+        })
+        .await;
+        key(
+            &mut app,
+            KeyCode::ArrowRight,
+            Key::Named(NamedKey::ArrowRight),
+            ModifiersState::empty(),
+        );
+        key(
+            &mut app,
+            KeyCode::ArrowLeft,
+            Key::Named(NamedKey::ArrowLeft),
+            ModifiersState::SHIFT,
+        );
+        key(
+            &mut app,
+            KeyCode::KeyX,
+            Key::Character("X".into()),
+            ModifiersState::empty(),
+        );
+        wait("replace shift selection", || {
+            field_value().is_some_and(|(text, _)| text == "valuX")
+        })
+        .await;
+        key(
+            &mut app,
+            KeyCode::KeyA,
+            Key::Character("a".into()),
+            ModifiersState::CONTROL,
+        );
+        key(
+            &mut app,
+            KeyCode::KeyX,
+            Key::Character("x".into()),
+            ModifiersState::CONTROL,
+        );
+        wait("cut selected value", || {
+            field_value().is_some_and(|(text, _)| text.is_empty())
+        })
+        .await;
+        assert_eq!(
+            clipboard.lock().unwrap().writes.last().map(String::as_str),
+            Some("valuX")
+        );
+        clipboard.lock().unwrap().text = Some("a👩‍💻e\u{301}z\r\nnext\tline".into());
+        key(
+            &mut app,
+            KeyCode::KeyV,
+            Key::Character("v".into()),
+            ModifiersState::CONTROL,
+        );
+        let pasted = "a👩‍💻e\u{301}z next line";
+        wait("paste into field", || {
+            field_value().is_some_and(|(text, _)| text == pasted)
+        })
+        .await;
+        key(
+            &mut app,
+            KeyCode::KeyA,
+            Key::Character("a".into()),
+            ModifiersState::CONTROL,
+        );
+        let writes = clipboard.lock().unwrap().writes.len();
+        clipboard.lock().unwrap().fail = true;
+        key(
+            &mut app,
+            KeyCode::KeyX,
+            Key::Character("x".into()),
+            ModifiersState::CONTROL,
+        );
+        wait("failed clipboard feedback", || panel.current_model().is_some_and(|m| {
+            matches!(m.body, PanelBody::Sections(ref sections) if sections.iter().flat_map(|s| &s.items).any(|i| i.id == "text.field" && i.detail_tone == PanelTone::Danger))
+        })).await;
+        assert_eq!(
+            field_value().unwrap().0,
+            pasted,
+            "a failed cut loses no text"
+        );
+        assert_eq!(clipboard.lock().unwrap().writes.len(), writes);
+        clipboard.lock().unwrap().fail = false;
+        key(
+            &mut app,
+            KeyCode::ArrowRight,
+            Key::Named(NamedKey::ArrowRight),
+            ModifiersState::empty(),
+        );
+        key(
+            &mut app,
+            KeyCode::Home,
+            Key::Named(NamedKey::Home),
+            ModifiersState::SHIFT,
+        );
+        key(
+            &mut app,
+            KeyCode::KeyD,
+            Key::Character("done".into()),
+            ModifiersState::empty(),
+        );
+        wait("replace home selection", || {
+            field_value().is_some_and(|(text, _)| text == "done")
+        })
+        .await;
+        assert_eq!(text_edits.load(Ordering::SeqCst), applied_before);
+        key(
+            &mut app,
+            KeyCode::Enter,
+            Key::Named(NamedKey::Enter),
+            ModifiersState::empty(),
+        );
+        wait("explicit field save", || {
+            text_edits.load(Ordering::SeqCst) == applied_before + 1
+        })
+        .await;
+        assert_eq!(
+            *text_values.lock().unwrap(),
+            vec![Edit::Text("done".into())]
+        );
+
+        // A slow clipboard call cannot hold input or Esc. Closing and
+        // reopening the same field must not accept its old delayed result.
+        panel.send(PanelEvent::Click(PanelHitTarget::Row(
+            "text.field".into(),
+            PanelPart::Body,
+        )));
+        key(
+            &mut app,
+            KeyCode::KeyA,
+            Key::Character("a".into()),
+            ModifiersState::CONTROL,
+        );
+        wait("field reselected", || {
+            field_value().is_some_and(|(_, c)| c.is_some_and(|c| c.cursor != c.anchor))
+        })
+        .await;
+        let gate = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
+        let reads = clipboard.lock().unwrap().reads;
+        let sent = panel.clipboard_sent();
+        {
+            let mut io = clipboard.lock().unwrap();
+            io.read_gate = Some(Arc::clone(&gate));
+            io.text = Some("stale clipboard".into());
+        }
+        key(
+            &mut app,
+            KeyCode::KeyV,
+            Key::Character("v".into()),
+            ModifiersState::CONTROL,
+        );
+        wait("clipboard provider waiting", || {
+            clipboard.lock().unwrap().reads == reads + 1
+        })
+        .await;
+        key(
+            &mut app,
+            KeyCode::KeyX,
+            Key::Character("local".into()),
+            ModifiersState::empty(),
+        );
+        wait("typing while clipboard waits", || {
+            field_value().is_some_and(|(text, _)| text == "local")
+        })
+        .await;
+        panel.send(PanelEvent::Chord(ChordRole::Panel));
+        wait("close with clipboard waiting", || !panel.is_open()).await;
+        panel.send(PanelEvent::Chord(ChordRole::Panel));
+        wait("reopen before clipboard result", || panel.is_open()).await;
+        panel.send(PanelEvent::Click(PanelHitTarget::Row(
+            "text.field".into(),
+            PanelPart::Body,
+        )));
+        key(
+            &mut app,
+            KeyCode::KeyA,
+            Key::Character("a".into()),
+            ModifiersState::CONTROL,
+        );
+        wait("reopened field selected", || {
+            field_value().is_some_and(|(_, c)| c.is_some_and(|c| c.cursor != c.anchor))
+        })
+        .await;
+        key(
+            &mut app,
+            KeyCode::KeyV,
+            Key::Character("v".into()),
+            ModifiersState::CONTROL,
+        );
+        panel.send(PanelEvent::WindowFocus(false));
+        wait("duplicate drained while provider waits", || {
+            panel.current_model().is_some_and(|m| m.notice.is_some())
+        })
+        .await;
+        assert_eq!(
+            clipboard.lock().unwrap().reads,
+            reads + 1,
+            "one in-flight clipboard call across close/reopen"
+        );
+        {
+            let (released, changed) = &*gate;
+            *released.lock().unwrap() = true;
+            changed.notify_one();
+            clipboard.lock().unwrap().read_gate = None;
+        }
+        wait("old clipboard completion queued", || {
+            panel.clipboard_sent() == sent + 1
+        })
+        .await;
+        panel.send(PanelEvent::WindowFocus(true));
+        wait("old completion drained", || {
+            panel.current_model().is_some_and(|m| m.notice.is_none())
+        })
+        .await;
+        assert_eq!(
+            field_value().unwrap().0,
+            "value",
+            "old paste cannot modify a reopened draft"
+        );
+        assert_eq!(text_edits.load(Ordering::SeqCst), applied_before + 1);
+
+        // Automatic result focus must not turn a clipboard shortcut into an
+        // edit or even a clipboard read. A focus event provides a queue barrier.
+        panel.send(PanelEvent::Click(PanelHitTarget::Search));
+        key(
+            &mut app,
+            KeyCode::KeyF,
+            Key::Character("field".into()),
+            ModifiersState::empty(),
+        );
+        wait("search again", || {
+            panel.current_model().is_some_and(|m| m.query == "field")
+        })
+        .await;
+        let reads = clipboard.lock().unwrap().reads;
+        key(
+            &mut app,
+            KeyCode::KeyV,
+            Key::Character("v".into()),
+            ModifiersState::CONTROL,
+        );
+        panel.send(PanelEvent::WindowFocus(false));
+        wait("shortcut drained", || {
+            panel.current_model().is_some_and(|m| m.notice.is_some())
+        })
+        .await;
+        assert_eq!(clipboard.lock().unwrap().reads, reads);
+        assert_eq!(panel.current_model().unwrap().query, "field");
+        assert_eq!(text_edits.load(Ordering::SeqCst), applied_before + 1);
+        panel.send(PanelEvent::Chord(ChordRole::Panel));
+        wait("editor closed", || !panel.is_open()).await;
     }
 
     /// An edit that waits on something slow (an administrator prompt, a
@@ -1735,6 +2170,7 @@ pub(super) mod panel_task_tests {
 
         let state = WindowedRuntimeState::new_headless();
         let deps = ControlPanelDeps {
+            clipboard: Default::default(),
             scene: Arc::clone(&state.shared_state.lock().await.scene),
             pause: PauseControl::new(
                 Arc::clone(&state.shared_state),
@@ -1876,6 +2312,7 @@ pub(super) mod panel_task_tests {
 
         let state = WindowedRuntimeState::new_headless();
         let deps = ControlPanelDeps {
+            clipboard: Default::default(),
             scene: Arc::clone(&state.shared_state.lock().await.scene),
             pause: PauseControl::new(
                 Arc::clone(&state.shared_state),

@@ -9,3 +9,6 @@ pub mod screenshot;
 pub mod status;
 pub mod surface_status;
 pub mod update;
+
+/// Bounded startup and holdings metadata for authenticated operator diagnostics.
+pub mod diagnostics;

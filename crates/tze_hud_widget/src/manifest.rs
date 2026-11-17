@@ -1,7 +1,7 @@
 //! TOML manifest deserialization for widget asset bundles.
 //!
 //! The `widget.toml` manifest format is defined in
-//! widget-system/spec.md §Requirement: Widget Asset Bundle Format.
+//! Widget Asset Bundle Format.
 //!
 //! # widget.toml Example
 //!

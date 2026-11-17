@@ -1,0 +1,22 @@
+[
+  {
+    "zone": "notification-area",
+    "ttl_ms": 15000,
+    "key": "looper-7638c11a:drag-before:one",
+    "content": {
+      "title": "Drag-handle check",
+      "body": "One compact move handle for this stack.",
+      "urgency": 1
+    }
+  },
+  {
+    "zone": "notification-area",
+    "ttl_ms": 15000,
+    "key": "looper-7638c11a:drag-before:two",
+    "content": {
+      "title": "Local visual fixture",
+      "body": "Cards share the same placement.",
+      "urgency": 0
+    }
+  }
+]

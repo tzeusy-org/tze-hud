@@ -16,13 +16,13 @@ use tze_hud_protocol::session_server::{
 use tze_hud_scene::types::{ResourceBudget, SceneId};
 
 /// Default cap on concurrent guest (non-resident) sessions.
-pub const DEFAULT_MAX_GUEST_SESSIONS: u32 = 64;
+pub(crate) const DEFAULT_MAX_GUEST_SESSIONS: u32 = 64;
 
 /// Window over which `max_update_rate_hz` is measured.
 const UPDATE_RATE_WINDOW: Duration = Duration::from_secs(1);
 
 /// Shared enforcement object used by production gRPC session handlers.
-pub struct RuntimeMutationBudgetEnforcer {
+pub(crate) struct RuntimeMutationBudgetEnforcer {
     inner: Mutex<AggregateBudgetState>,
     #[cfg(test)]
     clock: Option<std::sync::Arc<dyn Fn() -> Instant + Send + Sync>>,
@@ -179,11 +179,11 @@ fn apply_delta_u64(value: u64, delta: i64) -> u64 {
 }
 
 impl RuntimeMutationBudgetEnforcer {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::with_limits(u32::MAX, u32::MAX, u64::MAX)
     }
 
-    pub fn with_limits(
+    pub(crate) fn with_limits(
         max_resident_sessions: u32,
         max_leased_tiles: u32,
         max_leased_texture_bytes: u64,
@@ -196,7 +196,7 @@ impl RuntimeMutationBudgetEnforcer {
         )
     }
 
-    pub fn with_session_limits(
+    pub(crate) fn with_session_limits(
         max_resident_sessions: u32,
         max_guest_sessions: u32,
         max_leased_tiles: u32,

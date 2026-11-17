@@ -32,7 +32,7 @@ fn uncap_ambient(gpu: &mut Gpu) {
 }
 
 /// A scene with the shipped default zones (subtitle, notification-area,
-/// alert-banner, ambient-background, ...).
+/// alert-banner, ambient-background,...).
 fn default_scene(w: u32, h: u32) -> SceneGraph {
     let mut scene = SceneGraph::new(w as f32, h as f32);
     scene.zone_registry = ZoneRegistry::with_defaults();
@@ -107,7 +107,7 @@ fn notification_scene() -> SceneGraph {
     scene
 }
 
-// Canonical card tones at opacity.notification (0.92) over clear (hud-h51u7.4.1):
+// Canonical card tones at opacity.notification (0.92) over clear:
 // color.notification.container, caution.container, error.container.
 const NOTIF_LOW: [u8; 4] = [37, 42, 55, 255];
 const NOTIF_NORMAL: [u8; 4] = NOTIF_LOW;

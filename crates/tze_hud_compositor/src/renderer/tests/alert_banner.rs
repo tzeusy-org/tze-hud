@@ -23,7 +23,7 @@ fn test_alert_banner_backdrop_spans_full_display_width() {
 /// When no alert-banner publications are active, render_zone_content emits zero
 /// backdrop vertices — the zone occupies zero visible space.
 ///
-/// Acceptance criterion §Alert-Banner Chrome-Layer Positioning:
+/// Acceptance criterion -Banner Chrome-Layer Positioning:
 ///   "When no alerts are active, the alert-banner zone MUST occupy zero vertical space."
 #[tokio::test]
 async fn test_alert_banner_zero_height_when_inactive() {

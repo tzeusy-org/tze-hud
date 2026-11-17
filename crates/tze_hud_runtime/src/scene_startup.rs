@@ -30,6 +30,8 @@ pub struct SceneStartupResult {
     pub global_tokens: DesignTokenMap,
     /// SVG assets from widget bundles for compositor registration.
     pub widget_svg_assets: Vec<crate::widget_startup::WidgetSvgAsset>,
+    /// Nonfatal diagnostics from the same widget loading pass, without paths/content.
+    pub startup_warnings: tze_hud_scene::startup_diagnostics::StartupWarnings,
 }
 
 /// Run scene startup against `scene`.
@@ -73,7 +75,7 @@ pub fn run_scene_startup(
     // and tile-creating mutations have an active tab from the start.
     let tab_map = bootstrap_config_tabs(scene, raw);
 
-    let widget_svg_assets =
+    let (widget_svg_assets, startup_warnings) =
         init_widget_registry(scene, raw, config_parent, &tab_map, &global_tokens);
 
     let mut zone_registry = ZoneRegistry::with_defaults();
@@ -90,6 +92,7 @@ pub fn run_scene_startup(
     SceneStartupResult {
         global_tokens,
         widget_svg_assets,
+        startup_warnings,
     }
 }
 
@@ -134,7 +137,6 @@ pub(crate) fn resolve_font_dir(tokens: &mut DesignTokenMap, config_parent: Optio
 /// Returns a map from tab name to its `SceneId` so widget instances can bind to
 /// the already-created tabs in the subsequent widget-registry step.
 ///
-/// Spec reference: configuration/spec.md §Tab Configuration Validation.
 fn bootstrap_config_tabs(
     scene: &mut tze_hud_scene::graph::SceneGraph,
     raw: &RawConfig,
@@ -314,17 +316,18 @@ mod tests {
             .rendering_policy
             .text_color
             .expect("subtitle zone should have token-derived text_color");
-        // #AABBCC → R=0xAA/255≈0.667, G=0xBB/255≈0.733, B=0xCC/255≈0.8
+        // #AABBCC is sRGB; scene colours are linear.
+        let linear = |v: u8| ((v as f32 / 255.0 + 0.055) / 1.055).powf(2.4);
         assert!(
-            (text_color.r - 0xAA as f32 / 255.0).abs() < 1e-3,
+            (text_color.r - linear(0xAA)).abs() < 1e-3,
             "text_color.r should match #AABBCC red component"
         );
         assert!(
-            (text_color.g - 0xBB as f32 / 255.0).abs() < 1e-3,
+            (text_color.g - linear(0xBB)).abs() < 1e-3,
             "text_color.g should match #AABBCC green component"
         );
         assert!(
-            (text_color.b - 0xCC as f32 / 255.0).abs() < 1e-3,
+            (text_color.b - linear(0xCC)).abs() < 1e-3,
             "text_color.b should match #AABBCC blue component"
         );
     }
@@ -529,12 +532,12 @@ default_tab = true
         assert!(!scene.widget_registry.reduce_motion);
     }
 
-    // ── Step 2.5: Config-declared tab bootstrap (hud-d5rcd) ───────────────────
+    // ── Step 2.5: Config-declared tab bootstrap ───────────────────
 
     /// WHEN a minimal valid config declares a single widget-less `[[tabs]]` with
     /// `default_tab = true` THEN that tab materializes in `scene.tabs` at startup
     /// and is set active — so tile-creating mutations succeed without a manual
-    /// `create_tab` (regression test for hud-d5rcd).
+    /// `create_tab`.
     #[test]
     fn widgetless_config_tab_materializes_and_is_active() {
         let toml_str = r##"

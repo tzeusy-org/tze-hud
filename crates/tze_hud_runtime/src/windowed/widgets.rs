@@ -12,23 +12,22 @@ use crate::widget_hover::{
 };
 
 /// Default empty-draft placeholder hint used when a composer's owning
-/// `HitRegionNode` has no `composer_placeholder` override configured
-/// (hud-evk0j).
+/// `HitRegionNode` has no `composer_placeholder` override configured.
 ///
 /// The portal composer is a chat-message composer (`portal-bottom-chat-composer`),
 /// so this matches the existing UX. Rendered — dimmed, from
 /// `portal.composer.placeholder_color` — only while the draft is empty; it is
 /// never part of the draft buffer and is never submitted.
 ///
-/// Per-composer override (hud-se6hs, follow-up to hud-evk0j): a
+/// Per-composer override: a
 /// `HitRegionNode`'s `composer_placeholder` config is threaded through
 /// `composer_draft_snapshot` and resolved below — `None` inherits this
 /// default, `Some("")` opts the composer out of any placeholder, and
 /// `Some(text)` supplies non-chat composers with their own hint copy.
 const COMPOSER_DEFAULT_PLACEHOLDER: &str = "Type a message…";
 
-/// Window-space anchor rect for the OS IME candidate window, in physical pixels
-/// (hud-hxhnt finding 3). `x`/`y` is the caret's top-left; `height` is the caret
+/// Window-space anchor rect for the OS IME candidate window, in physical pixels.
+/// `x`/`y` is the caret's top-left; `height` is the caret
 /// line height. Width is a fixed 1px (the caret is a thin vertical bar).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct ImeCaretAnchor {
@@ -37,7 +36,7 @@ pub(super) struct ImeCaretAnchor {
     pub(super) height: f32,
 }
 
-/// Compute the IME candidate-window anchor for a composer caret (hud-hxhnt
+/// Compute the IME candidate-window anchor for a composer caret (
 /// finding 3), given the node's window-space region and the compositor-published
 /// shaped layout. Pure geometry so it is unit-testable without a live window.
 ///
@@ -148,14 +147,14 @@ fn menu_target_live(scene: &tze_hud_scene::SceneGraph, id: tze_hud_scene::SceneI
 
 impl WinitApp {
     /// Push the current composer draft snapshot to the compositor thread for
-    /// local echo rendering (hud-r3ax6).
+    /// local echo rendering.
     ///
     /// Called immediately after every keystroke that mutates the draft buffer.
     /// The snapshot is written to the shared `local_composer_state` slot;
     /// the compositor thread drains it once per frame (no round-trip).
     ///
-    /// Also records an input-to-local-ack latency sample so the p99 measurement
-    /// required by hud-o9ybl can be produced for the composer path.
+    /// Also records an input-to-local-ack latency sample for the composer path's
+    /// p99 measurement.
     ///
     /// No-ops if the draft manager reports no active draft (safety guard).
     pub(super) fn push_local_composer_echo(&mut self, input_started_at: std::time::Instant) {
@@ -189,20 +188,19 @@ impl WinitApp {
                 window.request_redraw();
             }
             // The caret may have moved; re-anchor the OS IME candidate window to
-            // it so CJK/other input methods track the caret (hud-hxhnt finding 3).
+            // it so CJK/other input methods track the caret.
             self.update_composer_ime_cursor_area();
         }
     }
 
-    /// Anchor the OS IME candidate window to the shaped composer caret position
-    /// (hud-hxhnt finding 3).
+    /// Anchor the OS IME candidate window to the shaped composer caret position.
     ///
     /// `set_ime_allowed(true)` is set at composer focus (see
     /// [`super::lifecycle::focus_window_for_text_input`]) but `set_ime_cursor_area`
     /// was never called, so CJK/accented candidate windows floated at the window
     /// origin instead of following the caret. This re-anchors the IME area on
     /// every composer caret move. Position-only: `Ime::Preedit` composition stays
-    /// v1-reserved per the input-model spec — this only tells the OS *where* to
+    /// separate from this position update, which only tells the OS *where* to
     /// place the candidate window, not how to render preedit.
     ///
     /// Geometry is single-authority: the caret x, visual row, and input-box come
@@ -630,7 +628,7 @@ impl WinitApp {
     }
 
     /// Synchronously reset the geometry override for `element_id` and broadcast
-    /// an `ElementRepositionedEvent` (hud-zc7f).
+    /// an `ElementRepositionedEvent`.
     ///
     /// This is the sync chrome-layer path for the "Reset to default" context
     /// menu action.  It mirrors the logic in `HudSessionImpl::reset_element_geometry`
@@ -644,7 +642,7 @@ impl WinitApp {
                 tracing::warn!("perform_reset_element_geometry: could not acquire shared state");
                 return;
             };
-            // Hand geometry authority back to the adapter FIRST (hud-lyqun),
+            // Hand geometry authority back to the adapter FIRST,
             // before the override no-op short-circuit below: a whole-portal
             // move/resize takes the viewer lock but does not always write an
             // element-store override, so the lock must be released here even when
@@ -749,7 +747,7 @@ mod tests {
     use super::*;
     use tze_hud_scene::graph::SceneGraph;
 
-    // ─── resolve_composer_placeholder (hud-se6hs) ─────────────────────────
+    // ─── resolve_composer_placeholder ─────────────────────────
 
     /// Unset override (`None`, i.e. no `composer_placeholder` configured on
     /// the owning `HitRegionNode`) falls back to the global default —
@@ -778,7 +776,7 @@ mod tests {
         assert_eq!(resolve_composer_placeholder(Some(String::new())), None);
     }
 
-    // ─── composer_ime_caret_anchor (hud-hxhnt finding 3) ──────────────────
+    // ─── composer_ime_caret_anchor ──────────────────
 
     /// With NO published layout the IME anchor falls back to the node interior
     /// (region origin + inset), NOT the window origin — the whole point of the

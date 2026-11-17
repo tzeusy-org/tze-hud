@@ -175,6 +175,23 @@ class WindowsGuardTests(unittest.TestCase):
                 native.gdi32.DeleteObject.assert_called_with(bitmap)
                 native.user32.ReleaseDC.assert_called_with(0, screen)
 
+    def test_a_refused_guard_keeps_earlier_outcomes(self) -> None:
+        run = mock.Mock(out=Path("unused"))
+        run.clear_publications.return_value = []
+        first = mock.Mock(__doc__="first scenario")
+
+        def second(_run):
+            raise g.Refused("the foreground window belongs to pid 7, not an owned process")
+
+        third = mock.Mock(__doc__="third scenario")
+        with mock.patch.dict(g.SCENARIOS, {"first": first, "second": second, "third": third}, clear=True), \
+                contextlib.redirect_stdout(io.StringIO()), self.assertRaises(g.Refused) as refused:
+            g.run_scenarios(run, ["first", "second", "third"])
+        outcomes = [(r["scenario"], r["outcome"]) for r in refused.exception.results]
+        self.assertEqual(outcomes, [("first", "PASS"), ("second", "FAIL")])
+        self.assertIn("not an owned process", refused.exception.results[1]["step"])
+        third.assert_not_called()
+
     def test_failed_diagnostic_keeps_original_result_and_next_scenario(self) -> None:
         cases = [(g.ScenarioFailed("original failure", {"marker": 1}),
                   "original failure", {"marker": 1})]
@@ -355,13 +372,103 @@ class WindowsGuardTests(unittest.TestCase):
                     self.assertEqual("overlay-pointer" in selected, mode == "overlay")
                     self.assertEqual("tray" in selected, mode == "overlay")
                     # 25: hud-ljhku.5 added "stack-trim"; hud-ljhku.2 added "portal-reading".
-                    self.assertEqual(len(selected), 2 if mode == "overlay" else 25)
-                    self.assertEqual(selected[-1] == "restart", mode == "fullscreen")
+                    self.assertEqual(len(selected), 2 if mode == "overlay" else 27)
+                    # Real link handoffs can foreground a browser late, so they run
+                    # after every other injecting scenario; MCP-only restart stays last.
+                    self.assertEqual(selected[-3:] == ["portal-reading", "card-link", "restart"],
+                                     mode == "fullscreen")
             for mode, scenario in (("fullscreen", "overlay-pointer"), ("overlay", "composer")):
                 with mock.patch.object(g, "WINDOWS", True), contextlib.redirect_stderr(io.StringIO()), \
                         self.assertRaises(SystemExit) as failure:
                     g.main(["--exe", "unused.exe", "--injector", "sendinput", "--window-mode", mode, scenario])
                 self.assertEqual(failure.exception.code, 2)
+
+
+class RequiredGateTests(unittest.TestCase):
+    """hud-ljhku.16: only required scenarios (and harness failures that cost one its PASS) fail the run."""
+
+    def gate(self, required, outcomes, *, refuse=None, mode="fullscreen"):
+        """`refuse` is how many scenarios finish before the harness refuses."""
+        with tempfile.TemporaryDirectory() as directory:
+            fake = mock.Mock(home=None, log=None, display="", port=0)
+            fake.exe = Path("target/release-dev/tze_hud.exe")
+            fake.timeline = []
+            fake.status.return_value = {}
+            fake.inj = None
+            fake.smoke.ok.return_value = {}
+
+            def scenarios(_run, names):
+                results = [{"scenario": n, "outcome": outcomes.get(n, "PASS"), "seconds": 0} for n in names]
+                if refuse is not None:
+                    err = g.Refused("foreground lost")
+                    err.results = results[:refuse]
+                    raise err
+                return results
+
+            gate = [] if required is None else ["--required", required]
+            with mock.patch.object(g, "WINDOWS", True), mock.patch.object(g, "Run", return_value=fake), \
+                    mock.patch.object(g, "run_scenarios", side_effect=scenarios) as run, \
+                    contextlib.redirect_stdout(io.StringIO()):
+                code = g.main(["--exe", "unused.exe", "--injector", "sendinput", "--window-mode", mode,
+                               "--out", directory, *gate])
+            verdict = json.loads((Path(directory) / "verdict.json").read_text())
+            return code, run.call_args.args[1] if run.call_args else None, verdict
+
+    def test_required_scenarios_run_first_and_informational_follow_in_the_same_boot(self) -> None:
+        _, names, _ = self.gate("keyboard,restart,composer", {})
+        self.assertEqual(names[:2], ["composer", "keyboard"])
+        self.assertEqual(names[-3:], ["portal-reading", "card-link", "restart"])
+        self.assertEqual(len(names), len(set(names)))
+
+    def test_exit_codes(self) -> None:
+        cases = [
+            ("informational failure passes and is listed", "composer", {"keyboard": "FAIL"}, None, 0),
+            ("required failure fails", "composer", {"composer": "FAIL"}, None, 1),
+            ("harness failure before a required scenario ran fails", "composer", {}, 0, 1),
+            ("harness failure after every required scenario passed passes", "composer", {}, 1, 0),
+            ("harness failure with nothing required in this mode passes", "overlay-pointer", {}, 0, 0),
+            ("no --required keeps every scenario required", None, {"keyboard": "FAIL"}, None, 1),
+        ]
+        for label, required, outcomes, refuse, expected in cases:  # refuse: scenarios done first
+            with self.subTest(label):
+                code, _, verdict = self.gate(required, outcomes, refuse=refuse)
+                self.assertEqual(code, expected)
+                self.assertEqual(verdict["blocking"], bool(expected))
+        _, _, verdict = self.gate("composer", {"keyboard": "FAIL"})
+        self.assertEqual(verdict["informational_failed"], ["keyboard"])
+        self.assertEqual(verdict["required_failed"], [])
+
+    def test_unknown_required_name_is_a_usage_error(self) -> None:
+        with mock.patch.object(g, "WINDOWS", True), contextlib.redirect_stderr(io.StringIO()), \
+                self.assertRaises(SystemExit) as failure:
+            g.main(["--exe", "unused.exe", "--injector", "sendinput", "--required", "no-such-scenario"])
+        self.assertEqual(failure.exception.code, 2)
+
+    def test_overlay_wrapper_passes_the_list_and_gates_setup_failure_on_it(self) -> None:
+        for required, expected in ((None, 1), ("composer", 0), ("composer,tray", 1)):
+            with self.subTest(required=required), tempfile.TemporaryDirectory() as directory, \
+                    mock.patch.object(overlay.sys, "platform", "win32"), \
+                    mock.patch.dict(overlay.os.environ, {"GITHUB_ACTIONS": "true", "WINDIR": directory}), \
+                    mock.patch.object(overlay.hud_gestures, "windows_huds", return_value=[]), \
+                    mock.patch.dict(sys.modules, {"winreg": mock.Mock()}), \
+                    contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                gate = [] if required is None else ["--required", required]
+                # No Vulkan loader under WINDIR: setup fails before any scenario.
+                self.assertEqual(overlay.main(["--exe", "unused.exe", "--out", directory, *gate]), expected)
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(overlay.sys, "platform", "win32"), \
+                mock.patch.dict(overlay.os.environ, {"GITHUB_ACTIONS": "true", "WINDIR": directory}), \
+                mock.patch.object(overlay.hud_gestures, "windows_huds", return_value=[]), \
+                mock.patch.dict(sys.modules, {"winreg": mock.Mock()}), \
+                mock.patch.object(overlay, "extract_driver", return_value=Path("icd.json")), \
+                mock.patch.object(overlay, "registered_driver", return_value=contextlib.nullcontext()), \
+                mock.patch.object(overlay.hud_gestures, "main", return_value=0) as scenarios, \
+                contextlib.redirect_stdout(io.StringIO()):
+            (Path(directory) / "System32").mkdir()
+            (Path(directory) / "System32/vulkan-1.dll").write_bytes(b"")
+            self.assertEqual(overlay.main(["--exe", "x.exe", "--out", directory, "--required", "tray"]), 0)
+            argv = scenarios.call_args.args[0]
+            self.assertEqual(argv[argv.index("--required") + 1], "tray")
+            self.assertEqual(argv[-2:], ["overlay-pointer", "tray"])
 
 
 class OverlayInstallerTests(unittest.TestCase):

@@ -6,13 +6,11 @@
 //!
 //! All tests are headless Layer 0-1: no display server or GPU required.
 //!
-//! Source: openspec/changes/persistent-movable-elements/
-//!
 //! Test status overview:
 //!   Test 1 — Cross-session persistence:          ACTIVE
 //!   Test 2 — Element discovery and reuse:        ACTIVE
-//!   Test 3 — Reset fallback chain:               ACTIVE (hud-zc7f merged)
-//!   Test 4 — Zone with config override + reset:  ACTIVE (hud-zc7f merged)
+//!   Test 3 — Reset fallback chain: ACTIVE
+//!   Test 4 — Zone with config override + reset: ACTIVE
 //!   Test 5 — Display resolution change:          ACTIVE
 //!   Test 6 — Agent notification:                 ACTIVE
 
@@ -88,7 +86,7 @@ fn build_activated_processor(element_id: SceneId) -> InputProcessor {
         cx,
         cy,
         1,     // 1ms threshold
-        false, // immediate (hud-cpjqe): legacy grip long-press path
+        false, // immediate : legacy grip long-press path
     );
     // Manually advance phase to Activated so we can immediately produce Moved/Released.
     state.phase = DragPhase::Activated;
@@ -120,7 +118,7 @@ fn drag_to_then_release(
         element_bounds(),
         DISPLAY_W,
         DISPLAY_H,
-        false, // is_header_band (hud-cpjqe): legacy grip path, long-press
+        false, // is_header_band : legacy grip path, long-press
     );
 
     // Release
@@ -132,7 +130,7 @@ fn drag_to_then_release(
         element_bounds(),
         DISPLAY_W,
         DISPLAY_H,
-        false, // is_header_band (hud-cpjqe): legacy grip path, long-press
+        false, // is_header_band : legacy grip path, long-press
     );
 
     match released {
@@ -741,7 +739,7 @@ fn display_resolution_double_center_example_from_spec() {
 // new_geometry.
 //
 // Uses HudSessionImpl directly (Layer 1 headless gRPC, no display server or GPU).
-// ElementRepositionedEvent is broadcast via the public channel landed in hud-bs2q.6.
+// ElementRepositionedEvent is broadcast via the public channel.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #[tokio::test]
@@ -834,7 +832,7 @@ async fn agent_receives_element_repositioned_event_with_old_and_new_geometry() {
 
     // ── Emit: simulate what the runtime does after persist_drag_geometry ──────
     // We broadcast via reposition_tx directly, mirroring what the runtime would
-    // do after persist_drag_geometry writes the geometry_override (hud-bs2q.6).
+    // do after persist_drag_geometry writes the geometry_override.
     let event = tze_hud_protocol::proto::ElementRepositionedEvent {
         element_id: tile_id.as_uuid().as_bytes().to_vec(),
         new_geometry: Some(tze_hud_protocol::convert::geometry_policy_to_proto(

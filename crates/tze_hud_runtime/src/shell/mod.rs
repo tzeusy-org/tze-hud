@@ -1,11 +1,10 @@
 //! System shell: runtime-owned state that agents never see or address.
 //!
-//! The shell owns the human-override semantics. Viewer dismiss, safe mode, and
-//! freeze work without any agent's cooperation and cannot be vetoed.
+//! The shell owns the human-override semantics. Viewer dismiss and safe mode
+//! work without any agent's cooperation and cannot be vetoed.
 //!
 //! - `chrome.rs`: tab slots, safe-mode flag, keyboard shortcuts, viewer dismiss.
 //! - `safe_mode.rs`: suspend/resume every agent's leases.
-//! - `freeze.rs`: freeze queue semantics.
 //! - `system_card.rs`: the runtime's own toast/status card.
 //! - `control_panel/`: the HUD control panel (chords, pause, every setting).
 //!
@@ -15,10 +14,6 @@
 pub(crate) mod chrome;
 pub(crate) mod control_panel;
 pub(crate) mod link;
-// Freeze is unwired in production; hud-bstmy.5.6 decides delete-or-wire. Drop
-// this expectation (and the dead items) with that decision.
-#[expect(dead_code, reason = "freeze is never activated; see hud-bstmy.5.6")]
-pub(crate) mod freeze;
 pub(crate) mod safe_mode;
 pub(crate) mod system_card;
 

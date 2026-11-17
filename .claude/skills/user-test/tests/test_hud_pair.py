@@ -658,7 +658,8 @@ def test_admin_sends_the_paired_psk_as_bearer(hud, monkeypatch, capsys):
                 if outcome.get("auth"):
                     raise admin.urllib.error.HTTPError(request.full_url, outcome["auth"], marker, {}, None)
                 return Response({"sha": outcome.get("sha", sha), "agents": marker,
-                                 "tailnet_inbound": {"state": outcome.get("firewall", "allowed"), "error": marker}})
+                                 "tailnet_inbound": {"state": outcome.get("firewall", "allowed"), "error": marker},
+                                 **outcome.get("metadata", {})})
             assert request.get_header("Authorization") is None
             record("release")
             if outcome.get("release"):
@@ -699,6 +700,132 @@ def test_admin_sends_the_paired_psk_as_bearer(hud, monkeypatch, capsys):
         assert marker not in captured.out and FakeHud.last_psk not in captured.out
         if code:
             assert observed["action"]
+
+    # Keep the existing owned-child probes, but pass real schema-shaped metadata
+    # through their bounded whitelist. Legacy/malformed metadata never turns into
+    # a healthy empty report, and later failures retain their original diagnosis.
+    import copy
+    metadata = {
+        "holdings": {"state": "complete", "sources": {"scene": "available", "portals": "not_configured"},
+                     "agents": [{"id": "first-agent", "surfaces": [
+                         {"surface": "zone:subtitle", "kind": "zone", "phase": "scheduled",
+                          "expires_in_ms": 2, "expiry_kind": "content", "count": 3}], "omitted_records": 0}],
+                     "omitted_agents": 0, "omitted_records": 0, "omission_reasons": []},
+        "warnings": {"state": "complete", "items": [
+            {"source": "font", "code": "FONT_FAMILY_FALLBACK", "subject": "sans", "fallback": "IBM Plex Sans"}],
+            "truncated": False, "omitted_events": 0, "omission_reasons": []},
+    }
+    for failure, code, layer, reason in [({}, 0, "dev_commit", None),
+                                        ({"firewall": "blocked"}, 1, "firewall", "blocked"),
+                                        ({"sha": "unknown"}, 1, "build", "unknown"),
+                                        ({"release": 403}, 1, "release", "http_error")]:
+        outcome.clear()
+        outcome.update({"metadata": metadata, **failure})
+        assert admin.main(["--host", host, "doctor"]) == code
+        captured = capsys.readouterr()
+        observed = json.loads(captured.out)
+        assert observed["layer"] == layer and observed.get("reason") == reason
+        diagnostic = observed["diagnostics"]
+        assert diagnostic["state"] == "complete" and admin.valid_diagnostics(diagnostic)
+        assert diagnostic["holdings"] == [{"agent": "first-agent", **metadata["holdings"]["agents"][0]["surfaces"][0]}]
+        assert diagnostic["warnings"] == metadata["warnings"]["items"]
+        assert len((json.dumps({"result": observed}) + "\n").encode()) <= 3072
+        assert marker not in captured.out and FakeHud.last_psk not in captured.out
+
+    malformed = []
+    for source, field, value in [
+        ("holdings", "state", "healthy"), ("holdings", "omitted_records", -1),
+        ("holdings", "omitted_records", True), ("holdings", "omitted_records", 2**80),
+        ("holdings", "omitted_records", 1), ("holdings", "omitted_records", None),
+        ("warnings", "omitted_events", 1), ("warnings", "truncated", True),
+    ]:
+        bad = copy.deepcopy(metadata)
+        bad[source][field] = value
+        malformed.append(bad)
+    for bad in [copy.deepcopy(metadata) for _ in range(4)]:
+        malformed.append(bad)
+    malformed[-4]["holdings"]["sources"]["scene"] = "busy"
+    malformed[-3]["holdings"]["agents"][0]["surfaces"][0]["content"] = marker
+    malformed[-2]["warnings"]["items"][0]["subject"] = marker + "/private-path"
+    malformed[-1]["holdings"]["agents"][0]["surfaces"][0]["count"] = []
+    for bad in malformed:
+        outcome.clear()
+        outcome.update(metadata=bad, firewall="blocked")
+        assert admin.main(["--host", host, "doctor"]) == 1
+        captured = capsys.readouterr()
+        observed = json.loads(captured.out)
+        assert observed["layer"] == "firewall" and observed["reason"] == "blocked"
+        assert observed["diagnostics"] == admin.unavailable_diagnostics("malformed")
+        assert marker not in captured.out and FakeHud.last_psk not in captured.out
+
+    for state in ["pending", "unavailable"]:
+        changed = copy.deepcopy(metadata)
+        changed["warnings"].update(state=state, items=[])
+        diagnostic = admin.project_diagnostics(changed)
+        assert diagnostic["state"] == "partial" and state in diagnostic["reasons"]
+        assert diagnostic["omitted_warning_events"] == (None if state == "unavailable" else 0)
+        assert admin.valid_diagnostics(diagnostic)
+    changed = copy.deepcopy(metadata)
+    changed["holdings"].update(state="partial", sources={"scene": "busy", "portals": "available"},
+                               agents=[], omitted_agents=None, omitted_records=None, omission_reasons=["busy"])
+    assert admin.project_diagnostics(changed)["omitted_records"] is None
+    assert admin.project_diagnostics({}) == admin.unavailable_diagnostics("unavailable")
+
+    # Whole original addresses, escaped JSON bytes, aggregation counts and exact
+    # bounded owner omissions survive both cardinality and final envelope trims.
+    crowded = copy.deepcopy(metadata)
+    crowded["holdings"]["agents"] = [
+        {"id": chr(1) * 125 + f"{i:03}", "surfaces": [
+            {"surface": "zone:" + chr(2) * 248 + f"{i:03}", "kind": "zone", "phase": "active",
+             "expires_in_ms": None, "expiry_kind": "until_clear", "count": 2}], "omitted_records": 0}
+        for i in range(12)]
+    crowded["holdings"].update(state="partial", omitted_agents=1, omitted_records=5, omission_reasons=["cardinality"])
+    crowded["warnings"].update(items=[
+        {"source": "widget_bundle", "code": "WIDGET_BUNDLE_ROOT_UNREADABLE", "subject": f"root:{i}", "fallback": None}
+        for i in range(6)], truncated=True, omitted_events=7, omission_reasons=["cardinality"])
+    outcome.clear()
+    outcome.update(metadata=crowded)
+    assert admin.main(["--host", host, "doctor"]) == 0
+    captured = capsys.readouterr()
+    observed = json.loads(captured.out)
+    diagnostic = observed["diagnostics"]
+    assert admin.valid_diagnostics(diagnostic)
+    assert len((json.dumps({"result": observed}) + "\n").encode()) <= 3072
+    assert len(diagnostic["holdings"]) <= 8 and len(diagnostic["warnings"]) <= 4
+    assert diagnostic["omitted_records"] + sum(row["count"] for row in diagnostic["holdings"]) == 29
+    assert diagnostic["omitted_agents"] + len(diagnostic["holdings"]) == 13
+    assert diagnostic["omitted_warning_events"] + len(diagnostic["warnings"]) == 13
+    assert "bytes" in diagnostic["reasons"] and "cardinality" in diagnostic["reasons"]
+    for row in diagnostic["holdings"]:
+        assert row["surface"] in {agent["surfaces"][0]["surface"] for agent in crowded["holdings"]["agents"]}
+    forged = {**diagnostic, "state": "complete"}
+    assert not admin.valid_diagnostics(forged)
+    # Bounded upstream counters may already be saturated. Trimming must not
+    # produce an invalid integer that replaces the original primary failure.
+    maximal = copy.deepcopy(crowded)
+    maximal["holdings"].update(omitted_agents=2**64-1, omitted_records=2**64-1)
+    maximal["warnings"]["omitted_events"] = 2**64-1
+    outcome.clear()
+    outcome.update(metadata=maximal, firewall="blocked")
+    assert admin.main(["--host", host, "doctor"]) == 1
+    observed = json.loads(capsys.readouterr().out)
+    assert observed["layer"] == "firewall" and observed["reason"] == "blocked"
+    assert admin.valid_diagnostics(observed["diagnostics"])
+    assert all(observed["diagnostics"][key] == 2**64-1 for key in
+               ("omitted_agents", "omitted_records", "omitted_warning_events"))
+
+    # Invalid nested metadata must not bypass the parent whitelist by naming
+    # one of the supervisor's own failure reasons before validation completes.
+    with monkeypatch.context() as child_patch:
+        child_patch.setattr(admin, "doctor_probe", lambda *_: {
+            "ok": False, "layer": "endpoint", "reason": "cleanup_failed",
+            "action": admin.DOCTOR_ACTIONS["endpoint"], "diagnostics": {"content": marker},
+        })
+        assert admin.main(["--host", host, "doctor"]) == 1
+        captured = capsys.readouterr()
+        rejected = json.loads(captured.out)
+        assert rejected["reason"] == "unknown" and "diagnostics" not in rejected
+        assert marker not in captured.out
 
     # Real C blocking cannot defer the parent's deadline. Prove no later layer,
     # TERM/KILL fallback and actual child reaping for DNS and HTTP open/read.

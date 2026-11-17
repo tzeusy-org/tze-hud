@@ -310,7 +310,7 @@ impl RuntimeContext {
 // ─── Shared runtime context type alias ───────────────────────────────────────
 
 /// Cheaply-cloneable handle to the shared runtime context.
-pub type SharedRuntimeContext = Arc<RuntimeContext>;
+pub(crate) type SharedRuntimeContext = Arc<RuntimeContext>;
 
 // ─── Unit tests ───────────────────────────────────────────────────────────────
 

@@ -3,7 +3,7 @@
 //!
 //! Moved from `renderer/mod.rs` banner 6 (`// ─── Image texture cache ──`)
 //! and the font/image loading method cluster (formerly ~L1338–1735 pre-split),
-//! by Step R-2 of the renderer module split (hud-fgryk).  No logic was changed;
+//! by Step R-2 of the renderer module split. No logic was changed;
 //! only visibility modifiers were added where Rust's module-privacy rules
 //! require them (listed in the PR body).
 
@@ -72,7 +72,7 @@ fn downsample_rgba_nearest(
 /// Passed from the input-event thread to the compositor thread via an
 /// [`Arc<StdMutex<Option<LocalComposerState>>>`] so the compositor can render
 /// the current draft text + caret locally on every frame — WITHOUT waiting for
-/// an adapter round-trip (§4.1 "Local feedback first").
+/// an adapter round-trip ("Local feedback first").
 ///
 /// Created by the windowed runtime on every keystroke that mutates the draft,
 /// cleared when the composer is deactivated (blur, submit, cancel).
@@ -95,7 +95,7 @@ pub struct LocalComposerState {
     /// The `SceneId` of the `HitRegionNode` that owns this composer region.
     /// Used to locate the tile bounds for overlay placement.
     pub node_id: tze_hud_scene::types::SceneId,
-    /// Optional dimmed hint rendered when the draft is EMPTY (hud-evk0j).
+    /// Optional dimmed hint rendered when the draft is EMPTY.
     ///
     /// When `text` is empty and this is `Some(non-empty)`, the composer echo
     /// renders this string colored from `portal.composer.placeholder_color`
@@ -170,7 +170,7 @@ impl LocalComposerState {
 /// frame at the top of the render loop.
 pub type LocalComposerStateHandle = Arc<StdMutex<Option<Option<LocalComposerState>>>>;
 
-/// Reverse channel for soft-wrap vertical caret movement (hud-21o6x): the
+/// Reverse channel for soft-wrap vertical caret movement: the
 /// compositor thread publishes the active composer's wrapped-line layout here
 /// each frame; the input thread reads it before dispatching ArrowUp/ArrowDown.
 ///
@@ -233,7 +233,7 @@ pub(crate) fn apply_composer_slot(
 
 /// Compute the composer's horizontal scroll offset — the number of physical
 /// pixels to shift the draft text LEFT within its visible window so the active
-/// caret stays visible once the draft is wider than the composer box (hud-zlfi4).
+/// caret stays visible once the draft is wider than the composer box.
 ///
 /// This is the pure, GPU-free core of horizontal caret-follow: given the caret's
 /// x position and the full draft width — both measured against the composer font
@@ -293,12 +293,12 @@ pub(crate) fn composer_scroll_offset(
 
 /// Per-frame composer layout state, computed by
 /// [`super::Compositor::prime_composer_scroll_offset`] and consumed by
-/// `render_composer_overlay` / `collect_composer_text_item` (hud-nx7yq.1).
+/// `render_composer_overlay` / `collect_composer_text_item`.
 ///
 /// One of two profiles is active per frame:
 /// - **Single-line** (`wrap == false`, max-lines token = 1): the draft is laid
-///   out on one unwrapped line and slides horizontally so the caret stays visible
-///   (hud-zlfi4). `h_scroll_px` / `content_width` drive it; the vertical fields
+///   out on one unwrapped line and slides horizontally so the caret stays visible.
+///   `h_scroll_px` / `content_width` drive it; the vertical fields
 ///   stay at their one-line defaults.
 /// - **Multi-line** (`wrap == true`, max-lines token > 1): the draft wraps within
 ///   the composer width, the box grows upward to `visible_lines`, and past the
@@ -317,7 +317,7 @@ pub(crate) struct ComposerLayout {
     pub(crate) content_width: f32,
     /// Caret x (px), measured from the start of the draft — single-line profile
     /// only; `0` when wrapping (the multi-line profile locates the caret via the
-    /// published [`tze_hud_input::ComposerVisualLayout`] instead, hud-hxhnt).
+    /// published [`tze_hud_input::ComposerVisualLayout`] instead).
     ///
     /// Raw (pre-scroll) value from `TextRasterizer::measure_composer_caret`,
     /// stashed here by `Compositor::prime_composer_scroll_offset` so the
@@ -351,7 +351,7 @@ impl Default for ComposerLayout {
     }
 }
 
-/// Number of text lines the composer box shows for a wrapped draft (hud-nx7yq.1).
+/// Number of text lines the composer box shows for a wrapped draft.
 ///
 /// The box grows from one line up to the token-bounded `max_lines`; beyond that it
 /// stops growing and scrolls internally (see [`composer_vertical_line_offset`]).
@@ -360,8 +360,7 @@ pub(crate) fn composer_visible_line_count(total_lines: usize, max_lines: usize) 
     total_lines.clamp(1, max_lines.max(1))
 }
 
-/// How many composer text lines the region interior can actually display
-/// (hud-nottc).
+/// How many composer text lines the region interior can actually display.
 ///
 /// The rendered box height is `visible_lines * line_height + 2*margin` clamped to
 /// the region height (see `Compositor::composer_input_box`), so a composer region
@@ -390,7 +389,7 @@ pub(crate) fn composer_region_fit_lines(
 }
 
 /// First visible wrapped line (count scrolled off the top) so the caret line stays
-/// visible inside the bounded `max_lines` window (hud-nx7yq.1).
+/// visible inside the bounded `max_lines` window.
 ///
 /// The vertical analogue of [`composer_scroll_offset`]'s right-pin: when the draft
 /// fits within `max_lines` there is no scroll; otherwise the caret line is pinned
@@ -513,8 +512,8 @@ impl super::Compositor {
     ///
     /// Sourced from the resolved `DisplayProfile::max_truncation_input_bytes`
     /// (see `tze_hud_config`), this bounds the bytes a single uncached
-    /// truncation may shape before the viewport-adjacent-window fallback engages
-    /// (spec.md §324/§331).  The value is retained on the compositor so it is
+    /// truncation may shape before the viewport-adjacent-window fallback engages.
+    /// The value is retained on the compositor so it is
     /// re-applied across any later [`Compositor::init_text_renderer`] call, and
     /// forwarded immediately to the subtitle measurement and live truncation
     /// caches when the rasterizer is already initialized.
@@ -561,6 +560,15 @@ impl super::Compositor {
         }
     }
 
+    /// Diagnostics from the actual currently initialized configured font system.
+    /// Runtime startup freezes its own first configured result; later theme rebuilds
+    /// do not turn this into a retained warning history.
+    pub fn startup_font_warnings(
+        &self,
+    ) -> Option<&tze_hud_scene::startup_diagnostics::StartupWarnings> {
+        self.text_rasterizer.as_ref().map(|r| r.font_warnings())
+    }
+
     /// The family each font role currently resolves to, or `None` before the
     /// text renderer is initialized.
     #[cfg(test)]
@@ -589,7 +597,7 @@ impl super::Compositor {
     /// `prime_truncation_cache` recomputes all entries regardless of whether
     /// the scene version has changed.  The cadence gate is bypassed for
     /// forced primes (see `prime_truncation_cache`), ensuring the new font is
-    /// reflected immediately on the next commit.  [hud-v2z6u]
+    /// reflected immediately on the next commit.
     #[cfg(test)]
     pub(crate) fn load_font_bytes(&mut self, resource_id: [u8; 32], data: &[u8]) -> bool {
         if let Some(rasterizer) = &mut self.text_rasterizer {
@@ -626,7 +634,7 @@ impl super::Compositor {
                 self.system_card_layout = None;
                 tracing::debug!(
                     resource_id = %crate::text::format_resource_id(&resource_id),
-                    "load_font_bytes: new font loaded — truncation cache invalidated [hud-v2z6u]"
+                    "load_font_bytes: new font loaded — truncation cache invalidated"
                 );
             }
             true

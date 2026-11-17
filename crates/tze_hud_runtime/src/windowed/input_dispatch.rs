@@ -1,4 +1,3 @@
-use std::sync::Arc;
 use std::time::Instant;
 
 use winit::event::MouseScrollDelta;
@@ -6,7 +5,6 @@ use winit::event::MouseScrollDelta;
 use crate::os_prefs::WheelLines;
 use tze_hud_input::{WHEEL_LINE_PX, WheelStep};
 
-use crate::channels::{INPUT_EVENT_CAPACITY, InputEvent};
 use tze_hud_protocol::proto::{EventBatch, InputEnvelope};
 use tze_hud_scene::MonoUs;
 use tze_hud_scene::graph::SceneGraph;
@@ -186,7 +184,7 @@ pub(super) fn dispatch_keyboard_event(
 
 /// Broadcast an abstract command produced by the production input adapter.
 ///
-/// Command events are transactional RFC 0004 input events. They use the same
+/// Command events are transactional input events. They use the same
 /// namespace-addressed `INPUT_EVENTS` channel as keyboard and pointer input;
 /// the session handler applies the capability/subscription filter.
 pub(super) fn dispatch_command_event(
@@ -269,7 +267,7 @@ pub(super) fn dispatch_command_event(
 ///
 /// Focus lost is dispatched first (if present) so the agent that relinquished
 /// focus receives its event before the newly-focused agent receives its gained
-/// event, preserving the ordering guarantee in RFC 0004 §8.4.
+/// event, preserving the ordering guarantee
 ///
 /// Focus events use the durable transactional lane. A send with no connected
 /// session has no destination and is ignored.
@@ -288,7 +286,7 @@ pub(super) fn dispatch_focus_event(
     use tze_hud_input::{FocusLostReason, FocusSource};
     use tze_hud_protocol::proto::input_envelope::Event as InputEvent;
 
-    // ── FocusLostEvent (dispatched first per RFC 0004 §8.4) ─────────────────
+    // ── FocusLostEvent (dispatched first ) ─────────────────
     if let Some((lost_ev, namespace)) = transition.lost {
         let tile_id_bytes = lost_ev.tile_id.as_uuid().as_bytes().to_vec();
         let node_id_bytes = lost_ev
@@ -377,10 +375,8 @@ pub(super) fn dispatch_focus_event(
 ///
 /// **Throttling**: every `PointerMove` is forwarded as-is to all opted-in
 /// subscribers.  Subscribers that cannot tolerate the full rate should
-/// throttle on the receive side.  This matches the "ephemeral realtime"
-/// message class contract (RFC CLAUDE.md §Four Message Classes) and avoids
-/// imposing a specific rate budget on the dispatch path, which is on the
-/// Stage 2 hot path (< 500 µs p99 per engineering-bar.md §2).
+/// throttle on the receive side. This keeps ephemeral realtime dispatch free
+/// of receive-side rate limits on the Stage 2 hot path (< 500 µs p99).
 ///
 /// All other `AgentDispatchKind` values are silently ignored — only
 /// `PointerDown`, `PointerMove`, and `PointerUp` are dispatched here.
@@ -483,8 +479,8 @@ pub(super) fn dispatch_pointer_event(
 /// `extra_dispatches` (e.g. after `PointerUp` with `release_on_up=true`).
 ///
 /// `CaptureReleased` is a focus/lease lifecycle event, not a pointer event, so
-/// it belongs on the `FOCUS_EVENTS` channel (RFC 0004 §8.3, subscriptions.rs
-/// §`is_focus_variant`).  Agents that subscribe to `FOCUS_EVENTS` with the
+/// it belongs on the `FOCUS_EVENTS` channel (`subscriptions.rs::is_focus_variant`).
+/// Agents that subscribe to `FOCUS_EVENTS` with the
 /// `access_input_events` capability will receive it.
 ///
 /// Capture release uses the durable transactional lane.
@@ -560,7 +556,7 @@ pub(super) fn dispatch_capture_released_event(
 /// The scene tile bounds have already been updated locally (local-first feedback).
 /// This function notifies gRPC subscribers subscribed to `SCENE_TOPOLOGY` that
 /// the portal geometry has changed, using the same `ElementRepositionedEvent`
-/// that drag-reposition uses (§6b.4).
+/// that drag-reposition uses.
 ///
 /// Delivery is best-effort (fire-and-forget): errors (no receivers, channel
 /// lagged) are silently ignored.
@@ -608,20 +604,7 @@ pub(super) fn dispatch_portal_geometry_event(
     let _ = tx.send(event);
 }
 
-/// Push an `InputEvent` into the ring buffer, dropping the oldest if full.
-pub(super) fn enqueue_input(
-    ring: &Arc<std::sync::Mutex<std::collections::VecDeque<InputEvent>>>,
-    event: InputEvent,
-) {
-    if let Ok(mut q) = ring.lock() {
-        if q.len() >= INPUT_EVENT_CAPACITY {
-            q.pop_front(); // Drop oldest to make room.
-        }
-        q.push_back(event);
-    }
-}
-
-/// Monotonic nanosecond timestamp for `InputEvent.timestamp_ns`.
+/// Monotonic nanoseconds since process start.
 ///
 /// Uses process-relative time so values are comparable within a session.
 pub(super) fn nanoseconds_since_start() -> u64 {
@@ -641,21 +624,8 @@ pub(super) fn monotonic_us_since_start() -> MonoUs {
     MonoUs((nanoseconds_since_start() / 1_000).max(1))
 }
 
-/// Map a winit `PhysicalKey` to a compact u32 key code.
-///
-/// This is a best-effort mapping for the `InputEventKind::KeyPress/KeyRelease`
-/// channel type. The full keyboard pipeline uses `tze_hud_input::KeyboardProcessor`
-/// for richer key event data.
-pub(super) fn physical_key_to_u32(key: &winit::keyboard::PhysicalKey) -> u32 {
-    use winit::keyboard::PhysicalKey;
-    match key {
-        PhysicalKey::Code(code) => *code as u32,
-        PhysicalKey::Unidentified(_) => 0,
-    }
-}
-
 /// Map a winit `PhysicalKey` to the DOM `KeyboardEvent.code`-style string
-/// used by `RawKeyDownEvent.key_code` (RFC 0004 §7.4).
+/// used by `RawKeyDownEvent.key_code`.
 ///
 /// Returns the `KeyCode` variant name (e.g. `"KeyA"`, `"ShiftLeft"`,
 /// `"ArrowDown"`) for identified keys, and `"Unidentified"` for unknown ones.
@@ -668,7 +638,7 @@ pub(super) fn physical_key_to_key_code_str(key: &winit::keyboard::PhysicalKey) -
 }
 
 /// Map a winit logical `Key` to the DOM `KeyboardEvent.key`-style string
-/// used by `RawKeyDownEvent.key` and `RawKeyUpEvent.key` (RFC 0004 §7.4).
+/// used by `RawKeyDownEvent.key` and `RawKeyUpEvent.key`.
 ///
 /// For character keys this is the character itself (e.g. `"a"`, `"A"`, `"1"`).
 /// For named keys this is the `NamedKey` variant name (e.g. `"Enter"`,
@@ -715,7 +685,7 @@ pub(super) fn key_press_text(
     }
 }
 
-/// Convert winit's `ModifiersState` to `KeyboardModifiers` (RFC 0004 §7.4).
+/// Convert winit's `ModifiersState` to `KeyboardModifiers`.
 ///
 /// CapsLock and NumLock toggle states are not exposed by winit's
 /// `ModifiersState`; they default to `false` here. Full toggle-key tracking
@@ -745,7 +715,6 @@ mod tests {
         let rx = tx.subscribe_all();
         (tx, rx)
     }
-    use crate::channels::{INPUT_EVENT_CAPACITY, InputEventKind};
 
     #[test]
     fn key_press_text_types_layout_and_packet_text_but_not_chords() {
@@ -782,35 +751,6 @@ mod tests {
         assert_eq!(
             key_press_text(&Key::Named(NamedKey::Space), Some(" "), none),
             None
-        );
-    }
-
-    #[test]
-    fn enqueue_input_drops_oldest_when_full() {
-        let ring = Arc::new(std::sync::Mutex::new(
-            std::collections::VecDeque::with_capacity(INPUT_EVENT_CAPACITY),
-        ));
-        // Fill beyond capacity.
-        for i in 0..INPUT_EVENT_CAPACITY + 10 {
-            let event = InputEvent {
-                timestamp_ns: i as u64,
-                kind: InputEventKind::KeyPress { key: 0 },
-            };
-            enqueue_input(&ring, event);
-        }
-        let q = ring.lock().unwrap();
-        assert_eq!(
-            q.len(),
-            INPUT_EVENT_CAPACITY,
-            "ring buffer should never exceed capacity"
-        );
-        // The oldest entry was dropped; the newest should have timestamp
-        // INPUT_EVENT_CAPACITY + 9.
-        let last = q.back().unwrap();
-        assert_eq!(
-            last.timestamp_ns,
-            (INPUT_EVENT_CAPACITY + 9) as u64,
-            "most recent event should be at the back"
         );
     }
 
@@ -1007,7 +947,7 @@ mod tests {
     }
 
     /// `dispatch_pointer_event` must set `timestamp_mono_us > 0` for PointerDown,
-    /// PointerMove, and PointerUp (gap from hud-zffvp now closed).
+    /// PointerMove, and PointerUp (gap from now closed).
     #[test]
     fn dispatch_pointer_event_timestamp_mono_us_is_non_zero() {
         use tze_hud_input::AgentDispatchKind;

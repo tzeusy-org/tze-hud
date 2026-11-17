@@ -2,7 +2,7 @@
 //!
 //! Property-based fuzzing for the scene graph mutation engine.
 //!
-//! Implements acceptance criteria from hud-3ksv:
+//! Implements acceptance criteria
 //! - 100,000 random mutation sequences → no crash, no inconsistent state, no leaked resources
 //! - Malformed / out-of-order mutations → rejected without crash/hang
 //! - Oversized payloads → structured error, no state corruption
@@ -604,7 +604,7 @@ proptest! {
 /// 4-phase loop, and verify no crash, no inconsistent state, and final graph is empty
 /// after cleanup.
 ///
-/// This is the high-volume stability gate from hud-3ksv (100,000 operations without
+/// This is the high-volume stability gate from (100,000 operations without
 /// crash or inconsistent state). The proptest suite above provides random/combinatorial
 /// coverage; this test provides sustained-load coverage.
 #[test]
@@ -691,7 +691,7 @@ fn test_100k_deterministic_tile_mutations() {
     assert_no_resource_leak(&graph);
 }
 
-/// Empty tab name must be rejected (RFC 0001 §2.2).
+/// Empty tab name must be rejected.
 #[test]
 fn test_empty_tab_name_rejected() {
     let mut graph = SceneGraph::new(1920.0, 1080.0);

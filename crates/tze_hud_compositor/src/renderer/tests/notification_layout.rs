@@ -1,8 +1,8 @@
 use super::*;
 
-// ── Notification text rendering [hud-j5g5.3] ─────────────────────────────
+// ── Notification text rendering ─────────────────────────────
 //
-// Spec §Notification Text Rendering:
+// Notification Text Rendering:
 //   - typography.body.size (16px default) font size
 //   - color.text.primary text color
 //   - left-aligned, 9px inset (8px padding + 1px border)
@@ -164,7 +164,7 @@ async fn test_notification_stack_adds_dismiss_label_and_reserves_text_width() {
     );
 }
 
-// ── Dismiss button typography token tests [hud-y08tp, hud-h51u7.4.1] ─────
+// ── Dismiss button typography token tests [, ] ─────
 //
 // The × glyph fills the `type.notification.title` line box at its weight: canonical
 // defaults without tokens, theme/owner token values otherwise.
@@ -375,9 +375,9 @@ async fn test_notification_text_inset_from_backdrop_edges() {
     );
 }
 
-// ── Two-line notification rendering [hud-ltgk.3] ──────────────────────────
+// ── Two-line notification rendering ──────────────────────────
 //
-// Spec §Two-line notification layout:
+// Two-line notification layout:
 //   - Empty title → single-line backward-compatible path (1 TextItem)
 //   - Non-empty title → two-line path (2 TextItems: title bold, body regular)
 //   - Card title: type.notification.title (size scaled by an explicit policy size,
@@ -755,6 +755,7 @@ async fn test_two_line_notification_title_produces_two_text_items() {
                     let records = scene.zone_registry.active_for_zone("notification-area");
                     let policy = &scene.zone_registry.zones["notification-area"].rendering_policy;
                     let layout = compositor.zone_slot_layout(
+                        &scene,
                         "notification-area",
                         records,
                         policy,
@@ -937,6 +938,7 @@ async fn test_two_line_notifications_stack_correctly() {
         "all 4 TextItems must have distinct pixel_y values, got: {ys:?}"
     );
     let before = compositor.zone_slot_layout(
+        &scene,
         "notification-area",
         scene.zone_registry.active_for_zone("notification-area"),
         &scene.zone_registry.zones["notification-area"].rendering_policy,
@@ -965,6 +967,7 @@ async fn test_two_line_notifications_stack_correctly() {
         .collect();
     }
     let after = compositor.zone_slot_layout(
+        &scene,
         "notification-area",
         scene.zone_registry.active_for_zone("notification-area"),
         &scene.zone_registry.zones["notification-area"].rendering_policy,
@@ -1050,9 +1053,9 @@ async fn test_rounded_notification_backdrop_uses_two_line_slot_height() {
     );
 }
 
-// ── TTL auto-dismiss [hud-j5g5.3] ────────────────────────────────────────
+// ── TTL auto-dismiss ────────────────────────────────────────
 //
-// Spec §Notification TTL Auto-Dismiss with Fade-Out:
+// Notification TTL Auto-Dismiss with Fade-Out:
 //   - Default TTL: 8000ms (zone auto_clear_ms)
 //   - Per-publish ttl_ms overrides zone default
 //   - 150ms linear fade-out from 1.0 to 0.0

@@ -10,23 +10,23 @@
 //! - `focus_tree` — per-tab focus tree data structure and history
 //! - `focus`      — focus manager (lifecycle, cycling, events, ring metadata)
 //! - `keyboard`   — keyboard event types and dispatch (KeyDownEvent, KeyUpEvent,
-//!   CharacterEvent) per RFC 0004 §7.4
+//!   CharacterEvent)
 //! - `command`    — abstract command input model (NAVIGATE_NEXT … SCROLL_DOWN)
-//!   per RFC 0004 §10
+//!
 //! - [`composer_draft`] — runtime-owned bounded plain-text draft buffer for
 //!   portal composer regions with local echo, caret/selection/word-delete/capped
 //!   paste, coalescible state-stream notifications, and transactional submit
-//!   (hud-5jbra.4)
+//!
 //! - [`pointer`] — rich pointer event types (PointerDownEvent, ClickEvent, etc.)
 //! - [`events`] — HitTestResult, RouteTarget, SceneLocalPatch, InputEnvelope, EventBatch
 //! - [`hit_test`] — headless-testable hit-test pipeline
 //! - `local_feedback` — `LocalFeedbackStyle`, `ResolvedFeedbackStyle`, rollback tracker
 //! - `scroll` — `ScrollConfig`, `ScrollState`, scroll-local-first processing
-//! - `capture`    — pointer capture manager (RFC 0004 §2)
+//! - `capture` — pointer capture manager
 //!
 //! ## Pointer Capture
 //!
-//! The [`capture`] module implements RFC 0004 §2 pointer capture semantics:
+//! The [`capture`] module implements pointer capture semantics:
 //! - Only one node holds capture globally at a time, per device.
 //! - Capture can be explicit (CaptureRequest) or automatic (auto_capture=true).
 //! - While captured, all events from the captured device route to the owning
@@ -112,15 +112,15 @@ use tze_hud_scene::graph::SceneGraph;
 use tze_hud_scene::{ElementStore, ElementType, HitResult, NodeData, SceneId, ZoneInteractionKind};
 
 pub use drag::{
-    DEFAULT_SNAP_GRID_PCT, DRAG_HIGHLIGHT_BORDER_PX, DRAG_OPACITY_BOOST, DRAG_Z_ORDER_BOOST,
-    DeviceDragState, DragConfig, DragEventOutcome, DragPhase, LONG_PRESS_MOVEMENT_TOLERANCE_DP,
-    LONG_PRESS_POINTER_THRESHOLD_MS, LONG_PRESS_TOUCH_THRESHOLD_MS,
+    DEFAULT_SNAP_GRID_PCT, DRAG_OPACITY_BOOST, DRAG_Z_ORDER_BOOST, DeviceDragState, DragConfig,
+    DragEventOutcome, DragPhase, LONG_PRESS_MOVEMENT_TOLERANCE_DP, LONG_PRESS_POINTER_THRESHOLD_MS,
+    LONG_PRESS_TOUCH_THRESHOLD_MS,
 };
 pub use tze_hud_scene::DragHandleElementKind;
 
 /// Scroll step (pixels) applied per PgUp or PgDn keypress on a portal tile.
 ///
-/// This is the keyboard scroll step for the OS keyboard path wired in hud-6bbe.
+/// Used by the OS keyboard scroll path.
 /// One PgUp/PgDn keypress scrolls 160px — approximately four line-scroll steps
 /// (cf. wheel: LineDelta * 40px). Callers may override this constant when
 /// computing the `delta_y` passed to [`InputProcessor::process_keyboard_scroll`].
@@ -241,7 +241,7 @@ pub enum CaptureReleasedReason {
 /// A request from an agent to acquire pointer capture.
 ///
 /// The runtime evaluates this after a PointerDownEvent has been dispatched.
-/// Capture is only granted in response to PointerDown (spec lines 104-106).
+/// Capture is only granted in response to PointerDown.
 #[derive(Clone, Debug)]
 pub struct CaptureRequest {
     /// The tile whose node is requesting capture.
@@ -303,6 +303,9 @@ pub struct InputProcessor {
     /// A runtime terminal pointer event must clear chrome before the next
     /// scene turn or pointer event. Retained while the scene lock is busy.
     pub chrome_feedback_cancel_pending: bool,
+    /// Runtime authorization for notification hover/press feedback. Drag
+    /// handles remain interactive while notification actions are unavailable.
+    pub notification_actions_enabled: bool,
     /// Per-device long-press drag state.
     ///
     /// Keyed by `device_id`.  Each entry is independent so multi-touch devices
@@ -327,7 +330,7 @@ pub struct InputProcessor {
     /// [`Self::route_key_down_to_composer`] / [`Self::route_character_to_composer`]
     /// on every keystroke while a composer region is focused.
     ///
-    /// Spec: §4.1 — runtime-owned draft attached to focused composer regions.
+    /// runtime-owned draft attached to focused composer regions.
     composer_draft_manager: ComposerDraftManager,
     /// OUTPUT links, selection, copy and reading stops (hud-ljhku.2).
     pub output_reading: portal_reading::OutputReading,
@@ -341,6 +344,7 @@ impl InputProcessor {
             current_chrome_hover: None,
             current_chrome_press: None,
             chrome_feedback_cancel_pending: false,
+            notification_actions_enabled: true,
             drag_states: HashMap::new(),
             drag_config: DragConfig::default(),
             rollback_tracker: RollbackTracker::new(),
@@ -798,7 +802,7 @@ impl InputProcessor {
         // Sync follow-tail anchor state to scene after user scroll.
         // A user scroll-back transitions AtTail → ScrolledBack, which must
         // be reflected in the scene so the compositor primes with HeadAnchored
-        // truncation (spec §3.3 — viewport stability after scroll-back).
+        // truncation (viewport stability after scroll-back).
         let at_tail = self.scroll_state.follow_tail_anchor(tile_id)
             == crate::scroll::FollowTailAnchor::AtTail;
         scene.set_tile_follow_tail_at_tail(tile_id, at_tail);
@@ -832,8 +836,8 @@ impl InputProcessor {
     ///
     /// This is the primary wiring point for portal/stream-text append events.
     /// It delegates to [`ScrollState::notify_content_appended`] to advance
-    /// the scroll offset when the tile is at-tail (spec §3.2), or leave it
-    /// unchanged when the user has scrolled back (spec §3.3).
+    /// the scroll offset when the tile is at-tail, or leave it
+    /// unchanged when the user has scrolled back.
     ///
     /// After updating the scroll offset, the method syncs the tile's
     /// follow-tail anchor state into the scene so `prime_truncation_cache`
@@ -903,7 +907,7 @@ impl InputProcessor {
     /// Lets a caller that appends content incrementally (e.g. one runtime
     /// -authored history entry at a time) read back the running total and add
     /// its own delta before re-calling [`Self::notify_tile_content_appended`],
-    /// rather than maintaining a duplicate counter (hud-qbcp8).
+    /// rather than maintaining a duplicate counter.
     pub fn tile_total_content_height_px(&self, tile_id: SceneId) -> f32 {
         self.scroll_state.total_content_height_px(tile_id)
     }
@@ -913,10 +917,10 @@ impl InputProcessor {
     ///
     /// Unlike [`Self::notify_tile_content_appended`], which deliberately
     /// leaves a `ScrolledBack` viewport undisturbed when ordinary content
-    /// grows (spec §3.3), this is for a deliberate LOCAL action — the viewer
+    /// grows, this is for a deliberate LOCAL action — the viewer
     /// typing into or submitting their own composer — where staying scrolled
-    /// away from the tail would strand them from their own live input
-    /// (hud-qbcp8). No-op if the tile has no tracked scroll state.
+    /// away from the tail would strand them from their own live input.
+    /// No-op if the tile has no tracked scroll state.
     pub fn reset_tile_scroll_to_tail(&mut self, tile_id: SceneId, scene: &mut SceneGraph) -> bool {
         let changed = self.scroll_state.reset_to_tail(tile_id);
         if changed {
@@ -932,7 +936,7 @@ impl InputProcessor {
     /// Called when the transcript head is trimmed — either by the 64 KiB
     /// `PortalHub` payload cap or the 16 KiB `visible_transcript_window`
     /// cap — so that a scrolled-back viewport stays visually stable rather than
-    /// jumping into the gap left by the removed content (spec §3.3 / hud-pkg2g).
+    /// jumping into the gap left by the removed content.
     ///
     /// Delegates to [`ScrollState::notify_head_content_removed`].
     ///
@@ -981,10 +985,8 @@ impl InputProcessor {
 
     /// Apply an agent rejection for an in-progress interaction.
     ///
-    /// Spec §Local Feedback Rollback: "If an agent explicitly rejects an
-    /// interaction, the local feedback SHALL be reverted with a 100ms reverse
-    /// animation. Rollback SHALL only occur on explicit agent rejection, not on
-    /// agent latency or silence."
+    /// Explicit agent rejection reverts local feedback with a 100ms reverse
+    /// animation. Agent latency or silence does not trigger rollback.
     ///
     /// Returns a `SceneLocalPatch` containing the rollback state update to
     /// forward to the compositor. The compositor drives the 100ms animation.
@@ -1029,7 +1031,7 @@ impl InputProcessor {
     ///
     /// In this variant, click-to-focus is applied **before** the pointer
     /// event is forwarded to the agent, using the provided `focus_manager`
-    /// and `tab_id`, per spec §1.2 (lines 27-29). The returned
+    /// and `tab_id`,. The returned
     /// `FocusTransition` (if any) must be dispatched to agents before the
     /// `AgentDispatch` payload.
     pub fn process_with_focus(
@@ -1080,7 +1082,7 @@ impl InputProcessor {
     ///   (`suspended = false`; safe-mode governance is applied separately), and
     ///   the node's `composer_placeholder` config (if any) is seeded into the
     ///   manager via `set_focused_placeholder` so `composer_draft_snapshot`
-    ///   can report a per-composer override (hud-se6hs).
+    ///   can report a per-composer override.
     fn apply_focus_transition_side_effects(
         &mut self,
         transition: &FocusTransition,
@@ -1118,7 +1120,7 @@ impl InputProcessor {
     /// This is the no-pointer analogue of [`Self::process_with_focus`]: it drives
     /// the already-implemented focus cycling
     /// ([`FocusManager::navigate_next`] / [`FocusManager::navigate_prev`],
-    /// RFC 0004 §1.3) and then applies the same composer-activation /
+    /// ) and then applies the same composer-activation /
     /// hit-region-focus bookkeeping the pointer click path applies, so the
     /// composer (and any focusable region) is reachable and editable without a
     /// pointer — e.g. on smart glasses / a Mobile Presence Node.
@@ -1127,8 +1129,6 @@ impl InputProcessor {
     /// `FocusGained`/`FocusLost` events over the focus-events channel exactly as
     /// the pointer path does.
     ///
-    /// Spec: `portal-composer-interaction-completeness` — "Transcript Interaction
-    /// Contract", scenario "composer is focusable without a pointer".
     pub fn navigate_focus(
         &mut self,
         focus_manager: &mut FocusManager,
@@ -1239,7 +1239,7 @@ impl InputProcessor {
     }
 
     /// Update the composer's wrapped-line layout for visual-row vertical caret
-    /// movement (hud-21o6x). The runtime forwards the compositor's latest layout
+    /// movement. The runtime forwards the compositor's latest layout
     /// here before dispatching an ArrowUp/ArrowDown; `None` reverts to
     /// hard-newline vertical movement.
     pub fn set_composer_visual_layout(&mut self, layout: Option<ComposerVisualLayout>) {
@@ -1257,7 +1257,7 @@ impl InputProcessor {
     /// If no composer region is focused, returns `EditOutcome::Unchanged`
     /// and the caller SHOULD forward the character to the agent.
     ///
-    /// Spec: §4.1 — keystroke routing into the runtime-owned draft buffer.
+    /// keystroke routing into the runtime-owned draft buffer.
     pub fn route_character_to_composer(&mut self, character: &str) -> EditOutcome {
         self.composer_draft_manager.route_character(character)
     }
@@ -1271,7 +1271,6 @@ impl InputProcessor {
     ///
     /// Returns `EditOutcome::Unchanged` when no composer region is focused.
     ///
-    /// Spec: §4.1 — pointer-driven cursor positioning (hud-083az).
     pub fn route_pointer_selection_to_composer(
         &mut self,
         anchor: usize,
@@ -1354,12 +1353,12 @@ impl InputProcessor {
     /// three-state convention, resolved for the focused node at focus-gain
     /// time: `None` — no per-composer override configured (caller should fall
     /// back to its own default hint); `Some("")` — explicit opt-out; `Some(text)`
-    /// — this composer's own hint copy (hud-se6hs, follow-up to hud-evk0j).
+    /// — this composer's own hint copy.
     ///
     /// Used by the windowed runtime to push a [`LocalComposerState`]-equivalent
     /// snapshot to the compositor thread after every composer mutation.
     ///
-    /// Spec: §4.1 local feedback first — the snapshot is pushed WITHOUT an
+    /// local feedback first — the snapshot is pushed WITHOUT an
     /// adapter round-trip so the compositor can render the echo on the next
     /// frame.
     pub fn composer_draft_snapshot(
@@ -1407,7 +1406,7 @@ impl InputProcessor {
     ///
     /// If a node holds pointer capture for `event.device_id`, all pointer events
     /// from that device are routed to the capturing node, bypassing normal
-    /// hit-testing.  (Spec lines 104-106, 110-111)
+    /// hit-testing.
     pub fn process(&mut self, event: &PointerEvent, scene: &mut SceneGraph) -> InputResult {
         if self.chrome_feedback_cancel_pending {
             self.clear_chrome_feedback(scene);
@@ -1612,18 +1611,34 @@ impl InputProcessor {
             }
         };
         // Runtime chrome controls with local hover/press feedback: drag
-        // handles and notification buttons (hud-paslt).
+        // handles and notification buttons.
         let hit_chrome_id: Option<String> = match &hit {
             HitResult::ZoneInteraction {
                 interaction_id: iid,
-                kind:
-                    ZoneInteractionKind::DragHandle { .. }
-                    | ZoneInteractionKind::Dismiss
-                    | ZoneInteractionKind::Action { .. },
+                kind: ZoneInteractionKind::DragHandle { .. },
                 ..
             } => Some(iid.clone()),
+            HitResult::ZoneInteraction {
+                interaction_id: iid,
+                kind: ZoneInteractionKind::Dismiss | ZoneInteractionKind::Action { .. },
+                ..
+            } if self.notification_actions_enabled => Some(iid.clone()),
             _ => None,
         };
+        if !self.notification_actions_enabled
+            && self.current_chrome_press.as_ref().is_some_and(|id| {
+                scene.overlay.zone_hit_regions.iter().any(|region| {
+                    &region.interaction_id == id
+                        && matches!(
+                            region.kind,
+                            ZoneInteractionKind::Dismiss | ZoneInteractionKind::Action { .. }
+                        )
+                })
+            })
+            && let Some(id) = self.current_chrome_press.take()
+        {
+            scene.set_chrome_pressed(&id, false);
+        }
 
         // ── Stage 2: Update hover state ───────────────────────────────────
         let prev_hover_node = self.current_hover.map(|(_, n)| n);
@@ -1895,7 +1910,7 @@ impl InputProcessor {
     /// acquired, or `Ok(AgentDispatch)` with `kind=CaptureDenied` if another node
     /// already holds capture for the requested device.
     ///
-    /// Per the spec (lines 104-106): capture can ONLY be granted in response to
+    /// capture can ONLY be granted in response to
     /// a PointerDownEvent.  The caller is responsible for only calling this after
     /// confirming a Down event just fired.
     pub fn request_capture(
@@ -1986,7 +2001,7 @@ impl InputProcessor {
 
     /// Runtime capture theft (Alt+Tab, system notification, tab switch, lease revocation).
     ///
-    /// Per the spec (lines 130-132): sends PointerCancelEvent first, then
+    /// sends PointerCancelEvent first, then
     /// CaptureReleasedEvent(reason).  Returns both dispatches in order, or an
     /// empty vec if no capture was active for the device.
     pub fn steal_capture(
@@ -2304,7 +2319,7 @@ fn node_accepts_composer_input(scene: &SceneGraph, node_id: SceneId) -> bool {
 /// Returns `None` for a missing node or a non-`HitRegion` node.
 ///
 /// Used by `apply_focus_transition_side_effects` to seed the draft manager's
-/// per-focus placeholder override at focus-gain time (hud-se6hs).
+/// per-focus placeholder override at focus-gain time.
 fn node_composer_placeholder(scene: &SceneGraph, node_id: SceneId) -> Option<String> {
     let node = scene.nodes.get(&node_id)?;
     let NodeData::HitRegion(hr) = &node.data else {
@@ -3376,7 +3391,7 @@ mod tests {
 
     /// WHEN node N1 in tile T1 holds pointer capture for device D1 and the pointer
     /// moves outside T1's bounds THEN all pointer events from D1 are routed to N1
-    /// regardless of which tile the pointer is visually over. (spec line 110)
+    /// regardless of which tile the pointer is visually over.
     #[test]
     fn test_capture_routes_events_outside_capturing_tile_bounds() {
         let (mut scene, t1, n1, _t2, _n2) = setup_two_tile_scene();
@@ -3433,7 +3448,7 @@ mod tests {
 
     /// WHEN node N1 holds capture for device D1 and node N2 requests capture for
     /// the same device D1 THEN the runtime responds with CaptureResponse(result=DENIED).
-    /// (spec line 114)
+    ///
     #[test]
     fn test_capture_denied_when_device_already_captured() {
         let (scene, t1, n1, t2, n2) = setup_two_tile_scene();
@@ -3469,7 +3484,7 @@ mod tests {
 
     /// WHEN a node with release_on_up=true holds capture and a PointerUpEvent arrives
     /// for the captured device THEN capture is released and
-    /// CaptureReleasedEvent(reason=POINTER_UP) is dispatched. (spec line 125)
+    /// CaptureReleasedEvent(reason=POINTER_UP) is dispatched.
     #[test]
     fn test_capture_released_on_pointer_up_when_release_on_up_true() {
         let (mut scene, t1, n1, _t2, _n2) = setup_two_tile_scene();
@@ -3510,7 +3525,7 @@ mod tests {
         assert_eq!(dispatch.tile_id, t1);
 
         // The secondary dispatch (extra_dispatches) must contain CaptureReleased(POINTER_UP)
-        // per spec line 125: "CaptureReleasedEvent(reason=POINTER_UP) SHALL be dispatched"
+        //: "CaptureReleasedEvent(reason=POINTER_UP) SHALL be dispatched"
         assert_eq!(
             result.extra_dispatches.len(),
             1,
@@ -3527,7 +3542,7 @@ mod tests {
 
     /// WHEN a node holds pointer capture and the user presses Alt+Tab THEN the runtime
     /// sends PointerCancelEvent to the capturing node, followed by
-    /// CaptureReleasedEvent(reason=RUNTIME_REVOKED). (spec line 136)
+    /// CaptureReleasedEvent(reason=RUNTIME_REVOKED).
     #[test]
     fn test_capture_theft_sends_cancel_then_released() {
         let (scene, t1, n1, _t2, _n2) = setup_two_tile_scene();
@@ -3578,7 +3593,7 @@ mod tests {
 
     /// WHEN PointerDownEvent hits a HitRegionNode with auto_capture=true THEN the
     /// runtime acquires capture for that node and device without the agent sending
-    /// CaptureRequest. (spec line 147)
+    /// CaptureRequest.
     #[test]
     fn test_auto_capture_on_pointer_down() {
         let mut scene = SceneGraph::new(1920.0, 1080.0);
@@ -3647,7 +3662,7 @@ mod tests {
     }
 
     /// WHEN node holds capture and agent sends explicit CaptureReleaseRequest THEN
-    /// capture is released with reason=AGENT_RELEASED. (spec line 120)
+    /// capture is released with reason=AGENT_RELEASED.
     #[test]
     fn test_explicit_capture_release_by_agent() {
         let (scene, t1, n1, _t2, _n2) = setup_two_tile_scene();
@@ -3744,7 +3759,7 @@ mod tests {
         );
     }
 
-    // ── Keyboard scroll (hud-6bbe) ────────────────────────────────────────────
+    // ── Keyboard scroll ────────────────────────────────────────────
 
     /// PgDn (positive delta_y) scrolls down on a scrollable portal tile.
     #[test]
@@ -3867,9 +3882,9 @@ mod tests {
         );
     }
 
-    // ── hud-8lpu: local-first invariant before agent dispatch ─────────────────
+    // ──: local-first invariant before agent dispatch ─────────────────
 
-    /// AC §4 (hud-8lpu): local scroll offset is updated synchronously before
+    /// local scroll offset is updated synchronously before
     /// the `ScrollOffsetChangedEvent` is returned for agent dispatch.
     ///
     /// `process_scroll_event` must:
@@ -3923,7 +3938,7 @@ mod tests {
         );
     }
 
-    /// AC §4 (hud-8lpu): keyboard scroll (PgDn) also updates local offset before
+    /// keyboard scroll (PgDn) also updates local offset before
     /// returning the notification event.
     #[test]
     fn test_keyboard_scroll_local_update_before_agent_event() {
@@ -3949,16 +3964,16 @@ mod tests {
         );
     }
 
-    // ── Spec task 3.2 / 3.3 end-to-end behavioural tests ──────────────────────
+    // ── Follow-tail and append-stability behavior tests ──────────────────────
 
-    /// Spec task 3.2 — at-tail tile advances by whole lines on append.
+    ///  at-tail tile advances by whole lines on append.
     ///
     /// `notify_tile_content_appended` on an at-tail tile must:
     /// 1. Advance the scroll offset by `floor(delta / line_h) * line_h`.
     /// 2. Update `scene.tile_follow_tail_at_tail(tile_id)` to `true` (at-tail preserved).
     /// 3. Apply the new offset to the scene for the compositor.
     #[test]
-    fn spec_3_2_at_tail_tile_advances_by_whole_lines_on_append() {
+    fn at_tail_tile_advances_by_whole_lines_on_append() {
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
         let lease_id = scene.grant_lease("test", 60_000);
@@ -4000,7 +4015,7 @@ mod tests {
 
         assert!(
             changed,
-            "spec 3.2: offset must change when at-tail and new content overflows the viewport"
+            "offset must change when at-tail and new content overflows the viewport"
         );
 
         // Offset must have advanced by exactly 3 whole lines (8 lines - 5 visible = 3).
@@ -4008,23 +4023,23 @@ mod tests {
         let expected_offset = 3.0 * line_h; // 180px
         assert!(
             (offset_y - expected_offset).abs() < 1.0,
-            "spec 3.2: at-tail offset must advance to {expected_offset}px; got {offset_y}px"
+            "at-tail offset must advance to {expected_offset}px; got {offset_y}px"
         );
 
         // Tile remains at-tail in the scene.
         assert!(
             scene.tile_follow_tail_at_tail(tile_id),
-            "spec 3.2: scene must reflect AtTail after at-tail append"
+            "scene must reflect AtTail after at-tail append"
         );
     }
 
-    /// Spec task 3.3 — append does not disturb a scrolled-back viewport.
+    ///  append does not disturb a scrolled-back viewport.
     ///
     /// After the user scrolls back, `notify_tile_content_appended` must:
     /// 1. Leave the scroll offset unchanged.
     /// 2. Update `scene.tile_follow_tail_at_tail(tile_id)` to `false` (ScrolledBack preserved).
     #[test]
-    fn spec_3_3_scrolled_back_append_does_not_disturb_viewport() {
+    fn scrolled_back_append_does_not_disturb_viewport() {
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
         let lease_id = scene.grant_lease("test", 60_000);
@@ -4079,7 +4094,7 @@ mod tests {
         let (_, offset_before) = scene.tile_scroll_offset_local(tile_id);
         assert!(
             !scene.tile_follow_tail_at_tail(tile_id),
-            "spec 3.3: anchor must be ScrolledBack after user scrolled up"
+            "anchor must be ScrolledBack after user scrolled up"
         );
 
         // Append 5 more lines.
@@ -4094,30 +4109,30 @@ mod tests {
 
         assert!(
             !changed,
-            "spec 3.3: offset must NOT change when ScrolledBack and content grows"
+            "offset must NOT change when ScrolledBack and content grows"
         );
 
         let (_, offset_after) = scene.tile_scroll_offset_local(tile_id);
         assert!(
             (offset_after - offset_before).abs() < 1.0,
-            "spec 3.3: scroll offset must be stable after append; \
+            "scroll offset must be stable after append; \
              before={offset_before}px, after={offset_after}px"
         );
 
         // Still scrolled-back in the scene.
         assert!(
             !scene.tile_follow_tail_at_tail(tile_id),
-            "spec 3.3: scene must still reflect ScrolledBack after append"
+            "scene must still reflect ScrolledBack after append"
         );
     }
 
-    // ── reset_tile_scroll_to_tail (hud-qbcp8) ─────────────────────────────────
+    // ── reset_tile_scroll_to_tail ─────────────────────────────────
 
     /// A viewer typing/submitting their OWN input is a deliberate local action,
     /// distinct from ordinary remote content growth: `reset_tile_scroll_to_tail`
     /// must force a `ScrolledBack` tile back to the tail and publish both the
     /// offset and the follow-tail flag to the scene, unlike
-    /// `notify_tile_content_appended` (spec 3.3), which leaves it alone.
+    /// `notify_tile_content_appended`, which leaves it alone.
     #[test]
     fn reset_tile_scroll_to_tail_forces_scrolled_back_tile_and_syncs_scene() {
         let mut scene = SceneGraph::new(1920.0, 1080.0);
@@ -4201,7 +4216,7 @@ mod tests {
 
     /// `tile_total_content_height_px` lets a caller read back the running
     /// total tracked by `notify_tile_content_appended` and add its own delta,
-    /// instead of maintaining a duplicate counter (hud-qbcp8's incremental
+    /// instead of maintaining a duplicate counter ('s incremental
     /// input-history height bookkeeping).
     #[test]
     fn tile_total_content_height_px_supports_incremental_append_callers() {
@@ -4305,9 +4320,9 @@ mod tests {
 
     // ─── Composer draft wiring ────────────────────────────────────────────
     //
-    // Spec: §4.1 — runtime-owned draft attached to focused composer regions.
-    // Spec: §4.3 — coalesced state-stream notifications.
-    // Spec: §4.4 — editing keystrokes are NOT forwarded to agent.
+    // runtime-owned draft attached to focused composer regions.
+    // coalesced state-stream notifications.
+    // editing keystrokes are NOT forwarded to agent.
     //
     // These tests validate the end-to-end wiring of `ComposerDraftManager` into
     // `InputProcessor::process_with_focus` and the keyboard routing methods.
@@ -4401,7 +4416,7 @@ mod tests {
         );
     }
 
-    /// hud-se6hs: a composer node with no `composer_placeholder` override
+    /// a composer node with no `composer_placeholder` override
     /// reports `None` in the `composer_draft_snapshot` tuple's placeholder
     /// slot — the caller (windowed runtime) falls back to its own default.
     #[test]
@@ -4429,7 +4444,7 @@ mod tests {
         );
     }
 
-    /// hud-se6hs: a composer node whose `HitRegionNode::composer_placeholder`
+    /// a composer node whose `HitRegionNode::composer_placeholder`
     /// carries a custom hint threads that hint end-to-end through
     /// `process_with_focus` → `composer_draft_snapshot`, overriding the
     /// runtime's global default.
@@ -4465,7 +4480,7 @@ mod tests {
         );
     }
 
-    /// hud-se6hs: `Some("")` on `HitRegionNode::composer_placeholder` is an
+    /// `Some("")` on `HitRegionNode::composer_placeholder` is an
     /// explicit opt-out, distinct from the unset (`None`) case above — it
     /// must round-trip through the snapshot as `Some("")`, not `None`, so the
     /// windowed runtime can tell "no config" apart from "explicitly disabled".
@@ -4500,16 +4515,13 @@ mod tests {
         );
     }
 
-    /// Regression (hud-v0cal): the composer must be focusable and editable
+    /// Regression: the composer must be focusable and editable
     /// WITHOUT a pointer.  A Tab key-down (keyboard focus traversal) must route
     /// focus onto the composer region and activate the draft manager, and a
-    /// subsequent character key must edit the draft — exactly the pointerless
-    /// flow the `portal-composer-interaction-completeness` change requires for
+    /// subsequent character key must edit the draft — supporting
+    /// pointerless editing on
     /// no-pointer surfaces (smart glasses / Mobile Presence Node).
     ///
-    /// Spec change `portal-composer-interaction-completeness`, requirement
-    /// "Transcript Interaction Contract", scenario "composer is focusable
-    /// without a pointer".
     #[test]
     fn tab_traversal_focuses_composer_without_pointer() {
         let (mut scene, tab_id, _tile_id, composer_id, plain_id) = setup_composer_scene();
@@ -4545,7 +4557,7 @@ mod tests {
         );
 
         // A subsequent character key edits the draft (the composer is now the
-        // keystroke sink — §4.1 keystroke routing).
+        // keystroke sink — keystroke routing).
         let outcome = processor.route_character_to_composer("x");
         assert_eq!(
             outcome,
@@ -4828,7 +4840,7 @@ mod tests {
         assert_eq!((text.as_str(), cursor, at_capacity), ("hi!", 3, false));
     }
 
-    /// hud-cpjqe: a portal header BAND drags on the first pointer-move with NO
+    /// a portal header BAND drags on the first pointer-move with NO
     /// 250 ms long-press hold and NO early-movement cancel (Windows-titlebar) —
     /// the fix for "clicking top to drag fails half the time". A mouse drags a
     /// grip the same way; touch keeps the long-press hysteresis on a grip (a
@@ -4926,7 +4938,7 @@ mod tests {
     /// draft buffer.  `route_character_to_composer` returns Unchanged when no
     /// composer is active.
     ///
-    /// Spec §4.4: editing keystrokes are never terminal/provider input; conversely,
+    /// editing keystrokes are never terminal/provider input; conversely,
     /// the manager must not intercept characters when no composer is focused.
     #[test]
     fn no_composer_focus_route_character_returns_unchanged() {
@@ -5089,14 +5101,14 @@ mod tests {
         assert_eq!(batch, ComposerOutcome::Unchanged);
     }
 
-    // ── hud-083az: focused-composer multiline paste and pointer selection ─────
+    // ──: focused-composer multiline paste and pointer selection ─────
 
     /// Multiline/control text routed to a focused composer via
     /// `route_character_to_composer` must land in the draft buffer (sanitised)
     /// and return a non-Unchanged outcome so the caller does NOT forward it to
     /// the agent's raw character stream.
     ///
-    /// Spec §4.4: editing keystrokes are never terminal input while a composer
+    /// editing keystrokes are never terminal input while a composer
     /// is focused. A Ctrl+V paste containing "\n" must be consumed by the
     /// composer and must NOT leak to the agent.
     #[test]
@@ -5149,12 +5161,12 @@ mod tests {
     /// composer must similarly be consumed (not leak to agent stream), and the
     /// draft must contain the sanitised result (control chars stripped).
     ///
-    /// Regression test for hud-60hgf: `dispatch_character_event` in the
+    /// `dispatch_character_event` in the
     /// runtime was incorrectly conditioned on `outcome != Unchanged` to decide
     /// whether to block the agent path.  For an all-control-char clipboard
     /// payload the sanitised string is empty, so `paste("")` returns
-    /// `EditOutcome::Unchanged` — but the event MUST still not reach the agent
-    /// (spec §4.4).  The fix adds an unconditional early-return whenever
+    /// `EditOutcome::Unchanged` — but the event MUST still not reach the agent.
+    /// The fix adds an unconditional early-return whenever
     /// `is_composer_active()` is true, regardless of outcome.
     ///
     /// This test verifies:
@@ -5200,7 +5212,7 @@ mod tests {
         );
 
         // The outcome for an empty sanitised paste is Unchanged (nothing mutated).
-        // This is the exact case that triggered the hud-60hgf bug: the runtime's
+        // This is the exact case that triggered the bug: the runtime's
         // `dispatch_character_event` had `if outcome != Unchanged { return }` which
         // fell through to the agent path when outcome was Unchanged.  The fix adds
         // an unconditional `return` after the composer block whenever
@@ -5221,7 +5233,7 @@ mod tests {
     }
 
     /// Ctrl+V KeyDown must be consumed by the composer draft manager so it is
-    /// never forwarded to the agent as a raw KeyDownEvent (hud-083az).
+    /// never forwarded to the agent as a raw KeyDownEvent.
     #[test]
     fn ctrl_v_key_down_consumed_by_focused_composer() {
         let (mut scene, tab_id, _tile_id, _composer_id, _plain_id) = setup_composer_scene();

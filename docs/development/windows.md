@@ -219,6 +219,19 @@ prints redacted discovery information without launching another window.
   fighting it, logged as a warning). Explicit `--width`/`--height` gives a
   single window on the primary. Screenshot one monitor with
   `hud_admin.py screenshot --display N` (or `--all`).
+
+  Auto-sized overlays keep native physical dimensions across DPI changes; the
+  scale factor does not multiply those dimensions again. The production sizing
+  plan matches the event's registered window ID to that window's monitor. An
+  unknown ID leaves winit's size writer unchanged, even if a primary monitor
+  record exists; registration and the existing surface catch-up/refit sequence
+  reconcile creation-time drift. Already matched geometry requests no refit;
+  minimized no-activate restore remains separate from the five-per-ten-second
+  geometry budget. The `hud-670ds` unit proof covers DPI 1.0/1.5/2.0 and unequal
+  native rectangles through those production plans. It does not prove actual
+  `WM_DPICHANGED` delivery, OS acceptance of each request or owner mixed-DPI and
+  sleep/wake outcomes. Logical `ui.scale`, stable display-key acceptance and
+  those physical-owner checks retain their separate scope.
 - **Global chords.** Ctrl+Shift+F12 pauses agents and opens the control panel,
   Ctrl+Shift+F11 opens it with agents running, Ctrl+Shift+F10 shows a pairing
   code. They work without focusing the HUD; see `docs/api.md`.
@@ -540,6 +553,13 @@ mode validates the bundle and typed parameters, then uses the existing retained
 `classic` or `blueprint`; `--tokens FILE` reads a flat `[design_tokens]` TOML
 table, with an explicit `--theme` taking precedence over its selector. Positive
 `--width`/`--height` are bounded to 8192 per axis and 16M pixels total.
+GPU fixture mode additionally requires both dimensions to fit the selected
+adapter's texture capability, requested on the headless device alongside the
+other downlevel limits. A capable llvmpipe adapter supports 3840×2160 capture;
+unsupported dimensions fail before frame construction/capture with the actual
+per-axis limit and a request to reduce them. The manifest records the requested
+device's `max_texture_dimension_2d`. CPU widget mode keeps the bounds above and
+requires no GPU.
 
 Scene and owner-card modes also accept `--config FILE` to capture a local owner configuration,
 including widget `initial_params`, through production scene startup. It validates
@@ -634,7 +654,7 @@ validation remains pending.
 
 ### Hosted overlay gesture check
 
-The existing informational Windows gesture step runs fullscreen WARP first,
+The existing Windows gesture step runs fullscreen WARP first,
 then `windows_overlay_gestures.py` runs only scenario 11 in real overlay mode.
 It downloads Mesa lavapipe 26.2.6 from the upstream release asset and verifies
 its pinned SHA256 before extracting the x64 driver. The runner's preinstalled
@@ -656,9 +676,18 @@ python scripts/ci/windows_overlay_gestures.py --exe target/release-dev/tze_hud.e
 The existing `gestures` artifact includes `overlay/timeline.json`, native logs,
 status and desktop captures, plus `overlay/setup.json` with setup and total
 added occupancy (target: combined gesture step at most four minutes). Native
-failures remain failures in these artifacts even though the step is
-informational. This checks hosted software-rendered mechanics; owner GPU,
+failures remain failures in these artifacts. Scenario 11 (`overlay-pointer`)
+and `tray` are in the step's `GESTURES_REQUIRED`
+list, so their failure, or a setup failure, fails `windows-build` in its last
+step and withholds the `dev` prerelease; merges are unaffected. This checks hosted software-rendered mechanics; owner GPU,
 DWM transparency, multiple monitors and DPI acceptance remain separate.
 An original scenario failure is preserved if its failure screenshot also
 fails (`diagnostic_error`). Desktop captures check GDI results and release
 their owned DCs and bitmap on error.
+
+
+Offline `render-scene --fixture FILE --drag-hover-at X,Y` renders a move-pill
+hover at a display-relative point through the actual frame snapshot and runtime
+hover mirror. It injects no OS input, starts no listener and changes no owner
+settings. The manifest records the point and whether it resolved to a draggable
+element. Use real gesture checks separately to establish input behavior.

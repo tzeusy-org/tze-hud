@@ -1,4 +1,4 @@
-//! # Zone Interaction Layer Tests — [hud-ltgk.4]
+//! # Zone Interaction Layer Tests —
 //!
 //! Tests for zone-level input routing: dismiss affordance, action buttons,
 //! `dismiss_notification()`, `ZoneHitRegion` hit-test routing, and

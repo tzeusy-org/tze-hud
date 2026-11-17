@@ -96,7 +96,7 @@ pub struct Rgba {
 
 /// Parse a font family from a canonical v1 keyword string.
 ///
-/// Supported keywords (per spec):
+/// Supported keywords:
 /// - `"system-ui"` → `FontFamily::SystemSansSerif`
 /// - `"sans-serif"` → `FontFamily::SystemSansSerif`
 /// - `"monospace"` → `FontFamily::SystemMonospace`
@@ -156,7 +156,7 @@ pub fn parse_color_hex(s: &str) -> Option<Rgba> {
 
 /// Parse a decimal numeric string into `f32`.
 ///
-/// Leading/trailing whitespace is NOT permitted (per spec).
+/// Leading/trailing whitespace is NOT permitted.
 /// NaN and infinity strings (`"nan"`, `"inf"`, `"infinity"`, etc.) are rejected.
 pub fn parse_numeric(s: &str) -> Option<f32> {
     let n = s.parse::<f32>().ok()?;
@@ -185,9 +185,7 @@ pub struct CanonicalToken {
 /// The canonical token keys with their fallback defaults.
 ///
 /// These are always present in the resolved token map even if the config
-/// does not specify them. The schema is defined by the component-shape-language
-/// specification (`openspec/changes/component-shape-language/specs/
-/// component-shape-language/spec.md`, §Requirement: Canonical Token Schema).
+/// does not specify them. This table defines each key's format and fallback.
 ///
 /// Token groups: color, opacity, typography, spacing, stroke, border.radius,
 /// portal divider, claimed-tile placement (`tile.*`) and the control panel
@@ -676,6 +674,42 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         description: "Status pill fraction of its tooltip canvas",
         default_value: "0.32258065",
     },
+    // Runtime drag affordances
+    CanonicalToken {
+        key: "size.drag.handle_width",
+        description: "Move pill width (dp)",
+        default_value: "32",
+    },
+    CanonicalToken {
+        key: "size.drag.handle_height",
+        description: "Move pill height (dp)",
+        default_value: "4",
+    },
+    CanonicalToken {
+        key: "size.drag.hit_height",
+        description: "Move pill hit row height (dp)",
+        default_value: "12",
+    },
+    CanonicalToken {
+        key: "size.drag.resize_target",
+        description: "Pip resize hit target (dp)",
+        default_value: "24",
+    },
+    CanonicalToken {
+        key: "opacity.drag.hover",
+        description: "Move pill opacity while its element is hovered",
+        default_value: "0.5",
+    },
+    CanonicalToken {
+        key: "opacity.drag.active",
+        description: "Move pill opacity while pressed or dragged",
+        default_value: "1",
+    },
+    CanonicalToken {
+        key: "opacity.drag.highlight",
+        description: "Active element outline opacity",
+        default_value: "0.9",
+    },
     // Stroke
     CanonicalToken {
         key: "stroke.border.width",
@@ -693,7 +727,7 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         description: "Large corner radius in pixels",
         default_value: "16",
     },
-    // Portal transcript turn separator (hud-nx7yq.4). Consumed by the compositor
+    // Portal transcript turn separator. Consumed by the compositor
     // markdown path to render a token-styled divider on thematic-break (`---`)
     // lines between transcript entries.
     CanonicalToken {
@@ -1273,7 +1307,7 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         description: "Numeric readout (gauges, timers): font weight (CSS numeric)",
         default_value: "500",
     },
-    // Gauge ring readout (hud-h51u7.8.1): the approved ring centres an 18dp
+    // Gauge ring readout: the approved ring centres an 18dp
     // percent, larger than the shared 14dp readout used by countdown/kpi.
     // Family and weight follow type.readout.
     CanonicalToken {
@@ -1281,7 +1315,7 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         description: "Gauge ring centred percent: font size (dp)",
         default_value: "18",
     },
-    // Notification card roles (hud-h51u7.4.1): the card's own fill, hairline,
+    // Notification card roles: the card's own fill, hairline,
     // text, opacity, corner, padding and type, so a theme can style cards
     // without restyling every surface that shares the generic roles.
     // Defaults are Tonal Glass's generic values.
@@ -1370,7 +1404,7 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         description: "Notification card body: font weight (CSS numeric)",
         default_value: "400",
     },
-    // Alert banner roles (hud-h51u7.4.2): the banner's own fill, hairline,
+    // Alert banner roles: the banner's own fill, hairline,
     // text, opacity, corner, margin, padding and type, so a theme can style
     // banners apart from notification cards and the generic roles. Defaults
     // are Tonal Glass's generic values.

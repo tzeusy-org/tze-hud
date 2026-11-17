@@ -9,7 +9,6 @@
 //! compilation exists in the render path — only the surface implementation
 //! differs between modes.
 //!
-//! Per runtime-kernel/spec.md Requirement: Headless Mode (line 198):
 //! "No conditional compilation for the render path."
 
 use std::collections::{HashMap, HashSet};
@@ -85,16 +84,16 @@ use icon::*;
 // Re-export the externally consumed shared state; renderer-only helpers stay
 // in private imports.
 pub use control_panel::{
-    ControlPanelGeometry, ControlPanelModel, PanelBadge, PanelBody, PanelChip, PanelConnect,
-    PanelControl, PanelFocus, PanelHit, PanelHitTarget, PanelItem, PanelNotice, PanelPart,
-    PanelRect, PanelSection, PanelSpan, PanelTone, estimate_control_panel_geometry,
+    ControlPanelGeometry, ControlPanelModel, PanelBadge, PanelBody, PanelCaret, PanelChip,
+    PanelConnect, PanelControl, PanelFocus, PanelHit, PanelHitTarget, PanelItem, PanelNotice,
+    PanelPart, PanelRect, PanelSection, PanelSpan, PanelTone, estimate_control_panel_geometry,
 };
 pub use focus_ring::{FocusRingOwner, FocusRingOwnerHandle};
 pub use system_card::{SystemCardKind, SystemCardModel};
 pub use text_fit::TextFitMeasurer;
 
 /// Shared single-slot handle carrying the tile whose resize-grip affordance the
-/// pointer is currently over (hud-wgiys). The runtime's windowed hit-test writes
+/// pointer is currently over. The runtime's windowed hit-test writes
 /// the focused portal's `SceneId` when the pointer is over its bottom-right
 /// resize corner (or `None` otherwise); the compositor drains it and swaps that
 /// tile's grip to `portal.window.resize_grip.hover_color`. Latest-wins — a plain
@@ -102,9 +101,12 @@ pub use text_fit::TextFitMeasurer;
 pub type ResizeGripHoverHandle = Arc<StdMutex<Option<SceneId>>>;
 
 /// Shared single-slot handle carrying the tile the pointer is over, whose viewer
-/// close button the compositor should show (hud-jm8nq.11). Same latest-wins
+/// close button the compositor should show. Same latest-wins
 /// overwrite-and-read contract as [`ResizeGripHoverHandle`].
 pub type TileCloseHoverHandle = Arc<StdMutex<Option<SceneId>>>;
+
+/// Local pointer target for the hover-only move pill, including passthrough zones.
+pub type DragHandleHoverHandle = Arc<StdMutex<Option<SceneId>>>;
 use image_cache::ImageTextureEntry;
 use image_cache::apply_composer_slot;
 pub use image_cache::{
@@ -219,8 +221,6 @@ pub struct Compositor {
     /// Opt-in work counts for the most recent completed headless frame.
     #[cfg(any(test, feature = "dev-mode"))]
     work_observation: work_observation::WorkObservation,
-    /// Latest real window-surface lifecycle outcome.
-    latest_surface_recovery: Option<SurfaceRecoveryOutcome>,
     /// When true, the clear color uses alpha=0 for transparent overlay mode.
     pub overlay_mode: bool,
     /// When true, the chrome pass draws the safe-mode overlay (see
@@ -276,7 +276,7 @@ pub struct Compositor {
     /// Track which zones had active publishes in the previous frame so we can
     /// detect publish → clear transitions and start fade-out animations.
     prev_active_zones: HashMap<String, bool>,
-    /// Per-portal-tile fade-in / fade-out animation state (§6.3 transition tokens).
+    /// Per-portal-tile fade-in / fade-out animation state.
     ///
     /// Keyed by tile `SceneId`. An entry is inserted when a scrollable tile
     /// (i.e. a portal tile, identified by a registered `TileScrollConfig`)
@@ -303,15 +303,15 @@ pub struct Compositor {
     /// Keyed by zone name.  Present only when the latest publication in that zone
     /// has non-empty breakpoints.  Absent (or None) means reveal all at once.
     ///
-    /// Per spec §Subtitle Streaming Word-by-Word Reveal: when a new publication
+    /// when a new publication
     /// replaces the old one (latest-wins), the old reveal state is discarded and
     /// a new one starts from the beginning of the new breakpoints.
     pub(crate) stream_reveal_states: HashMap<String, StreamRevealState>,
-    /// Per-portal-tile streaming-reveal state (hud-bl7yi).
+    /// Per-portal-tile streaming-reveal state.
     ///
     /// Keyed by `(tile SceneId, markdown-node SceneId)` — one entry **per
     /// eligible markdown node** under a scrollable (portal) tile, NOT one per
-    /// tile (hud-tbdfx). Per-node keying makes the tracker robust to the *first
+    /// tile. Per-node keying makes the tracker robust to the *first
     /// eligible node* changing between frames: a portal input tile carries both
     /// a settled history markdown node and a composer draft node whose
     /// pixel-bearing color runs toggle its eligibility, so a tile-keyed tracker
@@ -331,7 +331,7 @@ pub struct Compositor {
     /// [`StreamFadeRamp`]: crate::renderer::easing::StreamFadeRamp
     pub(crate) portal_tile_reveal_states: HashMap<(SceneId, SceneId), PortalTileStreamReveal>,
     /// Per-portal-tile smoothed scroll offset (smooth scroll / animated
-    /// follow-tail, hud-bq0gl.10).
+    /// follow-tail).
     ///
     /// Keyed by tile `SceneId`. The adapter/input layer owns the authoritative
     /// scroll *target* (`SceneGraph::tile_scroll_offset_local`); this eases the
@@ -397,22 +397,21 @@ pub struct Compositor {
     /// lifetime of the compositor (SVG paths are static config; runtime reload
     /// of icon paths is not currently supported).
     failed_icon_paths: HashSet<ResourceId>,
-    /// Phase-1 markdown parse cache, fronted by the async primer (hud-5jbra.2,
-    /// hud-380dl, hud-33qo7).
+    /// Markdown parse cache, fronted by the async primer.
     ///
     /// Maps BLAKE3(content) → [`ParsedMarkdown`].  Populated at content-commit
     /// time by [`Compositor::prime_markdown_cache`]; consumed at render time by
     /// [`Compositor::collect_text_items_from_node`] with zero parse cost on
     /// cache hits.  The cache is evicted in sync with node removal.
     ///
-    /// hud-33qo7: the primer owns an `Arc<ArcSwap<MarkdownCache>>`.  Large
+    /// the primer owns an `Arc<ArcSwap<MarkdownCache>>`. Large
     /// payloads are parsed on a background thread and swapped in atomically; the
     /// render path `load()`s the current snapshot lock-free.  Read it via
     /// [`Compositor::markdown_cache`].
     ///
     /// [`ParsedMarkdown`]: crate::markdown::ParsedMarkdown
     pub(crate) markdown_primer: crate::markdown::MarkdownPrimer,
-    /// Per-node content-key cache (hud-gpqde).
+    /// Per-node content-key cache.
     ///
     /// Maps `SceneId` → precomputed BLAKE3 content key, populated at prime time
     /// alongside `markdown_cache`.  Eliminates the per-frame BLAKE3 re-hash in
@@ -423,7 +422,7 @@ pub struct Compositor {
     /// scene version changes.  Evicted in sync with `markdown_cache.evict_except`.
     pub(crate) node_key_cache: HashMap<SceneId, [u8; 32]>,
     /// Cumulative count of `collect_text_items_from_node` markdown-cache misses
-    /// on the render path (hud-u4lq2).
+    /// on the render path.
     ///
     /// A miss here means the primer's published snapshot did not contain the
     /// entry for a node's content key, so the render path fell back to
@@ -441,7 +440,7 @@ pub struct Compositor {
     /// path only) — no atomic required.
     pub(crate) markdown_cache_miss_count: std::cell::Cell<u64>,
     /// Self-healing fallback cache for markdown-cache misses on the render
-    /// path (hud-u4lq2 defense-in-depth).
+    /// path (defense-in-depth).
     ///
     /// A miss in [`Self::markdown_primer`]'s authoritative snapshot is
     /// expected only transiently (first frame before any commit-time prime,
@@ -465,14 +464,14 @@ pub struct Compositor {
     pub(crate) markdown_fallback_cache:
         std::cell::RefCell<HashMap<[u8; 32], crate::markdown::ParsedMarkdown>>,
     /// Design-token–resolved markdown styling for the **portal** transcript
-    /// surface (hud-5jbra.2) — prefers `portal.*`-namespaced keys.
+    /// surface — prefers `portal.*`-namespaced keys.
     ///
     /// Rebuilt from `token_map` whenever `set_token_map` is called.
     /// Consumed by `prime_markdown_cache` and the render path for markdown nodes
     /// that belong to a governed portal surface (a tile with a scroll config).
     pub(crate) markdown_tokens: crate::markdown::MarkdownTokens,
     /// Design-token–resolved markdown styling for any **non-portal** markdown
-    /// surface (hud-3ryie) — resolves only the generic keys, ignoring every
+    /// surface — resolves only the generic keys, ignoring every
     /// `portal.*`-namespaced token so a portal preference cannot leak onto it.
     ///
     /// Rebuilt alongside [`Self::markdown_tokens`] in `set_token_map`.  In v1
@@ -485,7 +484,7 @@ pub struct Compositor {
     /// scene has actually changed.  Initialized to `u64::MAX` so the first
     /// frame always primes.
     ///
-    /// hud-u4lq2: `version` alone cannot distinguish "the same scene,
+    /// `version` alone cannot distinguish "the same scene,
     /// unchanged" from "a DIFFERENT `SceneGraph` instance that happens to have
     /// reached the same version number" — two independently-constructed
     /// `SceneGraph`s commonly do (e.g. two benchmark scenarios sharing one
@@ -494,7 +493,7 @@ pub struct Compositor {
     markdown_cache_scene_version: u64,
     /// The process-unique `SceneGraph::instance_id` last seen by
     /// `prime_markdown_cache`, checked alongside
-    /// [`Self::markdown_cache_scene_version`] (hud-u4lq2). `None` means "never
+    /// [`Self::markdown_cache_scene_version`]. `None` means "never
     /// primed". A mismatch here forces a re-prime even when `scene.version`
     /// happens to equal the stored sentinel, so a `Compositor` reused across a
     /// freshly-constructed `SceneGraph` can never have its priming silently
@@ -506,12 +505,12 @@ pub struct Compositor {
     /// scene has actually changed.  Initialized to `u64::MAX` so the first
     /// frame always primes.
     ///
-    /// hud-u4lq2: see [`Self::markdown_cache_scene_version`]'s doc for why
+    /// see [`Self::markdown_cache_scene_version`]'s doc for why
     /// [`Self::truncation_cache_scene_instance`] is checked alongside it.
     truncation_cache_scene_version: u64,
     /// The process-unique `SceneGraph::instance_id` last seen by
     /// `prime_truncation_cache`. Same rationale as
-    /// [`Self::markdown_cache_scene_instance`] (hud-u4lq2).
+    /// [`Self::markdown_cache_scene_instance`].
     truncation_cache_scene_instance: Option<u64>,
     /// Operator-configured per-surface bound (bytes) for the truncation cache's
     /// viewport-adjacent-window fallback, sourced from the resolved
@@ -542,8 +541,8 @@ pub struct Compositor {
     text_format: Option<wgpu::TextureFormat>,
     /// Instant of the last completed `prime_truncation_cache` run.
     ///
-    /// Used by the adaptive mid-drag re-truncation cadence gate (hud-ghhxa,
-    /// hud-3to8i): when the scene version changes rapidly (e.g. per-frame
+    /// Used by the adaptive mid-drag re-truncation cadence gate:
+    /// when the scene version changes rapidly (e.g. per-frame
     /// bounds updates during a resize drag), we cap the re-prime rate to at
     /// most once per the adaptive interval so we never re-prime every frame.
     ///
@@ -571,14 +570,14 @@ pub struct Compositor {
     /// for the current frame.
     pub local_composer_state: LocalComposerStateHandle,
     /// Reverse channel: the active composer's wrapped-line layout, published each
-    /// frame for the input thread's soft-wrap vertical caret movement (hud-21o6x).
+    /// frame for the input thread's soft-wrap vertical caret movement.
     ///
     /// Written at the tail of [`Compositor::prime_composer_scroll_offset`] (this
     /// thread) with the multi-line profile's freshly measured layout, or `None`
     /// otherwise. The runtime clones this `Arc` at init and reads it on the main
     /// thread before dispatching ArrowUp/ArrowDown.
     pub composer_visual_layout: image_cache::ComposerVisualLayoutHandle,
-    /// Per-frame resolved vertical-flow y-offsets (hud-pd9bp): for each direct
+    /// Per-frame resolved vertical-flow y-offsets: for each direct
     /// child of a `NodeLayout::VerticalFlow` node, its runtime-stacked tile-local
     /// `y` keyed by the child's own `SceneId`. Populated once per frame by
     /// [`Self::prime_vertical_flow_layout`] and read at the `&self` geometry sites
@@ -590,14 +589,14 @@ pub struct Compositor {
     /// byte-identical to before this capability existed.
     pub(crate) tile_flow_offsets: HashMap<SceneId, f32>,
     /// Shared handle carrying the current keyboard-focus owner from the runtime
-    /// `FocusManager` (hud-k6yvb). Drained at frame start into `focus_ring_owner`;
+    /// `FocusManager`. Drained at frame start into `focus_ring_owner`;
     /// the chrome-layer ring pass draws the ring for whatever owner it names.
     pub focus_ring_owner_state: focus_ring::FocusRingOwnerHandle,
     /// Most-recently drained focus-ring owner for this frame. `None` when focus is
     /// cleared / chrome / on another tab.
     pub(crate) focus_ring_owner: Option<focus_ring::FocusRingOwner>,
     /// Shared handle carrying the portal tile whose resize-grip corner the pointer
-    /// is over (hud-wgiys). Drained at frame start into `resize_grip_hover`; the
+    /// is over. Drained at frame start into `resize_grip_hover`; the
     /// grip pass paints that tile's mark in `hover_color`.
     pub resize_grip_hover_state: ResizeGripHoverHandle,
     /// Most-recently drained resize-grip hover target for this frame. `Some(tile)`
@@ -610,6 +609,9 @@ pub struct Compositor {
     /// Most-recently drained close-button hover target for this frame. `Some(tile)`
     /// draws that tile's close button and registers its hit region.
     pub(crate) tile_close_hover: Option<SceneId>,
+    /// Latest-wins draggable element under the runtime cursor; independent of capture.
+    pub drag_handle_hover_state: DragHandleHoverHandle,
+    pub(crate) drag_handle_hover: Option<SceneId>,
     /// Most-recently drained local composer state for this frame.
     ///
     /// Populated by draining `local_composer_state` at frame start.
@@ -627,8 +629,8 @@ pub struct Compositor {
     pub(crate) composer_caret_blink_start: std::time::Instant,
     /// Caret phase the idle gate last reported (`None` = no composer active).
     pub(crate) composer_caret_rendered_phase: Option<bool>,
-    /// Per-frame composer layout state (hud-zlfi4 single-line caret-follow +
-    /// hud-nx7yq.1 multi-line wrap / upward growth / vertical scroll).
+    /// Per-frame composer layout state (single-line caret-follow +
+    /// multi-line wrap / upward growth / vertical scroll).
     ///
     /// Recomputed once per frame by [`Compositor::prime_composer_scroll_offset`]
     /// (which measures the draft against the composer font — a mutable rasterizer
@@ -654,7 +656,7 @@ pub(crate) struct LayerPartitionedRoundedRectCmds {
     pub(crate) chrome: Vec<RoundedRectDrawCmd>,
 }
 
-/// Owned, scene-free inputs for the GPU encode stage (hud-uyhpn).
+/// Owned, scene-free inputs for the GPU encode stage.
 ///
 /// Produced by [`Compositor::collect_encode_inputs`] — which performs ALL of the
 /// scene reads the encode stage previously did inline (rounded-rect command
@@ -683,7 +685,7 @@ pub(crate) struct EncodeInputs {
     /// trimmed) exactly as before the split.
     render_text: bool,
     /// Whether the system card's text was prepared on the overlay text layer and
-    /// must be replayed by [`Compositor::encode_system_card_pass`] (hud-w5zon).
+    /// must be replayed by [`Compositor::encode_system_card_pass`].
     render_card_text: bool,
     affordance_rects: Vec<RoundedRectDrawCmd>,
     render_affordance_text: bool,
@@ -750,11 +752,12 @@ fn geometry_pass_plan(
 /// and `collect_all_rounded_rect_cmds`.
 ///
 /// Centralising this computation eliminates the hand-mirrored duplication that
-/// was previously guarded by a "must-mirror" comment (hud-lu50e / hud-qlerb).
+/// was previously guarded by a "must-mirror" comment.
 #[derive(Debug)]
 pub(crate) struct ZoneSlotLayout {
     /// Publication indices sorted by the zone's ordering rule (alert-banner:
-    /// severity-descending, then recency; others: newest-first / reverse order).
+    /// severity-descending, then recency; others: unanswered questions first,
+    /// newest-first within the question and non-question groups).
     pub(crate) ordered_indices: Vec<usize>,
     /// Per-slot heights in the same order as `ordered_indices`.
     /// Two-line notifications produce a taller slot; all others use
@@ -783,7 +786,7 @@ impl ZoneSlotLayout {
     /// card is shown whole or not at all, so its buttons and dismiss control
     /// are never cut off (its publication stays active and appears once space
     /// frees up). Only the first slot may be clamped, when it alone is taller
-    /// than the zone, so the newest publication is never hidden.
+    /// than the zone, so the first prioritized publication is never hidden.
     pub(crate) fn iter_visible(&self, zone: Rect) -> impl Iterator<Item = (usize, Rect)> + '_ {
         /// Float slack so a slot ending exactly at the zone bottom still fits.
         const FIT_EPSILON_PX: f32 = 0.01;
@@ -857,11 +860,10 @@ impl Compositor {
     /// selects llvmpipe on Linux or WARP on Windows. Primary backends are tried
     /// first; GL is initialized only if none provides a software adapter.
     ///
-    /// Per runtime-kernel/spec.md Requirement: Headless Software GPU (line 211):
     /// "When set, the wgpu adapter selection MUST request a software fallback
     /// (force_fallback_adapter = true)."
     pub async fn new_headless(width: u32, height: u32) -> Result<Self, CompositorError> {
-        // Check HEADLESS_FORCE_SOFTWARE env var (spec line 409: "conventionally
+        // Check HEADLESS_FORCE_SOFTWARE env var ("conventionally
         // named HEADLESS_FORCE_SOFTWARE").
         let force_software = std::env::var("HEADLESS_FORCE_SOFTWARE")
             .map(|v| v.trim() == "1")
@@ -898,18 +900,29 @@ impl Compositor {
         let (_instance, adapter) = selected_adapter.ok_or(CompositorError::NoAdapter)?;
         let adapter_info = CompositorAdapterInfo::from(adapter.get_info());
 
+        // Keep downlevel compatibility, but allow offscreen frames at the
+        // adapter's native texture size, as the windowed device does.
+        let mut required_limits = wgpu::Limits::downlevel_defaults();
+        required_limits.max_texture_dimension_2d = adapter.limits().max_texture_dimension_2d;
         let (device, queue) = adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
                     label: Some("tze_hud_compositor"),
                     required_features: wgpu::Features::empty(),
-                    required_limits: wgpu::Limits::downlevel_defaults(),
+                    required_limits,
                     memory_hints: wgpu::MemoryHints::default(),
                 },
                 None,
             )
             .await
             .map_err(|e| CompositorError::DeviceCreation(e.to_string()))?;
+
+        let max_dimension = device.limits().max_texture_dimension_2d;
+        if width > max_dimension || height > max_dimension {
+            return Err(CompositorError::DeviceCreation(format!(
+                "headless dimensions {width}x{height} exceed this device's {max_dimension}px per-axis texture limit; reduce width and height to <= {max_dimension}"
+            )));
+        }
 
         let pipeline = Self::create_pipeline(&device);
         let clear_pipeline =
@@ -953,7 +966,6 @@ impl Compositor {
             last_animation_frame_at: None,
             #[cfg(any(test, feature = "dev-mode"))]
             work_observation: work_observation::WorkObservation::default(),
-            latest_surface_recovery: None,
             overlay_mode: false,
             safe_mode_overlay: false,
             system_card: None,
@@ -1017,6 +1029,8 @@ impl Compositor {
             resize_grip_hover: None,
             tile_close_hover_state: Arc::new(StdMutex::new(None)),
             tile_close_hover: None,
+            drag_handle_hover_state: Arc::new(StdMutex::new(None)),
+            drag_handle_hover: None,
             local_composer: None,
             composer_caret_blink_start: std::time::Instant::now(),
             composer_caret_rendered_phase: None,
@@ -1038,11 +1052,11 @@ impl Compositor {
     /// Returns the `(Compositor, WindowSurface)` pair. The `WindowSurface` must
     /// be kept alive for the duration of the runtime.
     ///
-    /// Per spec §Compositor Thread Ownership (line 46): the returned `Compositor`
+    /// the returned `Compositor`
     /// (and thus `Device` + `Queue`) MUST be transferred to the compositor thread
     /// immediately after creation. The `WindowSurface` is owned by the main thread.
     ///
-    /// Per spec §Platform GPU Backends (line 189): this path uses the platform-
+    /// this path uses the platform-
     /// mandated backends. Headless hardware selection uses all backends, while
     /// headless software selection initializes GL only as a fallback.
     pub async fn new_windowed(
@@ -1302,7 +1316,6 @@ impl Compositor {
             last_animation_frame_at: None,
             #[cfg(any(test, feature = "dev-mode"))]
             work_observation: work_observation::WorkObservation::default(),
-            latest_surface_recovery: None,
             overlay_mode: false,
             safe_mode_overlay: false,
             system_card: None,
@@ -1366,6 +1379,8 @@ impl Compositor {
             resize_grip_hover: None,
             tile_close_hover_state: Arc::new(StdMutex::new(None)),
             tile_close_hover: None,
+            drag_handle_hover_state: Arc::new(StdMutex::new(None)),
+            drag_handle_hover: None,
             local_composer: None,
             composer_caret_blink_start: std::time::Instant::now(),
             composer_caret_rendered_phase: None,
@@ -1422,12 +1437,6 @@ impl Compositor {
         zone_geometry_in(&self.display_layout, zone_name, policy, sw, sh)
     }
 
-    /// Record an actual window-surface lifecycle outcome without widening any
-    /// scene, protocol, or agent-visible contract.
-    pub(super) fn record_surface_recovery_outcome(&mut self, outcome: SurfaceRecoveryOutcome) {
-        self.latest_surface_recovery = Some(outcome);
-    }
-
     /// Attempt a recovery transition queued by a real window-surface acquire
     /// failure.
     ///
@@ -1443,7 +1452,7 @@ impl Compositor {
             return WindowSurfaceRecoveryStatus::default();
         };
 
-        let status = match outcome {
+        match outcome {
             SurfaceRecoveryOutcome::Reconfigured { trigger } => {
                 let (width, height) = surface.size();
                 self.width = width;
@@ -1463,18 +1472,7 @@ impl Compositor {
                 );
                 WindowSurfaceRecoveryStatus::Terminal
             }
-        };
-        self.record_surface_recovery_outcome(outcome);
-        status
-    }
-
-    /// Drain the detailed outcome from a real surface recovery transition.
-    ///
-    /// Draining this compositor-private lifecycle evidence does not widen
-    /// WAL, protobuf, or agent-visible APIs.
-    #[allow(dead_code)] // Available for compositor-private lifecycle inspection.
-    pub(crate) fn take_latest_surface_recovery(&mut self) -> Option<SurfaceRecoveryOutcome> {
-        self.latest_surface_recovery.take()
+        }
     }
 
     /// Create a render pipeline targeting a specific texture format.
@@ -1747,7 +1745,7 @@ impl Compositor {
             crate::markdown::MarkdownTokens::from_token_map_scoped(&map, MarkdownScope::Portal);
         // Resolve the non-portal (generic) scope too so per-tile token selection
         // is correct the moment a non-portal markdown surface is introduced
-        // (hud-3ryie).  In v1 this set is never selected (the portal transcript
+        //. In v1 this set is never selected (the portal transcript
         // is the sole governed markdown surface).
         self.markdown_tokens_generic =
             crate::markdown::MarkdownTokens::from_token_map_scoped(&map, MarkdownScope::Generic);
@@ -1807,12 +1805,12 @@ impl Compositor {
             // moving the caret (standard editor behavior).
             self.composer_caret_blink_start = std::time::Instant::now();
         }
-        // Latest-wins read of the focus-ring owner (hud-k6yvb): a plain overwrite,
+        // Latest-wins read of the focus-ring owner: a plain overwrite,
         // so a momentary lock contention simply keeps the prior owner this frame.
         if let Ok(slot) = self.focus_ring_owner_state.lock() {
             self.focus_ring_owner = *slot;
         }
-        // Latest-wins read of the resize-grip hover target (hud-wgiys): the same
+        // Latest-wins read of the resize-grip hover target: the same
         // plain overwrite as the focus-ring owner, so momentary lock contention
         // simply keeps the prior hover state for this frame.
         if let Ok(slot) = self.resize_grip_hover_state.lock() {
@@ -1821,16 +1819,19 @@ impl Compositor {
         if let Ok(slot) = self.tile_close_hover_state.lock() {
             self.tile_close_hover = *slot;
         }
+        if let Ok(slot) = self.drag_handle_hover_state.lock() {
+            self.drag_handle_hover = *slot;
+        }
         new_draft
     }
 
     /// Drain the local composer echo slot and report whether the idle render
-    /// gate (hud-ilivg) must render this frame on the composer's behalf.
+    /// gate must render this frame on the composer's behalf.
     ///
     /// The windowed frame loop calls this **before** the gate decides whether to
     /// skip the build/encode/present pass. Two composer effects are driven purely
     /// off out-of-band state that never bumps `scene.version`, so the gate would
-    /// otherwise freeze them (hud-r3ax6, "Local feedback first"):
+    /// otherwise freeze them, violating local feedback:
     ///
     /// 1. **Local draft echo.** A keystroke writes the `local_composer_state`
     ///    slot; the draft is only applied by draining it (the `local_composer`
@@ -1856,6 +1857,7 @@ impl Compositor {
         let previous_focus_ring_owner = self.focus_ring_owner;
         let previous_resize_grip_hover = self.resize_grip_hover;
         let previous_tile_close_hover = self.tile_close_hover;
+        let previous_drag_handle_hover = self.drag_handle_hover;
         let draft_applied = self.drain_local_composer_state();
         let is_active = self.local_composer.is_some() && !self.notification_keyboard_active;
         // The caret only changes pixels when its phase flips; between toggles an
@@ -1872,6 +1874,7 @@ impl Compositor {
             || was_active != is_active
             || caret_toggled
             || previous_tile_close_hover != self.tile_close_hover
+            || previous_drag_handle_hover != self.drag_handle_hover
             || focus_or_grip_changed(
                 previous_focus_ring_owner,
                 self.focus_ring_owner,
@@ -1885,25 +1888,24 @@ impl Compositor {
     /// **Call site**: this must be called by the **runtime at Stage 4 (scene
     /// commit time)**, before `render_frame` or `render_frame_headless` is
     /// invoked.  Callers are responsible for measuring the cost and recording it
-    /// as `FrameTelemetry::markdown_prime_us` (hud-380dl, Option A).
+    /// as `FrameTelemetry::markdown_prime_us`.
     ///
     /// The method is gated internally on `scene.version` so repeated calls on
     /// unchanged scenes are no-ops (constant-time, no allocation).
     ///
     /// After this call returns, the frame pipeline can consume cached results via
     /// [`MarkdownCache::get_by_key`] with zero parse cost — satisfying the
-    /// "parse-on-commit, zero per-frame parse cost" contract (hud-5jbra.2,
-    /// hud-380dl).
+    /// "parse-on-commit, zero per-frame parse cost" contract.
     ///
     /// The method also evicts cache entries for content no longer referenced by
     /// any scene node, keeping the cache bounded to the live node set.
     ///
     /// [`TextMarkdownNode`]: tze_hud_scene::types::TextMarkdownNode
-    /// Cumulative per-frame text `shape_until_scroll` count (hud-991cj).
+    /// Cumulative per-frame text `shape_until_scroll` count.
     ///
-    /// Zero when no text renderer is initialised. Used by the scroll-reshape
-    /// benchmark/regression to prove that a pure scroll performs no re-shapes.
-    #[allow(dead_code)] // used by the hud-991cj scroll-reshape benchmark
+    /// Zero when no text renderer is initialised. Tests use it to prove that
+    /// a pure scroll or an unchanged frame performs no re-shapes.
+    #[cfg(any(test, feature = "dev-mode"))]
     pub(crate) fn text_shape_call_count(&self) -> u64 {
         self.text_rasterizer
             .as_ref()
@@ -1911,14 +1913,11 @@ impl Compositor {
             .unwrap_or(0)
     }
 
-    /// Cumulative markdown-cache-miss count on the render path (hud-u4lq2). See
+    /// Cumulative markdown-cache-miss count on the render path. See
     /// [`Self::markdown_cache_miss_count`]'s field doc for what a nonzero,
-    /// growing count means. Currently consumed only by
-    /// `renderer::tests::markdown_primer::reused_compositor_across_scenes_lands_markdown_primer_hud_u4lq2`
-    /// and its sibling baseline test; `#[allow(dead_code)]` covers the non-test
-    /// build (the field itself keeps incrementing regardless, for log-visible
-    /// `tracing::warn!` observability at the call site in `text.rs`).
-    #[allow(dead_code)]
+    /// growing count means. Read by tests; the field itself keeps counting
+    /// for the `tracing::warn!` at its increment in `text.rs`.
+    #[cfg(test)]
     pub(crate) fn markdown_cache_miss_count(&self) -> u64 {
         self.markdown_cache_miss_count.get()
     }
@@ -1927,7 +1926,7 @@ impl Compositor {
         use tze_hud_scene::types::NodeData;
 
         // Skip if the scene has not changed since we last primed. Checks the
-        // scene INSTANCE identity alongside the version number (hud-u4lq2):
+        // scene INSTANCE identity alongside the version number:
         // `version` restarts at 0 for every newly constructed `SceneGraph`, so
         // comparing it alone cannot tell "the same scene, unchanged" apart from
         // "a different scene instance that happens to have reached the same
@@ -1943,25 +1942,25 @@ impl Compositor {
         self.markdown_cache_scene_instance = Some(scene.instance_id);
         // A fresh commit-time prime is about to rebuild the authoritative
         // snapshot for every live node — any entries parked in the fallback
-        // self-heal cache (hud-u4lq2) are superseded now, so drop them rather
+        // self-heal cache are superseded now, so drop them rather
         // than let them shadow stale content or grow unbounded.
         self.markdown_fallback_cache.borrow_mut().clear();
 
         // Snapshot the current cache once so we can decide, per node, whether
         // its content still needs parsing.  Already-cached entries are carried
         // forward by the primer without re-cloning their source string
-        // (hud-33qo7); only cache misses ship their `Arc<str>` content.
+        //; only cache misses ship their `Arc<str>` content.
         let current = self.markdown_primer.load();
 
         // Build the complete live job set and repopulate the per-node key cache
-        // (hud-gpqde) in the same pass — eliminating per-frame re-hashes in
+        // in the same pass — eliminating per-frame re-hashes in
         // collect_text_items_from_node.
         let mut jobs: Vec<crate::markdown::PrimeJob> = Vec::new();
 
         // Rebuild the node key cache for this scene version.
         self.node_key_cache.clear();
 
-        // Classify markdown nodes by scope (hud-3ryie): a node under a governed
+        // Classify markdown nodes by scope: a node under a governed
         // portal surface (a tile with a scroll config) resolves the portal token
         // set; every other markdown node resolves the generic set.  The chosen
         // token identity is folded into the cache key, so the two scopes never
@@ -2004,14 +2003,14 @@ impl Compositor {
         // ones) with each job's own scoped tokens, atomically swaps in the new
         // snapshot, and evicts dead entries implicitly (the new snapshot is
         // exactly the live set).  Ordering against a late background result is
-        // handled by the primer's own internal epoch (hud-u4lq2) — it no longer
+        // handled by the primer's own internal epoch — it no longer
         // takes `scene.version`, which is only monotonic within one `SceneGraph`
         // instance's lifetime and previously caused legitimate results to be
         // silently dropped when a `Compositor` was reused across scenes.
         self.markdown_primer.prime(jobs);
     }
 
-    /// Load the current markdown parse-cache snapshot lock-free (hud-33qo7).
+    /// Load the current markdown parse-cache snapshot lock-free.
     ///
     /// Render-path callers use this to read [`ParsedMarkdown`] via
     /// [`MarkdownCache::get_by_key`].  The returned [`Arc`] pins the snapshot for
@@ -2053,7 +2052,7 @@ impl Compositor {
     }
 
     /// Prime the ellipsis-truncation cache for all `TextOverflow::Ellipsis` items
-    /// currently in the scene (hud-wgq7j, hud-ghhxa).
+    /// currently in the scene.
     ///
     /// Must be called **at content-commit time** (when `scene.version` changes),
     /// never on the per-frame render path.  The method is gated internally on
@@ -2061,9 +2060,9 @@ impl Compositor {
     ///
     /// After this call, `prepare_text_items` resolves each Ellipsis item in O(1)
     /// via `TruncationCache::get_by_key` — satisfying the "stable-shape-caching"
-    /// contract from RFC 0013 §3.4 and §4.2, Phase-1 design §3.
+    /// contract.
     ///
-    /// # Mid-drag cadence (hud-ghhxa — spec §6b.3)
+    /// # Mid-drag cadence
     ///
     /// When a portal tile is resized (hotkey or pointer drag), `scene.version`
     /// increments on every geometry change.  Because `truncate_line_to_ellipsis`
@@ -2078,7 +2077,7 @@ impl Compositor {
     /// the next frame after the interval elapses.
     pub fn prime_truncation_cache(&mut self, scene: &SceneGraph) {
         // Skip if the scene has not changed since we last primed. Checks the
-        // scene INSTANCE identity alongside the version number (hud-u4lq2) —
+        // scene INSTANCE identity alongside the version number —
         // see `Compositor::markdown_cache_scene_instance`'s doc for why
         // `scene.version` alone is not a reliable "unchanged" signal across
         // independently-constructed `SceneGraph`s sharing one `Compositor`.
@@ -2087,7 +2086,7 @@ impl Compositor {
             return;
         }
 
-        // ── Adaptive mid-drag cadence gate (hud-ghhxa, hud-3to8i) ───────────
+        // ── Adaptive mid-drag cadence gate ─────────────────────────────
         // When geometry changes rapidly (bounds updates from resize), cap the
         // re-prime rate to an adaptive interval derived from the total byte
         // count of Ellipsis text content visible in the scene.  This avoids
@@ -2113,12 +2112,11 @@ impl Compositor {
         //     scene.version is always picked up on the next allowed tick.
         //  c) At drag-end (geometry settles), the final geometry is primed on the
         //     next tick after the interval elapses — completing the re-resolution
-        //     required by spec §6b.3.
         //
         // The cadence gate is bypassed when the sentinel is `u64::MAX` (a forced
         // re-prime requested by `set_token_map` or initialisation) so that token/
         // font-metric changes are always reflected immediately regardless of resize
-        // cadence. Also bypassed on a scene-instance mismatch (hud-u4lq2): a
+        // cadence. Also bypassed on a scene-instance mismatch: a
         // brand-new `SceneGraph` handed to a reused `Compositor` must never be
         // treated as "mid-drag on the same scene" just because its version
         // number happens to fall inside the debounce window.
@@ -2164,7 +2162,7 @@ impl Compositor {
         // Zone StreamText items are not produced by the tile-node walk below, so
         // prime them separately.  Without this, an overflowing streaming zone
         // would hit the render path with no cache entry and fall back to raw
-        // clipping (head-anchored), never showing the tail (hud-gxz0x).  Zone
+        // clipping (head-anchored), never showing the tail. Zone
         // geometry resolves against the scene's display area — kept in sync with
         // the surface size (windowed.rs::sync_scene_display_area), so the primed
         // geometry matches what `collect_text_items` produces on the frame path.
@@ -2191,11 +2189,11 @@ impl Compositor {
         self.resize_reprime_last_at = Some(std::time::Instant::now());
 
         // Resolve the resize font clamp range BEFORE the &mut text_rasterizer
-        // borrow below (hud-ovjxu.1) — the ellipsis collector applies the same
+        // borrow below — the ellipsis collector applies the same
         // viewer-local font scaling as the render path so truncation keys match.
         let font_clamp = self.portal_font_clamp_range();
 
-        // Transcript optimal-measure cap (hud-rivcy): resolve once and apply the
+        // Transcript optimal-measure cap: resolve once and apply the
         // SAME clamp the render path (`collect_text_items_from_node`) applies, so
         // the primed truncation key (which includes `bounds_width`) matches what
         // gets shaped. Gated per-tile to portal surfaces below.
@@ -2212,7 +2210,7 @@ impl Compositor {
 
         // Load the markdown snapshot once (lock-free atomic load) and pin it for
         // the whole traversal — a concurrent background swap cannot free it
-        // mid-read (hud-33qo7).
+        // mid-read.
         let markdown_cache = self.markdown_primer.load();
         let mut live_items: Vec<crate::text::TextItem> = Vec::new();
         for tile in policy_visible_tiles {
@@ -2220,9 +2218,9 @@ impl Compositor {
             let tile_y = tile.bounds.y;
             // Determine whether this tile is currently following its tail.
             // Use the shared helper so this computation is identical to
-            // collect_text_items_from_node (hud-plz8q / hud-lu50e).
+            // collect_text_items_from_node.
             let at_tail = tile_at_tail_for_ellipsis(tile.id, scene);
-            // Per-tile token scope (hud-3ryie): a portal surface (scrollable
+            // Per-tile token scope: a portal surface (scrollable
             // tile) resolves the portal token set; any other markdown surface
             // resolves the generic set.  The whole subtree shares the tile's
             // scope, so select once and thread it down the recursion.
@@ -2241,7 +2239,7 @@ impl Compositor {
                 0.0
             };
             if let Some(root_id) = tile.root_node {
-                // Per-part portal-surface consumption (hud-s4lrw): mirror the
+                // Per-part portal-surface consumption: mirror the
                 // render path so the primed truncation keys (measure + viewport)
                 // match. `None` → legacy tile-level behavior.
                 let part_index = portal_part_index(scene, tile.id);
@@ -2491,7 +2489,7 @@ impl Compositor {
     // reduce the count without creating an ad-hoc context struct.
     #[allow(clippy::too_many_arguments)]
     /// Perform every scene read the GPU encode stage needs, returning an owned
-    /// [`EncodeInputs`] (hud-uyhpn).
+    /// [`EncodeInputs`].
     ///
     /// This is the scene-read half of the former monolithic `encode_frame`:
     /// rounded-rect command collection, composer/viewer-echo layout priming,
@@ -2665,7 +2663,7 @@ impl Compositor {
     }
 
     /// Encode the GPU command buffer from precomputed, scene-free
-    /// [`EncodeInputs`] (hud-uyhpn).
+    /// [`EncodeInputs`].
     ///
     /// This is the surface-touching half of the former monolithic `encode_frame`.
     /// It reads only the acquired surface `frame_view` and the owned `inputs`
@@ -2775,7 +2773,7 @@ impl Compositor {
         let use_opaque_rect_pipeline = self.use_opaque_rect_pipeline();
         if let Some(ref mut tr) = self.text_rasterizer {
             if inputs.render_text {
-                // ── Inline backdrop pass (Phase 2, hud-9ieev) ────────────────
+                // ── Inline backdrop pass (Phase 2) ────────────────
                 // Render pixel-exact backdrop quads for inline code spans BEFORE
                 // the glyphon glyph pass so backdrops appear behind the glyphs.
                 // Uses LoadOp::Load to preserve geometry pixels.
@@ -2863,7 +2861,7 @@ impl Compositor {
 
     /// Final pass of every frame: the system card (or, while open, the control
     /// panel) backdrop and shapes, then its text, above all other content
-    /// including the safe-mode overlay (hud-w5zon), so the pairing code stays
+    /// including the safe-mode overlay, so the pairing code stays
     /// readable. Draws nothing, and costs nothing, when neither is showing
     /// (`card_vertices` and `card_rounded_rects` are empty and
     /// `render_card_text` is false).
@@ -2911,7 +2909,7 @@ impl Compositor {
     /// scene through [`Compositor::collect_encode_inputs`] (scene reads) and then
     /// [`Compositor::encode_from_inputs`] (GPU encode). The windowed present path
     /// does NOT use this wrapper — it calls the two halves separately so it can
-    /// drop the scene lock between them (hud-uyhpn).
+    /// drop the scene lock between them.
     #[allow(clippy::too_many_arguments)]
     fn encode_frame(
         &mut self,
@@ -2955,21 +2953,21 @@ pub(crate) fn focus_or_grip_changed(
 /// [`Compositor::prime_truncation_cache`] (via [`collect_ellipsis_text_items_from_node`])
 /// and [`Compositor::collect_text_items`] (via [`Compositor::collect_text_items_from_node`]).
 /// Both callers must resolve `at_tail` identically so the per-frame
-/// [`crate::text::TruncationKey`] matches the primed cache entry (hud-lu50e).
+/// [`crate::text::TruncationKey`] matches the primed cache entry.
 ///
-/// Returns `true` (TailAnchored — spec §3.2: newest lines visible) when the
+/// Returns `true` when the
 /// tile has been registered at-tail by the follow-tail driver.  Returns `false`
-/// (HeadAnchored — spec §3.3: viewport stability) when the tile has been
+/// when the tile has been
 /// scrolled back or has never been registered (e.g., non-scrollable tiles).
 ///
 /// Extracting this as a named helper eliminates the hand-mirrored
-/// `must-mirror` comment that previously guarded the two call sites (hud-plz8q).
+/// `must-mirror` comment that previously guarded the two call sites.
 pub(crate) fn tile_at_tail_for_ellipsis(tile_id: SceneId, scene: &SceneGraph) -> bool {
     scene.tile_follow_tail_at_tail(tile_id)
 }
 
 /// Collect the ids of every node that belongs to a **governed portal surface**
-/// — a tile whose scroll config is set (hud-3ryie).
+/// — a tile whose scroll config is set.
 ///
 /// A node is portal-scoped iff it lies in the subtree of a scrollable tile.
 /// This mirrors the "portal = tile has `TileScrollConfig`" gate used elsewhere
@@ -2979,7 +2977,7 @@ pub(crate) fn tile_at_tail_for_ellipsis(tile_id: SceneId, scene: &SceneGraph) ->
 /// portal or the generic token set.
 ///
 /// In v1 every markdown node is under a portal tile, so this returns all of
-/// them and per-tile scoping is a no-op (identical to pre-hud-3ryie behavior).
+/// them and per-tile scoping is a no-op (identical to previous behavior).
 fn portal_markdown_node_ids(scene: &SceneGraph) -> HashSet<SceneId> {
     let mut ids = HashSet::new();
     for tile in scene.tiles.values() {

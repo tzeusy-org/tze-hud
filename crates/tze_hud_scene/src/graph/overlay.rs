@@ -114,7 +114,7 @@ pub struct RuntimeOverlayState {
     ///
     /// Written by the input processor on DragActivated and cleared on
     /// DragReleased / DragCancelled. Read by the compositor to apply v1-
-    /// compatible visual feedback (z-order boost, opacity, 2px highlight border).
+    /// compatible visual feedback (z-order boost, opacity, token-driven outline).
     ///
     /// Ephemeral: skipped during serialization.
     #[serde(skip, default)]
@@ -173,8 +173,7 @@ pub struct RuntimeOverlayState {
     /// authoritative target in [`tile_scroll_offsets`](Self::tile_scroll_offsets).
     /// The hit-test path consults this map (via
     /// [`SceneGraph::effective_tile_scroll_offset_local`]) so pointer queries
-    /// map against the same rows the operator actually sees mid-animation
-    /// (hud-3lynp).
+    /// map against the same rows the operator actually sees mid-animation.
     ///
     /// Empty in headless/snap mode (smoothing disabled): hit-testing then falls
     /// back to the authoritative offset, leaving deterministic tests unchanged.
@@ -186,7 +185,7 @@ pub struct RuntimeOverlayState {
     ///
     /// `true` = tile viewport is at the tail of its content stream (use
     /// tail-anchored truncation); `false` = scrolled-back (use head-anchored
-    /// truncation, spec task 3.3 append-stability guarantee).
+    /// truncation).
     ///
     /// Defaults to `true` for newly registered tiles (new tiles start at tail).
     /// Set by the runtime layer when `FollowTailAnchor` transitions; read by
@@ -208,12 +207,12 @@ pub struct RuntimeOverlayState {
     /// Lives here, keyed by tile id, rather than as a scene node so it survives
     /// `SetTileRoot`/`PublishToTile` content republishes (which replace the whole
     /// node tree). This is what keeps lifecycle-visible portals coalescible —
-    /// the accent is never re-added as a per-republish `AddNode` (hud-m48i0).
+    /// the accent is never re-added as a per-republish `AddNode`.
     ///
     /// Ephemeral: skipped during serialization.
     #[serde(skip, default)]
     pub tile_lifecycle_accents: HashMap<SceneId, LifecycleAccent>,
-    /// Runtime-owned composer interaction hit-region specs per tile (hud-iofav).
+    /// Runtime-owned composer interaction hit-region specs per tile.
     ///
     /// Set by the native portal driver's checked direct composer method.
     /// The scene derives a [`crate::types::HitRegionNode`] child of the tile root
@@ -225,7 +224,7 @@ pub struct RuntimeOverlayState {
     /// that an interaction-enabled portal's per-render transcript republish never
     /// has to re-send the composer as a per-republish `AddNode` (which flips the
     /// batch Transactional and defeats StateStream coalescing on the hottest path —
-    /// a streaming transcript with an interactive composer, hud-mzk74 / hud-iofav).
+    /// a streaming transcript with an interactive composer, / ).
     /// The derived hit region stays a real scene node so `hit_test`, focus, and the
     /// `ComposerDraftManager` operate unchanged — it is synthesized server-side as a
     /// derived consequence of this overlay, not as an inbound `AddNode`.
@@ -233,8 +232,8 @@ pub struct RuntimeOverlayState {
     /// Ephemeral: skipped during serialization.
     #[serde(skip, default)]
     pub tile_composer_interactions: HashMap<SceneId, HitRegionNode>,
-    /// The scene node id currently synthesized for each tile's composer interaction
-    /// (hud-iofav). Maps host tile id → the derived hit-region node's id.
+    /// The scene node id currently synthesized for each tile's composer interaction.
+    /// Maps host tile id → the derived hit-region node's id.
     ///
     /// Written by the composer-interaction reattach path
     /// (`SceneGraph::ensure_tile_composer_node`) so a stale derived node can be
@@ -245,8 +244,7 @@ pub struct RuntimeOverlayState {
     /// Ephemeral: skipped during serialization.
     #[serde(skip, default)]
     pub tile_composer_nodes: HashMap<SceneId, SceneId>,
-    /// First-class text-stream portal surface descriptors, keyed by host tile id
-    /// (hud-tc153).
+    /// First-class text-stream portal surface descriptors, keyed by host tile id.
     ///
     /// Declared and patched by the native portal driver's checked direct methods.
     /// Lives here, keyed by tile id, so it survives transcript-root republishes
@@ -272,7 +270,7 @@ pub struct RuntimeOverlayState {
     /// Ephemeral: skipped during serialization.
     #[serde(skip, default)]
     pub recently_removed_tile_ids: Vec<SceneId>,
-    /// Accepted MutationBatch ids applied since the last present drain (hud-91uu6).
+    /// Accepted MutationBatch ids applied since the last present drain.
     ///
     /// Populated by [`SceneGraph::apply_batch`] on every accepted (applied) batch,
     /// in application order. Drained by the render loop at frame present via
@@ -287,7 +285,7 @@ pub struct RuntimeOverlayState {
     #[serde(skip, default)]
     pub present_ack_pending_batch_ids: Vec<SceneId>,
     /// Tile IDs whose geometry the viewer has taken control of via a whole-portal
-    /// move or resize gesture (hud-lyqun).
+    /// move or resize gesture.
     ///
     /// While a tile is in this set the runtime holds geometry authority over it:
     /// the owning adapter's [`SceneMutation::UpdateTileBounds`] republishes become
@@ -312,7 +310,7 @@ pub struct RuntimeOverlayState {
     pub viewer_geometry_locked: HashSet<SceneId>,
 
     /// Viewer-local per-tile font-scale multiplier for whole-portal resize text
-    /// scaling (hud-ovjxu.1, spec §Portal Resize Text Scaling).
+    /// scaling.
     ///
     /// Accumulates the portal's WIDTH ratio across resize steps (grow ⇒ >1,
     /// shrink ⇒ <1). The compositor multiplies each text node's published
@@ -320,7 +318,7 @@ pub struct RuntimeOverlayState {
     /// result to the token-defined legible min/max — so the text grows and
     /// shrinks with the portal without ever mutating the adapter-published node
     /// content. This is the durable, viewer-local design required by the spec
-    /// ("font scaling ... MUST NOT alter the adapter-published content"): a
+    /// ("font scaling... MUST NOT alter the adapter-published content"): a
     /// content republish carries the base font, and the multiplier re-applies at
     /// render, so an adapter update can never reset the viewer's zoom (contrast a
     /// stored-font mutation, which a republish would stomp — the reason the
@@ -366,7 +364,7 @@ impl SceneGraph {
         self.overlay.recently_removed_tile_ids.drain(..).collect()
     }
 
-    /// Record an accepted MutationBatch id as pending on-screen present (hud-91uu6).
+    /// Record an accepted MutationBatch id as pending on-screen present.
     ///
     /// Called by [`SceneGraph::apply_batch`] for every batch that applied. The id
     /// is drained at the next frame present by [`Self::drain_present_ack_batch_ids`]
@@ -376,7 +374,7 @@ impl SceneGraph {
         self.overlay.present_ack_pending_batch_ids.push(batch_id);
     }
 
-    /// Drain the batch_ids applied since the last present (hud-91uu6).
+    /// Drain the batch_ids applied since the last present.
     ///
     /// Returns them in application order. The render loop calls this once per
     /// presented frame; a non-empty result is stamped with the frame number and
@@ -389,7 +387,7 @@ impl SceneGraph {
             .collect()
     }
 
-    /// Take viewer geometry authority over a tile (hud-lyqun).
+    /// Take viewer geometry authority over a tile.
     ///
     /// Called for every member of a portal group when the viewer moves or
     /// resizes the whole portal, so a subsequent adapter `UpdateTileBounds`
@@ -405,7 +403,7 @@ impl SceneGraph {
         self.overlay.viewer_geometry_locked.remove(&tile_id);
     }
 
-    /// The viewer-local font-scale multiplier for `tile_id` (hud-ovjxu.1).
+    /// The viewer-local font-scale multiplier for `tile_id`.
     /// Returns `1.0` when no scaling has been applied (the common case).
     pub fn tile_font_scale(&self, tile_id: SceneId) -> f32 {
         self.overlay
@@ -415,7 +413,7 @@ impl SceneGraph {
             .unwrap_or(1.0)
     }
 
-    /// Set the viewer-local font-scale multiplier for `tile_id` (hud-ovjxu.1).
+    /// Set the viewer-local font-scale multiplier for `tile_id`.
     ///
     /// A factor of exactly `1.0` removes the entry (back to the default) so the
     /// map only holds tiles the viewer has actually zoomed. Non-finite or
@@ -502,9 +500,9 @@ impl SceneGraph {
     /// (`portal::apply_render`) — which bypasses the `apply_batch`
     /// Stage-1 lease check — could otherwise mutate the accent overlay and bump
     /// `scene.version` under a safe-mode-suspended (or orphaned/expired) lease,
-    /// escaping lease suspension (hud-a745w). `require_active_lease` accepts only
+    /// escaping lease suspension. `require_active_lease` accepts only
     /// the `Active` state, so the lease-grace degraded repaint — which reconnects
-    /// the driver lease to `Active` before rendering (hud-i429x) — still applies,
+    /// the driver lease to `Active` before rendering — still applies,
     /// exactly matching the sibling `set_tile_root_checked` content paint in the
     /// same batch.
     pub fn set_tile_lifecycle_accent_checked(
@@ -541,7 +539,7 @@ impl SceneGraph {
     /// [`set_tile_lifecycle_accent_checked`](Self::set_tile_lifecycle_accent_checked):
     /// a suspended/orphaned/expired lease must not be able to mutate the accent
     /// overlay (or bump `scene.version`) through the in-process portal render-batch
-    /// path, even to clear it (hud-a745w).
+    /// path, even to clear it.
     pub fn clear_tile_lifecycle_accent_checked(
         &mut self,
         tile_id: SceneId,
@@ -559,7 +557,7 @@ impl SceneGraph {
         self.overlay.tile_lifecycle_accents.get(&tile_id).copied()
     }
 
-    // ── Composer interaction (hud-iofav) ─────────────────────────────────────
+    // ── Composer interaction ─────────────────────────────────────
 
     /// Set (or replace) the composer interaction hit-region spec for a tile
     /// (latest-wins; coalescible), then reconcile the derived scene node.
@@ -570,7 +568,7 @@ impl SceneGraph {
     /// `ensure_tile_composer_node`). This keeps
     /// an interaction-enabled portal's transcript republish coalescible: the
     /// composer never rides a per-republish `AddNode` (which would flip the batch
-    /// Transactional, hud-mzk74 / hud-iofav).
+    /// Transactional, / ).
     ///
     /// Bumps `scene.version` only when the stored spec actually changes, so a
     /// redundant re-publish of the same composer keeps a steady-state portal idle
@@ -620,7 +618,7 @@ impl SceneGraph {
     /// only checks tile existence, so the in-process portal scene-apply path — which
     /// bypasses the `apply_batch` Stage-1 lease check — could otherwise attach the
     /// composer node and bump `scene.version` under a suspended/orphaned/expired
-    /// lease, escaping lease suspension (hud-a745w).
+    /// lease, escaping lease suspension.
     pub fn set_tile_composer_interaction_checked(
         &mut self,
         tile_id: SceneId,
@@ -654,8 +652,7 @@ impl SceneGraph {
 
     /// Clear the composer interaction with a full lease gate (checked
     /// path) — the clear-side counterpart to
-    /// [`set_tile_composer_interaction_checked`](Self::set_tile_composer_interaction_checked)
-    /// (hud-a745w).
+    /// [`set_tile_composer_interaction_checked`](Self::set_tile_composer_interaction_checked).
     pub fn clear_tile_composer_interaction_checked(
         &mut self,
         tile_id: SceneId,
@@ -668,7 +665,7 @@ impl SceneGraph {
         Ok(())
     }
 
-    // ── Portal surface (hud-tc153) ──────────────────
+    // ── Portal surface ──────────────────
 
     /// Declare or replace the first-class portal surface descriptor over a tile.
     ///
@@ -796,7 +793,7 @@ impl SceneGraph {
     /// consumers cannot resolve, this nulls them back to "not yet materialized"
     /// (`node = None`); the owning adapter re-binds them on its next
     /// `set_portal_surface`. Bumps `scene.version` only when a reference is actually
-    /// pruned. Called by the tile-root replacement path (hud-tc153 review P2).
+    /// pruned. Called by the tile-root replacement path.
     pub(crate) fn revalidate_portal_surface_part_nodes(&mut self, tile_id: SceneId) {
         // Collect the stale node refs first to avoid borrowing `self` mutably and
         // immutably at once (node_belongs_to_tile needs &self).
@@ -889,7 +886,7 @@ impl SceneGraph {
     ///
     /// Called by the compositor once per frame, after advancing the per-tile
     /// `ScrollSmoother`s, so the hit-test path can map pointer coordinates
-    /// against the same offset the renderer drew with (hud-3lynp). Only invoked
+    /// against the same offset the renderer drew with. Only invoked
     /// while windowed scroll smoothing is active.
     pub fn set_displayed_tile_scroll_offset(
         &mut self,
@@ -926,8 +923,7 @@ impl SceneGraph {
     /// published one for this tile (i.e. a smoothed scroll is in flight);
     /// otherwise falls back to the authoritative
     /// [`tile_scroll_offset_local`](Self::tile_scroll_offset_local). This is the
-    /// offset the hit-test path uses so input and render agree during animation
-    /// (hud-3lynp).
+    /// offset the hit-test path uses so input and render agree during animation.
     pub fn effective_tile_scroll_offset_local(&self, tile_id: SceneId) -> (f32, f32) {
         self.overlay
             .displayed_tile_scroll_offsets
@@ -946,8 +942,7 @@ impl SceneGraph {
     ///
     /// `at_tail = true` means the tile uses tail-anchored truncation (newest
     /// content always visible).  `at_tail = false` means the tile uses
-    /// head-anchored truncation (scrolled-back viewport, spec task 3.3
-    /// append-stability guarantee).
+    /// head-anchored truncation (scrolled-back viewport).
     ///
     /// No-op if the tile does not exist (tiles without scroll state always
     /// behave as head-anchored by default).
@@ -986,13 +981,13 @@ impl SceneGraph {
             .unwrap_or(false)
     }
 
-    // ─── Ambient unread count (hud-g1ena.3) ───────────────────────────────
+    // ─── Ambient unread count ───────────────────────────────
 
     /// Record a tile's ambient unread-output count (the aggregate
     /// `PortalView::unread_output_count`).
     ///
     /// Called by the portal projection driver each drain, and by the wire apply
-    /// paths for a bridged portal (hud-hwk2m). `count = 0` clears the badge; the
+    /// paths for a bridged portal. `count = 0` clears the badge; the
     /// producer passes `0` for both a genuine empty count and a redacted (`None`)
     /// count so no unread badge renders in either case.
     ///
@@ -1025,9 +1020,9 @@ impl SceneGraph {
     /// session-server batch that reaches `apply_single_mutation`) could otherwise
     /// mutate the badge overlay under a `ModifyOwnTiles`-revoked, safe-mode-
     /// suspended, orphaned, or expired lease — escaping tile-modification authority
-    /// exactly like the accent overlay did before hud-a745w. `require_active_lease`
+    /// exactly like the accent overlay did before the change. `require_active_lease`
     /// accepts only `Active`, so the lease-grace degraded repaint (which reconnects
-    /// the driver lease to `Active` before rendering, hud-i429x) still applies.
+    /// the driver lease to `Active` before rendering) still applies.
     pub fn set_tile_unread_count_checked(
         &mut self,
         tile_id: SceneId,

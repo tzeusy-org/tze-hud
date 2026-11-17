@@ -29,6 +29,10 @@ STATE_LIMIT = 32768
 HTTP_TIMEOUT = 0.350
 DELIVERY_BUDGET = 1.0
 END_BUDGET = 1.2
+# Off-prompt publishers queue behind an in-flight delivery (parallel tools fire
+# their hooks together) instead of being dropped. Admission plus the delivery
+# watchdog stays under the configured 2 s hook timeout.
+QUEUE_ADMISSION = 0.750
 HOLD_MS = 600000
 EVENTS = {
     "SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse",
@@ -200,9 +204,11 @@ def validate_delivery(state):
 class Metadata:
     def __init__(self, session):
         # Hostname resolution does not read credentials. Only the network child
-        # invokes the existing paired-PSK resolver through portal_client.
-        import portal_client
-        hostname = portal_client.hud_env.hostname()
+        # invokes the existing paired-PSK resolver through portal_client, whose
+        # HTTP imports would otherwise dominate the synchronous prompt side.
+        sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "user-test" / "scripts"))
+        import hud_env
+        hostname = hud_env.hostname()
         root = Path.home() / ".cache" / "tze-hud" / "claude-hooks"
         for part in [root.parent.parent, root.parent, root]:
             if part.is_symlink():
@@ -385,10 +391,13 @@ def delivery(event, deadline):
 
 def supervise(event):
     metadata = Metadata(event["session"])
-    budget = END_BUDGET if event["event"] == "SessionEnd" else DELIVERY_BUDGET
-    deadline = time.monotonic() + budget
-    admission = max(0, budget - 0.050) if event["event"] == "SessionEnd" else 0.050
+    ending = event["event"] == "SessionEnd"
+    deadline = time.monotonic() + END_BUDGET
+    admission = END_BUDGET - 0.050 if ending else QUEUE_ADMISSION
     with lock(metadata.directory / "delivery.lock", admission) as delivery_fd:
+        if not ending:
+            # The watchdog covers delivery only, not the wait in the queue.
+            deadline = time.monotonic() + DELIVERY_BUDGET
         if not applicable(metadata.current(), event):
             return
         job = {"event": event, "deadline": deadline}

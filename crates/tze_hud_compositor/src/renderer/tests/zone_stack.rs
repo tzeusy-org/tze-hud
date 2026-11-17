@@ -255,7 +255,7 @@ async fn test_stack_slot_layout_five_notifications_distinct_y() {
         layer_attachment: LayerAttachment::Chrome,
     });
 
-    // Publish 5 notifications (oldest to newest: "N1" .. "N5").
+    // Publish 5 notifications (oldest to newest: "N1".. "N5").
     for i in 1..=5 {
         scene
             .publish_to_zone(
@@ -531,14 +531,115 @@ async fn test_stack_slot_clips_at_zone_boundary() {
             &items[0].text
         }
     );
+
+    // At production height, retained questions must lead the visible stack.
+    // The same scene predicate must stop prioritizing answered, URL-only and
+    // expired cards; newest-first remains stable within each group.
+    scene
+        .zone_registry
+        .zones
+        .get_mut("notification-area")
+        .unwrap()
+        .geometry_policy = GeometryPolicy::Relative {
+        x_pct: 0.75,
+        y_pct: 0.0,
+        width_pct: 0.25,
+        height_pct: 0.3,
+    };
+    let callback = NotificationAction {
+        label: "Answer".into(),
+        callback_id: Some("answer".into()),
+        url: None,
+    };
+    let records = scene
+        .zone_registry
+        .active_publishes
+        .get_mut("notification-area")
+        .unwrap();
+    for record in &mut records[..2] {
+        let ZoneContent::Notification(payload) = &mut record.content else {
+            panic!("notification fixture")
+        };
+        payload.actions = vec![callback.clone()];
+    }
+    let (older, newer) = (records[0].publication_id, records[1].publication_id);
+    let order = |scene: &SceneGraph| {
+        compositor
+            .zone_slot_layout(
+                scene,
+                "notification-area",
+                scene.zone_registry.active_for_zone("notification-area"),
+                &scene.zone_registry.zones["notification-area"].rendering_policy,
+                216.0,
+                320.0,
+            )
+            .ordered_indices
+    };
+    assert_eq!(order(&scene), vec![1, 0, 3, 2], "newest question first");
+    let items = compositor.collect_text_items(&scene, 1280.0, 720.0);
+    assert_eq!(items[0].text.as_ref(), "M2");
+    assert!(items.iter().any(|item| item.text.as_ref() == "M1"));
+
+    scene
+        .overlay
+        .notification_choices
+        .insert(newer, "answer".into());
+    assert_eq!(
+        order(&scene),
+        vec![0, 3, 2, 1],
+        "answered card loses priority"
+    );
+    let items = compositor.collect_text_items(&scene, 1280.0, 720.0);
+    assert_eq!(items[0].text.as_ref(), "M1");
+    scene
+        .overlay
+        .notification_choices
+        .insert(older, "answer".into());
+    assert_eq!(order(&scene), vec![3, 2, 1, 0], "no unanswered questions");
+
+    scene.overlay.notification_choices.remove(&older);
+    let record = &mut scene
+        .zone_registry
+        .active_publishes
+        .get_mut("notification-area")
+        .unwrap()[0];
+    let ZoneContent::Notification(payload) = &mut record.content else {
+        panic!("notification fixture")
+    };
+    payload.actions = vec![NotificationAction {
+        label: "Open".into(),
+        callback_id: None,
+        url: Some("https://example.com/".into()),
+    }];
+    assert_eq!(
+        order(&scene),
+        vec![3, 2, 1, 0],
+        "URL-only is not a question"
+    );
+    let expired = scene.now_wall_us().saturating_sub(1);
+    let record = &mut scene
+        .zone_registry
+        .active_publishes
+        .get_mut("notification-area")
+        .unwrap()[0];
+    let ZoneContent::Notification(payload) = &mut record.content else {
+        panic!("notification fixture")
+    };
+    payload.actions = vec![callback];
+    record.expires_at_wall_us = Some(expired);
+    assert_eq!(
+        order(&scene),
+        vec![3, 2, 1, 0],
+        "expired question loses priority"
+    );
 }
 
 /// ZoneSlotLayout::iter_visible: only slots that fit wholly inside the zone are
 /// emitted, stopping at the first that doesn't; only a first slot taller than
 /// the zone is clamped.
 ///
-/// This is a GPU-free unit test pinning the shared slot-geometry computation
-/// introduced in hud-qlerb. Geometry correctness is guaranteed by
+/// This GPU-free unit test pins the shared slot-geometry computation.
+/// Geometry correctness is guarded by
 /// test_stack_slot_clips_at_zone_boundary (integration) and this test (unit).
 #[test]
 fn test_zone_slot_layout_iter_visible_clips_and_clamps() {
@@ -770,7 +871,7 @@ async fn test_merge_by_key_latest_value_wins_for_duplicate_keys() {
     );
 }
 
-// ── StatusBar icon layout tests [hud-x2v1.2] ─────────────────────────────
+// ── StatusBar icon layout tests ─────────────────────────────
 
 /// `key_icon_map` non-empty → per-entry TextItems; icon-mapped entries have
 /// text `pixel_x` inset by `ICON_SIZE_PX + ICON_TEXT_GAP_PX`.

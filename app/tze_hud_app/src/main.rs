@@ -230,7 +230,7 @@ struct StartupOptions {
     quiescent_efficiency_emit: Option<String>,
     /// When true, print the MCP attach-info block (endpoint URL, the
     /// bearer-PSK auth rule, and a paste-ready MCP client config
-    /// snippet) and exit 0 *without* starting the runtime (hud-b7c0m).
+    /// snippet) and exit 0 *without* starting the runtime.
     print_attach_info: bool,
     /// `--install`: install per user even when args are present.
     install: bool,
@@ -248,7 +248,7 @@ struct StartupOptions {
     /// ready after the first frame and take over from it.
     handoff_child: Option<handoff::ChildSpec>,
     /// `--updated-from <sha>`: started by `POST /admin/update`; show the
-    /// "Updated to ..." toast. The value is the previous build's sha.
+    /// "Updated to..." toast. The value is the previous build's sha.
     updated_from: Option<String>,
 }
 
@@ -582,8 +582,8 @@ fn parse_options(args: &[String]) -> Result<StartupOptions, String> {
     while i < args.len() {
         match args[i].as_str() {
             "--help" | "-h" => {
-                // The console is already attached once at the top of `main`
-                // (hud-q2glv), so the help text reaches the launching terminal
+                // The console is already attached once at the top of `main`,
+                // so the help text reaches the launching terminal
                 // on Windows without a per-arm attach here.
                 print_help();
                 // `process::exit` skips destructors, so flush the buffered
@@ -752,7 +752,7 @@ fn parse_window_mode(s: &str) -> Result<WindowMode, String> {
 }
 
 /// On Windows, reattach the process's standard handles to the launching
-/// terminal's console (hud-b7c0m; Codex P2 on PR #1112).
+/// terminal's console.
 ///
 /// This binary is a GUI-subsystem app (`#![windows_subsystem = "windows"]`), so a
 /// launch from PowerShell/cmd gives the process *no* console and `print!` output
@@ -763,13 +763,13 @@ fn parse_window_mode(s: &str) -> Result<WindowMode, String> {
 /// harmless no-op when there is no parent console (e.g. a double-click launch,
 /// which has no terminal to show the block on anyway).
 ///
-/// Called ONCE at the very top of `main` (hud-q2glv). A single early attach
+/// Called ONCE at the very top of `main`. A single early attach
 /// covers every output path — `--help`/`--version`, `--print-attach-info`, the
 /// `tracing` log stream, and every startup `eprintln!` + `exit(1)` failure —
 /// so no per-path call is needed. It never `AllocConsole`s, so the double-click
 /// happy path shows no flashing console window.
 ///
-/// Empirically verified live on the hud-windows VM testhost (hud-xssgy):
+/// Empirically verified live on the hud-windows VM testhost:
 /// `AttachConsole` alone — with no `CONOUT$`/`CONIN$` reopen or `SetStdHandle`
 /// call, which the canonical hybrid console/GUI C/C++ pattern normally
 /// requires — is sufficient for Rust's `println!`/`eprintln!` here. A prior
@@ -807,8 +807,7 @@ fn attach_parent_console() {
 #[inline]
 fn attach_parent_console() {}
 
-/// On Windows, ignore CTRL+C for the calling process (hud-q2glv, Codex P2 on
-/// PR #1143).
+/// On Windows, ignore CTRL+C for the calling process.
 ///
 /// Before hoisting `attach_parent_console` to run unconditionally at the top
 /// of `main`, the console attach only ever happened on a fast-exit path
@@ -827,7 +826,7 @@ fn attach_parent_console() {}
 /// "ignore CTRL+C input for the calling process" — it affects CTRL_C_EVENT
 /// only. CTRL_BREAK_EVENT, window-close, logoff, and shutdown console events
 /// are untouched and keep their OS default handling, so the process remains
-/// stoppable through those paths; this narrowly restores the pre-hud-q2glv
+/// stoppable through those paths; this narrowly restores the previous
 /// invariant (immune to console Ctrl+C) rather than removing an existing
 /// shutdown mechanism (none existed).
 #[cfg(windows)]
@@ -851,7 +850,7 @@ fn ignore_console_ctrl_c() {
 #[inline]
 fn ignore_console_ctrl_c() {}
 
-/// Compute the attach-info block for the current startup options (hud-b7c0m).
+/// Compute the attach-info block for the current startup options.
 ///
 /// Resolves the same config the runtime would use (honouring `--config`) for the
 /// informational `config:` line, and derives the MCP/gRPC endpoint addresses from
@@ -1040,10 +1039,8 @@ fn run_pair() -> ! {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Bind the standard handles to the launching terminal ONCE, before any
-    // output is produced (hud-q2glv). This is the GUI-subsystem console fix
-    // that hud-b7c0m/#1112 (--print-attach-info) and hud-41q9t/#1140
-    // (--help/--version) applied per-arm — hoisted to a single call here so it
-    // ALSO covers the paths those missed: every startup `eprintln!` +
+    // output is produced. A single GUI-subsystem console attachment also
+    // covers --print-attach-info, --help/--version, every startup `eprintln!` +
     // `exit(1)` failure (unknown flag, config/PSK/validation errors) and the
     // `tracing` log stream, all of which were otherwise silently discarded on
     // the Windows GUI-subsystem binary. Safe on the happy path: it attaches to
@@ -1057,7 +1054,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // too, not just fast-exit paths — so the process stays attached to the
     // launching terminal's console for its entire lifetime. Shield it from
     // that console's Ctrl+C the same way a process with no console at all
-    // (the pre-hud-q2glv default) was always immune (Codex P2 on PR #1143).
+    // (the previous default) was always immune (Codex P2 on PR #1143).
     ignore_console_ctrl_c();
 
     // Keep the original argv for install selection; the runtime and its
@@ -1137,13 +1134,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    // ── Attach-info fast path (hud-b7c0m) ─────────────────────────────────────
+    // ── Attach-info fast path ─────────────────────────────────────
     // Print the MCP attach-info block and exit *before* acquiring the GPU lock,
     // reading/validating a config, or starting the runtime. This is an
     // onboarding aid that works on any platform without a shell, so it must not
     // fail-closed on a missing/invalid config the way canonical startup does.
     if opts.print_attach_info {
-        // The console was attached once at the top of `main` (hud-q2glv), so on
+        // The console was attached once at the top of `main`, so on
         // Windows this GUI-subsystem binary's block reaches the launching
         // terminal (Codex P2, PR #1112) without a per-branch attach here.
         print!("{}", render_attach_info_block(&opts));
@@ -1223,7 +1220,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // The resolved path is logged so operators can confirm which file is in use.
     // We track both the TOML content and the file path so that relative
     // [widget_bundles].paths entries can be resolved relative to the config file's
-    // parent directory (spec §Widget Bundle Configuration).
+    // parent directory.
     let security_mode = startup_security_mode();
     let mut searched_paths_for_missing: Vec<String> = Vec::new();
     let mut config_read_error_detail: Option<String> = None;
@@ -1267,7 +1264,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // No config file found at any location.
                 if opts.config_path.is_some() {
                     // --config was given explicitly but the file was not found.
-                    // This is a hard error (RFC 0006 §1.3).
+                    // This is a hard error.
                     eprintln!(
                         "error: config file not found: {}",
                         searched_paths_for_missing
@@ -1891,7 +1888,7 @@ mod tests {
                 &["--window-mode", "FULLSCREEN"],
                 |o| assert_eq!(o.window_mode, WindowMode::Fullscreen),
             ),
-            // hud-48ml: overlay auto-sizes only when neither dimension is explicit.
+            // overlay auto-sizes only when neither dimension is explicit.
             (
                 "overlay, no dims -> auto-size",
                 &[],
@@ -1901,7 +1898,7 @@ mod tests {
                     assert!(!o.explicit_width && !o.explicit_height);
                 },
             ),
-            // hud-q5hx bug-report command line.
+            // bug-report command line.
             (
                 "overlay 2560x1440",
                 &[],
@@ -2405,7 +2402,7 @@ mod tests {
 
     // ── parse_options: CLI flags ─────────────────────────────────────────────
 
-    /// hud-q2glv: `main` calls `attach_parent_console()` once at startup so
+    /// `main` calls `attach_parent_console()` once at startup so
     /// every output path — `--help`/`--version`, `--print-attach-info`, tracing
     /// logs, and startup `eprintln!` + `exit(1)` errors — reaches the launching
     /// terminal on the Windows GUI-subsystem binary. That call site runs before
@@ -2419,7 +2416,7 @@ mod tests {
         attach_parent_console();
     }
 
-    /// hud-q2glv (Codex P2 on PR #1143): `main` also calls
+    /// (Codex P2 on PR #1143): `main` also calls
     /// `ignore_console_ctrl_c()` once at startup, right after
     /// `attach_parent_console()`, so the now-always-attached long-running
     /// process is not killed by a Ctrl+C its console receives for an

@@ -268,7 +268,7 @@ fn new_psk() -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-/// RFC 3339 UTC timestamp (second precision) for `paired_at`.
+/// ISO 8601-compatible UTC timestamp (`YYYY-MM-DDTHH:MM:SSZ`) for `paired_at`.
 fn rfc3339_utc(wall_us: u64) -> String {
     let secs = wall_us / 1_000_000;
     let (days, rem) = (secs / 86_400, secs % 86_400);
@@ -864,7 +864,7 @@ pub(crate) mod tests {
         }
     }
 
-    /// Codes 111111, 222222, ... one per draw.
+    /// Codes 111111, 222222,... one per draw.
     fn counting_words() -> impl FnMut() -> u32 + Send {
         let mut n = 0;
         move || {
@@ -1686,6 +1686,7 @@ pub(crate) mod tests {
         let pairing = Arc::new(rig.pairing);
         let shutdown = crate::threads::ShutdownToken::new();
         let config = crate::mcp::McpServerConfig {
+            startup: None,
             text_fit: None,
             appearance: None,
             publication_defaults: Default::default(),

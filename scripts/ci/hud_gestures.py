@@ -29,6 +29,7 @@ Stdlib only (plus `xdotool`, `Xvfb` and optional `ffmpeg` for tier L).
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import secrets
@@ -129,6 +130,20 @@ def portal_entry(status: dict, surface: str) -> dict | None:
 def notification_entry(status: dict, key: str, surface: str = "zone:notification-area") -> dict | None:
     return next((p for p in status.get("notifications") or []
                  if p.get("s") == surface and p.get("key") == key), None)
+
+
+FOREIGN_AGENT = "gesture-foreign"
+
+
+def keyed_cards(status: dict, key: str) -> list[list[str]]:
+    """Action labels of every drawn, non-exiting notification card with `key`.
+
+    Status omits publishers and bodies, so cross-agent scenarios tell same-key
+    cards apart by their distinct action labels."""
+    return [[a["label"] for a in card.get("actions") or []]
+            for card in status.get("notifications") or []
+            if card.get("s") == "zone:notification-area" and card.get("key") == key
+            and card.get("state") != "exiting"]
 
 
 def widget_entry(status: dict, surface: str) -> dict | None:
@@ -278,6 +293,9 @@ class Run:
     display: str = ""
     port: int = 0
     psk: str = field(default_factory=lambda: secrets.token_hex(16))
+    # A second authenticated agent, for cross-agent isolation scenarios only.
+    foreign_psk: str = field(default_factory=lambda: secrets.token_hex(16))
+    foreign: Smoke | None = None
     xvfb: subprocess.Popen | None = None
     hud: subprocess.Popen | None = None
     owned_pids: list[int] = field(default_factory=list)
@@ -324,6 +342,10 @@ class Run:
         env["TZE_HUD_LOG_JSON"] = "1"
         self.port = free_port()
         config = seed_config(CONFIG, self.psk)
+        # Seed the second agent beside the first: PSK hash only, no admin grant.
+        digest = hashlib.sha256(self.foreign_psk.encode()).hexdigest()
+        with open(config.parent / "agents.toml", "a", encoding="utf-8") as agents:
+            agents.write(f'\n[agents.{FOREIGN_AGENT}]\npsk_sha256 = "{digest}"\nallow = ["*"]\n')
         self.config_dir = config.parent
         self.config = config
         self.log = self.out / "hud.log"
@@ -338,6 +360,7 @@ class Run:
             )
         self.owned_pids.append(self.hud.pid)
         self.smoke = Smoke(f"http://127.0.0.1:{self.port}/mcp", self.psk)
+        self.foreign = Smoke(f"http://127.0.0.1:{self.port}/mcp", self.foreign_psk)
         wait_for_mcp(self.smoke, self.hud, 60)
         self.inj = XTest(self.display, self.guard) if self.injector == "xtest" else WIN.SendInput(self.guard)
         if self.injector == "sendinput":
@@ -942,6 +965,110 @@ def scenario_card_click(run: Run) -> None:
     take_card_answer(run, key, f"{key}-first")
 
 
+def foreign_call(run: Run, tool: str, args: dict) -> dict:
+    run.mark()
+    is_error, reply = run.foreign.call(tool, args)
+    run.step(f"{FOREIGN_AGENT} {tool} {args.get('surface')} key={args.get('key')}")
+    if is_error:
+        raise ScenarioFailed(f"{FOREIGN_AGENT} {tool} refused", {"code": reply.get("code"), "hint": reply.get("hint")})
+    return reply
+
+
+def foreign_inputs(run: Run) -> list[dict]:
+    is_error, reply = run.foreign.call("hud_input", {"max_items": 20})
+    if is_error:
+        raise ScenarioFailed(f"{FOREIGN_AGENT} hud_input refused", {"code": reply.get("code")})
+    return reply.get("items") or []
+
+
+def scenario_foreign_publisher(run: Run) -> None:
+    """hud-bz9bv.6 AC10: another authenticated agent's same-key replace and
+    keyed or whole clear never touch A's card, and A's answer routes only to A."""
+    key, zone = "gesture-foreign", "zone:notification-area"
+    # Both cards must fit the zone on the smallest harness display (tier L's
+    # Xvfb reported 800x600, a 180 px zone), or the stack's visibility bound
+    # hides one, which is not a replace: A's card has one action and the
+    # foreign card none. Cards are told apart by action labels.
+    mine, theirs = ["First"], []
+    open_card(run, key, actions=[{"label": "First", "callback_id": f"{key}-first"}])
+    foreign = {"surface": zone, "key": key, "ttl_ms": 0, "content": {"body": "Foreign gesture check"}}
+    try:
+        foreign_call(run, "hud_publish", foreign)
+        run.expect("a foreign same-key publish adds its own card beside A's",
+                   lambda st: sorted(keyed_cards(st, key)) == sorted([mine, theirs]))
+        foreign_call(run, "hud_publish", foreign)  # the foreign agent's own same-key replace
+        run.expect("a foreign same-key replace replaces only its own card",
+                   lambda st: sorted(keyed_cards(st, key)) == sorted([mine, theirs]))
+        foreign_call(run, "hud_clear", {"surface": zone, "key": key})
+        run.expect("a foreign keyed clear removes only its own card", lambda st: keyed_cards(st, key) == [mine])
+        foreign_call(run, "hud_publish", foreign)
+        run.expect("foreign card back", lambda st: sorted(keyed_cards(st, key)) == sorted([mine, theirs]))
+        foreign_call(run, "hud_clear", {"surface": zone})
+        run.expect("a foreign whole-zone clear removes only its own cards", lambda st: keyed_cards(st, key) == [mine])
+        run.observe_for("and A's card stays, unanswered", lambda st: keyed_cards(st, key) == [mine]
+                        and all(c.get("chosen") is None for c in st.get("notifications") or []
+                                if c.get("key") == key and c.get("state") != "exiting"), 0.3)
+    finally:
+        run.foreign.call("hud_clear", {"surface": zone})
+    run.click(f"{zone}/{key}/0")
+    take_card_answer(run, key, f"{key}-first")
+    if items := foreign_inputs(run):
+        raise ScenarioFailed("A's answer reaches no other agent", {"items": items})
+
+
+def held_press_on_retired_card(run: Run, key: str, retire: Callable[[], None], what: str) -> None:
+    """Press A's action, retire that card while the button is down, release:
+    the retired publication's press must send nothing."""
+    open_card(run, key)
+    run.point(f"zone:notification-area/{key}/0")
+    run.settle()  # the hover frame first, so only the press can satisfy the next settle
+    run.mark()
+    run.inj.button(True)
+    run.step("button down (held)")
+    try:
+        # The pressed visual draws a frame: the HUD has handled the press on
+        # A's card before the MCP call can retire it.
+        run.settle()
+        retire()
+        run.settle()
+    finally:
+        run.mark()
+        run.inj.button(False)
+        run.step("button up")
+    run.observe_for(f"releasing after {what} activates nothing",
+                    lambda st: all(c.get("chosen") is None for c in st.get("notifications") or []), 0.5)
+    # Wait out a late stale activation rather than reading the queue once.
+    if items := run.inputs(wait_ms=500):
+        raise ScenarioFailed(f"releasing after {what} sends nothing", {"items": items, "status": run.status()})
+
+
+def scenario_held_press(run: Run) -> None:
+    """hud-bz9bv.6 AC2/AC10: a press held across a same-key replace, or across
+    a keyed clear, never activates on release; the replacement still answers."""
+    zone = "zone:notification-area"
+    replaced = "gesture-held-replace"
+    fresh = [{"label": "Third", "callback_id": f"{replaced}-third"},
+             {"label": "Fourth", "callback_id": f"{replaced}-fourth"}]
+
+    def replace() -> None:
+        run.publish(zone, key=replaced, ttl_ms=0, content={"body": "Replaced gesture check", "actions": fresh})
+        run.expect("the same-key replace is drawn", lambda st: keyed_cards(st, replaced) == [["Third", "Fourth"]])
+
+    held_press_on_retired_card(run, replaced, replace, "a same-key replace")
+    run.click(f"{zone}/{replaced}/0")
+    take_card_answer(run, replaced, f"{replaced}-third")
+
+    cleared = "gesture-held-clear"
+
+    def clear() -> None:
+        run.mark()
+        run.smoke.ok("hud_clear", {"surface": zone, "key": cleared})
+        run.step(f"hud_clear {zone} key={cleared}")
+        run.expect("the keyed clear removes the card", lambda st: not keyed_cards(st, cleared))
+
+    held_press_on_retired_card(run, cleared, clear, "a keyed clear")
+
+
 def scenario_card_keyboard(run: Run) -> None:
     """R14.2 S2: composer focus wraps with Tab to action two; Enter answers once."""
     key, surface = "gesture-card-keys", "portal:gesture-card-keys"
@@ -973,10 +1100,9 @@ def scenario_stack_trim(run: Run) -> None:
     """hud-ljhku.5 R5.2/R5.3: six cards, one an unanswered question; the question is kept.
 
     The trim spares the question and removes the oldest status card, whose
-    publisher gets one displaced receipt. A full five-card stack is taller
-    than the notification zone (30% of the display), so the kept question,
-    the oldest card, can sit below the drawn cards; it is checked visible
-    and answerable once the newer status cards leave.
+    publisher gets one displaced receipt. The kept question must remain
+    visible and answerable during the burst, while the newer cards are
+    still in the full stack at the production zone height.
     """
     question = "gesture-trim-question"
     open_card(run, question)
@@ -989,40 +1115,49 @@ def scenario_stack_trim(run: Run) -> None:
             [("displaced", statuses[0], "zone:notification-area")]:
         raise ScenarioFailed("one displaced receipt, for the oldest status card",
                              {"items": items, "status": run.status()})
-    run.expect("newest status cards drawn, trimmed one gone", lambda s: bool(
-        notification_entry(s, statuses[-1]) and notification_entry(s, statuses[0]) is None))
+    run.expect("kept question visible in the full stack", lambda s: bool(
+        (card := notification_entry(s, question)) and card["state"] != "exiting"
+        and notification_entry(s, statuses[0]) is None))
+    run.settle()
+    run.click(f"zone:notification-area/{question}/0")
+    take_card_answer(run, question, f"{question}-first")
     for key in statuses[1:]:
         is_error, reply = run.smoke.call("hud_clear", {"surface": "zone:notification-area", "key": key})
         if is_error:
             raise ScenarioFailed(f"hud_clear {key} refused", {"code": reply.get("code")})
-    run.expect("kept question drawn", lambda s: bool(
-        (card := notification_entry(s, question)) and card["state"] != "exiting"))
-    run.settle()
-    run.click(f"zone:notification-area/{question}/0")
-    take_card_answer(run, question, f"{question}-first")
+
+
+def regain_owned_foreground(run: Run, what: str, timeout_s: float) -> None:
+    """After a real link handoff, ShellExecute may have foregrounded a browser.
+    Regain only the owned HUD, without injecting; the normal guard still runs
+    before every later SendInput. Only link scenarios use this, never a
+    focus-preservation assertion."""
+    if run.injector != "sendinput":
+        return
+    if run.status().get("pid") != run.pid:
+        raise Refused(f"owned HUD changed: {what}")
+
+    def foreground():
+        if WIN.foreground_pid() != run.pid:
+            WIN.bring_to_front(run.pid)
+        return WIN.foreground_pid() == run.pid, WIN.foreground_pid()
+    wait_until(foreground, what=what, timeout_s=timeout_s, interval_s=0.02)
 
 
 def scenario_card_link(run: Run) -> None:
     """R14.2 S4/S5: one real link handoff; same action within 2s is refused, with no input."""
     key = "gesture-card-link"
     open_card(run, key, actions=[{"label": "Open test page", "url": "https://example.invalid/"}])
+    # portal-reading's handoffs run just before this one.
+    regain_owned_foreground(run, "owned HUD foreground before the first link press", 2.0)
     before = run.status()["link_launches"]
     run.point(f"zone:notification-area/{key}/0")
     first = time.monotonic()
     run.inj.click()
     run.expect("one accepted link launch", lambda s: s["link_launches"] == before + 1,
                timeout_s=1.0, interval_s=0.02)
-    # ShellExecute may have foregrounded a browser. Regain only the owned HUD,
-    # without injecting, and keep the normal guard on every subsequent SendInput.
-    if run.injector == "sendinput":
-        if run.status().get("pid") != run.pid:
-            raise Refused("owned HUD changed before the second link press")
-        def foreground():
-            if WIN.foreground_pid() != run.pid:
-                WIN.bring_to_front(run.pid)
-            return WIN.foreground_pid() == run.pid, WIN.foreground_pid()
-        wait_until(foreground, what="owned HUD foreground before second link press",
-                   timeout_s=max(0.01, first + 1.8 - time.monotonic()), interval_s=0.02)
+    regain_owned_foreground(run, "owned HUD foreground before second link press",
+                            max(0.01, first + 1.8 - time.monotonic()))
     run.inj.click()
     second = time.monotonic()
     if second - first >= 2.0:
@@ -1076,18 +1211,9 @@ def scenario_portal_reading(run: Run) -> None:
     run.expect("arrow over blank OUTPUT", on(s, lambda p: p["cursor"] == "arrow"))
 
     launches = run.status()["link_launches"]
-    run.glide(x, a)
-    run.click()
-    run.expect("a link click launches once (R2.1 S1)", lambda st: st["link_launches"] == launches + 1)
-    time.sleep(0.7)  # past the double-click interval
-    run.glide(x, b)
-    run.inj.click(repeat=2)
-    run.expect("a link double-click launches once and selects nothing (R2.1 S3)",
-               lambda st: st["link_launches"] == launches + 2 and portal_entry(st, s)["selection_chars"] == 0)
-    time.sleep(0.7)
     run.drag((x, a), (x + 120, a))
     run.expect("a press-drag on a link selects (R2.1 S2)", on(s, lambda p: p["selection_chars"] > 0))
-    run.observe_for("and launches nothing", lambda st: st["link_launches"] == launches + 2, 0.3)
+    run.observe_for("and launches nothing", lambda st: st["link_launches"] == launches, 0.3)
     run.key("Escape")
     run.expect("Esc clears the selection (R2.2 S4)", on(s, lambda p: p["selection_chars"] == 0))
 
@@ -1106,6 +1232,19 @@ def scenario_portal_reading(run: Run) -> None:
             raise ScenarioFailed("the clipboard holds the three selected lines", {"chars": len(text)})
     run.key("Escape")
     run.expect("selection cleared", on(s, lambda p: p["selection_chars"] == 0))
+
+    # Real link handoffs last: the browser can take the foreground late
+    # , so nothing but state reads follows a launch.
+    time.sleep(0.7)  # past the double-click interval
+    run.glide(x, a)
+    run.click()
+    run.expect("a link click launches once (R2.1 S1)", lambda st: st["link_launches"] == launches + 1)
+    time.sleep(0.7)
+    regain_owned_foreground(run, "owned HUD foreground before the link double-click", 1.0)
+    run.glide(x, b)
+    run.inj.click(repeat=2)
+    run.expect("a link double-click launches once and selects nothing (R2.1 S3)",
+               lambda st: st["link_launches"] == launches + 2 and portal_entry(st, s)["selection_chars"] == 0)
     if items := run.inputs():
         raise ScenarioFailed("OUTPUT reading creates no hud_input item", {"items": items})
 
@@ -1138,8 +1277,11 @@ def shrink(run: Run, s: str, times: int = 4) -> dict:
     before = portal_entry(run.status(), s)["rect"]
     for _ in range(times):
         run.key("ctrl+minus")
-    return run.expect("Ctrl+- shrinks the portal",
-                      on(s, lambda p: p["rect"]["w"] < before["w"] or p["rect"]["h"] < before["h"]))
+    run.expect("Ctrl+- shrinks the portal",
+               on(s, lambda p: p["rect"]["w"] < before["w"] or p["rect"]["h"] < before["h"]))
+    # The first shrink can show before the later presses land; return only
+    # once they all have, so the caller's next resize starts from rest.
+    return run.settle()
 
 
 def scenario_drag_alignment(run: Run) -> None:
@@ -1931,6 +2073,8 @@ SCENARIOS: dict[str, Callable[[Run], None]] = {
     "card-click": scenario_card_click,
     "card-keyboard": scenario_card_keyboard,
     "card-dismiss": scenario_card_dismiss,
+    "foreign-publisher": scenario_foreign_publisher,
+    "held-press": scenario_held_press,
     "card-link": scenario_card_link,
     "stack-trim": scenario_stack_trim,
     "portal-reading": scenario_portal_reading,
@@ -1954,6 +2098,9 @@ SCENARIOS: dict[str, Callable[[Run], None]] = {
 # ── Runner ───────────────────────────────────────────────────────────────────
 
 
+LINK_SCENARIOS = ("portal-reading", "card-link")  # each launches a real browser handoff
+
+
 def git_sha() -> str:
     try:
         return subprocess.run(["git", "rev-parse", "--short=12", "HEAD"], cwd=REPO, capture_output=True,
@@ -1974,7 +2121,13 @@ def run_scenarios(run: Run, names: list[str]) -> list[dict]:
             result["outcome"] = "PASS"
         except ScenarioFailed as failure:
             result.update(outcome="FAIL", step=failure.step, last=failure.last)
-        except Refused:
+        except Refused as err:
+            # Keep every earlier outcome: the timeline and summary must not
+            # collapse to 0/0 because a later guard refused .
+            result.update(outcome="FAIL", step=f"refused: {err}", last=None,
+                          seconds=round(time.monotonic() - started, 2))
+            results.append(result)
+            err.results = results
             raise
         except subprocess.CalledProcessError as err:
             stderr = err.stderr or ""
@@ -2017,13 +2170,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--window-mode", choices=("fullscreen", "overlay"), default="fullscreen")
     parser.add_argument("--out", type=Path, help="artifact dir (default test_results/gestures/<sha>/<run>)")
     parser.add_argument("--list", action="store_true", help="list scenarios and exit")
+    parser.add_argument("--required", type=required_names, metavar="NAMES",
+                        help="comma-separated scenarios whose failure fails the run; the rest become "
+                             "informational (listed, exit 0). Without it every scenario is required.")
     parser.add_argument("scenarios", nargs="*", help="scenario names (default: all)")
     args = parser.parse_args(argv)
     if args.list:
         for name, fn in SCENARIOS.items():
             print(f"{name:20} {(fn.__doc__ or '').strip().splitlines()[0]}")
         return 0
-    unknown = [n for n in args.scenarios if n not in SCENARIOS]
+    unknown = [n for n in args.scenarios + (args.required or []) if n not in SCENARIOS]
     if unknown:
         parser.error(f"unknown scenario(s): {', '.join(unknown)}; see --list")
     if (args.injector == "sendinput") != WINDOWS:
@@ -2039,8 +2195,17 @@ def main(argv: list[str] | None = None) -> int:
     names = args.scenarios or [n for n in SCENARIOS
                                if (tier_w or n not in TIER_W_ONLY)
                                and ((n in overlay_names) == (args.window_mode == "overlay"))]
-    if "restart" in names:  # it replaces the HUD; keep it last
-        names = [n for n in names if n != "restart"] + ["restart"]
+    # Real link handoffs ("portal-reading", "card-link") can let a browser take
+    # the foreground seconds later (Edge first-run UI covered the HUD for every
+    # later scenario, ), so they run after everything else that
+    # injects input. "restart" replaces the HUD and only uses MCP; it stays last.
+    # Before those, required scenarios run first in the fresh HUD and
+    # informational ones follow in the same boot. A list naming the other window
+    # mode's scenarios only gates the ones this invocation runs.
+    trailing = [n for n in LINK_SCENARIOS + ("restart",) if n in names]
+    required = set(names) if args.required is None else set(args.required).intersection(names)
+    names = ([n for n in names if n in required and n not in trailing]
+             + [n for n in names if n not in required and n not in trailing] + trailing)
     sha = git_sha()
     # The pid keeps parallel runs started in the same second apart.
     out = args.out or REPO / "test_results/gestures" / sha / f"{time.strftime('%Y%m%dT%H%M%S')}-{os.getpid()}"
@@ -2063,6 +2228,7 @@ def main(argv: list[str] | None = None) -> int:
             failure = f"{unacked} un-acked hud_input item(s) at exit"
     except Refused as err:
         failure = f"refused: {err}"
+        results = getattr(err, "results", results)
     except Exception as err:  # noqa: BLE001
         failure = f"harness: {type(err).__name__}: {err}"
     finally:
@@ -2076,6 +2242,7 @@ def main(argv: list[str] | None = None) -> int:
             "geometry": (status.get("displays") if "status" in locals() else None),
             "theme_scale": ({k: status.get(k) for k in ("theme", "ui_scale") if k in status} if "status" in locals() else None),
             "seconds": round(time.monotonic() - started, 2), "results": results, "failure": failure,
+            "required": sorted(required),
             "steps": run.timeline,
             "sendinput_calls": getattr(run.inj, "calls", None) if args.injector == "sendinput" else None,
         }
@@ -2083,24 +2250,55 @@ def main(argv: list[str] | None = None) -> int:
         if run.log and run.log.exists():
             tail = run.log.read_text(errors="replace").splitlines()[-200:]
             (out / "hud.log.tail").write_text("\n".join(tail))
+    for result in results:
+        result["required"] = result["scenario"] in required
     passed = sum(r["outcome"] == "PASS" for r in results)
     print(f"{passed}/{len(results)} scenarios passed in {time.monotonic() - started:.1f}s; artifacts: {out}")
     if failure:
         print(f"FAIL harness: {failure}")
-    write_step_summary(args.injector, results, failure, passed, time.monotonic() - started)
-    return 0 if failure is None and passed == len(results) else 1
+    verdict = gate_verdict(results, required, failure)
+    (out / "verdict.json").write_text(json.dumps(verdict, indent=1))
+    write_step_summary(args.injector, results, failure, passed, time.monotonic() - started, verdict)
+    return 1 if verdict["blocking"] else 0
 
 
-def write_step_summary(injector: str, results: list[dict], failure: str | None, passed: int, seconds: float) -> None:
+def required_names(value: str) -> list[str]:
+    return [name for name in (part.strip() for part in value.split(",")) if name]
+
+
+def gate_verdict(results: list[dict], required: set[str], failure: str | None) -> dict:
+    """Which failures block: a failed required scenario, or a harness failure
+    (refusal, crash, leftover process) that left a required scenario without a
+    PASS. A harness failure after every required scenario passed, such as an
+    informational link scenario losing the foreground, does not block.
+    Informational failures never do."""
+    outcomes = {r["scenario"]: r["outcome"] for r in results}
+    required_failed = sorted(n for n in required if outcomes.get(n) == "FAIL")
+    required_unproven = sorted(n for n in required if outcomes.get(n) not in ("PASS", "FAIL"))
+    informational_failed = [r["scenario"] for r in results
+                            if r["scenario"] not in required and r["outcome"] != "PASS"]
+    blocking = bool(required_failed) or (failure is not None and bool(required_unproven))
+    return {"required": sorted(required), "required_failed": required_failed,
+            "required_unproven": required_unproven, "informational_failed": informational_failed,
+            "harness_failure": failure, "blocking": blocking}
+
+
+def write_step_summary(injector: str, results: list[dict], failure: str | None, passed: int, seconds: float,
+                       verdict: dict | None = None) -> None:
     """A GitHub step summary table, so a dispatching agent reads outcomes without the artifact."""
     path = os.environ.get("GITHUB_STEP_SUMMARY")
     if not path:
         return
     rows = [f"## Gesture scenarios ({injector}): {passed}/{len(results)} passed in {seconds:.0f}s", "",
-            "| scenario | outcome | s | failing step |", "|---|---|---|---|"]
-    rows += [f"| {r['scenario']} | {r['outcome']} | {r['seconds']} | {r.get('step', '')} |" for r in results]
+            "| scenario | gate | outcome | s | failing step |", "|---|---|---|---|---|"]
+    rows += [f"| {r['scenario']} | {'required' if r.get('required', True) else 'info'} | {r['outcome']} "
+             f"| {r['seconds']} | {r.get('step', '')} |" for r in results]
     if failure:
         rows += ["", f"**harness:** {failure}"]
+    if verdict and verdict["required_failed"]:
+        rows += ["", f"**required failed:** {', '.join(verdict['required_failed'])}"]
+    if verdict and verdict["informational_failed"]:
+        rows += ["", f"Informational failures (do not fail the job): {', '.join(verdict['informational_failed'])}"]
     with open(path, "a", encoding="utf-8") as fh:
         fh.write("\n".join(rows) + "\n")
 

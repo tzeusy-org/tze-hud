@@ -258,7 +258,7 @@ mod headless_impl {
 
     // ── CLI args ─────────────────────────────────────────────────────────────
 
-    pub struct Args {
+    pub(crate) struct Args {
         /// Path to emit the telemetry JSON to.
         pub emit: Option<PathBuf>,
         /// Number of benchmark frames to render per scenario.
@@ -269,7 +269,7 @@ mod headless_impl {
         pub constrained_envelope: bool,
     }
 
-    pub fn parse_args() -> Args {
+    pub(crate) fn parse_args() -> Args {
         let args: Vec<String> = std::env::args().collect();
         let mut emit = None;
         let mut frames = 120u64;
@@ -473,7 +473,7 @@ mod headless_impl {
     /// Populate the per-frame correctness fields on a `FrameTelemetry` produced
     /// by the headless runtime, so the benchmark emits a *genuinely computed*
     /// signal for the CI-gated `invariant_violations` / `scene_lock_misses`
-    /// counters (hud-ipmj0 / PR #887) instead of leaving them at the implicit
+    /// counters (/ PR #887) instead of leaving them at the implicit
     /// `FrameTelemetry::new()` default.
     ///
     /// Why this is needed: `HeadlessRuntime::render_frame()` builds a fresh
@@ -499,7 +499,7 @@ mod headless_impl {
     /// running-total semantics the windowed runtime uses in `windowed.rs`). For
     /// the single-threaded `.lock().await` scenarios this is always `0` (no
     /// concurrent handler can contend the lock); the dedicated
-    /// `run_scene_lock_contention` scenario (hud-iky7b) drives genuine
+    /// `run_scene_lock_contention` scenario drives genuine
     /// `try_lock` contention and passes a real non-zero count through here.
     fn attach_frame_correctness(
         telemetry: &mut FrameTelemetry,
@@ -516,7 +516,7 @@ mod headless_impl {
     ///
     /// Renders a fixed multi-tile scene with overlapping alpha-blended tiles at
     /// target resolution (1920x1080). Returns FPS and the hardware factor.
-    pub async fn calibrate_gpu() -> GpuCalibrationResult {
+    pub(crate) async fn calibrate_gpu() -> GpuCalibrationResult {
         let start = Instant::now();
 
         let config = benchmark_config("calibration");
@@ -639,7 +639,7 @@ mod headless_impl {
     ///
     /// Creates and destroys tiles in rapid succession to measure the create/update/delete
     /// throughput, which is the primary bottleneck for texture-upload-heavy workloads.
-    pub async fn calibrate_upload() -> UploadCalibrationResult {
+    pub(crate) async fn calibrate_upload() -> UploadCalibrationResult {
         let start = Instant::now();
 
         let config = benchmark_config("calibration");
@@ -767,7 +767,7 @@ mod headless_impl {
     /// Run the "steady-state render" scenario.
     ///
     /// Renders a multi-tile scene for `frame_count` frames and collects telemetry.
-    pub async fn run_steady_state_render(frame_count: u64) -> ScenarioResult {
+    pub(crate) async fn run_steady_state_render(frame_count: u64) -> ScenarioResult {
         info!(
             "Running steady-state render scenario ({} frames)",
             frame_count
@@ -828,7 +828,7 @@ mod headless_impl {
         for frame_idx in 0..frame_count {
             record_synthetic_input_ack(&mut runtime, &mut summary, frame_idx).await;
             let mut telemetry = runtime.render_frame().await;
-            // Correctness signal (hud-ukq66): this scenario submits no per-frame
+            // Correctness signal: this scenario submits no per-frame
             // mutation batches, so no batch can be rejected — the genuine,
             // computed invariant-violation count for every frame here is 0.
             // We still attach the correctness fields and call
@@ -866,7 +866,7 @@ mod headless_impl {
     // A 5×2 grid of tiles on the benchmark's 1920×1080 display. Tile size and
     // pitch are chosen so that, even at the maximum per-frame jitter offset, the
     // rightmost/bottom tiles stay fully inside the display area — keeping every
-    // UpdateTileBounds batch valid (no spurious `invariant_violations`, hud-f6kjp)
+    // UpdateTileBounds batch valid (no spurious `invariant_violations`)
     // while still moving tiles every frame. Worst-case check:
     //   col 4: x_max = 4*384 + 16 = 1552; 1552 + 360 = 1912 ≤ 1920 ✓
     //   row 1: y_max = 1*540 + 16 = 556;  556 + 520 = 1076 ≤ 1080 ✓
@@ -895,7 +895,7 @@ mod headless_impl {
     }
 
     /// Run the "high-mutation" scenario: apply bounds mutations every frame.
-    pub async fn run_high_mutation(frame_count: u64) -> ScenarioResult {
+    pub(crate) async fn run_high_mutation(frame_count: u64) -> ScenarioResult {
         info!("Running high-mutation scenario ({} frames)", frame_count);
 
         let config = benchmark_config("benchmark");
@@ -965,7 +965,7 @@ mod headless_impl {
 
             // Apply bounds mutation to 3 tiles per frame. Capture the
             // batch-rejection outcome so we can feed a *real* invariant-violation
-            // signal into the gated correctness counter (hud-ukq66): a rejected
+            // signal into the gated correctness counter: a rejected
             // batch (applied == false) is exactly what the runtime pipeline
             // counts as one invariant violation (see pipeline.rs Stage 4).
             //
@@ -973,7 +973,7 @@ mod headless_impl {
             // area (see `mutation_tile_origin`), so every batch is valid and this
             // counter is legitimately 0 across the run. The scenario still
             // exercises real high-rate mutation (3 accepted UpdateTileBounds per
-            // frame); it just no longer models *invalid* load (hud-f6kjp).
+            // frame); it just no longer models *invalid* load.
             let mut invariant_violations_this_frame = 0u32;
             {
                 let scene_arc = scene_handle(&runtime).await;
@@ -1028,7 +1028,7 @@ mod headless_impl {
         }
     }
 
-    // ── Scene-lock contention scenario (hud-iky7b) ────────────────────────────
+    // ── Scene-lock contention scenario ────────────────────────────
 
     /// Number of concurrent background scene-mutation tasks to spawn for the
     /// contention scenario. Each models a gRPC/MCP session handler that takes
@@ -1176,16 +1176,16 @@ mod headless_impl {
         (ready_rx, handle)
     }
 
-    /// Run the "scene-lock contention" scenario (hud-iky7b).
+    /// Run the "scene-lock contention" scenario.
     ///
-    /// This is the *other half* of the hud-ipmj0/hud-ukq66 work: it produces a
+    /// This produces a
     /// genuine, measured **non-zero** `scene_lock_misses` signal by reproducing
     /// the exact production contention the windowed compositor frame loop
     /// experiences, without needing a real GPU/winit window.
     ///
     /// # Why this is the real `try_lock` path, not a faked counter
     ///
-    /// The windowed runtime (`crates/tze_hud_runtime/src/windowed.rs`, Stage 4)
+    /// The windowed runtime (`crates/tze_hud_runtime/src/windowed/mod.rs`, Stage 5)
     /// holds `compositor_scene: Arc<Mutex<SceneGraph>>` and acquires it with
     /// `compositor_scene.try_lock()`. On a miss (the lock is held by a
     /// concurrent gRPC/MCP scene-mutation handler) it does
@@ -1212,7 +1212,7 @@ mod headless_impl {
     /// then performs its `try_lock` — so the contended frames deterministically
     /// miss. We report the measured total; we never assert it equals a fixed
     /// value (it floats with scheduling, but is guaranteed `> 0`).
-    pub async fn run_scene_lock_contention(frame_count: u64) -> ScenarioResult {
+    pub(crate) async fn run_scene_lock_contention(frame_count: u64) -> ScenarioResult {
         info!(
             "Running scene-lock contention scenario ({} frames, {} mutation tasks)",
             frame_count, CONTENTION_MUTATION_TASKS,
@@ -1413,7 +1413,7 @@ mod headless_impl {
     /// Each scheduled hold still races the real `tokio::sync::Mutex::try_lock`
     /// frame-loop path and rolls misses through `FrameTelemetry` into
     /// `SessionSummary`; the difference is the production-shaped frequency.
-    pub async fn run_scene_lock_paced_contention(frame_count: u64) -> ScenarioResult {
+    pub(crate) async fn run_scene_lock_paced_contention(frame_count: u64) -> ScenarioResult {
         info!(
             "Running paced scene-lock contention scenario ({} frames, {} targeted holds; CI ceiling <= {} per 180 frames)",
             frame_count,
@@ -1564,7 +1564,7 @@ mod headless_impl {
 
     // ── Entry point ───────────────────────────────────────────────────────────
 
-    pub async fn run() {
+    pub(crate) async fn run() {
         use tze_hud_telemetry::AssertionOutcome;
 
         tracing_subscriber::fmt()
@@ -1662,7 +1662,7 @@ mod headless_impl {
             high_mutation.summary.peak_frame_time_us,
         );
 
-        // Scene-lock contention scenario (hud-iky7b): drives concurrent
+        // Scene-lock contention scenario: drives concurrent
         // scene-mutation handlers racing a real `try_lock` frame loop so
         // `scene_lock_misses` is genuinely non-zero. This is NOT one of the
         // gate's REQUIRED_SESSIONS (steady_state_render / high_mutation), so its

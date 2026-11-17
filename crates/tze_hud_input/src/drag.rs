@@ -42,7 +42,7 @@ pub const LONG_PRESS_TOUCH_THRESHOLD_MS: u64 = 1000;
 
 /// Movement tolerance before long-press is cancelled (density-independent pixels).
 ///
-/// Per RFC 0004 §3.4 and issue scope: 10dp movement tolerance.
+/// and issue scope: 10dp movement tolerance.
 pub const LONG_PRESS_MOVEMENT_TOLERANCE_DP: f32 = 10.0;
 
 /// Default snap grid as a fraction of the display dimension (2% = 0.02).
@@ -57,9 +57,6 @@ pub const DRAG_Z_ORDER_BOOST: u32 = 0x1000;
 ///
 /// Must be ≥ 1.0; the compositor clamps the result to 1.0.
 pub const DRAG_OPACITY_BOOST: f32 = 1.0;
-
-/// Width of the 2px highlight border applied during active drag.
-pub const DRAG_HIGHLIGHT_BORDER_PX: f32 = 2.0;
 
 /// Phase of a per-device drag recognizer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

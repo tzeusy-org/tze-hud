@@ -221,7 +221,7 @@ impl SceneGraph {
     ///
     /// # Arguments
     /// - `zone_name` — zone type name, resolved in the global `zone_registry` (v1: publishes
-    ///   are global, not tab-scoped; tab-scoped zone instances are a post-v1 feature)
+    ///   are global, not tab-scoped; tab-scoped zone instances are not supported)
     /// - `content` — content payload; must match one of the zone's accepted_media_types
     /// - `publisher_namespace` — the publishing agent's namespace
     /// - `merge_key` — key for MergeByKey contention (ignored for other policies)
@@ -455,7 +455,7 @@ impl SceneGraph {
 
     /// Resolve the "best" lease state for a given namespace.
     ///
-    /// Selection priority (per spec §Zone Publish Requires Active Lease):
+    /// Selection priority:
     ///
     /// 1. `Active` — if any Active lease exists, return it immediately.
     /// 2. First non-terminal lease — for accurate error reporting when no
@@ -490,7 +490,7 @@ impl SceneGraph {
 
     /// Publish content to a zone under `lease_id`, enforcing its state.
     ///
-    /// Spec §Requirement: Zone Publish Requires Active Lease:
+    /// Zone Publish Requires Active Lease:
     ///
     /// - ACTIVE lease → accepted, recorded under `lease_id`.
     /// - ORPHANED lease → rejected with `ZonePublishLeaseOrphaned`; existing
@@ -1042,7 +1042,7 @@ impl SceneGraph {
 
     /// Clear all active publishes for a zone made by a specific publisher.
     ///
-    /// Per spec: "ClearZone clears all publications by the agent in the specified zone."
+    /// "ClearZone clears all publications by the agent in the specified zone."
     /// If no publications exist for the publisher, this is a no-op (but still succeeds).
     /// Pending scheduled publishes are untouched (a batch `ClearZone` followed by
     /// a later batch's publish is the replace pattern); the verbs use
@@ -1139,7 +1139,7 @@ impl SceneGraph {
     ///
     /// # Local feedback
     ///
-    /// Per doctrine ("local feedback first"), this method immediately removes
+    /// ("local feedback first"), this method immediately removes
     /// matching hit regions from `zone_hit_regions` so that the stale dismiss
     /// affordance is gone before the next rendered frame.  Empty zone entries
     /// are pruned from `active_publishes` for consistency with other cleanup
@@ -1508,8 +1508,7 @@ impl SceneGraph {
     /// Clear active publications and whole scheduled batches owned by `lease_id`.
     ///
     /// Called when a lease reaches a terminal state (expired after grace,
-    /// revoked) per spec §Requirement: Lease Revocation Clears Zone
-    /// Publications. Publications by the same namespace under another lease
+    /// revoked). Publications by the same namespace under another lease
     /// (e.g. an operator session's MCP notifications) are untouched.
     pub fn clear_publications_for_lease(&mut self, lease_id: SceneId) {
         let pending_before = self.scheduled_batches.len();
@@ -1560,7 +1559,7 @@ impl SceneGraph {
         }
     }
 
-    /// Per spec: "ClearWidget clears all publications by the agent in the specified widget."
+    /// "ClearWidget clears all publications by the agent in the specified widget."
     /// If no publications exist for the publisher, this is a no-op (but still succeeds).
     /// When all publishers have been cleared the widget reverts to its default params.
     ///
@@ -1622,7 +1621,6 @@ impl SceneGraph {
 
     /// Remove zone publications whose `expires_at_wall_us` has passed.
     ///
-    /// Per timing-model/spec.md §Requirement: Expiration Policy and
     /// `ZonePublishRecord` contract: "When present, the runtime MUST clear
     /// this publication at or before this time."
     ///
@@ -1745,7 +1743,6 @@ impl SceneGraph {
     /// Remove widget publications whose `expires_at_wall_us` has passed.
     ///
     /// Mirrors `drain_expired_zone_publications` for the widget registry.
-    /// Per timing-model/spec.md §Requirement: Expiration Policy and the
     /// `WidgetPublishRecord` contract: "When present, the runtime MUST clear
     /// this publication at or before this time."
     ///
@@ -1790,7 +1787,10 @@ impl SceneGraph {
 }
 
 /// When `record` clears, given its widget's auto-clear limit.
-fn effective_expiry(record: &WidgetPublishRecord, auto_clear_ms: Option<u64>) -> Option<u64> {
+pub(super) fn effective_expiry(
+    record: &WidgetPublishRecord,
+    auto_clear_ms: Option<u64>,
+) -> Option<u64> {
     let limit = auto_clear_ms.map(|ms| {
         record
             .published_at_wall_us

@@ -1,6 +1,6 @@
 use super::*;
 
-// ── Zone interaction hit region tests (hud-ltgk.4) ────────────────────────
+// ── Zone interaction hit region tests ────────────────────────
 //
 // These tests verify `populate_zone_hit_regions`: the pure-geometry path that
 // computes dismiss (×) and action button pixel bounds for Stack zone
@@ -386,7 +386,7 @@ async fn zone_hit_populate_clears_on_repeated_calls() {
     );
 }
 
-/// hud-643dv: a portal frame tile (largest-area member of a scrollable lease)
+/// a portal frame tile (largest-area member of a scrollable lease)
 /// gets a full-width HEADER-BAND drag handle (Windows-titlebar), while the panes
 /// keep the legacy centered grip. The band height is token-driven with a sane
 /// default consistent with the exemplar header height.
@@ -458,7 +458,7 @@ async fn portal_frame_gets_full_width_header_band_handle() {
     );
 }
 
-/// hud-ovjxu.1: the compositor applies the tile's viewer-local font-scale
+/// the compositor applies the tile's viewer-local font-scale
 /// multiplier, clamped to the token-default legible range, when resolving a
 /// portal text node's effective font. GPU only builds the compositor (no readback).
 #[tokio::test]
@@ -862,7 +862,7 @@ async fn drag_handle_hit_test_wins_on_passthrough_tile() {
 ///
 /// Verifies that the per-frame drag-handle population retains only the keys
 /// that are still present in the current `drag_handle_hit_regions` set —
-/// the zero-allocation `iter().any()` retain used after [hud-tdtr7] must
+/// the zero-allocation `iter().any()` retain must
 /// have identical semantics to the previous `HashSet`-based approach.
 #[tokio::test]
 async fn chrome_states_stale_entries_pruned_on_repopulate() {
@@ -925,12 +925,11 @@ async fn chrome_states_stale_entries_pruned_on_repopulate() {
 
 #[tokio::test]
 async fn drag_handle_opacity_switches_to_active_on_hover_state() {
-    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);
-
+    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab = scene.create_tab("Main", 0).unwrap();
     let lease = scene.grant_lease("agent-a", 60_000);
-    let _tile_id = scene
+    let tile = scene
         .create_tile(
             tab,
             "agent-a",
@@ -939,52 +938,69 @@ async fn drag_handle_opacity_switches_to_active_on_hover_state() {
             10,
         )
         .unwrap();
+    for theme in ["tonal-glass", "classic", "blueprint"] {
+        for scale in [1.0_f32, 1.5, 2.0] {
+            let mut input = tze_hud_config::tokens::DesignTokenMap::new();
+            input.insert("theme".into(), theme.into());
+            let mut tokens = tze_hud_config::themes::resolve_config_tokens(&input);
+            tze_hud_config::tokens::set_px_scale(&mut tokens, f64::from(scale));
+            compositor.set_token_map(tokens);
+            let handles = compositor.collect_drag_handle_entries(&scene, 1920.0, 1080.0);
+            let handle = handles.iter().find(|h| h.element_id == tile).unwrap();
+            compositor.drag_handle_hover = None;
+            assert!(compositor.drag_pill_cmds(&scene, &handles).is_empty());
+            let mut flat = Vec::new();
+            compositor.append_drag_handle_vertices(&scene, &handles, &mut flat, 1920.0, 1080.0);
+            assert!(flat.is_empty(), "move pills never use the flat quad path");
 
+            // Runtime element-hover is independent of the tiny grip's hit state.
+            compositor.drag_handle_hover = Some(tile);
+            let cmds = compositor.drag_pill_cmds(&scene, &handles);
+            assert_eq!(cmds.len(), 1);
+            let pill = &cmds[0];
+            assert_eq!((pill.width, pill.height), (32.0 * scale, 4.0 * scale));
+            assert_eq!(handle.bounds.y, 140.0 - (12.0 + 8.0) * scale);
+            assert_eq!(pill.y, 140.0 - 16.0 * scale);
+            assert!(pill.radius >= pill.height / 2.0, "SDF pill corners");
+            assert_eq!(pill.color[3], 0.5);
+            assert!(handle.bounds.contains_point(pill.x, pill.y));
+            assert!(
+                handle
+                    .bounds
+                    .contains_point(pill.x + pill.width - 0.01, pill.y + pill.height - 0.01)
+            );
+
+            // The portal's input band keeps its full width; paint stays a pill.
+            let mut band = handle.clone();
+            band.is_header_band = true;
+            band.bounds = Rect::new(120.0, 140.0, 320.0, 52.0 * scale);
+            let header = compositor.drag_pill_cmds(&scene, &[band]);
+            assert_eq!(header[0].width, pill.width);
+            assert_eq!(header[0].height, pill.height);
+            assert!(header[0].width < 320.0);
+            compositor.drag_handle_hover = None;
+            assert!(compositor.drag_pill_cmds(&scene, &handles).is_empty());
+        }
+    }
+    // Live owner overrides flow through the same geometry/color resolver.
+    let mut tokens = compositor.token_map.clone();
+    tokens.insert("size.drag.handle_width".into(), "48".into());
+    tokens.insert("size.drag.handle_height".into(), "6".into());
+    tokens.insert("opacity.drag.hover".into(), "0.75".into());
+    tokens.insert("color.on_surface.variant".into(), "#FF0000".into());
+    compositor.set_token_map(tokens);
+    compositor.drag_handle_hover = Some(tile);
     let handles = compositor.collect_drag_handle_entries(&scene, 1920.0, 1080.0);
-    let handle = handles.first().expect("must have at least one drag handle");
-
-    let mut idle_vertices = Vec::new();
-    compositor.append_drag_handle_vertices(
-        &scene,
-        std::slice::from_ref(handle),
-        &mut idle_vertices,
-        1920.0,
-        1080.0,
-    );
-    let idle_alpha = idle_vertices[0].color[3];
-
-    scene
-        .overlay
-        .chrome_states
-        .entry(handle.interaction_id.clone())
-        .or_default()
-        .hovered = true;
-    let mut active_vertices = Vec::new();
-    compositor.append_drag_handle_vertices(
-        &scene,
-        std::slice::from_ref(handle),
-        &mut active_vertices,
-        1920.0,
-        1080.0,
-    );
-    let active_alpha = active_vertices[0].color[3];
-
-    assert!(
-        active_alpha > idle_alpha,
-        "hovered handle alpha must be greater than idle alpha"
-    );
+    let cmds = compositor.drag_pill_cmds(&scene, &handles);
+    let pill = &cmds[0];
+    assert_eq!((pill.width, pill.height), (96.0, 12.0));
+    assert_eq!(pill.color, [1.0, 0.0, 0.0, 0.75]);
 }
 
-// ─── Drag visual feedback tests [hud-bs2q.5] ─────────────────────────────
+// ─── Drag visual feedback tests ─────────────────────────────
 
-/// During an active drag, `append_drag_handle_vertices` MUST emit the
-/// v1-compatible visual feedback:
-///
-/// 1. **Z-order boost** (implicit: caller bumps z via `drag_active_elements`)
-/// 2. **Opacity increase**: handle alpha must equal `opacity_active` (same as
-///    hovered), not `opacity_idle`, when the element is in `drag_active_elements`.
-/// 3. **2px highlight border**: one SDF border-only command on the element
-///    bounds (`drag_highlight_cmds`), absent when idle.
+/// Active drag retains the pill without pointer hover, adds one token-driven
+/// SDF border and preserves group z-order/geometry without changing the scene.
 #[tokio::test]
 async fn drag_visual_feedback_applied_during_active_drag() {
     let (compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);
@@ -1008,66 +1024,30 @@ async fn drag_visual_feedback_applied_during_active_drag() {
         .find(|h| h.element_id == tile_id)
         .expect("must have tile drag handle");
 
-    // Idle state — no drag active
-    let mut idle_vertices = Vec::new();
-    compositor.append_drag_handle_vertices(
-        &scene,
-        std::slice::from_ref(handle),
-        &mut idle_vertices,
-        1920.0,
-        1080.0,
-    );
-    let idle_count = idle_vertices.len();
-    let idle_alpha = idle_vertices[0].color[3];
-
-    // Activate drag for this element
-    scene.set_drag_active(tile_id);
-
-    let mut drag_vertices = Vec::new();
-    compositor.append_drag_handle_vertices(
-        &scene,
-        std::slice::from_ref(handle),
-        &mut drag_vertices,
-        1920.0,
-        1080.0,
-    );
-    let drag_alpha = drag_vertices[0].color[3];
-
-    // Opacity must be at the active level (same as hover) — not idle.
     assert!(
-        drag_alpha > idle_alpha,
-        "drag active handle alpha ({drag_alpha}) must be greater than idle alpha ({idle_alpha})"
+        compositor
+            .drag_pill_cmds(&scene, std::slice::from_ref(handle))
+            .is_empty()
     );
-
-    // The highlight is a 2px SDF border on the element bounds, not grip quads.
+    scene.set_drag_active(tile_id);
+    let pill = compositor.drag_pill_cmds(&scene, std::slice::from_ref(handle));
     assert_eq!(
-        drag_vertices.len(),
-        idle_count,
-        "highlight adds no flat quads"
+        pill.len(),
+        1,
+        "drag keeps the pill visible after pointer leaves"
     );
+    assert_eq!(pill[0].color[3], 1.0);
     let highlight = compositor.drag_highlight_cmds(&scene, std::slice::from_ref(handle));
-    assert_eq!(highlight.len(), 1, "one highlight border while dragging");
+    assert_eq!(highlight.len(), 1);
     assert_eq!((highlight[0].x, highlight[0].width), (120.0, 320.0));
     assert_eq!(highlight[0].color, [0.0; 4], "border only");
-    assert_eq!(
-        highlight[0].border.map(|b| b.width),
-        Some(tze_hud_input::DRAG_HIGHLIGHT_BORDER_PX)
-    );
-
-    // Clear and verify feedback is removed
+    assert_eq!(highlight[0].border.map(|b| b.width), Some(1.0));
+    assert_eq!(highlight[0].radius, 16.0);
     scene.clear_drag_active(tile_id);
-    let mut cleared_vertices = Vec::new();
-    compositor.append_drag_handle_vertices(
-        &scene,
-        std::slice::from_ref(handle),
-        &mut cleared_vertices,
-        1920.0,
-        1080.0,
-    );
-    let cleared_count = cleared_vertices.len();
-    assert_eq!(
-        cleared_count, idle_count,
-        "after clearing drag, vertex count must return to idle level"
+    assert!(
+        compositor
+            .drag_pill_cmds(&scene, std::slice::from_ref(handle))
+            .is_empty()
     );
 
     let frame_bounds = scene.tiles[&tile_id].bounds;
@@ -1233,6 +1213,7 @@ async fn drag_visual_feedback_applied_during_active_drag() {
                 1080.0,
             );
             let slots = compositor.zone_slot_layout(
+                &scene,
                 "notif",
                 &scene.zone_registry.active_publishes["notif"],
                 &zone.rendering_policy,
@@ -1273,6 +1254,7 @@ async fn drag_visual_feedback_applied_during_active_drag() {
         let handle = handles.iter().find(|h| h.element_id == zone_id).unwrap();
         let zone = &scene.zone_registry.zones["notif"];
         let slots = compositor.zone_slot_layout(
+            &scene,
             "notif",
             &scene.zone_registry.active_publishes["notif"],
             &zone.rendering_policy,
@@ -1297,7 +1279,7 @@ async fn drag_visual_feedback_applied_during_active_drag() {
     }
 }
 
-// ─── Drag z-order + opacity boost unit tests [hud-17c8p] ─────────────────
+// ─── Drag z-order + opacity boost unit tests ─────────────────
 
 /// A tile in the `Activated` drag phase MUST be sorted last (highest
 /// effective z-order, front-most) among tiles, regardless of its declared
@@ -1519,7 +1501,7 @@ async fn tile_close_button_draw_and_hit_region_share_token_geometry() {
 /// `runtime.px_scale`: at 1.5 and 1.875 px per dp every dismiss and action
 /// region's top and height (so the stack slot pitch), and the dismiss
 /// button's size and right inset, are exactly that multiple of their 1x
-/// values (hud-h51u7.3 AC1,
+/// values (AC1,
 /// AC3). A zone on a secondary monitor uses that monitor's scale. Pure
 /// geometry: runs without a GPU.
 #[test]

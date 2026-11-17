@@ -1,20 +1,17 @@
-//! Text stream portal governance and shell-isolation validation (hud-t98e.4).
+//! Text stream portal governance and shell-isolation validation.
 //!
-//! Focus: lease lifecycle, safe-mode/freeze behavior, and shell isolation
+//! Focus: lease lifecycle, safe-mode behavior, and shell isolation
 //! constraints for the phase-0 raw-tile portal pilot.
 //!
-//! The second half of this file (hud-8z3w3, RFC 0013 §7.2 promotion) mirrors
+//! The second half of this file mirrors
 //! every governance contract above over the promoted first-class `PortalSurface`
-//! attached to the same host tile — proving lease ownership, safe mode, freeze,
+//! attached to the same host tile — proving lease ownership, safe mode,
 //! dismissal, and orphan handling hold UNCHANGED on the first-class surface,
 //! and that it stays content-layer below chrome.
 
 use std::sync::Arc;
 
-use tze_hud_runtime::{
-    ChromeState, EnqueueResult, FreezeQueue, MutationTrafficClass, QueuedMutation,
-    collect_diagnostic,
-};
+use tze_hud_runtime::{ChromeState, collect_diagnostic};
 use tze_hud_scene::{
     Clock, SceneGraph, SceneId, TestClock, ZONE_TILE_Z_MIN,
     lease::{LeaseState, ORPHAN_GRACE_PERIOD_MS},
@@ -265,42 +262,6 @@ fn safe_mode_suspend_blocks_portal_updates_until_resume() {
 }
 
 #[test]
-fn freeze_path_uses_generic_backpressure_signal_not_portal_specific_signal() {
-    let mut queue = FreezeQueue::new(1);
-    let first = queue.enqueue(QueuedMutation {
-        batch_id: b"tx-1".to_vec(),
-        original_batch_id: b"tx-1".to_vec(),
-        traffic_class: MutationTrafficClass::Transactional,
-        coalesce_key: None,
-        submitted_at_wall_us: 1,
-        payload: b"tx-1".to_vec(),
-    });
-    assert!(matches!(
-        first,
-        EnqueueResult::Queued | EnqueueResult::QueuedWithPressure
-    ));
-
-    let second = queue.enqueue(QueuedMutation {
-        batch_id: b"tx-2".to_vec(),
-        original_batch_id: b"tx-2".to_vec(),
-        traffic_class: MutationTrafficClass::Transactional,
-        coalesce_key: None,
-        submitted_at_wall_us: 2,
-        payload: b"tx-2".to_vec(),
-    });
-    assert!(
-        matches!(second, EnqueueResult::BackpressureRequired { .. }),
-        "freeze overflow should produce generic backpressure for transactional batches"
-    );
-
-    let proto = include_str!("../../crates/tze_hud_protocol/proto/session.proto");
-    assert!(
-        !proto.contains("PORTAL_FREEZE"),
-        "protocol must not expose a portal-specific freeze signal"
-    );
-}
-
-#[test]
 fn shell_status_snapshot_exposes_no_portal_identity_or_transcript() {
     let (scene, _clock, _tab_id, _lease_id, tile_id) = create_portal_scene(120_000);
     let transcript = portal_text(&scene, tile_id);
@@ -348,9 +309,9 @@ fn shell_dismiss_override_removes_portal_tile() {
     );
 }
 
-// ─── First-class PortalSurface governance parity (hud-8z3w3) ──────────────────
+// ─── First-class PortalSurface governance parity ──────────────────
 //
-// The RFC 0013 §7.2 promotion replaces the ad-hoc raw-tile assembly with a
+// The promotion replaces the ad-hoc raw-tile assembly with a
 // single first-class `PortalSurface` overlay descriptor keyed by the host tile
 // id. Promotion must not add or relax governance: every contract asserted above
 // on the RAW-TILE path must hold UNCHANGED once a first-class surface is

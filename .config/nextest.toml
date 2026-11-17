@@ -22,7 +22,7 @@ filter = "package(=vertical_slice) & binary(=production_boot) & test(=production
 retries = 2
 
 [[profile.default.overrides]]
-# hud-dh0jy: one host-load watchdog failure, not an observed CI flake. Preserve
+# one host-load watchdog failure, not an observed CI flake. Preserve
 # all three adversarial floods and their existing timing/content assertions.
 filter = "package(=tze_hud_compositor) & binary(=tze_hud_compositor) & test(=markdown::tests::adversarial_floods_stay_within_budget)"
 retries = 2

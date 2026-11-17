@@ -1,15 +1,10 @@
 //! Structured error codes for the widget asset bundle system.
 //!
-//! Each variant maps 1-to-1 with a spec-defined error code from
-//! widget-system/spec.md §Requirement: Widget Asset Bundle Format and
-//! §Requirement: SVG Layer Parameter Bindings.
+//! Each variant has a stable wire code for bundle and SVG binding errors.
 
 use thiserror::Error;
 
 /// Errors produced by the widget asset bundle loader.
-///
-/// Source: widget-system/spec.md §Requirement: Widget Asset Bundle Format,
-///         §Requirement: SVG Layer Parameter Bindings.
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum BundleError {
     /// The bundle directory does not contain a `widget.toml` manifest.

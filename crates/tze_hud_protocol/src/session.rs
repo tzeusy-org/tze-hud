@@ -14,21 +14,6 @@ use tze_hud_scene::graph::SceneGraph;
 use crate::proto::session::ServerMessage;
 use crate::token::TokenStore;
 
-/// Runtime input-capture command for the local input processor owned by the
-/// compositor/window thread.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum InputCaptureCommand {
-    Request {
-        tile_id: SceneId,
-        node_id: SceneId,
-        device_id: u32,
-        release_on_up: bool,
-    },
-    Release {
-        device_id: u32,
-    },
-}
-
 /// Shared state between the gRPC server and the compositor.
 ///
 /// # Scene coherence
@@ -43,7 +28,7 @@ pub enum InputCaptureCommand {
 pub struct SharedState {
     pub scene: Arc<Mutex<SceneGraph>>,
     pub sessions: SessionRegistry,
-    /// Resident scene-resource upload store (RFC 0011 on HudSession stream).
+    /// Resident scene-resource upload store (on HudSession stream).
     pub resource_store: ResourceStore,
     /// Durable runtime widget asset store (v1 scoped durability exception).
     pub runtime_widget_store: Option<RuntimeWidgetStore>,
@@ -51,7 +36,7 @@ pub struct SharedState {
     pub element_store: ElementStore,
     /// On-disk path for `element_store.toml`. When `None`, persistence is disabled.
     pub element_store_path: Option<PathBuf>,
-    /// Whether the runtime is currently in safe mode (RFC 0005 §3.7).
+    /// Whether the runtime is currently in safe mode.
     ///
     /// This is the **single source of truth** for the runtime-global safe-mode
     /// flag.  When `true`, all active sessions reject MutationBatch with
@@ -74,12 +59,12 @@ pub struct SharedState {
     ///
     /// The composer keystroke-echo path (`dispatch_key_down_event` →
     /// composer intercept) must apply local feedback within the 4 ms
-    /// input-to-local-ack budget ("Local feedback first" doctrine) and MUST
+    /// input-to-local-ack budget ("Local feedback first" rule) and MUST
     /// NOT be blocked by gRPC scene-mutation batches that hold the scene
     /// `Mutex`.  Reading `scene.active_tab` for the tab-id guard previously
     /// required `try_lock`ing the scene mutex; under sustained portal
     /// streaming that try_lock kept failing, so keystrokes were deferred and
-    /// the echo froze (hud-dwcr7).
+    /// the echo froze.
     ///
     /// This mirror is a tiny dedicated `std::sync::Mutex<Option<SceneId>>`
     /// that is **never** held across an `.await` and **never** nested with the
@@ -90,17 +75,9 @@ pub struct SharedState {
     /// switch).  A one-frame lag is acceptable: the scene remains the source of
     /// truth and the mirror reconverges on the next refresh.
     pub active_tab_mirror: Arc<std::sync::Mutex<Option<SceneId>>>,
-    /// In-memory resume token store (RFC 0005 §6.1).
+    /// In-memory resume token store.
     /// Cleared on process restart; never persisted.
     pub token_store: TokenStore,
-    /// Optional bridge for session-plane pointer capture requests. Windowed
-    /// runtime installs the receiving end; the gRPC session plane no longer
-    /// sends commands (the capture requests were removed in T5 S6).
-    pub input_capture_tx: Option<mpsc::UnboundedSender<InputCaptureCommand>>,
-    /// Main-loop-only wake paired with `input_capture_tx`. Successful command
-    /// enqueue uses this to wake the sole windowed consumer without creating a
-    /// speculative compositor generation.
-    pub input_capture_wake: tze_hud_scene::render_wake::RenderWakeNotifier,
 }
 
 impl SharedState {
@@ -146,7 +123,7 @@ pub struct AgentSession {
     /// Used by the safe mode controller to deliver `SessionSuspended` and
     /// `SessionResumed` messages outside the normal event subscription path.
     /// Registered by the session handler when the stream is established.
-    /// These messages are transactional (never dropped) — per RFC 0005 §3.1.
+    /// These messages are transactional (never dropped) —.
     pub server_message_tx: Option<mpsc::Sender<Result<ServerMessage, Status>>>,
     /// Ends the session from the runtime side (the owner unpaired the agent).
     pub closer: SessionCloser,
@@ -358,7 +335,7 @@ impl SessionRegistry {
     /// Broadcast a `ServerMessage` to all connected sessions via their direct server channels.
     ///
     /// Used by the safe mode controller to deliver `SessionSuspended` and `SessionResumed`
-    /// to all active session streams.  These messages are transactional (RFC 0005 §3.1) and
+    /// to all active session streams. These messages are transactional and
     /// must not be dropped; if the channel is full the send will fail and the drop is logged
     /// as a warning (the session's backpressure signal path handles overflow recovery).
     ///

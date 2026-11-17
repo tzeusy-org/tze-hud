@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 // ─── Shared gRPC session harness ─────────────────────────────────────────────
 // Extracted from duplicate copies in the former presence-card suite and
-// subtitle_streaming (hud-ls5pz). See common/mod.rs for drift reconciliation notes.
+// subtitle_streaming. See common/mod.rs for drift reconciliation notes.
 use crate::common;
 use common::*;
 
@@ -345,9 +345,9 @@ async fn test_three_agents_contention() -> Result<(), Box<dyn std::error::Error>
 
 // ─── Cross-protocol scene coherence test ─────────────────────────────────────
 
-/// Verify that MCP and gRPC share a single scene graph (hud-bco1).
+/// Verify that MCP and gRPC share a single scene graph.
 ///
-/// Acceptance criteria (from hud-bco1 issue):
+/// Acceptance criteria (from issue):
 /// The protocol and MCP services share the same scene Arc. This headless
 /// integration test exercises that internal ownership directly: writes through
 /// either clone are visible through the other without a transport round trip.
@@ -494,7 +494,7 @@ async fn test_grpc_and_mcp_share_single_scene_graph() {
 /// first publisher's content must be evicted — even though the first publisher is
 /// different from the second.
 ///
-/// This is the behavioral assertion that was absent prior to hud-59b32.
+/// This is the behavioral assertion that was absent before the change.
 #[test]
 fn test_latest_wins_two_distinct_publishers() {
     use tze_hud_scene::graph::SceneGraph;

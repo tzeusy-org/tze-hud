@@ -13,12 +13,22 @@ use crate::tokens::{
 
 // ─── Token lookup helpers ─────────────────────────────────────────────────────
 
-/// Convert a tokens-module `Rgba` to the scene-types `Rgba`.
+/// Convert a parsed token colour to the scene-types `Rgba` the compositor
+/// draws. Token hex is sRGB; scene colours are linear (the renderer encodes
+/// back to sRGB on output), so the colour channels are linearised here, once.
+/// Alpha is coverage and stays as declared.
 fn tokens_color_to_scene(c: crate::tokens::Rgba) -> Rgba {
+    fn linear(c: f32) -> f32 {
+        if c <= 0.04045 {
+            c / 12.92
+        } else {
+            ((c + 0.055) / 1.055).powf(2.4)
+        }
+    }
     Rgba {
-        r: c.r,
-        g: c.g,
-        b: c.b,
+        r: linear(c.r),
+        g: linear(c.g),
+        b: linear(c.b),
         a: c.a,
     }
 }
@@ -98,7 +108,7 @@ pub fn apply_subtitle_token_defaults(policy: &mut RenderingPolicy, tokens: &Desi
             .margin_px
             .or_else(|| token_f32(tokens, "space.subtitle.vertical"));
     }
-    // overflow: Ellipsis per subtitle exemplar spec (hardcoded, not token-driven)
+    // overflow: Ellipsis (hardcoded, not token-driven)
     if policy.overflow.is_none() {
         policy.overflow = Some(TextOverflow::Ellipsis);
     }
@@ -113,7 +123,7 @@ pub fn apply_subtitle_token_defaults(policy: &mut RenderingPolicy, tokens: &Desi
 
 /// Apply token-derived defaults for the `notification-area` zone to `policy`.
 ///
-/// Token mappings (the notification card roles, hud-h51u7.4.1; the
+/// Token mappings (the notification card roles,; the
 /// compositor's `NotificationStyle` reads every other card metric and colour
 /// from tokens directly):
 /// - `text_color` ← `color.on_surface`
@@ -225,7 +235,7 @@ pub fn apply_status_bar_token_defaults(policy: &mut RenderingPolicy, tokens: &De
 
 /// Apply token-derived defaults for the `alert-banner` zone to `policy`.
 ///
-/// Token mappings (the alert banner roles, hud-h51u7.4.2; the compositor's
+/// Token mappings (the alert banner roles,; the compositor's
 /// `NotificationStyle` reads every other banner metric and colour from
 /// tokens directly):
 /// - `text_color` ← `color.on_alert` (non-notification stream text)
@@ -413,7 +423,7 @@ mod tests {
         // outline_color should be set
         assert!(policy.outline_color.is_some());
 
-        // overflow should be Ellipsis (subtitle exemplar spec)
+        // overflow should be Ellipsis
         assert_eq!(
             policy.overflow,
             Some(TextOverflow::Ellipsis),
@@ -518,6 +528,22 @@ mod tests {
         assert!((tc.r).abs() < 1e-4, "r should be 0 for #00FF00");
         assert!((tc.g - 1.0).abs() < 1e-4, "g should be 1.0 for #00FF00");
         assert!((tc.b).abs() < 1e-4, "b should be 0 for #00FF00");
+
+        // Mid-range channels are linearised: sRGB 0x80 is linear ~0.2159.
+        config_tokens.insert("color.on_surface".to_string(), "#80808080".to_string());
+        let tokens = resolve_tokens(&DesignTokenMap::new(), &config_tokens);
+        let mut policy = RenderingPolicy::default();
+        apply_token_defaults_for_zone("subtitle", &mut policy, &tokens);
+        let tc = policy.text_color.expect("text_color should be set");
+        assert!(
+            (tc.r - 0.2159).abs() < 1e-3,
+            "sRGB 0x80 is linear 0.2159, got {}",
+            tc.r
+        );
+        assert!(
+            (tc.a - 128.0 / 255.0).abs() < 1e-4,
+            "alpha is not gamma-encoded"
+        );
     }
 
     #[test]
@@ -526,7 +552,7 @@ mod tests {
         let mut policy = RenderingPolicy::default();
         apply_token_defaults_for_zone("notification-area", &mut policy, &tokens);
 
-        // The card reads its own notification roles (hud-h51u7.4.1).
+        // The card reads its own notification roles.
         assert_eq!(policy.text_color, token_color(&tokens, "color.on_surface"));
         assert!(policy.font_family.is_some());
         assert_eq!(

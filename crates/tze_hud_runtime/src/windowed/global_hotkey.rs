@@ -1,5 +1,4 @@
-//! Windows global hotkeys: the pause, control-panel and pairing chords
-//! (hud-jm8nq.10, hud-vniri.2).
+//! Windows global hotkeys: the pause, control-panel and pairing chords.
 //!
 //! `RegisterHotKey` is the only way a chord reaches the unfocused, click-through
 //! overlay. Every chord is registered on one dedicated thread with its own

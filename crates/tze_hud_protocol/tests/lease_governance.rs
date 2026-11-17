@@ -1,12 +1,11 @@
 //! Lease governance lifecycle and namespace isolation tests.
 //!
-//! Implements test coverage for `hud-i6yd.7`: Wire the full lease governance
-//! state machine for the dashboard tile.
+//! Lease lifecycle and namespace isolation for the dashboard tile.
 //!
-//! Covers tasks.md §10 (Lease Governance Lifecycle) and §11 (Namespace Isolation)
-//! plus the following spec.md requirements:
-//! - Requirement: Lease Orphan Handling on Disconnect (3 scenarios)
-//! - Requirement: Lease Expiry Without Renewal Removes Tile (2 scenarios)
+//! Covers (Lease Governance Lifecycle) and (Namespace Isolation)
+//! plus the following requirements:
+//! - Lease orphan handling on disconnect (3 scenarios)
+//! - Lease expiry without renewal removes the tile (2 scenarios)
 //! - Namespace isolation enforcement
 //!
 //! All tests are headless Layer 0: no display server or GPU required.
@@ -74,7 +73,7 @@ fn create_tile(scene: &mut SceneGraph, tab_id: SceneId, ns: &str, lease_id: Scen
 
 // ─── Scenario 10.2: Disconnect → ORPHANED with badge ─────────────────────────
 
-/// spec.md §Lease Orphan Handling on Disconnect — Scenario: Disconnection triggers orphan state and badge
+/// Lease Orphan Handling on Disconnect — Scenario: Disconnection triggers orphan state and badge
 ///
 /// WHEN the agent's gRPC stream disconnects unexpectedly
 /// THEN the lease SHALL transition to ORPHANED
@@ -173,7 +172,7 @@ fn disconnect_badges_all_owned_tiles() {
 
 // ─── Scenario 10.3: Reconnect within grace period restores ACTIVE ─────────────
 
-/// spec.md §Lease Orphan Handling on Disconnect — Scenario: Reconnection within grace period restores tile
+/// Lease Orphan Handling on Disconnect — Scenario: Reconnection within grace period restores tile
 ///
 /// WHEN the agent reconnects within 30 seconds of disconnection
 /// THEN the lease SHALL transition back to ACTIVE
@@ -256,7 +255,7 @@ fn reconnect_at_grace_period_boundary_is_accepted() {
 
 // ─── Scenario 10.4: Grace period expiry removes tile ─────────────────────────
 
-/// spec.md §Lease Orphan Handling on Disconnect — Scenario: Grace period expiry removes tile
+/// Lease Orphan Handling on Disconnect — Scenario: Grace period expiry removes tile
 ///
 /// WHEN the agent fails to reconnect within 30 seconds
 /// THEN the lease SHALL transition to EXPIRED
@@ -368,7 +367,7 @@ fn grace_period_expiry_removes_all_tile_nodes() {
 
 // ─── Scenario 10.5: Explicit LeaseRelease removes tile cleanly ───────────────
 
-/// spec.md §Requirement: Lease Expiry Without Renewal Removes Tile —
+/// Lease Expiry Without Renewal Removes Tile —
 /// Scenario: Explicit LeaseRelease transitions to RELEASED and removes tile.
 ///
 /// WHEN the agent sends a `LeaseRelease` (mapped to `revoke_lease` in the scene graph)
@@ -455,7 +454,7 @@ fn explicit_lease_release_removes_all_nodes() {
 
 // ─── Scenario 10.6: Resource cleanup on expiry ───────────────────────────────
 
-/// spec.md §Requirement: Lease Expiry Without Renewal Removes Tile —
+/// Lease Expiry Without Renewal Removes Tile —
 /// Scenario: Resources freed after expiry
 ///
 /// WHEN the lease expires and the tile is removed
@@ -582,7 +581,7 @@ fn ttl_expiry_without_renewal_removes_tile() {
 
 // ─── Scenario 11.1: Cross-namespace mutation rejection ───────────────────────
 
-/// spec.md §Requirement: Full Lifecycle User-Test Scenario —
+/// Full Lifecycle User-Test Scenario —
 /// Scenario: Namespace isolation during lifecycle
 ///
 /// WHEN a second agent session attempts to mutate the dashboard tile
@@ -679,7 +678,7 @@ fn agent_cannot_create_tile_in_foreign_namespace() {
 
 // ─── Scenario 11.2: Dashboard agent cannot mutate other namespace tiles ───────
 
-/// spec.md §11.2: dashboard agent cannot mutate tiles owned by another namespace.
+/// The dashboard agent cannot mutate tiles owned by another namespace.
 ///
 /// WHEN the dashboard agent tries to mutate a tile owned by another agent's
 /// namespace THEN the scene graph SHALL reject with `NamespaceMismatch`.
@@ -763,7 +762,7 @@ fn dashboard_agent_cannot_update_input_mode_of_other_tile() {
 
 /// TTL continues running while lease is ORPHANED.
 ///
-/// Spec line 133: "TTL continues running during orphan state."
+///: "TTL continues running during orphan state."
 /// If the lease TTL elapses while orphaned (even before grace expires),
 /// `expire_leases` must still clean up the tile.
 #[test]

@@ -83,10 +83,190 @@ def dev_commit() -> str:
     raise ValueError("unresolved dev tag")
 
 
+DIAGNOSTIC_REASONS = {"unavailable", "pending", "malformed", "cardinality", "bytes", "oversize_row", "source_partial"}
+HOLDING_KINDS = {"zone", "widget", "tile", "portal"}
+HOLDING_PHASES = {"active", "scheduled", "suspended", "orphaned", "cleanup_due", "unknown"}
+EXPIRY_KINDS = {"content", "lease", "orphan_grace", "suspension_limit", "until_clear", "activity", "idle_reclaim", "unknown"}
+WARNING_CODES = {
+    "WIDGET_BUNDLE_NO_MANIFEST", "WIDGET_BUNDLE_INVALID_MANIFEST", "WIDGET_BUNDLE_INVALID_NAME",
+    "WIDGET_BUNDLE_MISSING_SVG", "WIDGET_BUNDLE_SVG_PARSE_ERROR", "WIDGET_BINDING_UNRESOLVABLE",
+    "WIDGET_BUNDLE_DUPLICATE_TYPE", "WIDGET_BUNDLE_UNRESOLVED_TOKEN", "WIDGET_BUNDLE_ROOT_UNREADABLE",
+    "WIDGET_STARTUP_TAB_FAILED", "WIDGET_STARTUP_MISSING_TYPE", "WIDGET_STARTUP_TYPE_UNAVAILABLE",
+    "WIDGET_STARTUP_INSTANCE_FAILED", "FONT_DIRECTORY_UNREADABLE", "FONT_FILE_UNREADABLE", "FONT_FAMILY_FALLBACK",
+}
+
+
+def unsigned(value, nullable=False):
+    return (nullable and value is None) or (type(value) is int and 0 <= value <= 2**64 - 1)
+
+
+def add_count(value, extra):
+    # Keep the runtime's saturating u64 counter contract through local trims.
+    return None if value is None else min(2**64 - 1, value + extra)
+
+
+def bounded_string(value, size, nullable=False):
+    return (nullable and value is None) or (isinstance(value, str) and len(value.encode("utf-8")) <= size)
+
+
+def valid_holding(row):
+    return (isinstance(row, dict) and set(row) == {"agent", "surface", "kind", "phase", "expires_in_ms", "expiry_kind", "count"}
+            and bounded_string(row["agent"], 128) and bounded_string(row["surface"], 256)
+            and row["kind"] in HOLDING_KINDS and row["surface"].startswith(row["kind"] + ":")
+            and row["phase"] in HOLDING_PHASES and row["expiry_kind"] in EXPIRY_KINDS
+            and unsigned(row["expires_in_ms"], True) and unsigned(row["count"]) and row["count"] > 0)
+
+
+def valid_warning(row):
+    return (isinstance(row, dict) and set(row) == {"source", "code", "subject", "fallback"}
+            and row["source"] in ("widget_bundle", "font") and row["code"] in WARNING_CODES
+            and bounded_string(row["subject"], 128, True)
+            and (row["subject"] is None or re.fullmatch(r"root:\d+(?:/bundle:\d+)?|builtin:\d+|bundle:\d+|tab:\d+(?:/widget:\d+)?|fonts-dir|font-file:\d+|sans|mono|serif", row["subject"]))
+            and row["fallback"] in (None, "IBM Plex Sans", "IBM Plex Mono", "DejaVu Serif"))
+
+
+def unavailable_diagnostics(reason):
+    return {"state": "unavailable", "holdings_state": "unavailable", "warnings_state": "unavailable",
+            "holdings": [], "warnings": [], "omitted_agents": None, "omitted_records": None,
+            "omitted_warning_events": None, "reasons": [reason]}
+
+
+def project_diagnostics(status):
+    """Whitelist metadata only after authenticated status succeeds; never copy raw status."""
+    if "holdings" not in status or "warnings" not in status:
+        return unavailable_diagnostics("unavailable")
+    try:
+        holdings, warnings = status["holdings"], status["warnings"]
+        if (not isinstance(holdings, dict) or set(holdings) != {"state", "sources", "agents", "omitted_agents", "omitted_records", "omission_reasons"}
+                or holdings["state"] not in ("complete", "partial", "unavailable")
+                or not isinstance(holdings["sources"], dict) or set(holdings["sources"]) != {"scene", "portals"}
+                or holdings["sources"]["scene"] not in ("available", "busy", "unavailable")
+                or holdings["sources"]["portals"] not in ("available", "not_configured", "busy", "unavailable")
+                or not isinstance(holdings["agents"], list) or len(holdings["agents"]) > 64
+                or not unsigned(holdings["omitted_agents"], True) or not unsigned(holdings["omitted_records"], True)
+                or not isinstance(holdings["omission_reasons"], list)
+                or any(reason not in ("cardinality", "bytes", "oversize_id", "busy", "unavailable") for reason in holdings["omission_reasons"])):
+            raise ValueError
+        complete_sources = (holdings["sources"]["scene"] == "available"
+                            and holdings["sources"]["portals"] in ("available", "not_configured"))
+        readable_source = "available" in holdings["sources"].values()
+        expected_state = ("complete" if complete_sources and holdings["omitted_records"] == 0
+                          else "partial" if readable_source else "unavailable")
+        if (holdings["state"] != expected_state
+                or (not complete_sources and (holdings["omitted_records"] is not None or holdings["omitted_agents"] is not None))
+                or (complete_sources and holdings["omitted_records"] is None)
+                or (holdings["state"] == "complete" and (holdings["omission_reasons"] or holdings["omitted_agents"] != 0))):
+            raise ValueError
+        rows = []
+        for agent in holdings["agents"]:
+            if (not isinstance(agent, dict) or set(agent) != {"id", "surfaces", "omitted_records"}
+                    or not bounded_string(agent["id"], 128) or not unsigned(agent["omitted_records"])
+                    or not isinstance(agent["surfaces"], list)):
+                raise ValueError
+            for surface in agent["surfaces"]:
+                if not isinstance(surface, dict) or "agent" in surface:
+                    raise ValueError
+                row = {"agent": agent["id"], **surface}
+                if not valid_holding(row):
+                    raise ValueError
+                rows.append(row)
+                if len(rows) > 256:
+                    raise ValueError
+        if (not isinstance(warnings, dict) or set(warnings) != {"state", "items", "truncated", "omitted_events", "omission_reasons"}
+                or warnings["state"] not in ("pending", "complete", "unavailable")
+                or type(warnings["truncated"]) is not bool or not unsigned(warnings["omitted_events"])
+                or not isinstance(warnings["items"], list) or len(warnings["items"]) > 64
+                or not all(valid_warning(row) for row in warnings["items"])
+                or not isinstance(warnings["omission_reasons"], list)
+                or any(reason not in ("cardinality", "bytes") for reason in warnings["omission_reasons"])):
+            raise ValueError
+        if (warnings["truncated"] != (warnings["omitted_events"] != 0)
+                or bool(warnings["omission_reasons"]) != warnings["truncated"]
+                or (warnings["state"] == "unavailable" and (warnings["items"] or warnings["truncated"]))
+                or (holdings["state"] == "unavailable" and rows)
+                or (holdings["state"] == "complete" and any(agent["omitted_records"] for agent in holdings["agents"]))):
+            raise ValueError
+        rows.sort(key=lambda row: (row["agent"], row["surface"], row["kind"], row["phase"], row["expiry_kind"], -1 if row["expires_in_ms"] is None else row["expires_in_ms"]))
+        reasons = set()
+        if holdings["state"] != "complete" or warnings["truncated"]:
+            reasons.add("source_partial")
+        if warnings["state"] == "pending":
+            reasons.add("pending")
+        if holdings["state"] == "unavailable" or warnings["state"] == "unavailable":
+            reasons.add("unavailable")
+        omitted = holdings["omitted_records"]
+        if len(rows) > 8:
+            if omitted is not None:
+                omitted = add_count(omitted, sum(row["count"] for row in rows[8:]))
+            reasons.add("cardinality")
+        warning_items = warnings["items"]
+        if len(warning_items) > 4:
+            reasons.add("cardinality")
+        omitted_agents = holdings["omitted_agents"]
+        if omitted_agents is not None:
+            omitted_agents = add_count(omitted_agents, len({row["agent"] for row in rows} - {row["agent"] for row in rows[:8]}))
+        return {"state": "complete" if not reasons else ("unavailable" if holdings["state"] == warnings["state"] == "unavailable" else "partial"),
+                "holdings_state": holdings["state"], "warnings_state": warnings["state"],
+                "holdings": rows[:8], "warnings": warning_items[:4],
+                "omitted_agents": omitted_agents, "omitted_records": omitted,
+                "omitted_warning_events": None if warnings["state"] == "unavailable" else add_count(warnings["omitted_events"], max(0, len(warning_items) - 4)), "reasons": sorted(reasons)}
+    except (KeyError, TypeError, ValueError, UnicodeError):
+        return unavailable_diagnostics("malformed")
+
+
+def diagnostic_result(result, diagnostics):
+    if diagnostics is None:
+        return result
+    result["diagnostics"] = diagnostics
+    # Actual default JSON encoding (including ensure_ascii escaping) plus newline.
+    while len((json.dumps({"result": result}) + "\n").encode()) > 3072:
+        reasons = set(diagnostics["reasons"])
+        reasons.add("bytes")
+        if diagnostics["holdings"]:
+            dropped = diagnostics["holdings"].pop()
+            single = {**diagnostics, "holdings": [dropped], "warnings": []}
+            if len((json.dumps({"result": {**result, "diagnostics": single}}) + "\n").encode()) > 3072:
+                reasons.add("oversize_row")
+            if diagnostics["omitted_agents"] is not None and not any(row["agent"] == dropped["agent"] for row in diagnostics["holdings"]):
+                diagnostics["omitted_agents"] = add_count(diagnostics["omitted_agents"], 1)
+            if diagnostics["omitted_records"] is not None:
+                diagnostics["omitted_records"] = add_count(diagnostics["omitted_records"], dropped["count"])
+        elif diagnostics["warnings"]:
+            diagnostics["warnings"].pop()
+            if diagnostics["omitted_warning_events"] is not None:
+                diagnostics["omitted_warning_events"] = add_count(diagnostics["omitted_warning_events"], 1)
+        else:
+            # The scalar envelope and fixed primary-result vocabulary fit alone.
+            raise ValueError("diagnostic envelope cannot fit")
+        diagnostics["reasons"] = sorted(reasons)
+        diagnostics["state"] = "partial"
+    return result
+
+
+def valid_diagnostics(value):
+    try:
+        return (isinstance(value, dict) and set(value) == {"state", "holdings_state", "warnings_state", "holdings", "warnings", "omitted_agents", "omitted_records", "omitted_warning_events", "reasons"}
+                and value["state"] in ("complete", "partial", "unavailable")
+                and value["holdings_state"] in ("complete", "partial", "unavailable")
+                and value["warnings_state"] in ("complete", "pending", "unavailable")
+                and isinstance(value["holdings"], list) and len(value["holdings"]) <= 8 and all(valid_holding(row) for row in value["holdings"])
+                and isinstance(value["warnings"], list) and len(value["warnings"]) <= 4 and all(valid_warning(row) for row in value["warnings"])
+                and all(unsigned(value[key], True) for key in ("omitted_agents", "omitted_records", "omitted_warning_events"))
+                and isinstance(value["reasons"], list) and len(value["reasons"]) <= len(DIAGNOSTIC_REASONS)
+                and all(reason in DIAGNOSTIC_REASONS for reason in value["reasons"])
+                and (value["state"] != "complete" or (value["holdings_state"] == value["warnings_state"] == "complete"
+                     and not value["reasons"] and all(value[key] == 0 for key in ("omitted_agents", "omitted_records", "omitted_warning_events"))))
+                and (value["warnings_state"] != "unavailable" or (not value["warnings"] and value["omitted_warning_events"] is None))
+                and (value["holdings_state"] != "unavailable" or (not value["holdings"] and value["omitted_records"] is None and value["omitted_agents"] is None)))
+    except (KeyError, TypeError, ValueError, UnicodeError):
+        return False
+
+
 def doctor_probe(host: str | None, progress) -> dict:
     """Read-only probe in an owned child; no Python signal deadline assumption."""
     layer = "endpoint"
     action = DOCTOR_ACTIONS[layer]
+    diagnostics = None
     try:
         name, url = hud_env._adapter_url(host or os.environ.get("HUD_HOST", ""))
         port = hud_env._split(url)[1]
@@ -114,13 +294,14 @@ def doctor_probe(host: str | None, progress) -> dict:
         action = DOCTOR_ACTIONS[layer]
         progress({"phase": layer, "deadline": time.monotonic() + DOCTOR_LAYER_SECONDS})
         status = doctor_json(url.removesuffix("/mcp") + "/admin/status", hud_env.load_psk(host))
+        diagnostics = project_diagnostics(status)
         layer = "firewall"
         action = DOCTOR_ACTIONS[layer]
         firewall = status.get("tailnet_inbound", {})
         state = firewall.get("state") if isinstance(firewall, dict) else None
         if state != "allowed":
             reason = state if state in ("blocked", "unknown", "not_applicable") else "unknown"
-            return {"ok": False, "layer": layer, "reason": reason, "action": action}
+            return diagnostic_result({"ok": False, "layer": layer, "reason": reason, "action": action}, diagnostics)
         layer = "build"
         action = DOCTOR_ACTIONS[layer]
         sha = status.get("sha", "")
@@ -131,9 +312,9 @@ def doctor_probe(host: str | None, progress) -> dict:
         progress({"phase": layer, "deadline": time.monotonic() + DOCTOR_LAYER_SECONDS})
         latest = dev_commit()
         if sha.lower() != latest:
-            return {"ok": False, "layer": "build", "reason": "sha_mismatch",
-                    "action": "Ask the owner to update to the resolved dev commit; no update was performed."}
-        return {"ok": True, "layer": "dev_commit", "sha": latest}
+            return diagnostic_result({"ok": False, "layer": "build", "reason": "sha_mismatch",
+                    "action": "Ask the owner to update to the resolved dev commit; no update was performed."}, diagnostics)
+        return diagnostic_result({"ok": True, "layer": "dev_commit", "sha": latest}, diagnostics)
     except Exception as error:
         if isinstance(error, urllib.error.HTTPError):
             reason = ("unauthenticated" if layer == "auth" and error.code == 401 else
@@ -149,7 +330,7 @@ def doctor_probe(host: str | None, progress) -> dict:
             reason = "pairing_unavailable" if layer == "auth" else "invalid_endpoint"
         else:
             reason = "unknown"
-        return {"ok": False, "layer": layer, "reason": reason, "action": action}
+        return diagnostic_result({"ok": False, "layer": layer, "reason": reason, "action": action}, diagnostics)
 
 
 def reap_doctor(pid: int, pidfd: int, stop: bool) -> int:
@@ -246,11 +427,16 @@ def doctor(host: str | None) -> int:
                 elif message.get("unavailable") is True:
                     result = {"ok": False, "layer": "endpoint", "reason": "deadline_unavailable", "action": DOCTOR_HOST_ACTION}
                 else:
-                    result = message["result"]
-                    if (set(result) - {"ok", "layer", "reason", "action", "sha"} or type(result.get("ok")) is not bool or
-                            result.get("action") not in (*DOCTOR_ACTIONS.values(), DOCTOR_HOST_ACTION,
+                    candidate = message["result"]
+                    if (set(candidate) - {"ok", "layer", "reason", "action", "sha", "diagnostics"} or type(candidate.get("ok")) is not bool or
+                            candidate.get("action") not in (*DOCTOR_ACTIONS.values(), DOCTOR_HOST_ACTION,
                                                         "Ask the owner to update to the resolved dev commit; no update was performed.", None)):
                         raise ValueError("invalid probe result")
+                    if "diagnostics" in candidate and (not valid_diagnostics(candidate["diagnostics"]) or len((json.dumps({"result": candidate}) + "\n").encode()) > 3072):
+                        raise ValueError("invalid probe diagnostics")
+                    # Do not let an unvalidated child's reason masquerade as a
+                    # supervisor-owned cleanup/deadline failure in the handler.
+                    result = candidate
         cleanup_attempted = True
         status = reap_doctor(pid, pidfd, result.get("reason") == "deadline_exceeded")
         reaped = True

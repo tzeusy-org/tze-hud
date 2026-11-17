@@ -191,12 +191,11 @@ pub struct RawConfig {
     /// Optional config schema version. Absent is treated as the current
     /// supported version (back-compatible for existing v1 configs); a value
     /// greater than the runtime's maximum supported version fails closed with
-    /// `CONFIG_SCHEMA_VERSION_UNSUPPORTED` (configuration spec §Config Schema
-    /// Version and Compatibility Policy).
+    /// `CONFIG_SCHEMA_VERSION_UNSUPPORTED`.
     #[serde(default)]
     pub schema_version: Option<u32>,
 
-    /// `includes` is v1-reserved.  Presence must produce a hard error.
+    /// `includes` is unsupported.  Presence must produce a hard error.
     /// Accepts any value — detection of presence triggers the error in validation.
     pub includes: Option<AnyValue>,
 

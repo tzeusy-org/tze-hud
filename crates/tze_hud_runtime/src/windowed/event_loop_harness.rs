@@ -3,7 +3,7 @@
 //! Headless test harness that drives the runtime's real event/window
 //! state-machine — the code production runs inside winit's
 //! [`ApplicationHandler`] — with synthetic events, WITHOUT constructing a real
-//! `winit` window, a `wgpu` surface, or running the OS event loop (hud-nu0ea).
+//! `winit` window, a `wgpu` surface, or running the OS event loop.
 //!
 //! ## Why this exists
 //!
@@ -28,26 +28,9 @@
 //!
 //! ## Scope
 //!
-//! This is deliberately NOT an attempt to run a real headless `WinitApp` with a
-//! GPU — that is the `cargo test -p tze_hud_compositor` llvmpipe pixel-readback
-//! deadlock this harness is meant to avoid. It drives only the parts of the
-//! state machine that are GPU-independent (input/keyboard dispatch, portal/
-//! composer routing over the shared scene). The window, surface, and compositor
-//! fields are left `None`. The capture-accounting gate additionally uses a
-//! headless compositor for real frame builds, substituting only GPU readback
-//! and swapchain operations through production-used frame/present seams.
-//!
-//! ## Networked mode (POC acceptance)
-//!
-//! [`HeadlessEventLoopHarness::with_network`] boots the same state from a real
-//! config with the production MCP HTTP server on a loopback ephemeral port and
-//! the MCP → event-loop portal-op channel, plus the gRPC session server on
-//! another (all over one `SharedState`), all reading one injected clock. The
-//! control panel task runs too ([`HeadlessEventLoopHarness::press_chord`]).
-//! [`HeadlessEventLoopHarness::tick`] runs one event-loop turn: the main-thread
-//! settle sequence `about_to_wait` runs, then the compositor's Stage 4
-//! timed-content sweep and notification hit-region refresh, minus the GPU.
-//! `tests/integration/poc_acceptance.rs` drives it (feature `test-harness`).
+//! Construction stays GPU-free. An opt-in test/dev offscreen backend uses the
+//! canonical HeadlessRuntime factory and the same scene/settle/production turn.
+//! It measures real local GPU submissions, never OS presentation or scanout.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -113,10 +96,6 @@ impl WindowedRuntimeState {
         )));
 
         let (frame_ready_tx, frame_ready_rx) = crate::channels::frame_ready_channel();
-        // Input-capture / paste channels: the drain path never reads these, but
-        // the fields require a receiver. Drop the senders — a disconnected
-        // receiver is harmless here.
-        let (_input_capture_tx, input_capture_rx) = tokio::sync::mpsc::unbounded_channel();
 
         WindowedRuntimeState {
             wake: super::wake::WindowedWake::disconnected(),
@@ -138,23 +117,17 @@ impl WindowedRuntimeState {
                 false,
                 Default::default(),
             )),
-            pairing: None,
             control_panel: None,
-            input_ring: Arc::new(StdMutex::new(VecDeque::new())),
             pending_input_latency: Arc::new(StdMutex::new(VecDeque::new())),
             frame_ready_rx,
             deferred_present: false,
             frame_ready_tx: Some(frame_ready_tx),
             frame_presented_tx: None,
             degradation_notices: None,
-            compositor: None,
             window_surface: None,
             input_processor: InputProcessor::new(),
-            input_capture_rx,
-            pending_input_capture_commands: VecDeque::new(),
             focus_manager: FocusManager::new(),
             keyboard_processor: KeyboardProcessor::new(),
-            telemetry: tze_hud_telemetry::TelemetryCollector::new(),
             pipeline: crate::pipeline::FramePipeline::new(),
             shutdown: crate::threads::ShutdownToken::new(),
             quiescent_failed: Arc::new(AtomicBool::new(false)),
@@ -171,6 +144,7 @@ impl WindowedRuntimeState {
             static_hit_regions: Vec::new(),
             widget_hover_trackers: HashMap::new(),
             pending_widget_svgs: Vec::new(),
+            startup_diagnostics: None,
             text_fit: Default::default(),
             modifiers: winit::keyboard::ModifiersState::empty(),
             primary_monitor: None,
@@ -214,6 +188,7 @@ impl WindowedRuntimeState {
             surface_ui: Default::default(),
             resize_grip_hover_state: Arc::new(StdMutex::new(None)),
             tile_close_hover_state: Arc::new(StdMutex::new(None)),
+            drag_handle_hover_state: Arc::new(StdMutex::new(None)),
             cursor_left_window: false,
             composer_visual_layout: Arc::new(StdMutex::new(None)),
             portal_projection_driver: crate::portal::PortalDriver::new(portals),
@@ -221,6 +196,7 @@ impl WindowedRuntimeState {
             pending_keyboard_events: VecDeque::new(),
             pending_scroll: VecDeque::new(),
             pending_pointer_move: false,
+            pending_pointer_buttons: VecDeque::new(),
             interaction_feedback_lock_misses: std::sync::atomic::AtomicU64::new(0),
         }
     }
@@ -253,8 +229,6 @@ impl SharedStateBuilder {
             safe_mode_atomic,
             active_tab_mirror,
             token_store: tze_hud_protocol::token::TokenStore::new(),
-            input_capture_tx: None,
-            input_capture_wake: tze_hud_scene::render_wake::RenderWakeNotifier::default(),
         }
     }
 }
@@ -273,6 +247,16 @@ impl SharedStateBuilder {
 /// end-to-end tests (see the module docs).
 pub struct HeadlessEventLoopHarness {
     app: WinitApp,
+    frame_turn: crate::pipeline::FrameTurnState,
+    offscreen: Option<(
+        tze_hud_compositor::Compositor,
+        tze_hud_compositor::HeadlessSurface,
+    )>,
+    last_turn_submitted: bool,
+    offscreen_work: (u64, u64),
+    offscreen_tokens_seen: u64,
+    next_frame_wall_us: Option<u64>,
+    next_animation_at: Option<std::time::Instant>,
     mcp_addr: Option<SocketAddr>,
     grpc_addr: Option<SocketAddr>,
     clipboard: Arc<std::sync::Mutex<Vec<String>>>,
@@ -280,6 +264,14 @@ pub struct HeadlessEventLoopHarness {
     /// (`open <path>`, `firewall <action> <ports>`, `autostart <on>`),
     /// recorded instead of done.
     effects: Arc<std::sync::Mutex<Vec<String>>>,
+    /// The first-run pairing the panel's connect rows share, when booted
+    /// with an agents file.
+    pairing: Option<Arc<crate::pairing::Pairing>>,
+    /// Already accepted overlay geometry, substituting for OS windows only.
+    display_fixture: Option<(
+        super::displays::MonitorSpec,
+        Vec<super::displays::MonitorSpec>,
+    )>,
 }
 
 impl HeadlessEventLoopHarness {
@@ -317,6 +309,10 @@ impl HeadlessEventLoopHarness {
         );
         let raw: Option<tze_hud_config::raw::RawConfig> =
             cfg.config_toml.as_deref().map(toml::from_str).transpose()?;
+        state.zone_displays = raw
+            .as_ref()
+            .map(tze_hud_config::displays::zone_display_assignments)
+            .unwrap_or_default();
         let global_tokens = match &raw {
             Some(raw) => {
                 let config_parent = cfg
@@ -330,6 +326,7 @@ impl HeadlessEventLoopHarness {
                         .text_fit
                         .register_widget_svg(widget_type, svg_file, svg);
                 }
+                state.pending_widget_svgs.extend(startup.widget_svg_assets);
                 startup.global_tokens
             }
             None => {
@@ -362,7 +359,6 @@ impl HeadlessEventLoopHarness {
                 grpc_addr.port(),
             ))
         });
-        state.pairing = pairing.clone();
         let render_wake = state.wake.render_notifier();
         state.live = Arc::new(
             crate::launch::LiveSettings::new(cfg.target_fps, cfg.debug_zones, render_wake.clone())
@@ -371,6 +367,7 @@ impl HeadlessEventLoopHarness {
         // GPU-free: measure with the production tokens the compositor would use.
         state.text_fit.set_tokens(global_tokens.clone());
         let mcp_config = crate::mcp::McpServerConfig {
+            startup: None,
             text_fit: Some(Arc::clone(&state.text_fit) as Arc<dyn tze_hud_scene::TextFit>),
             appearance: None,
             publication_defaults: state.live.publication_defaults.clone(),
@@ -453,6 +450,7 @@ impl HeadlessEventLoopHarness {
         let clipboard: Arc<std::sync::Mutex<Vec<String>>> = Arc::default();
         let effects: Arc<std::sync::Mutex<Vec<String>>> = Arc::default();
         let deps = crate::shell::control_panel::ControlPanelDeps {
+            clipboard: Default::default(),
             scene: Arc::clone(&panel_scene),
             pause: crate::shell::control_panel::PauseControl::new(
                 Arc::clone(&state.shared_state),
@@ -526,10 +524,19 @@ impl HeadlessEventLoopHarness {
         state.config = cfg;
         Ok(HeadlessEventLoopHarness {
             app: WinitApp { state },
+            frame_turn: crate::pipeline::FrameTurnState::default(),
+            offscreen: None,
+            last_turn_submitted: false,
+            offscreen_work: (0, 0),
+            offscreen_tokens_seen: 0,
+            next_frame_wall_us: None,
+            next_animation_at: None,
             mcp_addr: Some(mcp_addr),
             grpc_addr: Some(grpc_addr),
             clipboard,
             effects,
+            pairing,
+            display_fixture: None,
         })
     }
 
@@ -644,6 +651,81 @@ impl HeadlessEventLoopHarness {
             }
             tze_hud_compositor::PanelBody::Empty(_) => None,
         }
+    }
+
+    /// The current topology's zone choice as actually published by the panel.
+    pub fn control_panel_zone_row(&self, zone: &str) -> Option<tze_hud_compositor::PanelItem> {
+        let displays = self.app.state.control_panel.as_ref()?.displays.as_ref()?;
+        let topology = displays.snapshot().2;
+        self.control_panel_row(&format!("layout.zone.{zone}.{topology}"))
+    }
+
+    /// Inject accepted monitor keys/overlay geometry, bypassing OS identity
+    /// discovery and window creation. The real topology adoption and publisher
+    /// feed the panel, status and compositor's shared DisplayLayout. Subsequent
+    /// ticks run the same pending-assignment drain as `about_to_wait`.
+    pub fn set_display_topology(
+        &mut self,
+        monitors: Vec<(tze_hud_compositor::DisplayRect, String)>,
+    ) {
+        use super::displays::{KeyedMonitor, MonitorSpec};
+        use super::monitor_identity::DisplayKey;
+        assert_eq!(monitors.iter().filter(|(m, _)| m.primary).count(), 1);
+        let mut keyed = Vec::new();
+        let mut primary = None;
+        let mut secondaries = Vec::new();
+        for (monitor, key) in monitors {
+            let spec = MonitorSpec {
+                name: monitor.name.clone(),
+                x: monitor.rect.x as i32,
+                y: monitor.rect.y as i32,
+                width: monitor.rect.width as u32,
+                height: monitor.rect.height as u32,
+                scale: 1.0,
+            };
+            keyed.push(KeyedMonitor {
+                name: monitor.name,
+                key: DisplayKey {
+                    base: key.split_once('@').map(|(base, _)| base.to_owned()),
+                    key,
+                    stable: true,
+                },
+            });
+            if monitor.primary {
+                primary = Some(spec);
+            } else {
+                secondaries.push(spec);
+            }
+        }
+        let primary = primary.expect("one primary");
+        self.app.adopt_display_keys(keyed, &[]);
+        self.app.state.primary_monitor = Some(primary.clone());
+        self.app.publish_displays_for(&primary, &secondaries);
+        self.display_fixture = Some((primary, secondaries));
+    }
+
+    /// Restrict the fixture's secondary overlay plan without removing any
+    /// connected hardware keys. This models primary-only modes or a failed
+    /// sibling overlay; `set_display_topology` restores the complete plan.
+    pub fn retain_display_overlays(&mut self, secondary_names: &[&str]) {
+        let (primary, secondaries) = self
+            .display_fixture
+            .as_mut()
+            .expect("display topology fixture");
+        secondaries.retain(|monitor| secondary_names.contains(&monitor.name.as_str()));
+        self.app.publish_displays_for(primary, secondaries);
+    }
+
+    /// Observe the compositor's actual shared placement (None means primary),
+    /// and its publication generation, without constructing GPU surfaces.
+    pub fn zone_display_placement(&self, zone: &str) -> (Option<tze_hud_scene::Rect>, u64) {
+        let targets = self
+            .app
+            .state
+            .display_targets
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        (targets.layout.zone_display_rect(zone), targets.generation)
     }
 
     /// The open control panel's Connect an agent card, if it is showing.
@@ -773,9 +855,7 @@ impl HeadlessEventLoopHarness {
     /// Whether the control panel is open.
     /// Whether a pairing code is open (booted with an agents file).
     pub fn pairing_open(&self) -> bool {
-        self.app
-            .state
-            .pairing
+        self.pairing
             .as_ref()
             .is_some_and(|pairing| pairing.is_open())
     }
@@ -850,35 +930,148 @@ impl HeadlessEventLoopHarness {
             .collect()
     }
 
-    /// Run one GPU-free event-loop turn: the main-thread settle sequence from
-    /// `about_to_wait` (composer flush, deferred keys, MCP portal ops, portal
-    /// projection drain), then the compositor's Stage 4 timed-content sweep
-    /// and the notification hit-region refresh its post-render pass does.
-    ///
-    /// Returns `false` when a lock was busy and part of the turn was deferred;
-    /// call again.
+    /// Attach a real offscreen compositor using the canonical headless factory.
+    /// The temporary factory scene is discarded; every turn uses this harness's
+    /// actual shared scene, injected clock and production portal/composer state.
+    /// Repeated calls retain the already attached backend and its frame ledger.
+    pub async fn enable_offscreen_rendering(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        if self.offscreen.is_some() {
+            return Ok(());
+        }
+        let runtime = crate::headless::HeadlessRuntime::new(crate::headless::HeadlessConfig {
+            width: self.app.state.config.window.width,
+            height: self.app.state.config.window.height,
+            grpc_port: 0,
+            agents: self.app.state.config.agents.load().as_ref().clone(),
+            config_toml: self.app.state.config.config_toml.clone(),
+        })
+        .await?;
+        let mut compositor = runtime.compositor;
+        crate::widget_runtime_registration::process_pending_widget_svgs(
+            compositor.widget_renderer_mut(),
+            self.app.state.pending_widget_svgs.drain(..),
+        );
+        compositor.set_token_map(self.app.state.global_tokens.clone());
+        compositor.local_composer_state = Arc::clone(&self.app.state.local_composer_state);
+        compositor.focus_ring_owner_state = Arc::clone(&self.app.state.focus_ring_owner_state);
+        compositor.resize_grip_hover_state = Arc::clone(&self.app.state.resize_grip_hover_state);
+        compositor.tile_close_hover_state = Arc::clone(&self.app.state.tile_close_hover_state);
+        compositor.drag_handle_hover_state = Arc::clone(&self.app.state.drag_handle_hover_state);
+        compositor.composer_visual_layout = Arc::clone(&self.app.state.composer_visual_layout);
+        self.offscreen_tokens_seen = self.app.state.tokens_seen;
+        self.offscreen = Some((compositor, runtime.surface));
+        Ok(())
+    }
+
+    /// Real full-frame backend entries and successful local queue submissions.
+    pub fn offscreen_work_counts(&self) -> (u64, u64) {
+        self.offscreen_work
+    }
+
+    /// None identifies a renderer-unavailable turn, not an idle success.
+    pub fn last_frame_submitted(&self) -> Option<bool> {
+        self.offscreen.as_ref().map(|_| self.last_turn_submitted)
+    }
+
+    /// Content/lease/widget and animation deadlines from the production turn.
+    pub fn frame_deadlines(&self) -> (Option<u64>, Option<std::time::Instant>) {
+        (self.next_frame_wall_us, self.next_animation_at)
+    }
+
+    /// Run the real main-thread settle followed by the production frame turn.
+    /// A missing renderer is explicit and never acknowledges a successful frame.
+    /// Returns false on lock contention or deferred settle work.
     pub fn tick(&mut self) -> bool {
+        self.last_turn_submitted = false;
         self.app.sync_design_tokens();
+        if let Some((primary, secondaries)) = &self.display_fixture {
+            self.app.sync_zone_assignments_for(primary, secondaries);
+        } else {
+            self.app.sync_zone_assignments();
+        }
         let settled = !self.app.settle_scene_work().is_deferred();
         let (width, height) = (
-            self.app.state.config.window.width as f32,
-            self.app.state.config.window.height as f32,
+            self.app.state.config.window.width,
+            self.app.state.config.window.height,
         );
         let Ok(state) = self.app.state.shared_state.try_lock() else {
+            self.app.schedule_shared_scene_availability_wake();
             return false;
         };
-        let Ok(mut scene) = state.scene.try_lock() else {
+        let scene_arc = Arc::clone(&state.scene);
+        drop(state);
+        let Ok(mut scene) = scene_arc.try_lock() else {
+            let waiting_scene = Arc::clone(&scene_arc);
+            self.app
+                .state
+                .wake
+                .schedule_compositor_after_availability(move || {
+                    drop(waiting_scene.blocking_lock());
+                });
             return false;
         };
-        crate::pipeline::sweep_timed_scene_state(&mut scene);
-        tze_hud_compositor::renderer::hit_regions::populate_notification_hit_regions(
+        let mut repaint = false;
+        let (renderer, surface) = match self.offscreen.as_mut() {
+            Some((renderer, surface)) => {
+                repaint = renderer.set_safe_mode_overlay(
+                    self.app
+                        .state
+                        .safe_mode_atomic
+                        .load(std::sync::atomic::Ordering::Acquire),
+                );
+                if self.offscreen_tokens_seen != self.app.state.tokens_seen {
+                    renderer.set_token_map(self.app.state.global_tokens.clone());
+                    self.offscreen_tokens_seen = self.app.state.tokens_seen;
+                    repaint = true;
+                }
+                (Some(renderer), Some(surface))
+            }
+            None => (None, None),
+        };
+        let turn = self.frame_turn.run_frame_turn(
             &mut scene,
-            width,
-            height,
-            &std::collections::HashMap::new(),
+            renderer,
+            crate::pipeline::FrameTurnRequest {
+                repaint,
+                ..Default::default()
+            },
+            |_| (),
+            |renderer, scene, needs_render| {
+                let (telemetry, submitted) = if needs_render {
+                    self.offscreen_work.0 += 1;
+                    let (telemetry, submitted) = renderer.render_frame_headless_with_submission(
+                        scene,
+                        surface.expect("attached renderer owns a surface"),
+                    );
+                    self.offscreen_work.1 += u64::from(submitted);
+                    (Some(telemetry), submitted)
+                } else {
+                    (None, false)
+                };
+                crate::pipeline::FrameTurnBuild {
+                    work: telemetry,
+                    submitted,
+                }
+            },
         );
-        // The compositor hands terminal lease transitions to the owning
-        // sessions; removal is immediate without agent cooperation.
+        self.last_turn_submitted = turn.submitted;
+        self.next_frame_wall_us = turn.next_wall_us;
+        self.next_animation_at = turn.next_animation_at;
+        if turn.work.is_none() {
+            // GPU-free callers need approximate notification geometry, but do
+            // not claim render/snapshot/presentation evidence.
+            tze_hud_compositor::renderer::hit_regions::populate_notification_hit_regions(
+                &mut scene,
+                width as f32,
+                height as f32,
+                &std::collections::HashMap::new(),
+            );
+        }
+        let wakes = scene.take_notification_wait_notifiers();
+        drop(scene);
+        for wake in wakes {
+            wake.notify();
+        }
         settled
     }
 
@@ -981,27 +1174,48 @@ impl HeadlessEventLoopHarness {
         });
     }
 
+    /// Read the scene for a geometry lookup. Runtime tasks (an availability
+    /// waiter, a session handler) may hold the lock for a moment; wait that
+    /// out instead of reporting a target missing.
+    fn with_scene<T>(
+        &self,
+        read: impl FnOnce(&tze_hud_scene::graph::SceneGraph) -> T,
+    ) -> Option<T> {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        loop {
+            if let Ok(state) = self.app.state.shared_state.try_lock()
+                && let Ok(scene) = state.scene.try_lock()
+            {
+                return Some(read(&scene));
+            }
+            if std::time::Instant::now() >= deadline {
+                return None;
+            }
+            std::thread::yield_now();
+        }
+    }
+
     /// Display-space center of the first composer input region on screen
     /// (a portal armed with `expects_reply`), where a user would click to type.
     pub fn composer_center(&self) -> Option<(f32, f32)> {
-        let state = self.app.state.shared_state.try_lock().ok()?;
-        let scene = state.scene.try_lock().ok()?;
-        scene.tiles.values().find_map(|tile| {
-            let mut stack: Vec<SceneId> = tile.root_node.into_iter().collect();
-            while let Some(id) = stack.pop() {
-                let node = scene.nodes.get(&id)?;
-                if let NodeData::HitRegion(region) = &node.data
-                    && region.accepts_composer_input
-                {
-                    return Some((
-                        tile.bounds.x + region.bounds.x + region.bounds.width / 2.0,
-                        tile.bounds.y + region.bounds.y + region.bounds.height / 2.0,
-                    ));
+        self.with_scene(|scene| {
+            scene.tiles.values().find_map(|tile| {
+                let mut stack: Vec<SceneId> = tile.root_node.into_iter().collect();
+                while let Some(id) = stack.pop() {
+                    let node = scene.nodes.get(&id)?;
+                    if let NodeData::HitRegion(region) = &node.data
+                        && region.accepts_composer_input
+                    {
+                        return Some((
+                            tile.bounds.x + region.bounds.x + region.bounds.width / 2.0,
+                            tile.bounds.y + region.bounds.y + region.bounds.height / 2.0,
+                        ));
+                    }
+                    stack.extend(node.children.iter().copied());
                 }
-                stack.extend(node.children.iter().copied());
-            }
-            None
-        })
+                None
+            })
+        })?
     }
 
     /// Display-space center of the on-screen notification action button
@@ -1020,19 +1234,19 @@ impl HeadlessEventLoopHarness {
         &self,
         matches: impl Fn(&tze_hud_scene::NotificationAction) -> bool,
     ) -> Option<(f32, f32)> {
-        let state = self.app.state.shared_state.try_lock().ok()?;
-        let scene = state.scene.try_lock().ok()?;
-        scene
-            .overlay
-            .zone_hit_regions
-            .iter()
-            .find(|region| scene.notification_action(region).is_some_and(&matches))
-            .map(|region| {
-                (
-                    region.bounds.x + region.bounds.width / 2.0,
-                    region.bounds.y + region.bounds.height / 2.0,
-                )
-            })
+        self.with_scene(|scene| {
+            scene
+                .overlay
+                .zone_hit_regions
+                .iter()
+                .find(|region| scene.notification_action(region).is_some_and(&matches))
+                .map(|region| {
+                    (
+                        region.bounds.x + region.bounds.width / 2.0,
+                        region.bounds.y + region.bounds.height / 2.0,
+                    )
+                })
+        })?
     }
 
     /// Widget instance `name`'s geometry override and auto-clear limit.
@@ -1101,16 +1315,46 @@ impl HeadlessEventLoopHarness {
 
     /// Build a harness around an inert-but-real `WinitApp`.
     #[cfg(test)]
-    pub(super) fn new() -> Self {
+    pub(crate) fn new() -> Self {
         HeadlessEventLoopHarness {
             app: WinitApp {
                 state: WindowedRuntimeState::new_headless(),
             },
+            frame_turn: crate::pipeline::FrameTurnState::default(),
+            offscreen: None,
+            last_turn_submitted: false,
+            offscreen_work: (0, 0),
+            offscreen_tokens_seen: 0,
+            next_frame_wall_us: None,
+            next_animation_at: None,
             mcp_addr: None,
             grpc_addr: None,
             clipboard: Arc::default(),
             effects: Arc::default(),
+            pairing: None,
+            display_fixture: None,
         }
+    }
+
+    /// Drive the actual topology adoption/status publisher without OS windows.
+    #[cfg(test)]
+    pub(crate) fn publish_display_fixture(
+        &mut self,
+        configured: std::collections::HashMap<String, String>,
+        names: &[&str],
+    ) {
+        let primary = super::displays::MonitorSpec {
+            name: names[0].into(),
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 1080,
+            scale: 1.0,
+        };
+        self.app.state.zone_displays = configured;
+        self.app
+            .adopt_display_keys(super::displays::key_monitors(names, &[]), &[]);
+        self.app.publish_displays(&primary);
     }
 
     /// Install a single-tab scene containing a focused composer region and seed
@@ -1272,6 +1516,236 @@ mod tests {
     use tze_hud_protocol::proto::{CommandAction, CommandSource};
     use tze_hud_scene::MonoUs;
 
+    #[tokio::test]
+    async fn production_turn_skips_idle_and_renders_scene_changes_and_animation() {
+        let _gpu = crate::test_support::lock_headless_runtime().await;
+        let mut cfg = super::super::WindowedConfig::default();
+        cfg.window.width = 320;
+        cfg.window.height = 240;
+        cfg.config_toml = Some(
+            r#"
+            [[tabs]]
+            name = "gate"
+            [[tabs.widgets]]
+            instance_id = "gate-progress"
+            widget_type = "progress-bar"
+        "#
+            .into(),
+        );
+        let mut harness = HeadlessEventLoopHarness::with_network(
+            cfg,
+            Arc::new(tze_hud_scene::TestClock::new(1_000)),
+        )
+        .await
+        .unwrap();
+        assert!(harness.tick());
+        assert_eq!(harness.last_frame_submitted(), None);
+        assert_eq!(harness.frame_turn.last_rendered(), (u64::MAX, u64::MAX));
+        harness
+            .enable_offscreen_rendering()
+            .await
+            .expect("real offscreen backend");
+        assert!(harness.tick());
+        assert_eq!(harness.last_frame_submitted(), Some(true));
+        assert_eq!(harness.offscreen_work_counts(), (1, 1));
+        assert!(
+            harness
+                .offscreen
+                .as_mut()
+                .unwrap()
+                .0
+                .take_work_counts()
+                .is_some()
+        );
+        for _ in 0..3 {
+            assert!(harness.tick());
+            assert_eq!(harness.last_frame_submitted(), Some(false));
+            assert_eq!(
+                harness.offscreen_work_counts(),
+                (1, 1),
+                "settled empty turns do no build or submit"
+            );
+            assert!(
+                harness
+                    .offscreen
+                    .as_mut()
+                    .unwrap()
+                    .0
+                    .take_work_counts()
+                    .is_none()
+            );
+        }
+        harness.enable_offscreen_rendering().await.unwrap();
+        assert!(harness.tick());
+        assert_eq!(
+            harness.offscreen_work_counts(),
+            (1, 1),
+            "repeated enable retains the existing backend and its ledger"
+        );
+        {
+            let mut scene = harness.scene();
+            scene.zone_registry = tze_hud_scene::ZoneRegistry::with_defaults();
+            scene
+                .zone_registry
+                .zones
+                .get_mut("subtitle")
+                .unwrap()
+                .rendering_policy
+                .transition_in_ms = Some(0);
+            scene
+                .publish_to_zone(
+                    "subtitle",
+                    tze_hud_scene::ZoneContent::StreamText("held".into()),
+                    "gate",
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap();
+        }
+        assert!(harness.tick());
+        assert_eq!(
+            harness.offscreen_work_counts(),
+            (2, 2),
+            "a real publication builds and submits"
+        );
+        harness
+            .offscreen
+            .as_mut()
+            .unwrap()
+            .0
+            .take_work_counts()
+            .unwrap();
+        for _ in 0..3 {
+            assert!(harness.tick());
+            assert_eq!(
+                harness.offscreen_work_counts(),
+                (2, 2),
+                "held content does no further build or submit"
+            );
+            assert!(
+                harness
+                    .offscreen
+                    .as_mut()
+                    .unwrap()
+                    .0
+                    .take_work_counts()
+                    .is_none()
+            );
+        }
+        {
+            let mut scene = harness.scene();
+            scene
+                .zone_registry
+                .zones
+                .get_mut("subtitle")
+                .unwrap()
+                .rendering_policy
+                .transition_out_ms = Some(0);
+            scene.clear_zone_for_publisher("subtitle", "gate").unwrap();
+        }
+        assert!(harness.tick());
+        {
+            let mut scene = harness.scene();
+            // Long content transition is an input fixture, not a gate timeout.
+            scene
+                .zone_registry
+                .zones
+                .get_mut("subtitle")
+                .unwrap()
+                .rendering_policy
+                .transition_in_ms = Some(60_000);
+            scene
+                .publish_to_zone(
+                    "subtitle",
+                    tze_hud_scene::ZoneContent::StreamText("animation".into()),
+                    "gate",
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap();
+        }
+        assert!(harness.tick());
+        let versions = {
+            let scene = harness.scene();
+            (scene.version, scene.geometry_epoch)
+        };
+        assert_eq!(harness.frame_turn.last_rendered(), versions);
+        let before = harness.offscreen_work_counts();
+        assert!(harness.tick());
+        assert_eq!(
+            harness.frame_turn.last_rendered(),
+            versions,
+            "animation renders with both version ledgers pinned"
+        );
+        assert_eq!(
+            harness.offscreen_work_counts(),
+            (before.0 + 1, before.1 + 1)
+        );
+        assert!(
+            harness
+                .offscreen
+                .as_mut()
+                .unwrap()
+                .0
+                .take_work_counts()
+                .is_some()
+        );
+        {
+            let mut scene = harness.scene();
+            scene.clear_zone_for_publisher("subtitle", "gate").unwrap();
+        }
+        assert!(harness.tick());
+        assert!(harness.tick());
+        assert_eq!(harness.last_frame_submitted(), Some(false));
+        let before = harness.offscreen_work_counts();
+        let old_tokens = harness.offscreen.as_ref().unwrap().0.token_map.clone();
+        let appearance = Arc::clone(harness.app.state.appearance.as_ref().unwrap());
+        appearance
+            .apply(std::collections::HashMap::from([(
+                "theme".into(),
+                "blueprint".into(),
+            )]))
+            .await
+            .unwrap();
+        assert!(harness.tick());
+        assert_eq!(
+            harness.offscreen_work_counts(),
+            (before.0 + 1, before.1 + 1)
+        );
+        assert_eq!(
+            harness.offscreen.as_ref().unwrap().0.token_map,
+            harness.app.state.global_tokens
+        );
+        assert_ne!(harness.offscreen.as_ref().unwrap().0.token_map, old_tokens);
+        assert!(harness.tick());
+        assert_eq!(
+            harness.offscreen_work_counts(),
+            (before.0 + 1, before.1 + 1),
+            "live tokens repaint once then settle"
+        );
+        {
+            let mut scene = harness.scene();
+            scene
+                .publish_to_widget("gate-progress", Default::default(), "gate", None, 0, None)
+                .unwrap();
+        }
+        assert!(harness.tick());
+        let renderer = harness
+            .offscreen
+            .as_ref()
+            .unwrap()
+            .0
+            .widget_renderer()
+            .unwrap();
+        assert!(
+            renderer.texture_entry("gate-progress").is_some(),
+            "configured SVGs render on the actual harness scene"
+        );
+        assert!(renderer.raster_count("gate-progress") > 0);
+    }
+
     /// Real frame builds and runtime accounting; only offscreen readback and
     /// swapchain acquire/submit/present are synthetic. GPU pixels and PNG have
     /// their own dedicated compositor/operator gates.
@@ -1351,7 +1825,7 @@ mod tests {
     }
 
     /// `/admin/status` `portals` and `idle_since_ms` read the state real frame
-    /// builds and the production input path leave behind (T13, hud-1dnk5.12).
+    /// builds and the production input path leave behind (T13).
     #[tokio::test]
     async fn admin_status_reports_rendered_portal_state() {
         use serde_json::Value;
@@ -1894,7 +2368,7 @@ mod tests {
         runtime.events.press_named_key("Enter");
         assert_eq!(launches(&runtime), 3);
 
-        // A stale OUTPUT selection never takes a composer Ctrl+C (hud-hxhnt):
+        // A stale OUTPUT selection never takes a composer Ctrl+C:
         // a primary press outside OUTPUT clears it, browser-style.
         std::thread::sleep(multi_click);
         pointer(&mut runtime, from, PointerEventKind::Down);
@@ -2106,6 +2580,30 @@ mod tests {
         assert_eq!(
             runtime.events.app.state.wake.counters().snapshot(),
             counters
+        );
+        let versions = runtime.frames.last_rendered();
+        *runtime.compositor.focus_ring_owner_state.lock().unwrap() =
+            Some(tze_hud_compositor::renderer::FocusRingOwner {
+                tab_id: SceneId::new(),
+                tile_id: SceneId::new(),
+                node_id: None,
+            });
+        assert!(
+            runtime.turn(false),
+            "local-only feedback requests an ordinary attempt"
+        );
+        assert_eq!(
+            runtime.frames.last_rendered(),
+            versions,
+            "failed attempt does not acknowledge feedback"
+        );
+        assert!(
+            runtime.turn(true),
+            "consumed local-only feedback must retry until submission succeeds"
+        );
+        assert!(
+            !runtime.turn(true),
+            "the successful local-feedback retry returns to idle"
         );
         // A submitted image can be reused by a later encode before the main
         // thread presents it. If that encode is still busy, consuming the ready
@@ -2999,7 +3497,7 @@ mod tests {
 
     /// A release that arrives after the press was already ended (the runtime
     /// saw the button physically up and synthesized the Up) must not repeat
-    /// the click: one press on Approve queues exactly one `approve` (hud-z21e9).
+    /// the click: one press on Approve queues exactly one `approve`.
     #[test]
     fn late_os_release_after_synthesized_up_queues_one_action() {
         let mut harness = approve_reject_notification_harness();
@@ -3050,9 +3548,377 @@ mod tests {
 
     /// Hovering and pressing an action button set its local feedback state
     /// with no agent round trip, and each change re-arms the idle gate once
-    /// (the geometry epoch) while an unchanged move does not (hud-paslt).
+    /// (the geometry epoch) while an unchanged move does not.
     #[test]
     fn action_button_hover_and_press_are_local_and_frame_only_on_change() {
+        // Retaining native history must also preserve the authorization of a
+        // denied application edge queued behind a busy scene, and an exhausted
+        // receipt queue cannot advertise a live hover before it can admit Down.
+        {
+            use crate::windowed::lifecycle::{ChromeAppEdge, ChromeCaptureTestScope};
+            use winit::event::MouseButton;
+            let mut failures = Vec::new();
+            {
+                let mut harness = approve_reject_notification_harness();
+                let approve = harness.notification_action_center("approve").unwrap();
+                let reject = harness.notification_action_center("reject").unwrap();
+                let window = winit::window::WindowId::from(7);
+                let native = ChromeCaptureTestScope::new(window);
+                for down in [true, false] {
+                    let frame = native.begin(down);
+                    native.complete(frame);
+                }
+                drop(ChromeAppEdge::begin(winit::window::WindowId::from(8), true));
+                assert!(harness.tick());
+                let shared = harness.shared_state();
+                let held = shared.blocking_lock();
+                (harness.app.state.cursor_x, harness.app.state.cursor_y) = approve;
+                for down in [true, false] {
+                    harness
+                        .app
+                        .handle_mouse_button(MouseButton::Left, down, window, None);
+                }
+                (harness.app.state.cursor_x, harness.app.state.cursor_y) = reject;
+                for down in [true, false] {
+                    let frame = native.begin(down);
+                    harness
+                        .app
+                        .handle_mouse_button(MouseButton::Left, down, window, None);
+                    native.complete(frame);
+                }
+                assert_eq!(harness.app.state.pending_pointer_buttons.len(), 4);
+                assert!(!harness.tick());
+                assert_eq!(harness.app.state.pending_pointer_buttons.len(), 4);
+                drop(held);
+                let deadline = std::time::Instant::now() + SCENE_WAIT;
+                loop {
+                    // Tick completion covers scene/portal work, not delivery of
+                    // every retained edge: a transient lock miss can leave the
+                    // pointer FIFO queued while later settle phases complete.
+                    let settled = harness.tick();
+                    let pending = harness.app.state.pending_pointer_buttons.len();
+                    if settled && pending == 0 {
+                        break;
+                    }
+                    assert!(
+                        std::time::Instant::now() < deadline,
+                        "retained notification delivery stalled: {pending} edges; settled={settled}"
+                    );
+                    std::thread::yield_now();
+                }
+                let actions = take_action_ids(&harness);
+                if actions != ["reject"] {
+                    failures.push(format!(
+                        "retained stale pair borrowed fresh authorization: {actions:?}"
+                    ));
+                }
+            }
+            {
+                let mut harness = approve_reject_notification_harness();
+                let approve = harness.notification_action_center("approve").unwrap();
+                let window = winit::window::WindowId::from(7);
+                let native = ChromeCaptureTestScope::new(window);
+                for _ in 0..128 {
+                    for down in [true, false] {
+                        let frame = native.begin(down);
+                        native.complete(frame);
+                    }
+                }
+                drop(ChromeAppEdge::begin(winit::window::WindowId::from(8), true));
+                assert!(harness.tick());
+                assert!(native.healthy());
+                harness.app.state.cursor_window = Some(window);
+                (harness.app.state.cursor_x, harness.app.state.cursor_y) = approve;
+                harness.app.enqueue_pointer_event(PointerEventKind::Move);
+                let feedback = chrome_state(&harness, "approve");
+                let frame = native.begin(true);
+                assert!(frame.is_none(), "a full receipt queue cannot admit Down");
+                harness
+                    .app
+                    .handle_mouse_button(MouseButton::Left, true, window, None);
+                native.complete(frame);
+                assert!(!chrome_state(&harness, "approve").pressed);
+                assert!(take_action_ids(&harness).is_empty());
+                if feedback != Default::default() {
+                    failures.push(format!(
+                        "full receipt queue advertised live feedback: {feedback:?}"
+                    ));
+                }
+            }
+            assert!(
+                failures.is_empty(),
+                "retained-history availability failures: {failures:?}"
+            );
+        }
+        // Native callbacks can complete while winit buffers their application
+        // events. A recovered press must never lend its receipt to that old pair.
+        {
+            use crate::windowed::lifecycle::{ChromeAppEdge, ChromeCaptureTestScope};
+            use winit::event::MouseButton;
+            for during_fault in [false, true] {
+                let mut harness = approve_reject_notification_harness();
+                let approve = harness.notification_action_center("approve").unwrap();
+                let reject = harness.notification_action_center("reject").unwrap();
+                let window = winit::window::WindowId::from(7);
+                let native = ChromeCaptureTestScope::new(window);
+                for down in [true, false] {
+                    let frame = native.begin(down);
+                    native.complete(frame);
+                }
+                drop(ChromeAppEdge::begin(winit::window::WindowId::from(8), true));
+                assert!(!native.healthy());
+                if during_fault {
+                    for down in [true, false] {
+                        let frame = native.begin(down);
+                        assert!(frame.is_none(), "fault-era edges cannot authorize");
+                        native.complete(frame);
+                    }
+                }
+                assert!(harness.tick());
+                assert!(native.healthy());
+                if !during_fault {
+                    for down in [true, false] {
+                        let frame = native.begin(down);
+                        native.complete(frame);
+                    }
+                }
+                (harness.app.state.cursor_x, harness.app.state.cursor_y) = approve;
+                if during_fault {
+                    harness.app.state.cursor_window = Some(window);
+                    harness.app.enqueue_pointer_event(PointerEventKind::Move);
+                    assert_eq!(
+                        chrome_state(&harness, "approve"),
+                        Default::default(),
+                        "pending quarantine stays inert after fault latch recovery"
+                    );
+                }
+                for down in [true, false] {
+                    harness
+                        .app
+                        .handle_mouse_button(MouseButton::Left, down, window, None);
+                }
+                assert!(
+                    take_action_ids(&harness).is_empty(),
+                    "buffered old application pair cannot consume fresh native authorization"
+                );
+                assert_eq!(harness.zone_publication_count("notification-area"), 1);
+                (harness.app.state.cursor_x, harness.app.state.cursor_y) = reject;
+                for down in [true, false] {
+                    harness
+                        .app
+                        .handle_mouse_button(MouseButton::Left, down, window, None);
+                }
+                if during_fault {
+                    assert!(
+                        take_action_ids(&harness).is_empty(),
+                        "fault-era application pair only drains cancelled debt"
+                    );
+                    assert_eq!(harness.zone_publication_count("notification-area"), 1);
+                    for down in [true, false] {
+                        let frame = native.begin(down);
+                        harness
+                            .app
+                            .handle_mouse_button(MouseButton::Left, down, window, None);
+                        native.complete(frame);
+                    }
+                }
+                assert_eq!(
+                    take_action_ids(&harness),
+                    ["reject"],
+                    "only matching fresh application coordinates may act"
+                );
+            }
+        }
+        // Winit can deliver a fresh native frame before flushing older buffered
+        // application events. Ambiguity cancels all candidates, but each delivered
+        // edge must still retire one debt unit so the next complete click works.
+        {
+            use crate::windowed::lifecycle::{ChromeAppEdge, ChromeCaptureTestScope};
+            use winit::event::MouseButton;
+            let mut harness = approve_reject_notification_harness();
+            let approve = harness.notification_action_center("approve").unwrap();
+            let reject = harness.notification_action_center("reject").unwrap();
+            let window = winit::window::WindowId::from(7);
+            let native = ChromeCaptureTestScope::new(window);
+            for down in [true, false] {
+                let frame = native.begin(down);
+                native.complete(frame);
+            }
+            drop(ChromeAppEdge::begin(winit::window::WindowId::from(8), true));
+            assert!(harness.tick());
+            let frame = native.begin(true);
+            (harness.app.state.cursor_x, harness.app.state.cursor_y) = reject;
+            harness
+                .app
+                .handle_mouse_button(MouseButton::Left, true, window, None);
+            (harness.app.state.cursor_x, harness.app.state.cursor_y) = approve;
+            for down in [true, false] {
+                harness
+                    .app
+                    .handle_mouse_button(MouseButton::Left, down, window, None);
+            }
+            native.complete(frame);
+            let frame = native.begin(false);
+            harness
+                .app
+                .handle_mouse_button(MouseButton::Left, false, window, None);
+            native.complete(frame);
+            assert!(
+                take_action_ids(&harness).is_empty(),
+                "reentrant ambiguous delivery never activates either candidate"
+            );
+            assert_eq!(harness.zone_publication_count("notification-area"), 1);
+            assert!(harness.tick());
+            assert!(native.healthy());
+            (harness.app.state.cursor_x, harness.app.state.cursor_y) = reject;
+            for down in [true, false] {
+                let frame = native.begin(down);
+                harness
+                    .app
+                    .handle_mouse_button(MouseButton::Left, down, window, None);
+                native.complete(frame);
+            }
+            assert_eq!(
+                take_action_ids(&harness),
+                ["reject"],
+                "cancelled ambiguous edges leave no phantom debt"
+            );
+        }
+        // A capture fault and safe mode both make notification buttons inert.
+        // Inject only native receipt delivery; routing, feedback, cancellation
+        // and between-turn recovery below use the production implementations.
+        {
+            use crate::windowed::lifecycle::{ChromeAppEdge, ChromeCaptureTestScope};
+            use winit::event::MouseButton;
+
+            let mut missing = Vec::new();
+            for fault in [false, true] {
+                let mut harness = approve_reject_notification_harness();
+                let approve = harness.notification_action_center("approve").unwrap();
+                (harness.app.state.cursor_x, harness.app.state.cursor_y) = approve;
+                let window = winit::window::WindowId::from(7);
+                let native = ChromeCaptureTestScope::new(window);
+                harness.app.state.press_window = Some(window);
+                harness.app.state.cursor_window = Some(window);
+                let in_flight = if fault {
+                    let frame = native.begin(true);
+                    harness
+                        .app
+                        .handle_mouse_button(MouseButton::Left, true, window, None);
+                    native.complete(frame);
+                    assert!(chrome_state(&harness, "approve").pressed);
+                    assert!(harness.app.state.zone_press.is_some());
+                    let frame = native.begin(false);
+                    // An application edge without matching native history
+                    // faults while another native delivery is still active.
+                    drop(ChromeAppEdge::begin(winit::window::WindowId::from(8), true));
+                    assert!(!native.healthy());
+                    assert!(harness.tick());
+                    assert!(!native.healthy(), "in-flight history cannot recover");
+                    assert!(
+                        harness.app.state.zone_press.is_none(),
+                        "fault disarms the accepted press"
+                    );
+                    frame
+                } else {
+                    harness
+                        .app
+                        .state
+                        .safe_mode_atomic
+                        .store(true, std::sync::atomic::Ordering::Release);
+                    None
+                };
+                harness.app.enqueue_pointer_event(PointerEventKind::Move);
+                if chrome_state(&harness, "approve").hovered {
+                    missing.push((fault, "inert hover"));
+                }
+                let frame = native.begin(true);
+                harness
+                    .app
+                    .handle_mouse_button(MouseButton::Left, true, window, None);
+                native.complete(frame);
+                if chrome_state(&harness, "approve").pressed {
+                    missing.push((fault, "inert press"));
+                }
+                assert!(take_action_ids(&harness).is_empty());
+
+                if fault {
+                    native.complete(in_flight);
+                    let edge = ChromeAppEdge::begin(window, false);
+                    assert!(harness.tick());
+                    assert!(
+                        !native.healthy(),
+                        "an application edge cannot recover itself"
+                    );
+                    drop(edge);
+                    // Fault cancellation must reach the scene before recovery.
+                    harness.app.cancel_chrome_feedback();
+                    let shared = harness.shared_state();
+                    let held = shared.blocking_lock();
+                    for down in [true, false] {
+                        harness
+                            .app
+                            .handle_mouse_button(MouseButton::Left, down, window, None);
+                    }
+                    assert!(!harness.app.state.pending_pointer_buttons.is_empty());
+                    assert!(!harness.tick());
+                    assert!(!native.healthy(), "busy feedback cleanup stays fail-closed");
+                    drop(held);
+                    let deadline = std::time::Instant::now() + SCENE_WAIT;
+                    while !harness.tick() {
+                        assert!(std::time::Instant::now() < deadline);
+                        std::thread::yield_now();
+                    }
+                    assert!(harness.app.state.pending_pointer_buttons.is_empty());
+                    assert!(
+                        take_action_ids(&harness).is_empty(),
+                        "retained fault-era edges cannot activate"
+                    );
+                    if !native.healthy() {
+                        missing.push((fault, "between-turn recovery"));
+                    }
+                    assert_eq!(chrome_state(&harness, "approve"), Default::default());
+                } else {
+                    harness
+                        .app
+                        .state
+                        .safe_mode_atomic
+                        .store(false, std::sync::atomic::Ordering::Release);
+                }
+                // The cancelled/disabled press's Up cannot activate, even
+                // after recovery. Only a complete fresh press may act.
+                let frame = native.begin(false);
+                harness
+                    .app
+                    .handle_mouse_button(MouseButton::Left, false, window, None);
+                native.complete(frame);
+                assert!(take_action_ids(&harness).is_empty(), "late Up stays inert");
+                assert_eq!(harness.zone_publication_count("notification-area"), 1);
+                harness.app.state.cursor_window = Some(winit::window::WindowId::from(8));
+                harness.app.enqueue_pointer_event(PointerEventKind::Move);
+                assert_eq!(
+                    chrome_state(&harness, "approve"),
+                    Default::default(),
+                    "an unobserved window stays inert"
+                );
+                harness.app.state.cursor_window = Some(window);
+                for down in [true, false] {
+                    let frame = native.begin(down);
+                    harness
+                        .app
+                        .handle_mouse_button(MouseButton::Left, down, window, None);
+                    native.complete(frame);
+                }
+                harness.drain();
+                if take_action_ids(&harness) != ["approve"] {
+                    missing.push((fault, "fresh click after recovery"));
+                }
+            }
+            assert!(
+                missing.is_empty(),
+                "notification availability failures: {missing:?}"
+            );
+        }
         let mut harness = approve_reject_notification_harness();
         let approve = harness.notification_action_center("approve").unwrap();
         let reject = harness.notification_action_center("reject").unwrap();
@@ -3449,7 +4315,6 @@ mod tests {
                             .is_some()
                     );
                 }
-                let ring = harness.app.state.input_ring.lock().unwrap().len();
                 if let Some(native) = &native {
                     native.lose();
                     harness.app.state.press_window = Some(winit::window::WindowId::from(77));
@@ -3474,11 +4339,6 @@ mod tests {
                     cancellations_not_disarmed.push((native_loss, held_terminal));
                     continue;
                 }
-                assert_eq!(
-                    harness.app.state.input_ring.lock().unwrap().len(),
-                    ring,
-                    "cancel creates no synthetic input"
-                );
                 if held_terminal {
                     assert!(harness.app.settle_scene_work().is_deferred());
                 }
@@ -3701,8 +4561,74 @@ mod tests {
             "completed plus active is ambiguous"
         );
         receipts.complete(active);
-        assert!(!receipts.permit(window), "ambiguity disables until restart");
+        assert!(
+            !receipts.permit(window),
+            "ambiguity disables until explicit recovery"
+        );
         assert!(receipts.install(window).is_none(), "no automatic rearm");
+        assert!(
+            receipts.recover(),
+            "between-turn recovery discards ambiguous history"
+        );
+        assert!(
+            !receipts.permit(window),
+            "recovery cannot authorize an old press"
+        );
+        assert!(
+            !receipts.consume(window, false),
+            "buffered cancelled Up keeps its own receipt"
+        );
+        let late = receipts.begin(install, false).unwrap();
+        assert!(late > active, "frame identities never rewind");
+        assert!(
+            !receipts.consume(window, false),
+            "held old Up stays cancelled"
+        );
+        receipts.complete(late);
+        receipts.retire(install);
+        let replacement = receipts.install(window).unwrap();
+        assert!(
+            replacement > install,
+            "reinstallation identities never rewind"
+        );
+        let late = receipts.begin(replacement, false).unwrap();
+        assert!(
+            !receipts.consume(window, false),
+            "reinstallation cannot arm an Up"
+        );
+        receipts.complete(late);
+        for down in [true, false] {
+            let edge = receipts.begin(replacement, down).unwrap();
+            assert!(
+                receipts.consume(window, down),
+                "fresh replacement click works"
+            );
+            receipts.complete(edge);
+        }
+        assert!(!receipts.recover(), "healthy recovery is a no-op");
+
+        let mut receipts = ChromeCaptureLedger::default();
+        let old = receipts.install(window).unwrap();
+        receipts.fault();
+        assert!(receipts.begin(old, true).is_none());
+        assert!(receipts.recover());
+        receipts.retire(old);
+        let replacement = receipts.install(window).unwrap();
+        assert!(replacement > old);
+        assert!(
+            receipts.begin(replacement, true).is_none(),
+            "retired delivery debt cannot be bypassed by reinstallation"
+        );
+        assert!(!receipts.consume(window, true));
+        assert!(!receipts.consume(window, true));
+        for down in [true, false] {
+            let edge = receipts.begin(replacement, down).unwrap();
+            assert!(
+                receipts.consume(window, down),
+                "fresh replacement click follows the retired debt drain"
+            );
+            receipts.complete(edge);
+        }
 
         let mut receipts = ChromeCaptureLedger::default();
         let install = receipts.install(window).unwrap();
@@ -3715,6 +4641,23 @@ mod tests {
             "bounded receipt admission"
         );
         assert!(!receipts.consume(window, true));
+        assert!(
+            receipts.recover(),
+            "bounded receipt failure can resynchronize"
+        );
+        assert!(
+            receipts.begin(install, true).is_none(),
+            "overflow delivery debt cannot admit a new press"
+        );
+        for _ in 0..257 {
+            assert!(
+                !receipts.consume(window, true),
+                "known and overflow application edges drain inert"
+            );
+        }
+        let down = receipts.begin(install, true).unwrap();
+        assert!(receipts.consume(window, true));
+        receipts.complete(down);
         let mut receipts = ChromeCaptureLedger::default();
         for _ in 0..64 {
             assert!(receipts.install(window).is_some());
@@ -3723,11 +4666,16 @@ mod tests {
             receipts.install(window).is_none(),
             "bounded installation admission"
         );
+        assert!(receipts.recover());
+        assert!(
+            receipts.install(window).is_none(),
+            "recovery cannot bypass the installation bound"
+        );
     }
 
     /// One click on Approve queues exactly one `approve` and dismisses the
     /// notification, so the click has an immediate visible result and a
-    /// second click has nothing to land on (hud-paslt).
+    /// second click has nothing to land on.
     #[test]
     fn action_click_queues_one_action_and_dismisses_the_notification() {
         // The existing real pointer route also owns local links, exact debounce
@@ -4398,7 +5346,7 @@ mod tests {
 
     /// A release activates an action only when the press began on that same
     /// button: pressing Approve and releasing over Reject, or pressing the
-    /// dismiss button, queues no action the user did not press (hud-z21e9).
+    /// dismiss button, queues no action the user did not press.
     #[test]
     fn release_activates_only_the_button_the_press_began_on() {
         let mut harness = approve_reject_notification_harness();
@@ -4682,7 +5630,7 @@ mod tests {
 
     /// A pointer press on a notification action button, dispatched through the
     /// real `lifecycle.rs` pointer-up path, queues the action for `hud_input`
-    /// and dismisses the answered notification (hud-paslt).
+    /// and dismisses the answered notification.
     #[test]
     fn pointer_up_on_action_enqueues_pending_action() {
         use tze_hud_scene::{
@@ -5510,10 +6458,21 @@ mod tests {
                 // Neither contention point may block the event loop or force cleanup.
                 let shared_guard = (!busy_scene).then(|| shared_handle.blocking_lock());
                 let scene_guard = busy_scene.then(|| scene_handle.blocking_lock());
+                let main_before = harness.app.state.wake.main_work_generation();
+                let compositor_before = harness.app.state.wake.compositor().checkpoint();
                 assert!(!harness.tick());
                 assert_retained_focus(&harness);
                 drop(scene_guard);
                 drop(shared_guard);
+                // As in the real loop, retry after the availability wakes. The
+                // waiters briefly acquire the released lock themselves.
+                while if busy_scene {
+                    harness.app.state.wake.compositor().checkpoint() == compositor_before
+                } else {
+                    harness.app.state.wake.main_work_generation() == main_before
+                } {
+                    std::thread::yield_now();
+                }
                 for _ in 0..3 {
                     assert!(harness.tick());
                     assert_eq!(
@@ -5619,7 +6578,7 @@ mod tests {
         (focused_tile, pointer_tile, rx)
     }
 
-    /// RFC 0007 §2.3 / system-shell "Tab Keyboard Shortcuts": the runtime
+    /// / system-shell "Tab Keyboard Shortcuts": the runtime
     /// consumes Ctrl+Tab before agent routing and changes the authoritative
     /// scene tab locally. Drive the real event-loop drain so this proves the
     /// production precedence seam, not only `shell::handle_shortcut` in
@@ -6775,7 +7734,7 @@ mod tests {
         }
     }
 
-    /// RFC 0004 §10 production proof: keyboard is a concrete pointer-free
+    /// production proof: keyboard is a concrete pointer-free
     /// command source, not merely a library/test fixture. Drive the real pending
     /// keyboard drain and require ACTIVATE to emerge on the runtime broadcast.
     #[test]
@@ -6827,7 +7786,7 @@ mod tests {
         );
     }
 
-    /// RFC 0004 §5.7/§10.3: PageDown is focus-routed command input, not a
+    /// PageDown is focus-routed command input, not a
     /// pointer-position scroll. The focused tile must receive both local scroll
     /// feedback and the command even when the cursor rests over another tile.
     #[test]
@@ -6959,7 +7918,7 @@ mod tests {
         );
     }
 
-    /// A busy scene lock never loses pointer input (hud-65gpz): the Move and
+    /// A busy scene lock never loses pointer input: the Move and
     /// the wheel delta that arrive while an agent holds the scene both take
     /// effect once it frees, through the one coalesced availability wake and
     /// no periodic retry while held.
@@ -7003,6 +7962,16 @@ mod tests {
             main_work_before,
             "a held scene lock must cause no periodic retry wakes"
         );
+        let compositor_before = harness.app.state.wake.compositor().checkpoint();
+        for _ in 0..2 {
+            assert!(!harness.tick());
+            assert_eq!(harness.offscreen_work_counts(), (0, 0));
+            assert_eq!(harness.frame_turn.last_rendered(), (u64::MAX, u64::MAX));
+            assert_eq!(
+                harness.app.state.wake.compositor().checkpoint(),
+                compositor_before
+            );
+        }
         drop(held);
 
         let deadline = Instant::now() + Duration::from_secs(1);
@@ -7013,6 +7982,18 @@ mod tests {
             );
             std::thread::yield_now();
         }
+        while harness.app.state.wake.compositor().checkpoint() == compositor_before {
+            assert!(
+                Instant::now() < deadline,
+                "frame turn resumes on availability, never a polling cadence"
+            );
+            std::thread::yield_now();
+        }
+        assert_eq!(
+            harness.app.state.wake.compositor().checkpoint(),
+            compositor_before + 1,
+            "two busy turns share one compositor availability wake"
+        );
         harness.app.settle_scene_work();
 
         let shared = harness.app.state.shared_state.blocking_lock();
@@ -7028,10 +8009,154 @@ mod tests {
         );
     }
 
+    /// A wheel burst behind a retained click coalesces into one entry, so it
+    /// can neither evict the click nor overtake it.
+    #[test]
+    fn held_scene_lock_wheel_burst_waits_behind_click_without_evicting_it() {
+        use std::time::{Duration, Instant};
+
+        let mut harness = HeadlessEventLoopHarness::new();
+        let (_tile_id, _node_id, _rx) = install_button(&mut harness, false);
+        let scene_handle = Arc::clone(&harness.app.state.shared_state.blocking_lock().scene);
+        let held = scene_handle.blocking_lock();
+        let main_work_before = harness.app.state.wake.main_work_generation();
+        harness.app.state.cursor_x = 50.0;
+        harness.app.state.cursor_y = 30.0;
+        harness.app.enqueue_pointer_event(PointerEventKind::Down);
+        harness.app.enqueue_pointer_event(PointerEventKind::Up);
+        for _ in 0..40 {
+            harness
+                .app
+                .enqueue_scroll_event(0.0, -10.0, tze_hud_input::WheelStep::Pixels);
+        }
+        let retained = &harness.app.state.pending_pointer_buttons;
+        assert_eq!(retained.len(), 3, "the burst shares one wheel entry");
+        assert!(matches!(
+            &retained[0].event,
+            crate::windowed::lifecycle::RetainedPointerEvent::Button {
+                kind: PointerEventKind::Down,
+                ..
+            }
+        ));
+        assert!(matches!(
+            &retained[2].event,
+            crate::windowed::lifecycle::RetainedPointerEvent::Wheel(deltas) if deltas.len() == 1
+        ));
+        assert!(
+            harness.app.state.pending_scroll.is_empty(),
+            "wheel behind the click does not join the scroll ahead of it"
+        );
+        drop(held);
+
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while harness.app.state.wake.main_work_generation() == main_work_before {
+            assert!(Instant::now() < deadline, "release must wake the replay");
+            std::thread::yield_now();
+        }
+        harness.app.settle_scene_work();
+        assert!(harness.app.state.pending_pointer_buttons.is_empty());
+        assert!(harness.app.state.pending_scroll.is_empty());
+    }
+
+    /// A click made while the scene lock is busy is not lost:
+    /// the press and release retain their own positions and replay in order
+    /// once the lock frees: the press focuses the button it was made on even
+    /// though the pointer has since left, and the release ends the press.
+    #[test]
+    fn held_scene_lock_retains_click_and_replays_it_in_order() {
+        use std::time::{Duration, Instant};
+
+        let mut harness = HeadlessEventLoopHarness::new();
+        let (_tile_id, node_id, mut rx) = install_button(&mut harness, false);
+        received_events(&mut rx);
+        let scene_handle = Arc::clone(&harness.app.state.shared_state.blocking_lock().scene);
+        let held = scene_handle.blocking_lock();
+        let main_work_before = harness.app.state.wake.main_work_generation();
+
+        // Press and release on the button (local 10..170 x 10..58)...
+        harness.app.state.cursor_x = 50.0;
+        harness.app.state.cursor_y = 30.0;
+        harness.app.enqueue_pointer_event(PointerEventKind::Down);
+        harness.app.enqueue_pointer_event(PointerEventKind::Up);
+        // Typing that follows the click waits behind it, even though the
+        // keyboard path itself is free.
+        let PendingKeyboardEvent::Character(typed) = character("x", 2_000) else {
+            unreachable!()
+        };
+        harness.app.dispatch_character_event(&typed);
+        assert_eq!(harness.app.state.pending_keyboard_events.len(), 1);
+        // ...then the pointer leaves before the lock frees.
+        harness.app.state.cursor_x = 900.0;
+        harness.app.state.cursor_y = 900.0;
+        harness.app.enqueue_pointer_event(PointerEventKind::Move);
+        assert_eq!(
+            harness
+                .app
+                .state
+                .pending_pointer_buttons
+                .iter()
+                .map(|b| match &b.event {
+                    crate::windowed::lifecycle::RetainedPointerEvent::Button {
+                        kind, x, y, ..
+                    } => {
+                        (kind.clone(), *x, *y)
+                    }
+                    other => panic!("only buttons were retained: {other:?}"),
+                })
+                .collect::<Vec<_>>(),
+            vec![
+                (PointerEventKind::Down, 50.0, 30.0),
+                (PointerEventKind::Up, 50.0, 30.0)
+            ],
+            "a busy lock retains each press and release at its own position"
+        );
+        drop(held);
+
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while harness.app.state.wake.main_work_generation() == main_work_before {
+            assert!(
+                Instant::now() < deadline,
+                "releasing the scene lock must wake the main loop to replay"
+            );
+            std::thread::yield_now();
+        }
+        harness.app.settle_scene_work();
+
+        assert!(harness.app.state.pending_pointer_buttons.is_empty());
+        assert!(harness.app.state.pending_keyboard_events.is_empty());
+        assert_eq!(
+            (harness.app.state.cursor_x, harness.app.state.cursor_y),
+            (900.0, 900.0),
+            "replay restores the live cursor"
+        );
+        let kinds: Vec<&str> = received_events(&mut rx)
+            .iter()
+            .filter_map(|(_, event)| match event {
+                ProtoInputEvent::FocusGained(_) => Some("focus"),
+                ProtoInputEvent::PointerDown(_) => Some("down"),
+                ProtoInputEvent::Character(_) => Some("char"),
+                _ => None,
+            })
+            .collect();
+        // The same agent-visible events as an uncontended click on this
+        // button, and the key typed after it reaches the focus it gave.
+        assert_eq!(
+            kinds,
+            ["focus", "down", "char"],
+            "the retained press focuses the button where it was made, then the typing follows"
+        );
+        let shared = harness.app.state.shared_state.blocking_lock();
+        let scene = shared.scene.blocking_lock();
+        assert!(
+            !scene.hit_region_states[&node_id].pressed,
+            "the replayed release ends the press"
+        );
+    }
+
     /// A Move retained across a busy lock is dropped, not kept as deferred
     /// work, once a context-menu press owns the pointer; otherwise the free
     /// lock's availability wake would fire every turn while the button is
-    /// held (hud-65gpz).
+    /// held.
     #[test]
     fn held_scene_lock_retained_move_yields_to_context_menu_press() {
         let mut harness = HeadlessEventLoopHarness::new();
@@ -7233,7 +8358,7 @@ mod tests {
     }
 
     /// Composer-less Escape retains the existing focus-recovery behavior while
-    /// also delivering the RFC 0004 CANCEL command to the owner that had focus.
+    /// also delivering the CANCEL command to the owner that had focus.
     #[test]
     fn real_keyboard_drain_dispatches_cancel_before_focus_owner_is_lost() {
         let mut harness = HeadlessEventLoopHarness::new();
@@ -7268,7 +8393,7 @@ mod tests {
         assert_eq!(command.node_id, node_id.as_uuid().as_bytes());
     }
 
-    /// hud-nu0ea headline: the keyboard-drain full path runs end-to-end through
+    /// headline: the keyboard-drain full path runs end-to-end through
     /// production dispatch — NOT a reconstructed closure.
     ///
     /// A focused composer plus a pile of queued character events is drained by
@@ -7601,6 +8726,44 @@ mod tests {
         step(&mut harness.app, 450.0, false, Some(tile_b), true);
         step(&mut harness.app, 450.0, true, None, true);
         step(&mut harness.app, 10.0, true, None, false);
+
+        // A passthrough body exposes the move pill without capturing the body
+        // or emitting input. Only entering/leaving changes the wake signature.
+        let (mut scene, tile, _, _) =
+            super::super::test_support::scene_with_drag_handle_tile(600.0, 200.0, 300.0, 200.0);
+        scene.tiles.get_mut(&tile).unwrap().input_mode = tze_hud_scene::InputMode::Passthrough;
+        scene.overlay.drag_handle_hit_regions[0].element_bounds = Some(scene.tiles[&tile].bounds);
+        harness.app.state.pipeline.hit_test_snapshot.store(Arc::new(
+            crate::pipeline::HitTestSnapshot::from_scene(&scene),
+        ));
+        harness.app.state.cursor_x = 700.0;
+        harness.app.state.cursor_y = 300.0;
+        harness.app.state.cursor_left_window = false;
+        let signature = harness.app.cursor_entry_signature();
+        assert_eq!(signature.drag_handle, Some(tile));
+        assert!(!signature.capture);
+        assert_eq!(harness.app.cursor_entry_turn(), CursorEntryTurn::FullTurn);
+        harness.app.push_drag_handle_hover();
+        assert_eq!(
+            *harness.app.state.drag_handle_hover_state.lock().unwrap(),
+            Some(tile)
+        );
+        assert!(wake.finish_main_work(wake.main_work_checkpoint()));
+        let before = wake.compositor().checkpoint();
+        harness.app.state.cursor_x += 10.0;
+        assert!(matches!(
+            harness.app.cursor_entry_turn(),
+            CursorEntryTurn::Quiet { next: None }
+        ));
+        assert_eq!(wake.compositor().checkpoint(), before);
+        harness.app.state.cursor_left_window = true;
+        assert_eq!(harness.app.cursor_entry_turn(), CursorEntryTurn::FullTurn);
+        harness.app.push_drag_handle_hover();
+        assert_eq!(
+            *harness.app.state.drag_handle_hover_state.lock().unwrap(),
+            None
+        );
+        assert!(wake.finish_main_work(wake.main_work_checkpoint()));
     }
 
     /// The device-event wiring: only mouse motion ticks, and arming/disarming
@@ -7661,7 +8824,7 @@ mod tests {
 
     /// A quit must leave winit's loop without another OS message: winit on
     /// Windows checks `exit()` only after the wait that follows
-    /// `about_to_wait`, so the exit must also stop that wait (hud-gr6jp).
+    /// `about_to_wait`, so the exit must also stop that wait.
     #[test]
     fn shutdown_leaves_the_event_loop_without_waiting_for_a_message() {
         use std::cell::RefCell;

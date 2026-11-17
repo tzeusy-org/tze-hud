@@ -1,4 +1,4 @@
-//! HUD control panel chrome (hud-vniri.2).
+//! HUD control panel chrome.
 //!
 //! The panel is runtime chrome like the system card: the runtime pushes a
 //! platform-neutral [`ControlPanelModel`] through
@@ -136,6 +136,11 @@ pub enum PanelControl {
         text: String,
         mono: bool,
     },
+    /// A single-line local editor. Offsets are UTF-8 byte boundaries.
+    Field {
+        text: String,
+        caret: Option<PanelCaret>,
+    },
     /// A value the panel cannot change here (set elsewhere, or a fact).
     ReadOnly {
         text: String,
@@ -148,6 +153,12 @@ pub enum PanelControl {
     Stepper(String),
     /// The whole item is a button (label drawn in the action color).
     Action,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PanelCaret {
+    pub cursor: usize,
+    pub anchor: usize,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -533,6 +544,16 @@ enum Align {
     Center,
 }
 
+/// The runtime supplies valid byte offsets; clamp malformed external models
+/// before slicing so rendering cannot panic on a UTF-8 interior byte.
+fn field_prefix(text: &str, byte: usize) -> &str {
+    let mut end = byte.min(text.len());
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    &text[..end]
+}
+
 impl Painter<'_, '_> {
     fn width(&mut self, text: &str, ty: TypeStyle, mono: bool) -> f32 {
         (self.measure)(text, ty.size, ty.weight, mono).ceil()
@@ -761,6 +782,7 @@ impl Painter<'_, '_> {
         item: &PanelItem,
         target: &dyn Fn(PanelPart) -> PanelHitTarget,
         right: f32,
+        max_width: f32,
         cy: f32,
         text_color: Rgba,
         muted: Rgba,
@@ -769,6 +791,89 @@ impl Painter<'_, '_> {
         let s = self.style.clone();
         match &item.control {
             PanelControl::None | PanelControl::Action => right,
+            PanelControl::Field { text, caret } => {
+                let ty = s.readout;
+                let pad = s.space_s;
+                let text_w = self.width(text, ty, true) + s.ring.max(1.0);
+                let w = (text_w + pad * 2.0)
+                    .max(s.space_xl * 3.0)
+                    .min(max_width.max(1.0));
+                let rect = PanelRect {
+                    x: right - w,
+                    y: cy - (ty.line + s.space_xs) / 2.0,
+                    w,
+                    h: ty.line + s.space_xs,
+                };
+                let border = if caret.is_some() {
+                    (s.ring, s.primary)
+                } else {
+                    (1.0, s.outline_variant)
+                };
+                self.shape(rect, s.shape_row, s.field, Some(border), clip);
+                let inner = PanelRect {
+                    x: rect.x + pad,
+                    y: rect.y,
+                    w: (rect.w - pad * 2.0).max(1.0),
+                    h: rect.h,
+                };
+                let Some(inner_clip) = clip.map_or(Some(inner), |c| inner.intersect(&c)) else {
+                    return rect.x;
+                };
+                let caret_x = caret.map(|c| self.width(field_prefix(text, c.cursor), ty, true));
+                let scroll = caret_x.map_or(0.0, |x| {
+                    (x + s.ring.max(1.0) - inner.w)
+                        .max(0.0)
+                        .min((text_w - inner.w).max(0.0))
+                });
+                let text_x = inner.x - scroll;
+                if let Some(caret) = caret {
+                    let (start, end) = (
+                        caret.cursor.min(caret.anchor),
+                        caret.cursor.max(caret.anchor),
+                    );
+                    if start != end {
+                        let x0 = text_x + self.width(field_prefix(text, start), ty, true);
+                        let x1 = text_x + self.width(field_prefix(text, end), ty, true);
+                        self.shape(
+                            PanelRect {
+                                x: x0,
+                                y: cy - ty.line / 2.0,
+                                w: (x1 - x0).max(1.0),
+                                h: ty.line,
+                            },
+                            0.0,
+                            s.primary_container,
+                            None,
+                            Some(inner_clip),
+                        );
+                    }
+                    // A steady caret keeps an otherwise idle panel asleep.
+                    self.shape(
+                        PanelRect {
+                            x: text_x + caret_x.unwrap_or_default(),
+                            y: cy - ty.size * 0.6,
+                            w: s.ring.max(1.0),
+                            h: ty.size * 1.2,
+                        },
+                        0.0,
+                        s.primary,
+                        None,
+                        Some(inner_clip),
+                    );
+                }
+                self.text(
+                    text,
+                    text_x,
+                    cy,
+                    text_w,
+                    ty,
+                    text_color,
+                    true,
+                    Align::Start,
+                    Some(inner_clip),
+                );
+                rect.x
+            }
             PanelControl::Value { text, mono } | PanelControl::ReadOnly { text, mono } => {
                 let ty = if *mono { s.readout } else { s.body };
                 let color = if matches!(item.control, PanelControl::ReadOnly { .. }) {
@@ -918,6 +1023,7 @@ impl Painter<'_, '_> {
             item,
             &target,
             rect.x + rect.w - pad,
+            rect.w * 0.45,
             cy,
             s.on_surface,
             s.on_surface_variant,
@@ -1109,7 +1215,7 @@ impl Painter<'_, '_> {
         let target = move |part| PanelHitTarget::Tile(index, part);
         let mut right = rect.x + rect.w - s.space_l;
         if matches!(item.control, PanelControl::Stepper(_)) {
-            right = self.control(item, &target, right, cy, text, muted, None);
+            right = self.control(item, &target, right, rect.w * 0.45, cy, text, muted, None);
         } else if let Some(shortcut) = &item.shortcut {
             let w = self.width(shortcut, s.label_s, true) + 2.0;
             self.text(
@@ -2393,6 +2499,87 @@ mod tests {
             g.hit(tile.x + 4.0, tile.y + 4.0),
             Some(PanelHitTarget::Tile(0, PanelPart::Body))
         );
+        // Field content, selection and the steady caret stay inside the
+        // value box at either panel width, even for a long Unicode draft.
+        let text = "a👩‍💻e\u{301}z".repeat(80);
+        for width in [700.0, 1600.0] {
+            for (cursor, anchor) in [(0, 0), (text.len(), text.len()), (text.len(), 0), (2, 3)] {
+                let mut m = model(PanelBody::Sections(vec![PanelSection {
+                    id: "text".into(),
+                    title: "Text".into(),
+                    key: None,
+                    items: vec![item(
+                        "text.field",
+                        "Value",
+                        PanelControl::Field {
+                            text: text.clone(),
+                            caret: Some(PanelCaret { cursor, anchor }),
+                        },
+                    )],
+                }]));
+                m.focus = PanelFocus::Row("text.field".into());
+                let l = layout(&m, width, 900.0);
+                let row = l
+                    .geometry
+                    .hits
+                    .iter()
+                    .find(|h| h.target == PanelHitTarget::Row("text.field".into(), PanelPart::Body))
+                    .unwrap()
+                    .rect;
+                let drawn = l
+                    .texts
+                    .iter()
+                    .find(|t| t.text.as_ref() == text.as_str())
+                    .expect("draft drawn");
+                assert!(
+                    drawn.clip_bounds_width <= row.w * 0.45,
+                    "bounded value width"
+                );
+                assert!(drawn.clip_pixel_x >= row.x);
+                assert!(drawn.clip_pixel_x + drawn.clip_bounds_width <= row.x + row.w);
+                let style = PanelStyle::resolve(&HashMap::new(), 1.0);
+                let caret = l
+                    .shapes
+                    .iter()
+                    .find(|s| {
+                        s.fill == style.primary
+                            && s.border.is_none()
+                            && s.rect.w <= style.ring.max(1.0) + 0.01
+                            && s.rect.y >= row.y
+                            && s.rect.y + s.rect.h <= row.y + row.h
+                    })
+                    .expect("steady caret drawn");
+                let visible_caret = caret.clip.unwrap_or(caret.rect);
+                assert!(
+                    visible_caret.x >= drawn.clip_pixel_x - 0.01
+                        && visible_caret.x + visible_caret.w
+                            <= drawn.clip_pixel_x + drawn.clip_bounds_width + 0.01,
+                    "caret remains visible at {cursor}: {:?}",
+                    caret.rect
+                );
+                if cursor == text.len() {
+                    assert!(
+                        drawn.pixel_x < drawn.clip_pixel_x,
+                        "long draft scrolls to caret"
+                    );
+                }
+                if cursor != anchor && cursor == text.len() {
+                    assert!(
+                        l.shapes.iter().any(|s| {
+                            let visible = s.clip.unwrap_or(s.rect);
+                            s.fill == style.primary_container
+                                && visible.w > 0.0
+                                && visible.x >= drawn.clip_pixel_x - 0.01
+                                && visible.x + visible.w
+                                    <= drawn.clip_pixel_x + drawn.clip_bounds_width + 0.01
+                                && visible.y >= row.y
+                                && visible.y + visible.h <= row.y + row.h
+                        }),
+                        "visible selection stays inside field"
+                    );
+                }
+            }
+        }
     }
 
     /// A changed row draws a `Reset` link left of its control, with its own

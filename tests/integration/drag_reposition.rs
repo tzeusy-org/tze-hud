@@ -5,7 +5,6 @@
 //!
 //! All tests are headless Layer 0: no display server or GPU required.
 //!
-//! Source: openspec/changes/persistent-movable-elements/specs/drag-to-reposition/spec.md
 
 use tze_hud_input::{
     DragEventOutcome, DragHandleElementKind, DragPhase, InputProcessor, PointerEvent,
@@ -104,7 +103,7 @@ fn long_press_starts_accumulating_on_pointer_down() {
         element_bounds(),
         DISPLAY_W,
         DISPLAY_H,
-        false, // is_header_band (hud-cpjqe): legacy grip path, long-press
+        false, // is_header_band : legacy grip path, long-press
     );
 
     assert_eq!(
@@ -133,7 +132,7 @@ fn long_press_cancelled_if_pointer_moves_beyond_tolerance() {
         element_bounds(),
         DISPLAY_W,
         DISPLAY_H,
-        false, // is_header_band (hud-cpjqe): legacy grip path, long-press
+        false, // is_header_band : legacy grip path, long-press
     );
 
     // Move 15dp beyond tolerance (threshold is 10dp)
@@ -145,7 +144,7 @@ fn long_press_cancelled_if_pointer_moves_beyond_tolerance() {
         element_bounds(),
         DISPLAY_W,
         DISPLAY_H,
-        false, // is_header_band (hud-cpjqe): legacy grip path, long-press
+        false, // is_header_band : legacy grip path, long-press
     );
 
     assert_eq!(outcome, DragEventOutcome::Cancelled);
@@ -169,7 +168,7 @@ fn long_press_not_cancelled_within_movement_tolerance() {
         element_bounds(),
         DISPLAY_W,
         DISPLAY_H,
-        false, // is_header_band (hud-cpjqe): legacy grip path, long-press
+        false, // is_header_band : legacy grip path, long-press
     );
 
     // Move 5dp — below 10dp threshold
@@ -181,7 +180,7 @@ fn long_press_not_cancelled_within_movement_tolerance() {
         element_bounds(),
         DISPLAY_W,
         DISPLAY_H,
-        false, // is_header_band (hud-cpjqe): legacy grip path, long-press
+        false, // is_header_band : legacy grip path, long-press
     );
 
     assert!(
@@ -206,7 +205,7 @@ fn long_press_activates_after_threshold_met_on_move() {
             cx,
             cy,
             1,     // 1ms threshold
-            false, // immediate (hud-cpjqe): legacy grip long-press path
+            false, // immediate : legacy grip long-press path
         ),
     );
 
@@ -221,7 +220,7 @@ fn long_press_activates_after_threshold_met_on_move() {
         element_bounds(),
         DISPLAY_W,
         DISPLAY_H,
-        false, // is_header_band (hud-cpjqe): legacy grip path, long-press
+        false, // is_header_band : legacy grip path, long-press
     );
 
     assert_eq!(
@@ -263,7 +262,7 @@ fn two_devices_have_independent_drag_state() {
         element_bounds(),
         DISPLAY_W,
         DISPLAY_H,
-        false, // is_header_band (hud-cpjqe): legacy grip path, long-press
+        false, // is_header_band : legacy grip path, long-press
     );
 
     // Device 1 starts accumulating on a different element
@@ -281,7 +280,7 @@ fn two_devices_have_independent_drag_state() {
         Rect::new(ELEMENT_X + 100.0, ELEMENT_Y + 100.0, 200.0, 100.0),
         DISPLAY_W,
         DISPLAY_H,
-        false, // is_header_band (hud-cpjqe): legacy grip path, long-press
+        false, // is_header_band : legacy grip path, long-press
     );
 
     assert_eq!(outcome, DragEventOutcome::Accumulating { progress: 0.0 });
@@ -379,7 +378,7 @@ fn full_drag_flow_persists_geometry_on_release() {
             cx,
             cy,
             1,
-            false, // immediate (hud-cpjqe): legacy grip long-press path
+            false, // immediate : legacy grip long-press path
         ),
     );
     std::thread::sleep(std::time::Duration::from_millis(5));
@@ -393,7 +392,7 @@ fn full_drag_flow_persists_geometry_on_release() {
         element_bounds(),
         DISPLAY_W,
         DISPLAY_H,
-        false, // is_header_band (hud-cpjqe): legacy grip path, long-press
+        false, // is_header_band : legacy grip path, long-press
     );
     assert_eq!(
         act,
@@ -419,7 +418,7 @@ fn full_drag_flow_persists_geometry_on_release() {
         element_bounds(),
         DISPLAY_W,
         DISPLAY_H,
-        false, // is_header_band (hud-cpjqe): legacy grip path, long-press
+        false, // is_header_band : legacy grip path, long-press
     );
     assert!(
         matches!(moved, DragEventOutcome::Moved { .. }),
@@ -435,7 +434,7 @@ fn full_drag_flow_persists_geometry_on_release() {
         element_bounds(),
         DISPLAY_W,
         DISPLAY_H,
-        false, // is_header_band (hud-cpjqe): legacy grip path, long-press
+        false, // is_header_band : legacy grip path, long-press
     );
 
     let (final_x, final_y) = match released {
@@ -520,7 +519,7 @@ fn full_drag_flow_persists_geometry_on_release() {
     }
 }
 
-// ── ElementRepositionedEvent emission (hud-bs2q.6) ───────────────────────────
+// ── ElementRepositionedEvent emission ───────────────────────────
 
 /// GIVEN a completed drag (geometry_override persisted)
 /// WHEN emit_drag_repositioned_event is called
@@ -648,7 +647,7 @@ fn scene_drag_active_elements_set_cleared_correctly() {
     );
 }
 
-// ── Reset-to-default (hud-zc7f) ──────────────────────────────────────────────
+// ── Reset-to-default ──────────────────────────────────────────────
 //
 // All reset tests use HudSessionImpl::reset_element_geometry (async), the
 // authoritative reset path wired to the context menu action.

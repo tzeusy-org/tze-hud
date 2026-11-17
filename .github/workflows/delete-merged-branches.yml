@@ -1,4 +1,4 @@
-# tze_hud — Merged-branch cleanup (hud-3qpgv.6)
+# tze_hud — Merged-branch cleanup
 #
 # Deletes remote agent/* branches whose tips are already merged into main.
 # This reclaims namespace and keeps `git branch -r` readable.

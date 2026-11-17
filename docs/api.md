@@ -61,8 +61,12 @@ notification stack trims its oldest card that is not an unanswered question
 (a live card with a callback action and no accepted answer; answered and
 URL-only cards are not questions). Only a stack of nothing but questions drops
 its oldest question, and an arriving non-question at such a stack is itself the
-card trimmed. The rule is the same on MCP and gRPC admission. `busy:true`
-appears only when another agent currently occupies a single-occupant zone.
+card trimmed. The rule is the same on MCP and gRPC admission. Regular
+notification stacks present unanswered questions first, newest-first within
+the question and other-card groups, so a retained question stays reachable
+during a burst. Answered, expired and URL-only cards have no question priority;
+alert banners keep their severity ordering. `busy:true` appears only when
+another agent currently occupies a single-occupant zone.
 MCP accepts lists omit `static_image`: resource upload is on gRPC. Strings with
 an explicit positive byte limit appear as `string<=N`; others as `string`. Numeric discovery hints use JSON `number` with the
 declared bounds (for example `number 0..1`); admission still enforces finite f32.
@@ -508,6 +512,68 @@ agents until one is paired.
   composer has focus treat `idle_since_ms >= 300` as settled.
   `GET /admin/status?cpu=0` answers at once with `cpu_pct_2s` null instead of
   sampling CPU for 2 s, for harnesses that poll status.
+  The additive `holdings` and `warnings` fields contain **admin-only,
+  content-free diagnostics**. They do not extend `hud_surfaces` or ordinary
+  agent discovery. Published text, notification titles/actions/keys, widget
+  parameters, transcript/input, session/lease IDs, credentials, paths and raw
+  configuration/error detail are excluded from these two fields.
+
+  `holdings` is `{state, sources, agents, omitted_agents, omitted_records,
+  omission_reasons}`. `state` is `complete`, `partial` or `unavailable`;
+  `sources.scene` is `available|busy|unavailable` and `sources.portals` also
+  permits `not_configured`. Each agent group is `{id, surfaces,
+  omitted_records}`; each surface row is `{surface, kind, phase,
+  expires_in_ms, expiry_kind, count}`. Full canonical addresses use
+  `zone:`, `widget:`, `tile:` or `portal:`. Owners come from retained records,
+  including agents removed from configuration. Accepted pending zone/widget
+  publications count; future tile creations do not. Runtime backing tiles
+  are excluded; authenticated hub portals count once. Identical metadata and
+  absolute deadlines coalesce into `count`; differing deadlines remain distinct
+  even when rounded remaining milliseconds match.
+
+  `phase` is `active|scheduled|suspended|orphaned|cleanup_due|unknown`.
+  `expiry_kind` is `content|lease|orphan_grace|suspension_limit|until_clear|
+  activity|idle_reclaim|unknown`. Finite remaining time uses the earliest
+  applicable production cleanup bound, with positive fractions rounded up to
+  milliseconds. Ties prefer content, lease, orphan grace, then suspension limit.
+  A retained record already due reports `cleanup_due` and zero until normal
+  cleanup removes it; status never sweeps, applies or renews content.
+  Suspended lease TTL is paused but its maximum suspension still applies.
+  Widget content clocks pause with widgets. Pending relative widget TTL,
+  auto-clear and implicit notification urgency TTL depend on actual application:
+  they report unknown content expiry until materialized, while independent
+  lease/origin bounds remain observable. A live portal reports activity-dependent
+  null expiry (`activity`), or `until_clear` for an indefinite hold. A finite
+  hold end is not a reclaim deadline. Actual degradation starts the finite
+  `idle_reclaim` bound, overriding holds and paused liveness.
+
+  Each source is sampled independently with immediate `try_lock`, releasing
+  the scene before reading the hub. Contention reports `busy`, never healthy
+  emptiness; counts for unreadable sources are null. This is not a transactional
+  cross-source snapshot. Retention is bounded to 64 owners and 256 rows, sorted
+  by owner/address/kind/phase/basis/absolute deadline. Owner IDs over 128 UTF-8
+  bytes and full surface IDs over 256 bytes are omitted whole. Compact encoded
+  `holdings` is at most 49,152 bytes; trimming counts original records, including
+  aggregate counts. Omission reasons are `cardinality|bytes|oversize_id|busy|
+  unavailable`. `omitted_agents` is exact within the bounded owner set, otherwise
+  null when distinct omitted owners cannot be counted. Groups without retained
+  rows are absent, with their omissions still reported.
+
+  `warnings` is `{state, items, truncated, omitted_events, omission_reasons}`.
+  State is `pending` until the first configured compositor font initialization
+  finishes, then `complete`; an absent/poisoned producer is `unavailable`.
+  Items are `{source, code, subject, fallback}`: `widget_bundle` failures from
+  the actual startup scan/instance creation, and `font` directory/file load or
+  requested-role fallback failures from the actual font builder. Codes are
+  fixed; subjects are safe configured ordinals or fixed font roles, and fallback
+  families are bundled defaults. Warnings are deduplicated per startup, capped
+  at 64 retained entries and 16,000 encoded bytes. Dropped warning *events* are
+  counted without claiming distinctness beyond that cap; reasons are
+  `cardinality|bytes`. Readiness is independent of truncation. Complete empty
+  warnings mean both producers finished; later theme changes do not rewrite
+  startup history. The combined encoded `{holdings,warnings}` is at most
+  65,536 bytes; existing unrelated status fields keep their contracts.
+
   `portals` (`null` before the windowed runtime starts or while the scene stays
   locked for 100 ms) is read-only portal UI state for out-of-process validation,
   one entry per portal: `s` (`portal:<id>`), `state`, `rect`, `display` (index
@@ -570,7 +636,8 @@ agents until one is paired.
   interaction or another publish is not required to retry that owed image.
   `unplaced_zones` lists `{zone, display, reason}` placements with no overlay
   window, rendering on the primary instead (`display` is the key as
-  configured): `reason` is `not_connected` (no connected monitor matches it), or
+  configured): `reason` is `legacy_key` (a retired Windows enumeration key),
+  `not_connected` (no connected monitor matches it), or
   `overlay_failed` when that monitor's overlay surface was lost and recreated
   3 times in a row (it is retried when the monitor is reconnected).
   `/admin/screenshot` returns a PNG of the frame the compositor draws (not an
@@ -763,14 +830,22 @@ unique on the system and persistent across restarts. Quote keys:
 exactly one connected monitor has that model and serial, so owners with
 distinct monitors never write one. A monitor without a usable EDID identity
 (non-Windows, headless, or a failed query), or in a shared set without an
-instance id, is keyed by its OS name (`DISPLAY6`) with a warning. Copy keys
+instance id, is keyed by its OS name with a warning. Copy usable keys
 from `/admin/status` `displays[].key` or the log's per-display
 `display <key> = <name> <w>x<h> @ (<x>,<y>)[ primary]` lines, written at
 startup and on every layout change. A configured key that matches no
 connected monitor keeps its zones on the primary, never another monitor; the
 log warns once per change naming the key, its zones and every connected key,
-and `/admin/status` `unplaced_zones` lists them as `not_connected`. Legacy
-`DISPLAYn` keys match only a monitor that is itself keyed by that OS name.
+and `/admin/status` `unplaced_zones` lists them as `not_connected`.
+
+Legacy Windows enumeration section keys (`DISPLAYn`, ignoring case, outer
+whitespace and an optional `\\.\` prefix) are ignored even when a matching OS
+fallback is connected; their zones render on the primary with
+`unplaced_zones.reason = "legacy_key"`.
+The nonfatal topology warning supplies the exact current EDID-derived
+replacement for a unique usable connected identity, otherwise reports
+`not connected` or `identity unavailable`; rename the section only when a
+replacement is supplied, and keep nonlegacy OS fallback keys unchanged.
 
 Built-in zone placement, as fractions of the display (1% margins):
 `notification-area` is the top-right column (x 75–99%, from y 5.5%, below
@@ -942,8 +1017,10 @@ something and what they hold ("3 agents · 2 portals · 5 zones · 1 widget")
 and says "restart pending" while a saved setting waits for a
 restart (Restart now is in System, Alt+8). It takes keyboard focus when it
 opens (if Windows refuses, the header says to click it) and returns focus
-on close. Typing searches every row; arrows, Tab, Enter and Space move and
-act; Esc clears the search, then closes. A row whose value differs from
+on close. Typing searches every row; Space continues the query after automatic
+result focus. Arrows and Tab navigate, Enter acts on the best match, and Space
+acts on an explicitly selected control. Esc clears the search, then closes.
+A row whose value differs from
 its default (an override that matches the theme does not) shows Reset:
 clicking it, or Delete on the row (not while typing in a field or the
 search), puts the default back live and removes the key from the config
@@ -951,6 +1028,23 @@ file. Visibility, Appearance, Advanced tokens, Input, Diagnostics and the
 Agents answer-window row offer it; ports and widget boxes take a typed value. Clicks outside the
 panel pass through to the desktop. Closing the panel always resumes
 agents. While paused, the pause tile and row turn caution-colored.
+
+Value fields edit locally. Clicking a field or pressing Enter on a field result
+selects its current value; typing replaces the selection. Left/Right move by
+Unicode grapheme, Home/End move to either end, and Shift extends the selection.
+Ctrl+A selects all; Ctrl+C copies; Ctrl+X cuts after a successful clipboard
+write; Ctrl+V pastes at the selection. Backspace/Delete edit the draft. Paste
+converts line breaks and tabs to spaces; Connect agent names keep their existing
+lowercase name alphabet and 32-byte limit. Other drafts are bounded at 65,535
+UTF-8 bytes; overflow is shown and saving waits for an edit that shortens or
+replaces it. Enter saves through the row's existing validation and confirmation;
+Esc cancels before clearing search or closing the panel. Moving away drops the
+draft. Automatic search-result focus keeps typing and clipboard shortcuts out
+of value editing until explicit selection. Clipboard access runs in the
+background with one operation at a time; a delayed result cannot modify a
+changed or reopened draft. Failed clipboard access leaves a cut intact and
+shows feedback beside the field. Caret and selection stay inside the value box;
+the caret stays steady so an idle panel needs no blink timer.
 
 The Visibility card hides portals, zones or widgets for
 the session; the Hide all tile (Alt+H) hides all of them and, when everything
@@ -1071,15 +1165,36 @@ in the config file or the launch arguments and restart), and the version.
 The Layout card shows, per widget, its box as percentages of the display
 ("4%, 8% · 18×12%": x, y, width×height) and how long its content stays up.
 Widgets draw no drag handle; this box is how the owner places them.
+Move handles for draggable tiles, portal frames and primary zones are hidden
+until the pointer enters the element or its handle. They draw a 32×4 dp rounded
+pill in the theme's `color.on_surface.variant` role at `opacity.drag.hover`;
+pressing or dragging uses `opacity.drag.active` and keeps the pill visible after
+the pointer leaves. A 12 dp hit row contains the small pill, separated from the
+card by `space.s` (8 dp); the continuous hover envelope includes that gap without
+capturing it. The row clamps to the display edges. Portal header bands
+keep their full input area and yield to header controls. Notification hover uses
+the painted stack, including gaps, rather than empty logical zone space; bodies
+remain click-through. Hover is local and repaints only on entry/exit, with no
+polling deadline or agent event. Active drag uses the semantic primary outline,
+`stroke.border.width` and `shape.l`. All sizes follow monitor scale × `ui.scale`.
+The pip resize target and its existing corner dot mark remain separate.
+Overlapping element bodies reveal the frontmost element's pill; this hover
+selection does not change existing grip capture precedence.
 Typing four numbers and Enter moves or resizes it at once (a box that does
 not fit on the display is refused); "Clears after" (Never, 5 s ... 1 h)
 caps each publication at that long after it was published, including what
 shows now, unless the agent asked for less. Both are saved into the
 widget's own `[[tabs.widgets]]` entry with the file's comments kept; when the
-save fails the change lasts the session and the row says so. A
-`[displays."<key>"]` table's zones show read-only until the Layout row can
-edit them (`hud-vniri.8`). This read-only assignment does not prevent live zone
-placement: drag an existing zone grip to move the whole zone for this runtime
+save fails the change lasts the session and the row says so. The
+Layout card also gives each zone a display choice. Choose a connected monitor
+by its current key to move the zone on the next frame and save it under
+`[displays."<key>"]`, keeping the file's comments and other zone assignments.
+"Primary (default)" removes the explicit binding; a named primary monitor
+keeps its physical key. Missing or retired bindings remain labelled unavailable,
+and a monitor unplugged before an edit is applied is refused rather than
+redirecting the edit to another screen. If saving fails, the live change lasts
+until restart and the row explains why; without a config file it is session-only.
+You can also drag an existing zone grip to move the whole zone for this runtime
 session. The shown `pip` zone also has a resize grip in its corner facing the
 display centre (diagonal resize cursor): dragging it scales the zone with its
 width/height ratio pinned and the opposite corner fixed, kept on screen and no

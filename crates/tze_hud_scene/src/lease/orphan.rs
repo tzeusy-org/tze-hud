@@ -6,7 +6,7 @@
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-/// Reconnect grace period (ms). Spec: "default 30,000 ms" (line 133).
+/// Default reconnect grace period: 30,000 ms.
 pub const DEFAULT_GRACE_PERIOD_MS: u64 = 30_000;
 
 // ─── TileVisualHint ──────────────────────────────────────────────────────────
@@ -14,12 +14,9 @@ pub const DEFAULT_GRACE_PERIOD_MS: u64 = 30_000;
 /// Visual overlay hint to display on a tile's rendered surface.
 ///
 /// The compositor renders these within one frame of a state change.
-/// Spec requirements:
-/// - `DisconnectionBadge`: "Disconnection badge MUST appear within 1 frame"
-///   (line 133).
-/// - `StaleBadge`: zone publications during ORPHANED state are "stale-badged"
-///   (lines 231–233, adapted).
-/// - `BudgetWarning`: amber border for budget ≥ 80% (line 170).
+/// - `DisconnectionBadge`: appears within one frame of the disconnect.
+/// - `StaleBadge`: zone publications during the ORPHANED state.
+/// - `BudgetWarning`: amber border for budget ≥ 80%.
 /// - `None`: normal rendering.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
 pub enum TileVisualHint {
@@ -27,7 +24,7 @@ pub enum TileVisualHint {
     #[default]
     None,
     /// Agent is disconnected; tile is frozen at last state.
-    /// Displayed within 1 frame of `disconnect` (spec line 133).
+    /// Displayed within 1 frame of `disconnect`.
     DisconnectionBadge,
     /// Tile content is stale because the controlling lease is ORPHANED;
     /// new publishes to this tile's zone are rejected.

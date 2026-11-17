@@ -2,16 +2,13 @@
 //!
 //! ## Wire vs. debug format
 //!
-//! Per resource-store/spec.md §Requirement: Content-Addressed Resource Identity
-//! (lines 5-8) and RFC 0011 §1.4:
-//!
 //! - **Wire format**: `ResourceId` is transmitted as raw 32 bytes in a protobuf
 //!   `bytes` field.  It MUST NOT be hex-encoded on the wire.
 //! - **Operator/debug format**: `ResourceId` is rendered as a 64-character lowercase
 //!   hex string for logs, CLI output, and diagnostic tools.  This is the ONLY
 //!   acceptable text encoding.
 //!
-//! The bead (rig-6l03) explicitly validates that:
+//! The debug/display tests validate that:
 //! 1. The `Debug` impl outputs `ResourceId(<hex>)` where `<hex>` is 64 lowercase hex chars.
 //! 2. The `Display` impl outputs the 64-character hex string directly.
 //! 3. No uppercase hex, no `0x` prefix, no base64 encoding appears.

@@ -282,6 +282,8 @@ pub struct UnplacedZone {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum UnplacedReason {
+    /// Retired Windows enumeration key; ignored even if that OS name is connected.
+    LegacyKey,
     /// No connected monitor matches that key.
     NotConnected,
     /// The monitor is connected, but its overlay surface kept failing and the
@@ -382,7 +384,7 @@ pub fn process_cpu_secs() -> Option<f64> {
 
 #[cfg(target_os = "linux")]
 mod imp {
-    pub fn process_cpu_secs() -> Option<f64> {
+    pub(super) fn process_cpu_secs() -> Option<f64> {
         let stat = std::fs::read_to_string("/proc/self/stat").ok()?;
         // Fields after the parenthesised comm: state is field 3, utime 14, stime 15.
         let rest = &stat[stat.rfind(')')? + 2..];
@@ -405,7 +407,7 @@ mod imp {
         ((u64::from(t.dwHighDateTime) << 32) | u64::from(t.dwLowDateTime)) as f64 / 1e7
     }
 
-    pub fn process_cpu_secs() -> Option<f64> {
+    pub(super) fn process_cpu_secs() -> Option<f64> {
         let (mut created, mut exited) = (FILETIME::default(), FILETIME::default());
         let (mut kernel, mut user) = (FILETIME::default(), FILETIME::default());
         // SAFETY: the pseudo-handle is always valid and the out-pointers are live locals.
@@ -433,6 +435,9 @@ mod imp {
 /// What `/admin/status` reads from. Cheap to clone.
 #[derive(Clone)]
 pub struct StatusSource {
+    pub scene: Option<Arc<tokio::sync::Mutex<tze_hud_scene::SceneGraph>>>,
+    pub portals: Option<tze_hud_mcp::PortalHandle>,
+    pub startup: Option<crate::operator::diagnostics::StartupDiagnostics>,
     pub agents: SharedAgents,
     pub binds: Arc<Mutex<Vec<SocketAddr>>>,
     pub safe_mode: Arc<AtomicBool>,
@@ -512,7 +517,14 @@ impl StatusSource {
                 .unwrap_or_default(),
             None => Default::default(),
         };
+        let (holdings, warnings) = crate::operator::diagnostics::render(
+            self.scene.as_ref(),
+            self.portals.as_ref(),
+            self.startup.as_ref(),
+        );
         json!({
+            "holdings": holdings,
+            "warnings": warnings,
             "version": env!("CARGO_PKG_VERSION"),
             "sha": build.map_or("unknown", |b| b.sha.as_str()),
             "channel": build.map_or("local", |b| b.channel.as_str()),

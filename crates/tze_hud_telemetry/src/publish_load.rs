@@ -1,9 +1,5 @@
 //! Canonical artifact contract for resident publish-load benchmark runs.
 //!
-//! Spec alignment:
-//! - `openspec/changes/rust-widget-publish-load-harness/specs/publish-load-harness/spec.md`
-//! - `openspec/changes/rust-widget-publish-load-harness/specs/validation-framework/spec.md`
-//!
 //! This module defines identity fields, raw metrics, byte-accounting labels,
 //! traceability fields, calibration status, and verdict semantics with explicit
 //! `uncalibrated` handling for remote runs lacking approved normalization.
@@ -138,7 +134,6 @@ pub struct PublishLoadThresholds {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct PublishLoadTraceability {
     pub spec_id: Option<String>,
-    pub rfc_id: Option<String>,
     pub budget_id: Option<String>,
     pub threshold_id: Option<String>,
 }

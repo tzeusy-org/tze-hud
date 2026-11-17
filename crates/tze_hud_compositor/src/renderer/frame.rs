@@ -59,7 +59,7 @@ fn hash_visible_triangles(hasher: &mut impl std::hash::Hasher, vertices: &[RectV
 
 /// All CPU-side, scene-free frame data produced under the scene lock by
 /// [`Compositor::build_windowed_frame`] and consumed lock-free by
-/// [`Compositor::present_windowed_frame`] (hud-uyhpn).
+/// [`Compositor::present_windowed_frame`].
 ///
 /// The windowed frame loop builds this value while holding the scene lock, then
 /// DROPS the lock before calling `present_windowed_frame`, which performs the
@@ -174,7 +174,7 @@ impl Compositor {
     /// Build the shared per-frame vertex / textured-command lists from the scene.
     ///
     /// Single source of truth for the scene→geometry stage shared by
-    /// `render_frame` and `render_frame_headless` (hud-8uafa). It covers the
+    /// `render_frame` and `render_frame_headless`. It covers the
     /// canonical layer ordering (Background zones → tiles → Content zones →
     /// Chrome zones), the per-tile background / content / scroll-indicator /
     /// composer-overlay geometry, and the overlay-mode alpha-zeroing quad. The
@@ -218,7 +218,7 @@ impl Compositor {
         // These are deliberately once-per-frame measurements, off the transcript
         // hot path.
         self.prime_composer_scroll_offset(scene);
-        // hud-pd9bp: resolve vertical-flow child offsets once per frame,
+        // resolve vertical-flow child offsets once per frame,
         // before the geometry + text passes read them. No-op for Absolute scenes.
         self.prime_vertical_flow_layout(scene);
 
@@ -258,11 +258,11 @@ impl Compositor {
         // Must run before any render_zone_content call below.
         self.last_animation_frame_at = Some(animation_now);
         self.update_zone_animations_at(scene, animation_now);
-        // §6.3 portal transition: advance per-portal-tile fade animations
-        // alongside zone animations (hud-58rg1). Folded in here so all three
+        // portal transition: advance per-portal-tile fade animations
+        // alongside zone animations. Folded in here so all three
         // render entry points share the single update site.
         self.update_portal_tile_animations_at(scene, animation_now);
-        // Smooth scroll / animated follow-tail (hud-bq0gl.10): advance the
+        // Smooth scroll / animated follow-tail: advance the
         // per-portal-tile scroll smoothers once per frame, BEFORE the tile loop
         // and the later text/encode passes read displayed offsets via
         // `display_tile_scroll_offset`. No-op (snap) in headless mode.
@@ -286,8 +286,8 @@ impl Compositor {
         // Resolve scroll-indicator tokens once per frame (not per tile) since
         // the token map does not change during the tile loop.
         let scroll_indicator_tokens = resolve_scroll_indicator_tokens(&self.token_map);
-        // Resolve "jump to latest" pill tokens once per frame (hud-9ci61).
-        // Resolve composer overlay tokens once per frame (hud-r3ax6).
+        // Resolve "jump to latest" pill tokens once per frame.
+        // Resolve composer overlay tokens once per frame.
         let composer_overlay_tokens = resolve_composer_overlay_tokens(&self.token_map);
 
         for tile in &tiles {
@@ -317,7 +317,7 @@ impl Compositor {
                 );
             }
 
-            // ── Lifecycle affordance accent (hud-m48i0) ────────────────────
+            // ── Lifecycle affordance accent ────────────────────
             // A token-colored bar along the tile's left edge signalling the
             // portal's lifecycle state. Painted from runtime overlay state
             // (`tile_lifecycle_accents`) set by the native driver's checked
@@ -345,7 +345,7 @@ impl Compositor {
                 }
             }
 
-            // ── Scroll indicator (§6b.5) ───────────────────────────────────
+            // ── Scroll indicator ───────────────────────────────────
             // Rendered on top of the tile content. Geometry-only; carries no
             // transcript text. Redaction-safe: the indicator reveals only that
             // content overflows and approximately where the viewport sits.
@@ -388,7 +388,7 @@ impl Compositor {
                 }
             }
 
-            // ── Composer echo overlay (hud-r3ax6) ─────────────────────────
+            // ── Composer echo overlay ─────────────────────────
             // Renders the local draft text background strip on top of the
             // tile.  The text itself is injected in collect_text_items via
             // collect_composer_text_item.  NO adapter round-trip.
@@ -414,7 +414,7 @@ impl Compositor {
         // Colored/sized from `tile.disconnect_badge.*`; reads `Tile::visual_hint`.
         self.append_disconnect_badge_vertices(scene, &mut vertices, sw, sh);
 
-        // ── Viewer close button on the hovered tile (hud-jm8nq.11) ─────────────
+        // ── Viewer close button on the hovered tile ─────────────
         // Drawn only for the runtime-plumbed hover target; tokens come from
         // `tile.close_button.*`.
         self.append_tile_close_button_vertices(scene, &mut vertices, sw, sh);
@@ -424,14 +424,14 @@ impl Compositor {
         // Update zone animation states (fade-in/fade-out) before rendering.
         self.last_animation_frame_at = Some(animation_now);
         self.update_zone_animations_at(scene, animation_now);
-        // §6.3 portal transition: advance per-portal-tile fade animations
-        // alongside zone animations (hud-58rg1).
+        // portal transition: advance per-portal-tile fade animations
+        // alongside zone animations.
         self.update_portal_tile_animations_at(scene, animation_now);
 
         // Update streaming word-by-word reveal state.
         self.update_stream_reveals(scene);
 
-        // Update per-portal-tile streaming-reveal fade state (hud-bl7yi): fades
+        // Update per-portal-tile streaming-reveal fade state: fades
         // newly-appended portal-tile content in segment-by-segment instead of
         // snapping. Mirrors the zone reveal above for the portal-tile path.
         self.update_portal_tile_reveals(scene);
@@ -456,7 +456,7 @@ impl Compositor {
             animation_now,
         );
         // The system card is not part of this vertex list: it is drawn by the
-        // final `encode_system_card_pass` above every other pass (hud-w5zon).
+        // final `encode_system_card_pass` above every other pass.
 
         (
             vertices,
@@ -466,7 +466,7 @@ impl Compositor {
         )
     }
 
-    /// Build all CPU-side, scene-free frame data under the scene lock (hud-uyhpn).
+    /// Build all CPU-side, scene-free frame data under the scene lock.
     ///
     /// This is the scene-reading half of the windowed present path. It performs
     /// EVERY read of (and the few writes back into) `scene` that a frame needs —
@@ -497,7 +497,7 @@ impl Compositor {
         let frame_start = std::time::Instant::now();
         self.frame_number += 1;
 
-        // ── Drain local composer echo state (hud-r3ax6) ───────────────────
+        // ── Drain local composer echo state ───────────────────
         // Must happen before any render work so the overlay is current for
         // this frame.  Lock contention is negligible: the shared slot is
         // written ≤ once per keystroke and drained once per frame (60 Hz).
@@ -505,7 +505,7 @@ impl Compositor {
 
         let mut telemetry = FrameTelemetry::new(self.frame_number);
 
-        // ── Phase-1 markdown cache prime (hud-380dl: commit-time prime) ─────
+        // ── Phase-1 markdown cache prime (commit-time prime) ─────
         // The markdown cache MUST be primed at commit time (before this build
         // runs) by an explicit `prime_markdown_cache` call at the scene-commit
         // site (Stage 3/4 of the pipeline).  By the time the build executes,
@@ -525,7 +525,7 @@ impl Compositor {
             debug_assert!(
                 false,
                 "build_windowed_frame: markdown cache was not commit-primed for scene version {} \
-                 (cache version {}); falling back to in-render prime [hud-380dl]",
+                 (cache version {}); falling back to in-render prime",
                 scene.version, self.markdown_cache_scene_version,
             );
             self.prime_markdown_cache(scene);
@@ -533,7 +533,7 @@ impl Compositor {
             // as a correctness fallback, not the normal commit-time path).
         }
 
-        // ── Phase-1 truncation cache prime (hud-wgq7j / hud-v2z6u) ─────────────
+        // ── Phase-1 truncation cache prime  ─────────────
         // The truncation cache MUST be primed at commit time (before this build
         // runs) by an explicit `prime_truncation_cache` call at the scene-commit
         // site, mirroring the markdown cache contract.  By the time the build
@@ -546,13 +546,13 @@ impl Compositor {
         //
         // Unlike the markdown cache, a version mismatch here is NOT necessarily a
         // contract violation: `prime_truncation_cache` carries a mid-drag cadence
-        // gate (hud-ghhxa) that intentionally DEFERS a re-prime — leaving the
+        // gate that intentionally DEFERS a re-prime — leaving the
         // sentinel behind `scene.version` — when geometry changes faster than
         // RESIZE_REPRIME_INTERVAL_MS.  During a fast resize drag (or the headless
         // benchmark's tight 180-frame loop), the cache legitimately lags the scene
         // for one or more frames.  We therefore trace rather than debug_assert; the
         // call to prime_truncation_cache below is itself cadence-gated and will be
-        // a no-op defer when appropriate, preserving the per-frame budget [hud-v2z6u].
+        // a no-op defer when appropriate, preserving the per-frame budget.
         if scene.version != self.truncation_cache_scene_version {
             tracing::trace!(
                 scene_version = scene.version,
@@ -575,12 +575,12 @@ impl Compositor {
 
         // Publish this frame's displayed (smoothed/lagged) scroll offsets into
         // the scene so the live hit-test path maps pointer coordinates against
-        // the same offset we just drew with (hud-3lynp). build_frame_vertices
+        // the same offset we just drew with. build_frame_vertices
         // advanced the smoothers above; this records their displayed state.
         // No-op clear in headless/snap mode.
         //
         // Deliberately published here, AFTER the smoothers advanced and BEFORE
-        // present (hud-96f3h). The override is read from the *live* scene by the
+        // present. The override is read from the *live* scene by the
         // async input path (`SceneGraph::hit_test` → `effective_tile_scroll_offset_local`;
         // `HitTestSnapshot` does NOT carry the offset), so between frames it must
         // equal the offset currently on screen. For a presented frame that holds:
@@ -592,16 +592,17 @@ impl Compositor {
         // self-correcting skew, strictly better than the pre-#942 baseline.
         // Publishing only for actually-presented frames would require re-writing
         // the override AFTER present confirms; but present runs lock-free and never
-        // touches the scene (the hud-uyhpn lock split, which collapsed the lock
+        // touches the scene (the lock split, which collapsed the lock
         // hold to this build phase to stop drag-input starvation), so that would
         // reintroduce a post-present scene-lock re-acquire. Not worth it for this
-        // precision case — the skew is transient and self-heals (hud-96f3h).
+        // precision case — the skew is transient and self-heals.
         self.publish_displayed_scroll_offsets(scene);
 
         let drag_handles = self.collect_drag_handle_entries(scene, sw, sh);
         let mut drag_handle_vertices: Vec<RectVertex> = Vec::new();
         self.append_drag_handle_vertices(scene, &drag_handles, &mut drag_handle_vertices, sw, sh);
-        let drag_highlight_cmds = self.drag_highlight_cmds(scene, &drag_handles);
+        let mut drag_highlight_cmds = self.drag_highlight_cmds(scene, &drag_handles);
+        drag_highlight_cmds.extend(self.drag_pill_cmds(scene, &drag_handles));
 
         // ── Widget texture sync: rasterize dirty SVGs BEFORE frame acquisition.
         // SVG rasterization can be slow; if a resize event arrives while we hold
@@ -645,14 +646,14 @@ impl Compositor {
             })
             .collect();
 
-        // ── Keyboard focus ring (chrome layer, hud-k6yvb) ───────────────────
+        // ── Keyboard focus ring (chrome layer) ───────────────────
         let mut focus_ring_vertices: Vec<RectVertex> = Vec::new();
         self.append_focus_ring_vertices(scene, &mut focus_ring_vertices, sw, sh);
-        // ── Composer caret quad (chrome layer, same pass, hud-hxhnt) ────────
+        // ── Composer caret quad (chrome layer, same pass) ────────
         self.append_composer_caret_vertices(scene, &mut focus_ring_vertices, sw, sh);
         self.append_composer_preedit_underline_vertices(scene, &mut focus_ring_vertices, sw, sh);
 
-        // ── Chrome context menu (hud-zc7f) ─────────────────────────────────
+        // ── Chrome context menu ─────────────────────────────────
         let (context_menu_vertices, context_menu_text) = self.collect_context_menu(scene, sw, sh);
         // The open panel shows the paused state itself; its scrim replaces the
         // safe-mode dim on the primary display (other displays keep it).
@@ -694,7 +695,7 @@ impl Compositor {
         }
     }
 
-    /// Present a previously-built frame to the surface, lock-free (hud-uyhpn).
+    /// Present a previously-built frame to the surface, lock-free.
     ///
     /// This is the GPU half of the windowed present path. It acquires the
     /// swapchain frame, encodes every pass from the owned [`WindowedFrameBuild`]
@@ -703,7 +704,7 @@ impl Compositor {
     /// per-frame telemetry.
     ///
     /// Skips the frame gracefully (returning early with total-time telemetry) if
-    /// the surface is unavailable, and contains the hud-pi5wx submit/present
+    /// the surface is unavailable, and contains the submit/present
     /// panic so the compositor thread survives a mid-frame swapchain reconfigure.
     pub(crate) fn present_windowed_frame(
         &mut self,
@@ -760,7 +761,7 @@ impl Compositor {
 
         let submit_start = std::time::Instant::now();
         let cmd = encoder.finish();
-        // hud-pi5wx Layer-1 resilience: a swapchain reconfigure (e.g. a resize) can
+        // Layer-1 resilience: a swapchain reconfigure (e.g. a resize) can
         // destroy the surface texture between acquire_frame() and queue.submit(), so
         // submit raises a wgpu validation error ("<Surface Texture> has been
         // destroyed") whose default uncaptured-error handler PANICS. On the compositor
@@ -787,7 +788,7 @@ impl Compositor {
             tracing::error!(
                 "compositor: queue.submit/present panicked (surface texture likely \
                  destroyed mid-frame) — frame skipped, compositor thread preserved \
-                 (hud-pi5wx)"
+                "
             );
             // Zero is the established skipped-stage sentinel. The windowed
             // runtime must not signal or benchmark-count a failed submission.
@@ -875,15 +876,15 @@ impl Compositor {
         self.encode_rounded_rect_pass(&mut encoder, view, &tv.drag_highlight_cmds, sw, sh);
         self.encode_drag_handle_pass(&mut encoder, view, &tv.drag_handle_vertices);
 
-        // ── Keyboard focus ring (chrome layer, hud-k6yvb) ───────────────────
-        // Drawn above all agent content (input-model §416) for the current focus
+        // ── Keyboard focus ring (chrome layer) ───────────────────
+        // Drawn above all agent content (input-model ) for the current focus
         // owner — node OR tile-level, any tile — via the same LoadOp::Load chrome
         // pass the drag handles use.
         if !tv.focus_ring_vertices.is_empty() {
             self.encode_drag_handle_pass(&mut encoder, view, &tv.focus_ring_vertices);
         }
 
-        // ── Chrome context menu (hud-zc7f) ─────────────────────────────────
+        // ── Chrome context menu ─────────────────────────────────
         // Render the drag-handle reset context menu on top of everything.
         if !tv.context_menu_vertices.is_empty() {
             self.encode_drag_handle_pass(&mut encoder, view, &tv.context_menu_vertices);
@@ -892,12 +893,12 @@ impl Compositor {
             self.encode_menu_text_pass(&mut encoder, view);
         }
 
-        // ── Safe-mode overlay (hud-jm8nq.10): above all scene content and chrome.
+        // ── Safe-mode overlay: above all scene content and chrome.
         if !tv.safe_mode_vertices.is_empty() {
             self.encode_drag_handle_pass(&mut encoder, view, &tv.safe_mode_vertices);
         }
 
-        // ── System card (hud-w5zon): the last pass, above the safe-mode overlay,
+        // ── System card: the last pass, above the safe-mode overlay,
         // so the pairing code can never be covered.
         self.encode_system_card_pass(
             &mut encoder,
@@ -1208,14 +1209,13 @@ impl Compositor {
     /// This is a thin wrapper that runs [`Compositor::build_windowed_frame`]
     /// immediately followed by [`Compositor::present_windowed_frame`]. The
     /// production windowed loop does NOT use this wrapper — it calls the two
-    /// halves separately so it can drop the scene lock in between (hud-uyhpn).
+    /// halves separately so it can drop the scene lock in between.
     /// Retained for tests and any caller that holds the scene throughout.
     ///
     /// This method is surface-agnostic: it works with any type implementing
     /// `CompositorSurface`.  The same code path executes in headless and windowed
     /// modes — only the surface implementation differs.
     ///
-    /// Per runtime-kernel/spec.md Requirement: Headless Mode (line 198):
     /// "No conditional compilation for the render path."
     ///
     /// For headless pixel readback, use `render_frame_headless()` instead,
@@ -1267,12 +1267,12 @@ impl Compositor {
         let frame_start = std::time::Instant::now();
         self.frame_number += 1;
 
-        // ── Drain local composer echo state (hud-r3ax6) ───────────────────
+        // ── Drain local composer echo state ───────────────────
         self.drain_local_composer_state();
 
         let mut telemetry = FrameTelemetry::new(self.frame_number);
 
-        // ── Phase-1 markdown cache prime (hud-380dl: commit-time prime) ─────
+        // ── Phase-1 markdown cache prime (commit-time prime) ─────
         // The markdown cache MUST be primed at commit time (before
         // render_frame_headless is called) by an explicit `prime_markdown_cache`
         // call at the scene-commit site (Stage 3/4).  By the time this path
@@ -1285,23 +1285,23 @@ impl Compositor {
             debug_assert!(
                 false,
                 "render_frame_headless: markdown cache was not commit-primed for scene \
-                 version {} (cache version {}); falling back to in-render prime [hud-380dl]",
+                 version {} (cache version {}); falling back to in-render prime",
                 scene.version, self.markdown_cache_scene_version,
             );
             self.prime_markdown_cache(scene);
             // Note: markdown_prime_us stays 0 (correctness fallback, not normal path).
         }
 
-        // ── Phase-1 truncation cache prime (hud-wgq7j / hud-v2z6u) ─────────────
+        // ── Phase-1 truncation cache prime  ─────────────
         // Same commit-time prime contract as the markdown cache — see render_frame
         // for the full correctness rationale.  In steady state this block is a
         // no-op because the caller already primed at commit time.
         if scene.version != self.truncation_cache_scene_version {
             // A version mismatch is an EXPECTED state: prime_truncation_cache's
-            // mid-drag cadence gate (hud-ghhxa) defers re-primes during fast
+            // mid-drag cadence gate defers re-primes during fast
             // geometry changes, so the sentinel legitimately lags scene.version
             // for one or more frames.  Trace (not debug_assert) and apply the
-            // cadence-gated in-render prime to preserve correctness [hud-v2z6u].
+            // cadence-gated in-render prime to preserve correctness.
             tracing::trace!(
                 scene_version = scene.version,
                 cache_version = self.truncation_cache_scene_version,
@@ -1327,7 +1327,8 @@ impl Compositor {
         let drag_handles = self.collect_drag_handle_entries(scene, sw, sh);
         let mut drag_handle_vertices: Vec<RectVertex> = Vec::new();
         self.append_drag_handle_vertices(scene, &drag_handles, &mut drag_handle_vertices, sw, sh);
-        let drag_highlight_cmds = self.drag_highlight_cmds(scene, &drag_handles);
+        let mut drag_highlight_cmds = self.drag_highlight_cmds(scene, &drag_handles);
+        drag_highlight_cmds.extend(self.drag_pill_cmds(scene, &drag_handles));
 
         // ── Widget texture sync before frame acquisition (same as windowed path).
         self.sync_widget_textures(scene, self.degradation_level);
@@ -1376,17 +1377,17 @@ impl Compositor {
         self.encode_rounded_rect_pass(&mut encoder, &frame.view, &drag_highlight_cmds, sw, sh);
         self.encode_drag_handle_pass(&mut encoder, &frame.view, &drag_handle_vertices);
 
-        // ── Keyboard focus ring (chrome layer, hud-k6yvb) ───────────────────
+        // ── Keyboard focus ring (chrome layer) ───────────────────
         let mut focus_ring_vertices: Vec<RectVertex> = Vec::new();
         self.append_focus_ring_vertices(scene, &mut focus_ring_vertices, sw, sh);
-        // ── Composer caret quad (chrome layer, same pass, hud-hxhnt) ────────
+        // ── Composer caret quad (chrome layer, same pass) ────────
         self.append_composer_caret_vertices(scene, &mut focus_ring_vertices, sw, sh);
         self.append_composer_preedit_underline_vertices(scene, &mut focus_ring_vertices, sw, sh);
         if !focus_ring_vertices.is_empty() {
             self.encode_drag_handle_pass(&mut encoder, &frame.view, &focus_ring_vertices);
         }
 
-        // ── Chrome context menu (hud-zc7f) ─────────────────────────────────
+        // ── Chrome context menu ─────────────────────────────────
         if !context_menu_vertices.is_empty() {
             self.encode_drag_handle_pass(&mut encoder, &frame.view, &context_menu_vertices);
         }
@@ -1394,7 +1395,7 @@ impl Compositor {
             self.encode_menu_text_pass(&mut encoder, &frame.view);
         }
 
-        // System card last, above everything (hud-w5zon).
+        // System card last, above everything.
         let system_card_vertices = self.final_chrome_vertices(sw, sh);
         let (system_card_rounded_rects, _) = self.final_chrome_rounded_rects(sw, sh);
         self.encode_system_card_pass(

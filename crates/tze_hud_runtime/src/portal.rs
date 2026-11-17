@@ -1421,7 +1421,7 @@ pub(crate) mod tests {
         assert_eq!(scene.tile_scroll_offset_local(tile_id).1, 0.0);
     }
 
-    /// spec §3.3 — `notify_tile_content_appended` on a scrolled-back tile must
+    /// 3.3 — `notify_tile_content_appended` on a scrolled-back tile must
     /// NOT change the scroll offset (InputProcessor enforces this; driver just calls it).
     #[test]
     fn scrolled_back_tile_offset_is_stable_on_append() {
@@ -1477,7 +1477,7 @@ pub(crate) mod tests {
 
         let (_, pre_y) = scene.tile_scroll_offset_local(tile_id);
 
-        // spec §3.3: another append must NOT change the scrolled-back position.
+        // 3.3: another append must NOT change the scrolled-back position.
         let changed = processor.notify_tile_content_appended(
             tile_id,
             large_content + line_h,
@@ -1488,13 +1488,10 @@ pub(crate) mod tests {
 
         let (_, post_y) = scene.tile_scroll_offset_local(tile_id);
 
-        assert!(
-            !changed,
-            "spec §3.3: scrolled-back tile must not advance after append"
-        );
+        assert!(!changed, "scrolled-back tile must not advance after append");
         assert!(
             (post_y - pre_y).abs() < f32::EPSILON,
-            "spec §3.3: scroll offset must be unchanged; pre={pre_y} post={post_y}"
+            "scroll offset must be unchanged; pre={pre_y} post={post_y}"
         );
     }
 
@@ -1543,7 +1540,7 @@ pub(crate) mod tests {
         let tile_id = tile(&driver, "p");
         assert!(
             tile_markdown(&scene, tile_id).contains("UNIQUE-TRANSCRIPT-MARKER-42"),
-            "the create drain paints the first publish (the grey-tile bug, hud-utbiy)"
+            "the create drain paints the first publish (the grey-tile bug)"
         );
 
         publish(&mut driver, "p", "SECOND-TRANSCRIPT-MARKER-99", 300);
@@ -1717,7 +1714,7 @@ pub(crate) mod tests {
         );
     }
 
-    /// A portal renders even with no active tab (hud-obw3q): into the first
+    /// A portal renders even with no active tab: into the first
     /// tab, activated only once the tile exists, or into a new "Main" tab.
     #[test]
     fn drain_with_no_active_tab_activates_tab_and_paints() {
@@ -1771,7 +1768,7 @@ pub(crate) mod tests {
             let mut processor = InputProcessor::new();
             publish(&mut driver, "p", "hello", 100);
             driver.drain_inner(&mut scene, &mut processor, None, 200);
-            assert_eq!(scene.active_tab, None, "hud-zccuf");
+            assert_eq!(scene.active_tab, None, "a publish must not activate a tab");
             assert!(driver.entries[&key("p")].tile_scene_id.is_none());
             assert_eq!(scene.tile_count(), 0);
             let original_lease = lease(&driver, "p");
@@ -2062,7 +2059,7 @@ pub(crate) mod tests {
     }
 
     /// The "⋯ writing" cue quiesces on an idle portal with one repaint, keeps
-    /// the unread count, and is not repainted again (hud-kbm80).
+    /// the unread count, and is not repainted again.
     #[test]
     fn activity_cue_quiesces_after_deadline_without_new_update() {
         let mut driver = PortalDriver::new(PortalHandle::default());

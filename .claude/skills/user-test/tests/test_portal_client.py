@@ -354,6 +354,27 @@ def test_hook_lifecycle_over_real_mcp_surface(tmp_path):
         assert (tombstone.parent / "marker.lock").exists()  # lock identity survives expiry
 
 
+def test_hook_parallel_tool_updates_queue_instead_of_dropping(tmp_path):
+    # Parallel tools fire their Post hooks together; the second must wait for
+    # the in-flight delivery rather than lose its update .
+    with HookHarness(tmp_path / "parallel") as h:
+        h.boot()
+        h.event("PreToolUse", tool_use_id="ok", tool_name="Bash")
+        h.event("PreToolUse", tool_use_id="bad", tool_name="Bash")
+        h.block_text = "Bash: completed"
+        first = h.launch(h.payload("PostToolUse", tool_use_id="ok", tool_name="Bash"))
+        assert h.received.wait(2)
+        second = h.launch(h.payload("PostToolUseFailure", tool_use_id="bad", tool_name="Bash"))
+        time.sleep(0.2)  # well past the old 50 ms admission window
+        h.release.set()
+        h.finish(first)
+        h.finish(second)
+        h.wait_idle()
+        contents = [p.get("content") for p in h.publications()]
+        assert contents.count("Bash: completed") == 1
+        assert contents.count("Bash: failed") == 1
+
+
 def test_hook_subprocess_replay_prompt_races_and_reaping(tmp_path):
     import fcntl
     with HookHarness(tmp_path / "ordering") as h:
@@ -873,6 +894,7 @@ class UsageHarness(HookHarness):
         self.registration_thread = None
         self.worker_script = USAGE
         self.hold_timeout = 5
+        self.prewarmed = []
 
     def track_wrapper_children(self):
         # Pin each detached helper and foreground sleep before real exec. The
@@ -927,6 +949,17 @@ class UsageHarness(HookHarness):
         self.env["PATH"] = str(commands) + os.pathsep + self.env["PATH"]
 
     def __exit__(self, *args):
+        # An unused prepared child has not entered main or touched usage state.
+        # Closing its private gate releases it; kill only this owned child if
+        # startup itself stalls, so a failed assertion cannot leave it behind.
+        for process, channel in self.prewarmed:
+            channel.close()
+            try:
+                process.communicate(timeout=2)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.communicate(timeout=2)
+        self.prewarmed.clear()
         try:
             super().__exit__(*args)
         finally:
@@ -1009,14 +1042,55 @@ class UsageHarness(HookHarness):
         return {"rate_limits": {"five_hour": {"used_percentage": pct, "resets_at": reset or self.reset}},
                 "context_window": {"used_percentage": 99}, "private_unknown": "discard-this-synthetic-text"}
 
+    def _spawn(self, argv, **kwargs):
+        return subprocess.Popen(argv, cwd=self.home, env=self.env, stdin=subprocess.PIPE,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, **kwargs)
+
+    def prewarm(self, count):
+        # Prepare imports before the held-owner interleaving, rather than
+        # spending its lease on seven more interpreters. Each release enters
+        # the unchanged main with cached imports and the real one-second timer;
+        # stdin, state locks, HTTP and ACK persistence remain inside that budget.
+        # Cold-start and cancellation parents continue to use normal launches.
+        # The gate is closed before main and cannot extend the delivery lease.
+        prepare = ("import runpy,socket,sys\nfrom pathlib import Path\n"
+                   "sys.path.insert(0, str(Path(sys.argv[1]).resolve().parents[2] / 'user-test' / 'scripts'))\n"
+                   "import hud_env,publish_widget_batch\n"
+                   "entry = runpy.run_path(sys.argv[1])['main']\n"
+                   "with socket.socket(fileno=int(sys.argv[2])) as gate:\n"
+                   "    gate.sendall(b'+')\n"
+                   "    start = gate.recv(1) == b'+'\n"
+                   "sys.argv = [sys.argv[1]]\n"
+                   "if start: entry()\n")
+        for _ in range(count):
+            channel, child_channel = socket.socketpair()
+            try:
+                process = self._spawn([sys.executable, "-c", prepare, str(USAGE),
+                                       str(child_channel.fileno())],
+                                      pass_fds=(child_channel.fileno(),))
+            except BaseException:
+                channel.close()
+                raise
+            finally:
+                child_channel.close()
+            self.prewarmed.append((process, channel))
+            channel.settimeout(2)
+            assert channel.recv(1) == b"+", "owned usage child did not prepare"
+
     def launch(self, payload):
         raw = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
-        p = subprocess.Popen([sys.executable, str(USAGE)], cwd=self.home, env=self.env,
-                             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if self.prewarmed:
+            p, channel = self.prewarmed[0]
+        else:
+            p, channel = self._spawn([sys.executable, str(USAGE)]), None
         p.started = time.monotonic()
         p.stdin.write(raw)
         p.stdin.close()
         p.stdin = None
+        if channel is not None:
+            with channel:
+                channel.sendall(b"+")
+            self.prewarmed.pop(0)
         return p
 
     def finish(self, process, expected=0):
@@ -1089,6 +1163,10 @@ def test_usage_metric_steps_new_window_and_unavailable(tmp_path):
 def test_usage_concurrent_claim_and_obsolete_ack_preserve_desire(tmp_path):
     import fcntl
     with UsageHarness(tmp_path / "concurrent") as h:
+        # Scheduling seven more cold interpreters after the first send could
+        # exhaust its real deadline before this test reached ACK persistence.
+        # Keep that deadline real, but prepare this first burst before starting it.
+        h.prewarm(8)
         h.block_text = f'41% · resets {time.strftime("%H:%M", time.gmtime(h.reset))}'
         first = h.launch(h.payload())
         assert h.received.wait(1)
@@ -1416,6 +1494,43 @@ def test_usage_wrapper_stdout_and_detached_cancellation(tmp_path):
 
 def test_usage_failures_are_silent_private_bounded_and_event_driven(tmp_path):
     import fcntl
+    with UsageHarness(tmp_path / "imports") as h:
+        # Exercise real application imports under the original process timer.
+        # A timeout before transport must leave the same input eligible later.
+        imports = h.home / "imports"
+        imports.mkdir()
+        marker = imports / "entered"
+        original_pythonpath = h.env.get("PYTHONPATH")
+        for index, module in enumerate(("hud_env", "publish_widget_batch")):
+            marker.unlink(missing_ok=True)
+            (imports / "sitecustomize.py").write_text(
+                "import sys, time\n"
+                "class SlowImport:\n"
+                "    def find_spec(self, fullname, path=None, target=None):\n"
+                f"        if fullname == {module!r}:\n"
+                f"            with open({str(marker)!r}, 'w') as out:\n"
+                "                out.write(fullname)\n"
+                "            time.sleep(1.5)\n"
+                "sys.meta_path.insert(0, SlowImport())\n")
+            h.env["PYTHONPATH"] = str(imports) + (
+                os.pathsep + original_pythonpath if original_pythonpath else "")
+            payload = h.payload(41 + index)
+            process = h.launch(payload)
+            try:
+                h.finish(process, expected=-signal.SIGALRM)
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                    process.communicate(timeout=2)
+                if original_pythonpath is None:
+                    h.env.pop("PYTHONPATH")
+                else:
+                    h.env["PYTHONPATH"] = original_pythonpath
+            assert marker.read_text() == module
+            assert len(h.records) == index
+            h.replay(payload)
+            assert len(h.records) == index + 1
+            assert h.state()["ack"]["key"] == [h.reset, 41 + index]
     with UsageHarness(tmp_path / "failures") as h:
         h.env["HUD_USAGE_WIDGET"] = "../unsafe"
         h.replay(h.payload())

@@ -97,6 +97,15 @@ This command requires Linux/WSL pidfd and parent-death support; other hosts
 report `deadline_unavailable` without an unbounded probe. A 401 requires a valid pairing; 403 `NOT_ADMIN` requires the
 owner's admin pairing. Neither grants permission to elevate or re-pair.
 
+After authenticated status succeeds, doctor also prints bounded content-free
+holdings and startup warnings: up to eight whole owner/surface/kind/phase/expiry
+rows and four warning entries, within a 3072-byte result envelope. Omission
+counts/reasons qualify trimming; null means unknown. Pending fonts, absent
+producers, legacy HUDs and malformed metadata never appear as healthy empty
+lists. Later failures retain these diagnostics and the original failing layer;
+unauthenticated/forbidden responses disclose none. `status` provides the full
+bounded metadata schema ([API](../../../docs/api.md)).
+
 After explicit authorization to publish test content, use:
 
 ```bash

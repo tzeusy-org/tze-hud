@@ -25,6 +25,8 @@ pub(crate) type Autostart = Arc<dyn Fn(Option<bool>) -> Result<bool, String> + S
 /// Saves one `[[tabs.widgets]]` entry: (tab, instance, change).
 pub(crate) type WidgetWriter =
     Arc<dyn Fn(&str, &str, &tze_hud_config::WidgetUpdate) -> Result<(), String> + Send + Sync>;
+/// Saves a zone's exact monitor key (`None`: follow the primary display).
+pub(crate) type DisplayWriter = Arc<dyn Fn(&str, Option<&str>) -> Result<(), String> + Send + Sync>;
 /// Sets or removes `[design_tokens]` keys in the config file.
 pub(crate) type TokenWriter =
     Arc<dyn Fn(&[(&str, tze_hud_config::TokenUpdate)]) -> Result<(), String> + Send + Sync>;
@@ -63,8 +65,9 @@ pub(crate) struct RuntimeControl {
     pub write_widget: Option<WidgetWriter>,
     /// `None` when there is no config file to save design tokens to.
     pub write_tokens: Option<TokenWriter>,
-    /// `[displays.<NAME>]` zone lists, sorted by display.
-    pub displays: Vec<(String, Vec<String>)>,
+    /// Live configured assignments and the main thread's current monitor choices.
+    pub displays: super::displays::DisplayControl,
+    pub write_display: Option<DisplayWriter>,
     pub restart: Option<RestartHandle>,
     pub update: Option<UpdateHandle>,
     /// The channel Install update pulls from.
@@ -156,16 +159,17 @@ impl RuntimeControl {
                 tze_hud_config::set_design_tokens(&path, updates).map_err(|e| e.to_string())
             }) as TokenWriter
         });
-        let mut displays: Vec<(String, Vec<String>)> = cfg
+        let write_display = config_path.clone().map(|path| {
+            Arc::new(move |zone: &str, display: Option<&str>| {
+                tze_hud_config::set_zone_display(&path, zone, display).map_err(|e| e.to_string())
+            }) as DisplayWriter
+        });
+        let displays = cfg
             .config_toml
             .as_deref()
             .and_then(|src| toml::from_str::<tze_hud_config::raw::RawConfig>(src).ok())
-            .and_then(|raw| raw.displays)
-            .into_iter()
-            .flatten()
-            .map(|(name, table)| (name, table.zones))
-            .collect();
-        displays.sort();
+            .map(|raw| tze_hud_config::displays::zone_display_assignments(&raw))
+            .unwrap_or_default();
         let profile = config.profile.clone();
         let (window, window_sized) = window_label(cfg);
         Self {
@@ -175,7 +179,8 @@ impl RuntimeControl {
             config_path,
             write_widget,
             write_tokens,
-            displays,
+            displays: super::displays::DisplayControl::new(displays),
+            write_display,
             sources: Arc::new(Mutex::new(sources)),
             running,
             saved: Arc::new(Mutex::new(saved)),

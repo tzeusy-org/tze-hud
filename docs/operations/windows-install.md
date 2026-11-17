@@ -254,6 +254,20 @@ The same calls are wrapped by `python3 .claude/skills/user-test/scripts/hud_admi
 (`status`, `logs --tail N`, `screenshot -o FILE`, `update --channel dev`,
 `restart`).
 
+`status` also reports bounded `holdings` by actual owner and per-startup
+`warnings`; see the [metadata schema and expiry rules](../api.md). These fields
+exclude published content, widget parameters, credentials and raw paths/errors.
+The existing `doctor` command includes at most eight complete holding rows
+(owner, full address, kind, phase, remaining expiry/basis and count) and four
+safe startup warnings after authenticated status succeeds. It trims whole rows
+against an actual 3072-byte JSON result-envelope limit and reports omitted
+records/owners/events. Null counts mean unknown, and portal `activity` expiry
+is activity-dependent. Legacy HUDs, unavailable producers, pending fonts and
+malformed metadata are explicitly qualified. Later firewall/build/release
+failures keep both that metadata and their original first-failure diagnosis;
+401/403 disclose none. Doctor retains its five-second probe deadlines and
+owned-child cleanup and makes no runtime or machine changes.
+
 Without a valid PSK the answer is 401; with one lacking `admin`, 403
 `{"code":"NOT_ADMIN","hint":...}`.
 

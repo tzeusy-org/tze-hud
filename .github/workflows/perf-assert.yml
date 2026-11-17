@@ -1,4 +1,4 @@
-# tze_hud — Performance-assert CI lane (hud-94vm5)
+# tze_hud — Performance-assert CI lane
 #
 # Runs wall-clock / p99 latency assertions that are intentionally
 # EXCLUDED from the blocking `test-unit` lane (ci.yml) because they are

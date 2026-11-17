@@ -1,6 +1,6 @@
 //! Mutation batch operations for atomic scene changes.
 //!
-//! # Transaction Validation Pipeline (RFC 0001 §3.2, §3.3)
+//! # Transaction Validation Pipeline
 //!
 //! Every [`MutationBatch`] passes through five ordered validation stages before
 //! any mutation is applied to the live scene graph:
@@ -16,13 +16,13 @@
 //! Stages run in this order. A failure at any stage produces a [`BatchRejected`] and
 //! no mutations are applied (all-or-nothing).
 //!
-//! # Batch size limit (RFC 0001 §3.1)
+//! # Batch size limit
 //!
 //! The maximum batch size is [`MAX_BATCH_SIZE`] (1000 mutations).  Batches
 //! exceeding this limit are rejected with [`ValidationError::BatchSizeExceeded`]
 //! before any stage runs.
 //!
-//! # Agent namespace (RFC 0001 §3.1)
+//! # Agent namespace
 //!
 //! `agent_namespace` MUST be derived from the authenticated session context.
 //! It is carried in the batch struct for in-process callers but the gRPC layer
@@ -37,7 +37,7 @@ use crate::validation::ValidationErrorCode;
 use crate::validation::{BatchRejected, ValidationError};
 use serde::{Deserialize, Serialize};
 
-/// Maximum number of mutations in a single batch (RFC 0001 §3.1).
+/// Maximum number of mutations in a single batch.
 pub const MAX_BATCH_SIZE: usize = 1_000;
 
 /// An atomic batch of scene mutations from an agent.
@@ -60,7 +60,7 @@ pub struct MutationBatch {
     pub lease_id: Option<SceneId>,
 }
 
-/// Optional timing hints attached to a [`MutationBatch`] (RFC 0005).
+/// Optional timing hints attached to a [`MutationBatch`].
 ///
 /// Fields use the [`WallUs`] newtype for clock-domain safety. The protocol
 /// boundary converts wire timing hints into this batch-level representation.
@@ -72,26 +72,20 @@ pub struct BatchTimingHints {
     pub expires_at_wall_us: Option<WallUs>,
 }
 
-/// Individual scene mutations (v1 set per RFC 0001 §3.1).
+/// Individual scene mutations.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum SceneMutation {
     // ── Tab mutations ─────────────────────────────────────────────────────
-    // NOTE: Tab mutations require the `manage_tabs` capability per RFC 0001
-    // §2.2, §3.3. However, `SceneMutation` variants do not carry a `lease_id`
-    // field, so capability enforcement at the batch-apply layer must be done
-    // by the transport/session layer (gRPC handler) before calling
-    // `apply_batch`. Checked graph wrappers are available only to fixtures;
-    // production admission happens at the session boundary.
-    //
-    // Tab mutations in `apply_single_mutation` call the unchecked graph
-    // methods; the gRPC layer is responsible for verifying `manage_tabs`
-    // before dispatching the batch.
-    /// Create a new tab. RFC 0001 §2.2.
+    // These internal tab mutations carry no `lease_id` and call unchecked
+    // graph methods. Callers must authorize structural changes before applying
+    // a batch. Checked graph wrappers are available only to fixtures;
+    // agent-facing session routes do not dispatch these tab mutations.
+    /// Create a new tab.
     CreateTab { name: String, display_order: u32 },
-    /// Switch the active tab. RFC 0001 §2.2.
+    /// Switch the active tab.
     SwitchActiveTab { tab_id: SceneId },
     // ── Tile mutations (require create_tiles / modify_own_tiles) ──────────
-    /// Create a new tile. Requires `create_tiles` + `modify_own_tiles`. RFC 0001 §2.3.
+    /// Create a new tile. Requires `create_tiles` + `modify_own_tiles`.
     CreateTile {
         tab_id: SceneId,
         namespace: String,
@@ -99,16 +93,16 @@ pub enum SceneMutation {
         bounds: Rect,
         z_order: u32,
     },
-    /// Update tile bounds. RFC 0001 §2.3.
+    /// Update tile bounds.
     UpdateTileBounds { tile_id: SceneId, bounds: Rect },
-    /// Update tile opacity (must be in [0.0, 1.0]). RFC 0001 §2.3.
+    /// Update tile opacity (must be in [0.0, 1.0]).
     UpdateTileOpacity { tile_id: SceneId, opacity: f32 },
-    /// Update tile input mode. RFC 0001 §2.3.
+    /// Update tile input mode.
     UpdateTileInputMode {
         tile_id: SceneId,
         input_mode: InputMode,
     },
-    /// Delete a tile and all its nodes. RFC 0001 §2.3.
+    /// Delete a tile and all its nodes.
     DeleteTile { tile_id: SceneId },
     // ── Node mutations ────────────────────────────────────────────────────
     SetTileRoot {
@@ -117,11 +111,11 @@ pub enum SceneMutation {
         /// SceneIds materialized from `descendants`.
         node: Node,
         /// Inline descendants of `node` (any depth), root EXCLUDED, in a flat
-        /// list (hud-ga4md). Materialized atomically with the root as ONE
+        /// list. Materialized atomically with the root as ONE
         /// mutation so a multi-node portal body (transcript + head-anchored
         /// composer + INPUT band) rides a single coalescible StateStream update
         /// instead of a per-node `AddNode` fan-out that would flip the batch
-        /// Transactional and break republish latest-wins coalescing (hud-mzk74).
+        /// Transactional and break republish latest-wins coalescing.
         /// Empty = a flat single-node root (pre-children behavior).
         descendants: Vec<Node>,
     },
@@ -166,7 +160,7 @@ pub enum SceneMutation {
         ///
         /// Only meaningful when `content` is `ZoneContent::StreamText`.
         /// Empty = reveal full text immediately.
-        /// Per spec §Subtitle Streaming Word-by-Word Reveal.
+        /// Per Subtitle Streaming Word-by-Word Reveal.
         #[serde(default)]
         breakpoints: Vec<u64>,
         /// No expiry at all: a notification skips its urgency-derived
@@ -177,7 +171,7 @@ pub enum SceneMutation {
     },
     /// Clear all publications by this agent in the specified zone.
     ///
-    /// Per spec: "ClearZone clears all publications by the agent in the specified zone."
+    /// "ClearZone clears all publications by the agent in the specified zone."
     ClearZone {
         zone_name: String,
         publish_token: ZonePublishToken,
@@ -208,7 +202,7 @@ pub enum SceneMutation {
     // ── Scroll mutations (require ModifyOwnTiles) ──────────────────────
     /// Register or replace local-first scroll config for a tile.
     /// Enables adapter-driven scroll via `SetScrollOffset`.
-    /// Renderer/coalescer/clamp plumbing shipped in hud-w5ih (PR #489).
+    /// Renderer/coalescer/clamp plumbing shipped in (PR #489).
     RegisterTileScroll {
         tile_id: SceneId,
         scrollable_x: bool,
@@ -256,7 +250,7 @@ pub struct MutationResult {
     pub applied: bool,
     pub created_ids: Vec<SceneId>,
     pub error: Option<ValidationError>,
-    /// Structured rejection response (RFC 0001 §3.4). Present when `applied == false`.
+    /// Structured rejection response. Present when `applied == false`.
     pub rejection: Option<BatchRejected>,
     /// True if the lease is at the soft budget warning threshold (80%).
     /// The batch was still applied. This remains part of the mutation-return
@@ -288,7 +282,7 @@ impl MutationResult {
 impl SceneGraph {
     /// Apply a mutation batch atomically per the five-stage validation pipeline.
     ///
-    /// # Pipeline stages (RFC 0001 §3.2)
+    /// # Pipeline stages
     ///
     /// 1. **Batch size check** — reject if > [`MAX_BATCH_SIZE`] mutations.
     /// 2. **Stage 1: Lease check** — all referenced leases must be Active.
@@ -524,7 +518,7 @@ impl SceneGraph {
             }
         }
 
-        // Record this batch for batch-correlated present acknowledgment (hud-91uu6).
+        // Record this batch for batch-correlated present acknowledgment.
         // The commit above mutated the live graph, so the next composited frame
         // carries this batch; the render loop drains and stamps it with the
         // present wall-clock to emit a FramePresented event.
@@ -724,7 +718,7 @@ impl SceneGraph {
             } => {
                 // Use checked variant to enforce namespace isolation and ModifyOwnTiles capability.
                 // The whole inline subtree (root + descendants) materializes as one
-                // mutation so it stays a coalescible StateStream update (hud-ga4md).
+                // mutation so it stays a coalescible StateStream update.
                 self.set_tile_root_tree_checked(
                     *tile_id,
                     node.clone(),
@@ -786,7 +780,7 @@ impl SceneGraph {
                 zone_name,
                 publish_token: _publish_token, // token validated by the gRPC layer
             } => {
-                // Per spec: ClearZone clears publications by THIS agent in the zone.
+                // ClearZone clears publications by THIS agent in the zone.
                 self.clear_zone_for_publisher(zone_name, namespace)?;
                 Ok(vec![])
             }
@@ -1034,7 +1028,7 @@ mod tests {
 
     #[test]
     fn accepted_batch_records_present_ack_and_drains_once() {
-        // hud-91uu6: an accepted batch enqueues its batch_id for present-ack
+        // an accepted batch enqueues its batch_id for present-ack
         // correlation; the render loop drains it exactly once per present.
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
@@ -1133,7 +1127,7 @@ mod tests {
 
         // Set: the accent lands in overlay state, keyed by tile id, and bumps
         // scene.version so the #943 idle present-gate re-arms for an accent-only
-        // transition (regression guard for hud-m48i0).
+        // transition.
         let accent = LifecycleAccent {
             color: Rgba::new(0.1, 0.2, 0.3, 1.0),
             width_px: 4.0,
@@ -1221,7 +1215,7 @@ mod tests {
 
     /// Build a leased scene with a portal tile at the display origin whose root is
     /// a TextMarkdown "transcript" node — the shape an interaction-enabled portal
-    /// republishes each streaming render (hud-iofav).
+    /// republishes each streaming render.
     #[cfg(test)]
     fn transcript_scene_with_tile(text: &str) -> (SceneGraph, SceneId) {
         let mut scene = SceneGraph::new(1920.0, 1080.0);
@@ -1299,8 +1293,8 @@ mod tests {
         None
     }
 
-    /// The interaction-path regression guard for hud-iofav (the missing counterpart
-    /// to the non-interactive tests): the checked composer setter
+    /// The interaction-path counterpart to the non-interactive tests:
+    /// the checked composer setter
     /// attaches a composer hit-region node under the tile root, and that node —
     /// with `accepts_composer_input` and click-to-focus `accepts_pointer` — SURVIVES
     /// consecutive transcript republishes (each `SetTileRoot` replaces the whole
@@ -1326,7 +1320,7 @@ mod tests {
         );
         assert!(
             hr1.accepts_pointer && hr1.accepts_focus,
-            "attached composer must accept pointer (click-to-focus, hud-v4k1h)"
+            "attached composer must accept pointer (click-to-focus)"
         );
         assert_eq!(hr1.interaction_id, "portal-42-composer");
         // Click-to-focus resolves to the composer node via hit_test (the tile sits
@@ -1428,7 +1422,7 @@ mod tests {
 
     /// A checked composer write by an agent that does not own the
     /// tile must be rejected (lease/namespace gate), leaving no composer node
-    /// attached — mirroring the accent's cross-namespace guard (hud-a745w).
+    /// attached — mirroring the accent's cross-namespace guard.
     #[test]
     fn set_tile_composer_interaction_rejects_cross_namespace() {
         let (mut scene, tile_id) = transcript_scene_with_tile("render 1");
@@ -1464,7 +1458,7 @@ mod tests {
     /// A checked accent write by an agent that does not own the tile
     /// must be rejected with `NamespaceMismatch` and must not mutate the accent
     /// overlay state — the accent is a per-tile visual owned by the tile's
-    /// namespace, exactly like every other tile mutation (hud-m48i0).
+    /// namespace, exactly like every other tile mutation.
     #[test]
     fn set_tile_lifecycle_accent_rejects_cross_namespace() {
         let mut scene = SceneGraph::new(1920.0, 1080.0);
@@ -1511,7 +1505,7 @@ mod tests {
         assert_eq!(scene.nodes.len(), nodes_before);
     }
 
-    // ── Portal surface (RFC 0013 §7.2 promotion; hud-tc153) ──────────────────
+    // ── Portal surface ────────────────────────────────────────────────
 
     /// Set up a tab + lease + tile whose root is a known SolidColor node, and
     /// return `(scene, tile_id, root_node_id)`. Mirrors the raw-tile pilot: the
@@ -1769,7 +1763,7 @@ mod tests {
         assert!(scene.portal_surface(tile_id).is_none());
     }
 
-    /// hud-tc153 review P2: the descriptor survives a content republish, but a
+    /// review P2: the descriptor survives a content republish, but a
     /// part node reference that pointed at the now-removed root must not dangle —
     /// `SetTileRoot` prunes it back to `None` so consumers never resolve a stale
     /// `SceneId`.
@@ -1831,7 +1825,7 @@ mod tests {
         );
     }
 
-    /// hud-tc153 review (Gemini): a portal part with negative width/height is
+    /// review (Gemini): a portal part with negative width/height is
     /// rejected as an invalid portal surface, mirroring the non-negative extent
     /// expected of tile/node bounds.
     #[test]

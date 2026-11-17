@@ -23,7 +23,9 @@ use super::monitor_identity::{DisplayKey, MonitorIdentity, display_keys};
 use crate::operator::status::{UnplacedReason, UnplacedZone};
 
 use tze_hud_compositor::{DisplayLayout, DisplayRect, FrameTarget, WindowSurface};
+use tze_hud_config::displays::{is_legacy_display_key, normalize_display_key};
 use tze_hud_scene::Rect;
+use winit::dpi::PhysicalSize;
 use winit::event_loop::ActiveEventLoop;
 use winit::monitor::MonitorHandle;
 use winit::window::{Window, WindowAttributes, WindowId, WindowLevel};
@@ -70,11 +72,11 @@ impl MonitorSpec {
     }
 
     /// This monitor's bounds in scene pixels, given the primary's origin.
-    pub fn scene_origin(&self, primary: &MonitorSpec) -> (i32, i32) {
+    pub(super) fn scene_origin(&self, primary: &MonitorSpec) -> (i32, i32) {
         (self.x - primary.x, self.y - primary.y)
     }
 
-    pub fn scene_rect(&self, primary: &MonitorSpec) -> Rect {
+    pub(super) fn scene_rect(&self, primary: &MonitorSpec) -> Rect {
         let (x, y) = self.scene_origin(primary);
         Rect::new(x as f32, y as f32, self.width as f32, self.height as f32)
     }
@@ -241,6 +243,37 @@ pub(super) fn unmatched_display_keys(
         .collect()
 }
 
+/// A migration hint comes only from the current all-connected GDI join, never
+/// from overlay availability or an OS-name fallback masquerading as an EDID key.
+#[derive(Debug, PartialEq, Eq)]
+enum LegacyIdentity {
+    Replacement(String),
+    NotConnected,
+    Unavailable,
+}
+
+// Headroom over the bounded Windows EDID/device-instance inputs. Never offer
+// a truncated key that the owner could mistake for an exact replacement.
+const MAX_MIGRATION_KEY_BYTES: usize = 4096;
+
+fn legacy_identity(configured: &str, keyed: &[KeyedMonitor]) -> LegacyIdentity {
+    let wanted = normalize_display_key(configured);
+    let mut joined = keyed
+        .iter()
+        .filter(|m| normalize_display_key(&m.name) == wanted);
+    match (joined.next(), joined.next()) {
+        (None, _) => LegacyIdentity::NotConnected,
+        (Some(m), None)
+            if m.key.stable
+                && !is_legacy_display_key(&m.key.key)
+                && m.key.key.len() <= MAX_MIGRATION_KEY_BYTES =>
+        {
+            LegacyIdentity::Replacement(m.key.key.clone())
+        }
+        _ => LegacyIdentity::Unavailable,
+    }
+}
+
 /// The per-sync log line naming one display's key, so it can be copied into
 /// `[displays."<key>"]`.
 pub(super) fn display_log_line(key: &str, spec: &MonitorSpec, primary: bool) -> String {
@@ -326,14 +359,14 @@ pub(super) struct DisplayTargets {
 
 impl DisplayTargets {
     /// Report `name`'s surface as lost (once, however often it is seen).
-    pub fn report_lost(&mut self, name: &str) {
+    pub(super) fn report_lost(&mut self, name: &str) {
         if !self.lost.iter().any(|n| n == name) {
             self.lost.push(name.to_owned());
         }
     }
 
     /// Report that `name` presented a frame.
-    pub fn report_healthy(&mut self, name: &str) {
+    pub(super) fn report_healthy(&mut self, name: &str) {
         if !self.healthy.iter().any(|n| n == name) {
             self.healthy.push(name.to_owned());
         }
@@ -365,28 +398,28 @@ pub(super) struct PresentLedger {
 
 impl PresentLedger {
     /// A frame with `signature` differs from what is on screen.
-    pub fn needs_present(&self, signature: u64) -> bool {
+    pub(super) fn needs_present(&self, signature: u64) -> bool {
         self.presented != Some(signature)
     }
 
     /// A present may be attempted at `now` (not backing off).
-    pub fn ready(&self, now: Instant) -> bool {
+    pub(super) fn ready(&self, now: Instant) -> bool {
         self.retry.is_none_or(|(at, _)| now >= at)
     }
 
     /// Owed a frame and the retry time has come.
-    pub fn retry_due(&self, now: Instant) -> bool {
+    pub(super) fn retry_due(&self, now: Instant) -> bool {
         self.retry.is_some_and(|(at, _)| now >= at)
     }
 
     /// When the owed frame should be retried.
-    pub fn retry_at(&self) -> Option<Instant> {
+    pub(super) fn retry_at(&self) -> Option<Instant> {
         self.retry.map(|(at, _)| at)
     }
 
     /// Record a present attempt of `signature` made at `now`. Returns true
     /// the first time a present submits.
-    pub fn record(&mut self, signature: u64, submitted: bool, now: Instant) -> bool {
+    pub(super) fn record(&mut self, signature: u64, submitted: bool, now: Instant) -> bool {
         if submitted {
             self.presented = Some(signature);
             self.retry = None;
@@ -400,17 +433,17 @@ impl PresentLedger {
     }
 
     /// The window already shows the current frame: nothing is owed.
-    pub fn settle(&mut self) {
+    pub(super) fn settle(&mut self) {
         self.retry = None;
     }
 
     /// Forget what is on screen (reconfigured or new surface).
-    pub fn invalidate(&mut self) {
+    pub(super) fn invalidate(&mut self) {
         self.presented = None;
     }
 
     #[cfg(test)]
-    pub fn owed(&self) -> bool {
+    pub(super) fn owed(&self) -> bool {
         self.retry.is_some()
     }
 }
@@ -424,7 +457,7 @@ pub(super) struct SecondaryTarget {
 }
 
 impl SecondaryTarget {
-    pub fn frame_target(&self) -> FrameTarget {
+    pub(super) fn frame_target(&self) -> FrameTarget {
         let (width, height) = tze_hud_compositor::CompositorSurface::size(self.surface.as_ref());
         FrameTarget {
             x: self.origin.0 as f32,
@@ -597,6 +630,23 @@ pub(super) fn secondary_index(secondaries: &[SecondaryDisplay], id: WindowId) ->
     secondaries.iter().position(|s| s.window.id() == id)
 }
 
+/// Resolve a DPI event only against registered windows, using native physical
+/// dimensions without applying the scale factor again. A creation-time event
+/// may arrive before registration; leave its writer default alone, then let
+/// display sync fit that window once it is registered.
+pub(super) fn scale_change_target<'a>(
+    window_id: WindowId,
+    primary: Option<(WindowId, &'a MonitorSpec)>,
+    secondaries: impl IntoIterator<Item = (WindowId, &'a MonitorSpec)>,
+) -> Option<PhysicalSize<u32>> {
+    primary
+        .into_iter()
+        .chain(secondaries)
+        .find_map(|(id, spec)| {
+            (id == window_id).then_some(PhysicalSize::new(spec.width, spec.height))
+        })
+}
+
 /// Final swapchain outcomes: successful secondary present and deferred encodes.
 pub(super) type SecondaryPresentation =
     (bool, Vec<tze_hud_compositor::surface::PresentAvailability>);
@@ -664,10 +714,14 @@ pub(super) fn unplaced_zones(
         .iter()
         .filter_map(|(zone, display)| {
             let name = resolved.get(zone).map(String::as_str);
-            let reason = match name {
-                Some(name) if failed.contains(&name) => UnplacedReason::OverlayFailed,
-                Some(name) if connected.contains(&name) => return None,
-                _ => UnplacedReason::NotConnected,
+            let reason = if is_legacy_display_key(display) {
+                UnplacedReason::LegacyKey
+            } else {
+                match name {
+                    Some(name) if failed.contains(&name) => UnplacedReason::OverlayFailed,
+                    Some(name) if connected.contains(&name) => return None,
+                    _ => UnplacedReason::NotConnected,
+                }
             };
             Some(UnplacedZone {
                 zone: zone.clone(),
@@ -836,7 +890,7 @@ impl RefitBudget {
     }
 
     /// Spend one re-fit at `now` if the budget allows it.
-    pub fn take(&mut self, now: Instant) -> bool {
+    pub(super) fn take(&mut self, now: Instant) -> bool {
         if self
             .window_start
             .is_none_or(|start| now.duration_since(start) >= REFIT_WINDOW)
@@ -940,10 +994,7 @@ impl super::WinitApp {
         let identities = super::monitor_identity::monitor_identities();
         let names: Vec<&str> = all_specs.iter().map(|m| m.name.as_str()).collect();
         let keyed = key_monitors(&names, &identities);
-        let keys_changed = keyed != self.state.display_keys;
-        if keys_changed {
-            self.adopt_display_keys(keyed, &identities);
-        }
+        let keys_changed = self.adopt_display_keys(keyed, &identities);
 
         let first_sync = self
             .state
@@ -1099,7 +1150,14 @@ impl super::WinitApp {
     /// Record a new key snapshot and resolve `[displays]` against it. Warns,
     /// once per change, about monitors keyed by OS name and configured keys
     /// that match no connected monitor (their zones stay on the primary).
-    fn adopt_display_keys(&mut self, keyed: Vec<KeyedMonitor>, identities: &[MonitorIdentity]) {
+    pub(super) fn adopt_display_keys(
+        &mut self,
+        keyed: Vec<KeyedMonitor>,
+        identities: &[MonitorIdentity],
+    ) -> bool {
+        if keyed == self.state.display_keys {
+            return false;
+        }
         for id in identities {
             tracing::debug!(
                 gdi = %id.gdi_name,
@@ -1124,6 +1182,36 @@ impl super::WinitApp {
         let resolved = resolve_zone_displays(&self.state.zone_displays, &keyed);
         let connected: Vec<&str> = keyed.iter().map(|m| m.key.key.as_str()).collect();
         for (configured, zones) in unmatched_display_keys(&self.state.zone_displays, &resolved) {
+            if is_legacy_display_key(&configured) {
+                let identity = legacy_identity(&configured, &keyed);
+                // Debug formatting escapes control characters; bound every
+                // user/driver-controlled field emitted by the migration hint.
+                let configured = configured.chars().take(128).collect::<String>();
+                let zones: Vec<_> = zones
+                    .iter()
+                    .take(8)
+                    .map(|zone| zone.chars().take(64).collect::<String>())
+                    .collect();
+                match identity {
+                    LegacyIdentity::Replacement(key) => tracing::warn!(
+                        configured = ?configured,
+                        ?zones,
+                        replacement = ?key,
+                        "legacy display key: currently connected; rename the section to the replacement key; its zones render on the primary"
+                    ),
+                    LegacyIdentity::NotConnected => tracing::warn!(
+                        configured = ?configured,
+                        ?zones,
+                        "legacy display key: not connected; its zones render on the primary"
+                    ),
+                    LegacyIdentity::Unavailable => tracing::warn!(
+                        configured = ?configured,
+                        ?zones,
+                        "legacy display key: identity unavailable; its zones render on the primary"
+                    ),
+                }
+                continue;
+            }
             tracing::warn!(
                 configured = %configured,
                 ?zones,
@@ -1133,6 +1221,7 @@ impl super::WinitApp {
         }
         self.state.zone_targets = resolved;
         self.state.display_keys = keyed;
+        true
     }
 
     /// Consume a minimized resize before it can shrink the scene or surface.
@@ -1314,14 +1403,55 @@ impl super::WinitApp {
         });
     }
 
-    fn publish_displays(&mut self, primary: &MonitorSpec) {
+    /// Apply the panel's latest assignment edit on the main thread. The
+    /// existing geometry/key snapshot is enough; no hardware query is needed.
+    pub(super) fn sync_zone_assignments(&mut self) {
+        let Some(primary) = self.state.primary_monitor.clone() else {
+            return;
+        };
+        let specs: Vec<_> = self
+            .state
+            .secondaries
+            .iter()
+            .map(|s| s.spec.clone())
+            .collect();
+        self.sync_zone_assignments_for(&primary, &specs);
+    }
+
+    pub(super) fn sync_zone_assignments_for(
+        &mut self,
+        primary: &MonitorSpec,
+        specs: &[MonitorSpec],
+    ) {
+        let Some(configured) = self
+            .state
+            .control_panel
+            .as_ref()
+            .and_then(|panel| panel.displays.as_ref())
+            .and_then(|displays| displays.take_pending())
+        else {
+            return;
+        };
+        self.state.zone_displays = configured;
+        self.state.zone_targets =
+            resolve_zone_displays(&self.state.zone_displays, &self.state.display_keys);
+        self.publish_displays_for(primary, specs);
+    }
+
+    pub(super) fn publish_displays(&mut self, primary: &MonitorSpec) {
         let specs: Vec<MonitorSpec> = self
             .state
             .secondaries
             .iter()
             .map(|s| s.spec.clone())
             .collect();
-        let layout = display_layout(primary, &specs, &self.state.zone_targets);
+        self.publish_displays_for(primary, &specs);
+    }
+
+    /// Shared by real window publication and the GPU-free event-loop harness;
+    /// `specs` is the already accepted overlay plan, never fresh OS discovery.
+    pub(super) fn publish_displays_for(&mut self, primary: &MonitorSpec, specs: &[MonitorSpec]) {
+        let layout = display_layout(primary, specs, &self.state.zone_targets);
         let zones_on = |name: &str| -> Vec<String> {
             let mut zones: Vec<String> = self
                 .state
@@ -1434,8 +1564,53 @@ impl super::WinitApp {
                 states
             }));
         }
+        if let Some(displays) = self
+            .state
+            .control_panel
+            .as_ref()
+            .and_then(|panel| panel.displays.as_ref())
+        {
+            // Validate aliases against all connected hardware before limiting
+            // choices to usable overlays. A missing sibling overlay must not
+            // make an ambiguous model+serial alias look unique in the panel.
+            let connected: Vec<_> = self
+                .state
+                .display_keys
+                .iter()
+                .map(|monitor| (monitor.key.key.as_str(), monitor.key.base.as_deref()))
+                .collect();
+            displays.publish_monitors(
+                status
+                    .iter()
+                    .filter_map(|display| {
+                        if tze_hud_config::displays::is_legacy_display_key(&display.key)
+                            || display.key.trim().is_empty()
+                        {
+                            return None;
+                        }
+                        Some(crate::shell::control_panel::MonitorChoice {
+                            key: display.key.clone(),
+                            base: self
+                                .state
+                                .display_keys
+                                .iter()
+                                .find(|monitor| monitor.name == display.name)
+                                .and_then(|monitor| monitor.key.base.as_deref())
+                                .filter(|base| {
+                                    tze_hud_config::displays::match_display_key(base, &connected)
+                                        .is_some_and(|index| {
+                                            self.state.display_keys[index].name == display.name
+                                        })
+                                })
+                                .map(str::to_owned),
+                            primary: display.primary,
+                        })
+                    })
+                    .collect(),
+            );
+        }
         crate::operator::status::set_displays(status, unplaced);
-        self.publish_display_scales(primary, &specs);
+        self.publish_display_scales(primary, specs);
         {
             let mut targets = self
                 .state
@@ -1763,6 +1938,85 @@ mod tests {
         assert_eq!(add, desired);
         let (remove, add) = plan_secondary_changes(&current, &current);
         assert!(remove.is_empty() && add.is_empty(), "no change, no work");
+
+        // Identity-only availability changes must pass the real adoption gate
+        // even when the window plan and geometry have not changed at all.
+        let mut app = super::super::WinitApp {
+            state: super::super::WindowedRuntimeState::new_headless(),
+        };
+        app.state.zone_displays = HashMap::from([
+            ("subtitle".into(), "DEL41A2-S6".into()),
+            ("alert-banner".into(), r" \\.\display6 ".into()),
+            ("pip".into(), "MONITOR1".into()),
+            ("status-bar".into(), r" \\.\display6 ".into()),
+            (
+                "ambient-background".into(),
+                format!("DISPLAY{}", "9".repeat(4096)),
+            ),
+        ]);
+        let names = ["DISPLAY7", "DISPLAY6", "MONITOR1"];
+        let id = super::super::monitor_identity::test_identity;
+        let available = [id(r"\\.\DISPLAY6", "DEL", 0x41A2, "S6", None)];
+        let mut log = tempfile::tempfile().unwrap();
+        let subscriber = tracing_subscriber::fmt()
+            .json()
+            .without_time()
+            .with_max_level(tracing::Level::WARN)
+            .with_writer(log.try_clone().unwrap())
+            .finish();
+        tracing::subscriber::with_default(subscriber, || {
+            for identities in [&[][..], &available[..], &available[..], &[][..]] {
+                let keyed = key_monitors(&names, identities);
+                let expected_change = keyed != app.state.display_keys;
+                assert_eq!(
+                    app.adopt_display_keys(keyed.clone(), identities),
+                    expected_change
+                );
+                assert_eq!(app.state.display_keys, keyed);
+                assert_eq!(
+                    app.state.zone_targets.contains_key("subtitle"),
+                    !identities.is_empty()
+                );
+                assert!(!app.state.zone_targets.contains_key("alert-banner"));
+                assert_eq!(app.state.zone_targets["pip"], "MONITOR1");
+                assert!(
+                    !app.adopt_display_keys(keyed, identities),
+                    "unchanged snapshot emits no warning/work"
+                );
+                assert!(plan_secondary_changes(&current, &current).0.is_empty());
+            }
+        });
+        use std::io::{Read, Seek};
+        log.rewind().unwrap();
+        let mut logged = String::new();
+        log.read_to_string(&mut logged).unwrap();
+        let warnings: Vec<serde_json::Value> = logged
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+            .filter(|event| {
+                event["fields"]["message"]
+                    .as_str()
+                    .is_some_and(|m| m.starts_with("legacy display key"))
+            })
+            .collect();
+        assert_eq!(
+            warnings.len(),
+            6,
+            "two sections, three changed snapshots; no duplicate per zone or unchanged sync"
+        );
+        assert_eq!(
+            warnings
+                .iter()
+                .filter(|event| event["fields"].get("replacement").is_some())
+                .count(),
+            1
+        );
+        for warning in warnings {
+            assert!(
+                warning["fields"]["configured"].as_str().unwrap().len() <= 160,
+                "diagnostic key is bounded and control-escaped"
+            );
+        }
     }
 
     /// Zones on a connected secondary get its scale; zones on the primary,
@@ -1808,6 +2062,7 @@ mod tests {
         let configured = HashMap::from([
             ("subtitle".to_string(), "aci27a1-s8".to_string()),
             ("pip".to_string(), "DEL41A2-GONE".to_string()),
+            ("alert-banner".to_string(), r" \\.\display8 ".to_string()),
         ]);
         let zones = resolve_zone_displays(&configured, &keyed);
         assert_eq!(
@@ -1822,6 +2077,15 @@ mod tests {
         );
         // The unmatched key stays on the primary (no other secondary).
         assert_eq!(layout.zone_display_rect("pip"), None);
+        assert_eq!(layout.zone_display_rect("alert-banner"), None);
+        // No compatibility alias appears when EDID disappears, either.
+        assert!(
+            !resolve_zone_displays(
+                &configured,
+                &key_monitors(&["DISPLAY7", "DISPLAY6", "DISPLAY8"], &[])
+            )
+            .contains_key("alert-banner")
+        );
         assert_eq!(
             display_log_line(&keyed[2].key.key, &secondaries[1], false),
             "display ACI27A1-S8 = DISPLAY8 3840x2160 @ (17,-2160)"
@@ -2066,6 +2330,102 @@ mod tests {
     /// The sizes Windows left the overlays at during the owner's replug.
     #[test]
     fn overlay_geometry_and_visibility_recovery() {
+        // DPI labels describe the layout; the requested dimensions are always
+        // native physical pixels, including at 150% and 200% scaling.
+        let primary_id = WindowId::from(1);
+        let secondary_150_id = WindowId::from(2);
+        let secondary_200_id = WindowId::from(3);
+        let unknown_id = WindowId::from(4);
+        let primary = MonitorSpec {
+            width: 1920,
+            height: 1080,
+            scale: 1.0,
+            ..spec("DPI100", 0, 0)
+        };
+        let secondary_150 = MonitorSpec {
+            width: 2560,
+            height: 1440,
+            scale: 1.5,
+            ..spec("DPI150", 1920, 0)
+        };
+        let secondary_200 = MonitorSpec {
+            scale: 2.0,
+            ..spec("DPI200", -3840, 0)
+        };
+        let registered_primary = Some((primary_id, &primary));
+        let secondaries = [
+            (secondary_150_id, &secondary_150),
+            (secondary_200_id, &secondary_200),
+        ];
+        for (id, expected) in [
+            (primary_id, PhysicalSize::new(1920, 1080)),
+            (secondary_150_id, PhysicalSize::new(2560, 1440)),
+            (secondary_200_id, PhysicalSize::new(3840, 2160)),
+        ] {
+            assert_eq!(
+                scale_change_target(id, registered_primary, secondaries),
+                Some(expected)
+            );
+        }
+        assert_eq!(
+            scale_change_target(unknown_id, registered_primary, secondaries),
+            None,
+            "an unknown or stale ID must not resize another overlay"
+        );
+        // The same creation-time ID receives no override until it is actually
+        // registered, then resolves to its own monitor rather than the primary.
+        assert_eq!(
+            scale_change_target(secondary_200_id, registered_primary, [secondaries[0]]),
+            None
+        );
+        assert_eq!(
+            scale_change_target(secondary_200_id, registered_primary, secondaries),
+            Some(PhysicalSize::new(3840, 2160))
+        );
+        for (primary_window, primary_spec) in [
+            (None, Some(&primary)),
+            (Some(primary_id), None),
+            (None, None),
+        ] {
+            let registered_primary = primary_window.zip(primary_spec);
+            assert_eq!(
+                scale_change_target(primary_id, registered_primary, secondaries),
+                None,
+                "primary geometry alone or primary identity alone is insufficient"
+            );
+            assert_eq!(
+                scale_change_target(secondary_150_id, registered_primary, secondaries),
+                Some(PhysicalSize::new(2560, 1440)),
+                "a registered secondary does not require a primary record"
+            );
+        }
+        // Display sync first catches the surface up to the current window,
+        // then the existing recovery plan corrects logical-size creation drift.
+        for (monitor, logical_size, native_size) in [
+            (&primary, (1920, 1080), (1920, 1080)),
+            (&secondary_150, (1707, 960), (2560, 1440)),
+            (&secondary_200, (1920, 1080), (3840, 2160)),
+        ] {
+            let position = (monitor.x, monitor.y);
+            if logical_size != native_size {
+                assert_eq!(
+                    overlay_refit(Some(position), logical_size, monitor),
+                    Some((position, native_size))
+                );
+                assert_eq!(
+                    overlay_recovery(false, Some(position), logical_size, monitor),
+                    OverlayRecovery::Refit(position, native_size)
+                );
+            }
+            assert_eq!(overlay_refit(Some(position), native_size, monitor), None);
+            assert_eq!(
+                overlay_recovery(false, Some(position), native_size, monitor),
+                OverlayRecovery::Matched,
+                "native geometry converges without more work at DPI {}",
+                monitor.scale
+            );
+        }
+
         let d8 = spec("DISPLAY8", 17, -2160);
         assert_eq!(overlay_refit(Some((17, -2160)), (3840, 2160), &d8), None);
         for drifted in [(3862, 2182), (237, 39)] {
@@ -2284,6 +2644,111 @@ mod tests {
         assert_eq!(
             (&json["key"], &json["name"]),
             (&"ACI27A1-S7".into(), &"DISPLAY7".into())
+        );
+
+        // Legacy is a configuration disposition, independent of physical
+        // presence, usable identity, or a failed overlay on that monitor.
+        let raw = r"  \\.\dIsPlAy6  ";
+        let legacy = HashMap::from([
+            ("alert-banner".into(), raw.into()),
+            ("subtitle".into(), raw.into()),
+        ]);
+        let unavailable = key_monitors(&["DISPLAY6"], &[]);
+        let invalid = key_monitors(&["DISPLAY6"], &[id("DISPLAY6", "?", 0, "", None)]);
+        let conflicting = key_monitors(
+            &["DISPLAY6"],
+            &[identities[0].clone(), identities[0].clone()],
+        );
+        let shared = key_monitors(
+            &["DISPLAY6", "DISPLAY7"],
+            &[
+                id("DISPLAY6", "DEL", 0x41A2, "SAME", None),
+                id("DISPLAY7", "DEL", 0x41A2, "SAME", None),
+            ],
+        );
+        let duplicate_connector = key_monitors(
+            &["DISPLAY6", "DISPLAY7"],
+            &[
+                id(
+                    "DISPLAY6",
+                    "DEL",
+                    0x41A2,
+                    "SAME",
+                    Some(r"DISPLAY\DEL41A2\A"),
+                ),
+                id(
+                    "DISPLAY7",
+                    "DEL",
+                    0x41A2,
+                    "SAME",
+                    Some(r"DISPLAY\DEL41A2\A"),
+                ),
+            ],
+        );
+        let oversized = key_monitors(
+            &["DISPLAY6"],
+            &[id(
+                "DISPLAY6",
+                "DEL",
+                0x41A2,
+                &"X".repeat(MAX_MIGRATION_KEY_BYTES),
+                None,
+            )],
+        );
+        let blank_serial = key_monitors(&["DISPLAY6"], &[id("DISPLAY6", "DEL", 0x41A2, "", None)]);
+        for (snapshot, want) in [
+            (&keyed[..], LegacyIdentity::Replacement("DEL41A2-S6".into())),
+            (&[][..], LegacyIdentity::NotConnected),
+            (&unavailable[..], LegacyIdentity::Unavailable),
+            (&invalid[..], LegacyIdentity::Unavailable),
+            (&conflicting[..], LegacyIdentity::Unavailable),
+            (&shared[..], LegacyIdentity::Unavailable),
+            (&duplicate_connector[..], LegacyIdentity::Unavailable),
+            (&oversized[..], LegacyIdentity::Unavailable),
+            (
+                &blank_serial[..],
+                LegacyIdentity::Replacement("DEL41A2".into()),
+            ),
+        ] {
+            let resolved = resolve_zone_displays(&legacy, snapshot);
+            assert!(resolved.is_empty());
+            assert_eq!(legacy_identity(raw, snapshot), want);
+            assert_eq!(unmatched_display_keys(&legacy, &resolved).len(), 1);
+            for failed in [&[][..], &["DISPLAY6"][..]] {
+                let output = unplaced_zones(&legacy, &resolved, &["DISPLAY6"], failed);
+                assert_eq!(
+                    output,
+                    vec![
+                        unplaced("alert-banner", raw, UnplacedReason::LegacyKey),
+                        unplaced("subtitle", raw, UnplacedReason::LegacyKey),
+                    ]
+                );
+            }
+        }
+        // Current connector-qualified keys are copied exactly, including a
+        // suffix generated from all hardware rather than only live overlays.
+        let suffixed = key_monitors(
+            &["DISPLAY6", "DISPLAY7"],
+            &[
+                id(
+                    "DISPLAY6",
+                    "DEL",
+                    0x41A2,
+                    "SAME",
+                    Some(r"DISPLAY\DEL41A2\A"),
+                ),
+                id(
+                    "DISPLAY7",
+                    "DEL",
+                    0x41A2,
+                    "SAME",
+                    Some(r"DISPLAY\DEL41A2\B"),
+                ),
+            ],
+        );
+        assert_eq!(
+            legacy_identity(raw, &suffixed),
+            LegacyIdentity::Replacement(suffixed[0].key.key.clone())
         );
     }
 }

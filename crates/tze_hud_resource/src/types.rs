@@ -9,7 +9,6 @@
 //! **Wire format**: raw 32 bytes in a protobuf `bytes` field.
 //! **Log/CLI format**: lowercase hex string (64 hex chars).
 //!
-//! Source: RFC 0011 §1.1, §1.4; resource-store/spec.md lines 5-8.
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -39,7 +38,6 @@ impl ResourceId {
     /// Compute a `ResourceId` from a byte slice using BLAKE3.
     ///
     /// BLAKE3 achieves ~3 GB/s on modern hardware; 1 MiB hashes in <1 ms
-    /// (spec line 330).
     #[inline]
     pub fn from_content(bytes: &[u8]) -> Self {
         let hash = blake3::hash(bytes);
@@ -83,7 +81,6 @@ impl std::fmt::Display for ResourceId {
 /// (IMAGE_SVG).  Uploads of any other type are rejected with
 /// `ResourceError::UnsupportedType`.
 ///
-/// Source: resource-store/spec.md §Requirement: V1 Resource Type Enumeration.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ResourceType {
     /// Raw RGBA8 pixel data (width × height × 4 bytes, row-major, top-left origin).
@@ -108,8 +105,7 @@ pub enum ResourceType {
     /// `width_px * height_px * 4` where dimensions come from `viewBox` or
     /// `width`/`height` attributes, with a 512×512 default and 2048×2048 clamp.
     ///
-    /// Source: resource-store/spec.md §Requirement: V1 Resource Type Enumeration,
-    ///         §Requirement: SVG Resource Budget Accounting.
+    ///: SVG Resource Budget Accounting.
     ImageSvg,
 }
 
@@ -117,11 +113,11 @@ impl ResourceType {
     /// Return `true` iff this type is part of the v1 supported set.
     ///
     /// All six variants are v1-supported; the method exists so callers can
-    /// express intent clearly and so future post-v1 variants (VIDEO_H264, etc.)
+    /// express intent clearly and so any future variants
     /// can be added without changing call sites.
     #[inline]
     pub fn is_v1_supported(self) -> bool {
-        // All current variants are v1; post-v1 types would map to a separate
+        // All current variants are supported; new types would map to a separate
         // enum or a discriminant > the current max.
         matches!(
             self,
@@ -154,12 +150,10 @@ impl std::fmt::Display for ResourceType {
 /// Default SVG rasterized dimension when no explicit `viewBox`/`width`/`height`
 /// is present (512 × 512 pixels).
 ///
-/// Source: resource-store/spec.md §Requirement: SVG Resource Budget Accounting.
 pub const SVG_DEFAULT_DIMENSION_PX: u32 = 512;
 
 /// Maximum SVG rasterized dimension for budget clamping (2048 × 2048).
 ///
-/// Source: resource-store/spec.md §Requirement: SVG Resource Budget Accounting.
 pub const SVG_MAX_DIMENSION_PX: u32 = 2048;
 
 // ─── Resource size limits (configurable via ResourceStoreConfig) ──────────────
@@ -170,7 +164,7 @@ pub const DEFAULT_MAX_RESOURCE_BYTES: usize = 16 * 1024 * 1024;
 /// Default maximum decoded texture size (64 MiB).
 pub const DEFAULT_MAX_DECODED_TEXTURE_BYTES: usize = 64 * 1024 * 1024;
 
-/// Maximum texture dimension in either axis (not configurable per spec).
+/// Maximum texture dimension in either axis (not configurable ).
 pub const MAX_TEXTURE_DIMENSION_PX: u32 = 8192;
 
 /// Default maximum total texture memory across all agents (512 MiB).
@@ -243,7 +237,6 @@ impl Default for ResourceStoreConfig {
 
 /// Resource store errors; each maps 1-to-1 with a spec-defined error code.
 ///
-/// Source: RFC 0011 §3.5, resource-store/spec.md lines 83-98.
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum ResourceError {
     /// Agent does not hold the `upload_resource` capability.
@@ -344,7 +337,7 @@ mod tests {
 
     #[test]
     fn resource_id_from_content_is_32_bytes() {
-        // Acceptance: ResourceId MUST be exactly 32 bytes (spec line 14-16).
+        // Acceptance: ResourceId MUST be exactly 32 bytes.
         let id = ResourceId::from_content(b"hello world");
         assert_eq!(id.as_bytes().len(), 32);
     }
@@ -352,7 +345,6 @@ mod tests {
     #[test]
     fn identical_bytes_produce_identical_resource_id() {
         // Acceptance: two uploads of identical bytes MUST produce same ResourceId
-        // (spec lines 11-12).
         let data = b"some image data";
         let id_a = ResourceId::from_content(data);
         let id_b = ResourceId::from_content(data);
@@ -392,7 +384,6 @@ mod tests {
     #[test]
     fn all_v1_types_are_supported() {
         // Acceptance: all six v1 types must be supported.
-        // Source: resource-store/spec.md §Requirement: V1 Resource Type Enumeration.
         for rt in [
             ResourceType::ImageRgba8,
             ResourceType::ImagePng,

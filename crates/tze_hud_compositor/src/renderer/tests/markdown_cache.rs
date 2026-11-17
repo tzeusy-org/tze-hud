@@ -1,6 +1,6 @@
 use super::*;
 
-// ── hud-gpqde: markdown prime instrumentation and node_key_cache ─────────
+// ──: markdown prime instrumentation and node_key_cache ─────────
 
 /// MarkdownCache::compute_key is deterministic and content-addressed: same
 /// content produces the same BLAKE3 key; distinct content produces distinct
@@ -12,7 +12,7 @@ fn markdown_cache_compute_key_is_deterministic_and_content_addressed() {
     let content_a = "# Hello\n\nThis is **bold** text.";
     let content_b = "Plain text with `code`.";
 
-    // The key includes token-set identity as well as content (hud-3ryie).
+    // The key includes token-set identity as well as content.
     let tokens = crate::markdown::MarkdownTokens::default();
     let expected_key_a = crate::markdown::MarkdownCache::compute_key(content_a, &tokens);
     let expected_key_b = crate::markdown::MarkdownCache::compute_key(content_b, &tokens);
@@ -43,7 +43,7 @@ fn markdown_cache_compute_key_is_deterministic_and_content_addressed() {
     );
 }
 
-/// Per-tile markdown scoping (hud-3ryie): `portal_markdown_node_ids` classifies
+/// Per-tile markdown scoping: `portal_markdown_node_ids` classifies
 /// a markdown node under a scrollable (portal) tile as portal-scoped, while a
 /// node under a non-scrollable tile is NOT — so the compositor selects the
 /// portal token set only for the governed portal surface and the generic set
@@ -123,7 +123,7 @@ fn portal_markdown_node_ids_scopes_by_scroll_config() {
     );
 }
 
-/// Verify the commit-time prime contract (hud-380dl, Option A):
+/// Verify the commit-time prime contract:
 ///
 /// When `prime_markdown_cache` is called BEFORE `render_frame_headless`
 /// (as the runtime now does at Stage 4 commit time), the render-frame path
@@ -286,7 +286,7 @@ async fn render_frame_headless_is_parse_free_after_commit_time_prime() {
     );
 }
 
-/// Cache-miss fallback produces non-lossy styled output (hud-xcp9b, spec task 2.2).
+/// Cache-miss fallback produces non-lossy styled output.
 ///
 /// When the markdown cache is cold (no prior prime) and a node with
 /// `color_runs.is_empty()` is rendered, the renderer's fallback path must
@@ -337,7 +337,7 @@ async fn markdown_cache_miss_fallback_is_non_lossy() {
     );
 
     // Invoke the non-lossy inline-parse path directly (mirrors what the
-    // renderer does on a cache miss after hud-xcp9b).
+    // renderer does on a cache miss after ).
     let parsed = crate::markdown::parse_markdown_subset(content, &tokens);
     let item = crate::text::TextItem::from_text_markdown_cached(&node, 0.0, 0.0, &parsed);
 
@@ -425,7 +425,7 @@ async fn markdown_cache_miss_fallback_is_non_lossy() {
     );
 }
 
-/// Verify the commit-time truncation cache prime contract (hud-v2z6u):
+/// Verify the commit-time truncation cache prime contract:
 ///
 /// When `prime_truncation_cache` is called BEFORE `render_frame_headless`
 /// (as the runtime now does at Stage 4 commit time), the render-frame path
@@ -481,7 +481,7 @@ async fn prime_truncation_cache_is_commit_primed_before_render_frame_headless() 
     assert_eq!(
         compositor.truncation_cache_scene_version, scene.version,
         "after commit-time prime, truncation_cache_scene_version must match scene.version \
-             [hud-v2z6u]"
+            "
     );
 
     // ── Render frame — must not re-prime truncation cache ─────────────────
@@ -494,7 +494,7 @@ async fn prime_truncation_cache_is_commit_primed_before_render_frame_headless() 
     assert_eq!(
         compositor.truncation_cache_scene_version, scene.version,
         "render_frame_headless must not alter truncation_cache_scene_version \
-             when cache was already commit-primed [hud-v2z6u]"
+             when cache was already commit-primed"
     );
 }
 
@@ -556,7 +556,7 @@ async fn resize_reprime_cadence_defers_inside_interval_then_primes_settled_geome
     );
 }
 
-/// hud-uyhpn benchmark: a portal drag-move is position-only, so it must NOT
+/// benchmark: a portal drag-move is position-only, so it must NOT
 /// re-prime the version-gated content caches. This measures re-primes per drag
 /// frame two ways over the REAL cache gates:
 ///
@@ -651,7 +651,7 @@ async fn drag_move_position_only_skips_content_cache_reprimes_bench() {
     let fixed_us = fixed_start.elapsed().as_micros();
 
     eprintln!(
-        "hud-uyhpn bench (FRAMES={FRAMES}): markdown cache re-primes \
+        "bench (FRAMES={FRAMES}): markdown cache re-primes \
          baseline={md_reprimes_baseline} fixed={md_reprimes_fixed}; \
          prime wall-time baseline={baseline_us}us fixed={fixed_us}us"
     );
@@ -668,7 +668,7 @@ async fn drag_move_position_only_skips_content_cache_reprimes_bench() {
 
 /// Verify that `load_font_bytes` resets the truncation cache sentinel to
 /// `u64::MAX` when a NEW font is loaded, forcing a re-prime on the next
-/// `prime_truncation_cache` call (hud-v2z6u item b).
+/// `prime_truncation_cache` call (item b).
 ///
 /// A new font can change shaping advance widths, so all truncation points
 /// cached under the old font metrics are stale.  The sentinel reset ensures
@@ -769,7 +769,7 @@ async fn load_font_bytes_new_font_resets_truncation_cache_scene_version() {
         compositor.truncation_cache_scene_version,
         u64::MAX,
         "load_font_bytes with a new resource_id must reset truncation_cache_scene_version \
-             to u64::MAX so the next prime re-resolves all entries [hud-v2z6u]"
+             to u64::MAX so the next prime re-resolves all entries"
     );
 
     // ── Loading the SAME resource_id again must NOT reset the sentinel ─────
@@ -803,7 +803,7 @@ async fn load_font_bytes_new_font_resets_truncation_cache_scene_version() {
     assert_eq!(
         compositor.truncation_cache_scene_version, scene.version,
         "load_font_bytes with an already-loaded resource_id must NOT reset the sentinel \
-             — dedup guard prevents spurious cache invalidation [hud-v2z6u]"
+             — dedup guard prevents spurious cache invalidation"
     );
     compositor.render_frame_headless(&mut scene, &surface);
     assert_shapes(

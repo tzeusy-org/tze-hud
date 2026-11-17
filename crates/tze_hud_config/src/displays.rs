@@ -35,11 +35,23 @@ pub fn normalize_display_key(key: &str) -> String {
     key.trim().trim_start_matches(r"\\.\").to_ascii_uppercase()
 }
 
+/// Old Windows enumeration keys cannot identify a monitor across replug or reboot.
+pub fn is_legacy_display_key(key: &str) -> bool {
+    normalize_display_key(key)
+        .strip_prefix("DISPLAY")
+        .is_some_and(|digits| !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()))
+}
+
 /// Index of the connected display a configured key names. `connected` holds
 /// each display's key and, when it has an EDID identity, its model+serial
 /// base. The key matches case-insensitively; a key without an `@<connector>`
-/// suffix also matches a base exactly one connected display has.
+/// suffix also matches a base exactly one connected display has. Legacy
+/// Windows enumeration keys are ignored, including OS fallback keys.
 pub fn match_display_key(configured: &str, connected: &[(&str, Option<&str>)]) -> Option<usize> {
+    // An OS fallback is diagnostic-only when it looks like the retired syntax.
+    if is_legacy_display_key(configured) {
+        return None;
+    }
     let wanted = normalize_display_key(configured);
     if let Some(i) = connected
         .iter()
@@ -74,6 +86,13 @@ pub fn validate_displays(raw: &RawConfig, errors: &mut Vec<ConfigError>) {
     let mut names: Vec<&String> = displays.keys().collect();
     names.sort();
     for display in names {
+        if is_legacy_display_key(display) {
+            let configured = display.chars().take(128).collect::<String>();
+            tracing::warn!(
+                configured = ?configured,
+                "legacy display key; its zones stay on the primary; topology diagnostics report the current replacement when available"
+            );
+        }
         for zone in &displays[display].zones {
             let field_path = format!("displays.{display}.zones");
             if !known.zones.contains_key(zone) {
@@ -118,6 +137,31 @@ mod tests {
         assert_eq!(map.len(), 2);
         assert!(errors_for("[displays.DISPLAY6]\nzones = [\"subtitle\"]\n").is_empty());
 
+        // Legacy sections remain readable/nonfatal and preserve their raw key,
+        // but never bind to the OS fallback, even while EDID is unavailable.
+        for legacy in ["DISPLAY0", "display06", r"  \\.\dIsPlAy6  "] {
+            assert!(is_legacy_display_key(legacy), "{legacy:?}");
+            let raw: RawConfig =
+                toml::from_str(&format!("[displays.'{legacy}']\nzones = [\"subtitle\"]\n"))
+                    .unwrap();
+            assert_eq!(zone_display_assignments(&raw)["subtitle"], legacy);
+            let mut errors = Vec::new();
+            validate_displays(&raw, &mut errors);
+            assert!(errors.is_empty(), "{legacy:?}: {errors:?}");
+            assert_eq!(match_display_key(legacy, &[(legacy, None)]), None);
+        }
+        for current in [
+            "DISPLAY",
+            "DISPLAY١",
+            "DISPLAY1x",
+            "DISPLAY-1",
+            "DISPLAY 1",
+            "MONITOR6",
+            "PRIMARY",
+        ] {
+            assert!(!is_legacy_display_key(current), "{current:?}");
+        }
+
         // Quoted connector-suffixed keys parse verbatim.
         let key = "DEL41A2@DISPLAY/DEL41A2/5&1A2B3C&0&UID4352";
         let raw: RawConfig =
@@ -137,10 +181,12 @@ mod tests {
             ("DEL41A2@DISPLAY/DEL41A2/1&0&UID1", Some("DEL41A2")),
             ("DEL41A2@DISPLAY/DEL41A2/1&0&UID2", Some("DEL41A2")),
             ("GSM5B7F@DISPLAY/GSM5B7F/1&0&UID3", Some("GSM5B7F")),
+            ("MONITOR1", None),
         ];
         for (configured, want) in [
             ("del41a2-7xk2n13", Some(1)),
-            (r"\\.\display1", Some(0)),
+            (r"\\.\display1", None),
+            ("monitor1", Some(5)),
             ("DEL41A2@display/del41a2/1&0&uid2", Some(3)),
             ("GSM5B7F", Some(4)),
             ("DEL41A2", None),

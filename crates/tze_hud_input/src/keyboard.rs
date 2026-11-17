@@ -1,4 +1,4 @@
-//! Keyboard event types and dispatch per RFC 0004 §7.4.
+//! Keyboard event types and dispatch.
 //!
 //! Implements:
 //! - `KeyDownEvent`   — physical key press (key_code + logical key + modifiers)
@@ -10,21 +10,16 @@
 //! - `KeyboardProcessor` — translates raw OS key/char events + focus state into
 //!   `KeyboardDispatch` descriptors for the owning agent.
 //!
-//! # Bubbling semantics (spec line 290)
+//! # Bubbling semantics
 //! Keyboard events target the focused node first. If the node does not consume
 //! the event the caller may re-dispatch with a `KeyboardDispatch` whose `node_id`
 //! is `None`, routing the event to the tile-level handler for the owning agent.
 //!
-//! # IME v1 fallback (spec lines 466–468)
+//! # IME v1 fallback
 //! In v1, only direct ASCII / basic Unicode input via `KeyDownEvent` and
-//! `CharacterEvent` is mandatory. Full IME composition events are v1-reserved
+//! `CharacterEvent` is mandatory. Full IME composition events are not supported
 //! (their protobuf schema is defined but Rust logic is not implemented here).
 //!
-//! # Spec refs
-//! - Lines 289–291: Keyboard Event Types
-//! - Lines 294–296: KeyDownEvent targets focused node
-//! - Lines 298–300: Key events bubble to tile
-//! - Lines 466–468: IME V1 Fallback
 
 use serde::{Deserialize, Serialize};
 use tze_hud_scene::{MonoUs, SceneId};
@@ -33,7 +28,7 @@ use crate::focus_tree::FocusOwner;
 
 // ─── Modifier flags ────────────────────────────────────────────────────────────
 
-/// Keyboard modifier state carried by key events (spec line 290).
+/// Keyboard modifier state carried by key events.
 ///
 /// Represented as a struct of boolean flags.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -69,7 +64,6 @@ impl KeyboardModifiers {
 /// `key` is the DOM `KeyboardEvent.key` string (logical value after layout +
 /// modifiers, e.g. `"a"`, `"A"`, `"ArrowDown"`).
 ///
-/// Spec: lines 289–290.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RawKeyDownEvent {
     /// Physical key position (DOM `KeyboardEvent.code`).
@@ -100,7 +94,6 @@ pub struct RawKeyUpEvent {
 /// a single codepoint, occasionally a multi-character string for ligatures /
 /// precomposed sequences).
 ///
-/// Spec: lines 290, 471–472.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RawCharacterEvent {
     /// Post-IME committed Unicode character(s).
@@ -156,7 +149,7 @@ pub enum KeyboardDispatchKind {
 /// The processor is stateless with respect to focus (it takes the current
 /// `FocusOwner` as a parameter); the `FocusManager` owns the focus state.
 ///
-/// # Dispatch rules (spec lines 289–300)
+/// # Dispatch rules
 /// 1. Keyboard events target the focused node first (`node_id = Some(...)`).
 /// 2. If the node does not consume the event, the caller re-dispatches at tile
 ///    level by calling `bubble_to_tile`, which returns a new `KeyboardDispatch`
@@ -235,7 +228,7 @@ impl KeyboardProcessor {
     }
 
     /// Produce a tile-level re-dispatch for an event that the focused node did
-    /// not consume (bubbling, spec line 298–300).
+    /// not consume (bubbling).
     ///
     /// Takes a `KeyboardDispatch` originally targeting a node and returns a new
     /// one targeting the tile (node_id = None). Returns `None` if the original
@@ -326,7 +319,7 @@ mod tests {
 
     // ── WHEN node N1 in tile T1 has focus THEN agent receives KeyDownEvent ──
 
-    /// Spec scenario (line 295): focused node receives KeyDownEvent.
+    /// focused node receives KeyDownEvent.
     #[test]
     fn key_down_dispatched_to_focused_node() {
         let tile_id = SceneId::new();
@@ -359,7 +352,7 @@ mod tests {
         }
     }
 
-    /// Spec scenario (line 295): focused node receives CharacterEvent.
+    /// focused node receives CharacterEvent.
     #[test]
     fn character_dispatched_to_focused_node() {
         let tile_id = SceneId::new();
@@ -380,7 +373,7 @@ mod tests {
         }
     }
 
-    /// IME v1 mandatory: CharacterEvent for basic Unicode (spec line 472).
+    /// IME v1 mandatory: CharacterEvent for basic Unicode.
     #[test]
     fn character_event_basic_unicode() {
         let tile_id = SceneId::new();
@@ -427,7 +420,7 @@ mod tests {
         }
     }
 
-    /// Spec scenario (line 298–300): key event bubbles to tile if node doesn't consume.
+    /// key event bubbles to tile if node doesn't consume.
     #[test]
     fn key_event_bubbles_to_tile() {
         let tile_id = SceneId::new();

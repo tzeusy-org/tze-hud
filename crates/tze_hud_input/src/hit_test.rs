@@ -1,13 +1,13 @@
 //! Hit-test pipeline: point queries against the scene graph.
 //!
-//! Implements spec §Requirement: Hit-Test Performance (lines 263-265):
+//! Performance contract:
 //! - < 100µs p99 for 50 tiles
 //! - Traversal order: chrome layer first, then content tiles by z-order
 //!   descending, within each tile nodes in reverse tree order (last child first)
 //! - First HitRegionNode whose bounds contain the point wins
 //!
 //! This module operates entirely on pure Rust data structures — no GPU, no
-//! display server required (spec §Requirement: Headless Testability, line 422).
+//! display server required.
 
 use tze_hud_scene::{InputMode, NodeData, SceneGraph, SceneId};
 
@@ -49,7 +49,7 @@ pub fn hit_test(scene: &SceneGraph, display_x: f32, display_y: f32) -> HitTestRe
     chrome_tiles.sort_unstable_by(|a, b| b.0.cmp(&a.0));
     content_tiles.sort_unstable_by(|a, b| b.0.cmp(&a.0));
 
-    // Chrome tiles are checked before content tiles (spec line 264)
+    // Chrome tiles are checked before content tiles
     let ordered: Vec<(u32, SceneId)> = chrome_tiles
         .iter()
         .chain(content_tiles.iter())
@@ -93,7 +93,7 @@ pub fn hit_test(scene: &SceneGraph, display_x: f32, display_y: f32) -> HitTestRe
 ///
 /// "Reverse tree order" means last child is tested first (deepest in paint
 /// order wins). This matches the spec's "reverse tree order (last child first)"
-/// requirement (line 264).
+/// requirement.
 ///
 /// Returns `Some(HitTestResult)` when a hit is found, `None` otherwise.
 fn hit_test_node_reverse(
@@ -105,7 +105,7 @@ fn hit_test_node_reverse(
 ) -> Option<HitTestResult> {
     let node = scene.nodes.get(&node_id)?;
 
-    // Test children in reverse order first (last child wins per spec)
+    // Test children in reverse order first (last child wins )
     for &child_id in node.children.iter().rev() {
         if let Some(hit) = hit_test_node_reverse(scene, child_id, local_x, local_y, tile_id) {
             return Some(hit);
@@ -181,7 +181,7 @@ mod tests {
 
     #[test]
     fn hit_test_returns_correct_node_without_gpu() {
-        // Spec §Requirement: Headless Testability, line 428:
+        // Headless Testability:
         // Layer 0 test injects synthetic PointerDownEvent at (50,50) — hit-test
         // returns the correct result without GPU or display server.
         let (scene, tile_ids, node_ids) = make_scene_with_hit_regions(1);
@@ -251,7 +251,7 @@ mod tests {
 
     #[test]
     fn chrome_wins_over_content_tile() {
-        // Spec §Requirement: Hit-Test Performance, line 272-274:
+        // Hit-Test Performance:
         // Chrome layer always wins when overlapping content.
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
@@ -408,7 +408,7 @@ mod tests {
 
     #[test]
     fn hit_test_50_tiles_under_100us_p99() {
-        // Spec §Requirement: Hit-Test Performance, line 268-270:
+        // Hit-Test Performance:
         // Hit-test for 50 tiles must complete in < 100µs.
         use std::time::Instant;
         use tze_hud_scene::perf_budget::{budgets, test_budget};
@@ -445,7 +445,7 @@ mod tests {
 
     #[test]
     fn last_child_wins_over_first_child() {
-        // Spec line 264: within a tile, nodes tested in reverse tree order
+        //: within a tile, nodes tested in reverse tree order
         // (last child first).
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();

@@ -1,6 +1,6 @@
 //! # Protocol Boundary Fuzzer
 //!
-//! Implements acceptance criteria from hud-3ksv:
+//! Implements acceptance criteria
 //! - Malformed protobuf → rejected without crash/hang
 //! - Oversized payloads → structured error, no state corruption
 //! - Out-of-order / adversarial messages → no crash, no state inconsistency

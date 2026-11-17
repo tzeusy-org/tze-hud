@@ -9,23 +9,21 @@ use tze_hud_compositor::{CaptureError, CapturedFrame, Compositor};
 use tze_hud_scene::graph::SceneGraph;
 
 use super::displays::FramePlan;
-use super::lifecycle::windowed_frame_needs_render;
 use super::wake::WindowedWake;
 use crate::operator::screenshot::{CaptureInbox, CaptureRequest};
+use crate::pipeline::{FrameTurnBuild, FrameTurnRequest, FrameTurnState};
 
 pub(super) struct WindowedFrameWork {
-    last_rendered: (u64, u64),
-    widget_repaint_pending: bool,
+    turn: FrameTurnState,
     wake: WindowedWake,
     frame_ready: crate::channels::FrameReadyTx,
 }
 
 impl WindowedFrameWork {
-    pub fn new(wake: WindowedWake, frame_ready: crate::channels::FrameReadyTx) -> Self {
+    pub(super) fn new(wake: WindowedWake, frame_ready: crate::channels::FrameReadyTx) -> Self {
         // Both content and position-only mutations must render on startup.
         Self {
-            last_rendered: (u64::MAX, u64::MAX),
-            widget_repaint_pending: false,
+            turn: FrameTurnState::default(),
             wake,
             frame_ready,
         }
@@ -34,14 +32,17 @@ impl WindowedFrameWork {
 
 #[derive(Default)]
 pub(super) struct RenderTriggers {
-    pub composer: bool,
     pub surface: bool,
+    pub degradation: Option<tze_hud_compositor::CompositorDegradationPolicy>,
 }
 
 pub(super) struct PreparedFrameWork {
     pub plan: FramePlan,
     pub render: Option<WindowedFrameBuild>,
     pub capture: Option<PreparedCapture>,
+    pub markdown_prime_us: u64,
+    pub next_wall_us: Option<u64>,
+    pub next_animation_at: Option<std::time::Instant>,
 }
 
 pub(super) struct PreparedCapture {
@@ -50,7 +51,7 @@ pub(super) struct PreparedCapture {
 }
 
 impl WindowedFrameWork {
-    pub fn prepare(
+    pub(super) fn prepare(
         &mut self,
         compositor: &mut Compositor,
         scene: &mut SceneGraph,
@@ -59,47 +60,48 @@ impl WindowedFrameWork {
         triggers: RenderTriggers,
         plan: impl FnOnce(bool) -> FramePlan,
     ) -> PreparedFrameWork {
-        // Decide BEFORE capture builds: a build may step an animation's final
-        // state, but must never consume the screen's corresponding repaint.
-        // Raster cache updates are not ordinary presentation acknowledgement.
-        // Keep a due countdown repaint across captures/failed submissions.
-        self.widget_repaint_pending &= scene.widgets_shown() && !scene.widget_time_paused();
-        self.widget_repaint_pending |= compositor.widget_deadline_needs_render(scene);
-        let needs_render = windowed_frame_needs_render(
-            scene.version != self.last_rendered.0,
-            scene.geometry_epoch != self.last_rendered.1,
-            compositor.has_inflight_animation(scene),
-            triggers.composer,
-            triggers.surface || self.widget_repaint_pending,
+        let turn = self.turn.run_frame_turn(
+            scene,
+            Some(compositor),
+            FrameTurnRequest {
+                repaint: triggers.surface,
+                degradation: triggers.degradation,
+                ..Default::default()
+            },
+            |_| (),
+            |compositor, scene, needs_render| {
+                // Decide before capture builds: captures cannot acknowledge the
+                // ordinary frame's animation/deadline repaint.
+                let plan = plan(needs_render);
+                let capture = inbox.next_live().map(|request| {
+                    tracing::debug!(target: "tze_hud_delay_diagnostic", event = "capture_build_begin", scene_version = scene.version);
+                    let build = compositor.build_windowed_frame(scene, size.0, size.1);
+                    tracing::debug!(target: "tze_hud_delay_diagnostic", event = "capture_build_end", scene_version = scene.version);
+                    PreparedCapture { request, build }
+                });
+                let render = (plan.full || plan.retry_only)
+                    .then(|| compositor.build_windowed_frame(scene, size.0, size.1));
+                FrameTurnBuild {
+                    work: (plan, render, capture),
+                    submitted: false,
+                }
+            },
         );
-        let plan = plan(needs_render);
-        let capture = inbox.next_live().map(|request| {
-            tracing::debug!(
-                target: "tze_hud_delay_diagnostic",
-                event = "capture_build_begin",
-                scene_version = scene.version,
-            );
-            let build = compositor.build_windowed_frame(scene, size.0, size.1);
-            tracing::debug!(
-                target: "tze_hud_delay_diagnostic",
-                event = "capture_build_end",
-                scene_version = scene.version,
-            );
-            PreparedCapture { request, build }
-        });
-        let render = (plan.full || plan.retry_only)
-            .then(|| compositor.build_windowed_frame(scene, size.0, size.1));
+        let (plan, render, capture) = turn.work.expect("windowed renderer is attached");
         PreparedFrameWork {
             plan,
             render,
             capture,
+            markdown_prime_us: turn.markdown_prime_us,
+            next_wall_us: turn.next_wall_us,
+            next_animation_at: turn.next_animation_at,
         }
     }
 
     /// Only ordinary primary submissions may advance the idle gate or signal
     /// main-thread presentation. Acquisitions/submits count even if a later
     /// operation failed and cleared the aggregate stage-success sentinel.
-    pub fn record_primary_submission(
+    pub(super) fn record_primary_submission(
         &mut self,
         outcome: &WindowedPresentOutcome,
         built_versions: (u64, u64),
@@ -121,8 +123,7 @@ impl WindowedFrameWork {
             ready = outcome.telemetry.stage7_gpu_submit_us > 0,
         );
         if submitted {
-            self.last_rendered = built_versions;
-            self.widget_repaint_pending = false;
+            self.turn.record_submission(true, built_versions);
             let _ = self.frame_ready.send(true);
             self.wake
                 .notify_main(crate::idle_efficiency::RuntimeWakeupSource::FrameReady);
@@ -131,15 +132,15 @@ impl WindowedFrameWork {
     }
 
     #[cfg(test)]
-    pub fn last_rendered(&self) -> (u64, u64) {
-        self.last_rendered
+    pub(super) fn last_rendered(&self) -> (u64, u64) {
+        self.turn.last_rendered()
     }
 }
 
 impl PreparedCapture {
     /// Complete the real inbox drain after releasing the scene lock. The
     /// callback owns only offscreen rendering, never swapchain presentation.
-    pub fn finish_with(
+    pub(super) fn finish_with(
         self,
         render: impl FnOnce(&WindowedFrameBuild, Option<&str>) -> Result<CapturedFrame, CaptureError>,
     ) {

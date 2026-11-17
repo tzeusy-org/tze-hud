@@ -1,10 +1,10 @@
-//! Motion-polish primitives for the portal tile render path (hud-bq0gl.10).
+//! Motion-polish primitives for the portal tile render path.
 //!
 //! This module hosts the **pure, deterministic** building blocks for compositor
 //! animation: easing curves, scalar interpolation, frame-rate-
-//! independent scroll smoothing, and a streaming-reveal fade ramp. The runtime
-//! never sits in the frame loop (RFC 0013 §3 — *arrival time ≠ presentation
-//! time*): adapters set targets (scroll offset, content), and these primitives
+//! independent scroll smoothing, and a streaming-reveal fade ramp. Arrival time
+//! differs from presentation time: adapters set targets (scroll offset, content),
+//! and these primitives
 //! drive the *presentation-time* interpolation the compositor owns.
 //!
 //! Everything here is split so that the time-independent math is testable
@@ -128,7 +128,7 @@ pub(crate) fn exp_smooth_factor(dt_ms: f32, tau_ms: f32) -> f32 {
 /// The adapter/input layer sets the authoritative scroll *target*; this smoother
 /// eases the *displayed* offset toward it each frame using frame-rate-
 /// independent exponential smoothing ([`exp_smooth_factor`]). User scroll
-/// remains authoritative (RFC 0013 §3.2): the target is never altered here, only
+/// remains authoritative: the target is never altered here, only
 /// the visual catch-up is animated.
 ///
 /// `advance` is pure given `dt_ms`, so convergence and frame-rate independence
@@ -185,7 +185,7 @@ impl ScrollSmoother {
     ///
     /// "Settled" means both axes are within [`Self::snap_epsilon`] of the
     /// target, i.e. the next [`advance`](Self::advance) would snap exactly onto
-    /// it and produce no further motion. The idle render gate (hud-ilivg) uses
+    /// it and produce no further motion. The idle render gate uses
     /// this to tell a still-catching-up smoother (must keep rendering) apart
     /// from a settled one (safe to idle).
     #[inline]
@@ -424,7 +424,7 @@ mod tests {
     fn scroll_smoother_is_settled_tracks_inflight_state() {
         // Settled on the construction offset; not settled once the target moves
         // far away; settles again once the displayed offset converges onto it.
-        // This is the predicate the idle render gate (hud-ilivg) uses to tell a
+        // This is the predicate the idle render gate uses to tell a
         // still-catching-up smoother (keep rendering) from a finished one (idle).
         let mut s = ScrollSmoother::new(0.0, 0.0, (0.0, 0.0));
         assert!(s.is_settled(0.0, 0.0));

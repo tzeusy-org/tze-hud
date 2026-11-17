@@ -1,20 +1,18 @@
 //! Portal part inventory and token mapping for the text-stream portal pilot.
 //!
-//! Implements §6.2 of `text-stream-portal-phase1/tasks.md`:
 //! - Portal part inventory (frame, header, composer, transcript body, divider,
 //!   collapsed card)
 //! - Token mapping each part consumes
 //! - `PortalPartTokens`: resolved visual values extracted from a `DesignTokenMap`
 //!
-//! Also implements §6b window management tokens (amendment 2026-06-10):
+//! Also implements window management tokens:
 //! - Window geometry bounds (min size, resize step, affordance size)
 //! - Scroll-position indicator styling
 //!
 //! **Pre-promotion rule:** the exemplar adapter MUST source every published visual
 //! value from the runtime's resolved token set (via `PortalPartTokens`) rather than
 //! literal values. A profile/token change MUST reskin the portal end-to-end without
-//! touching adapter logic. See `about/heart-and-soul/v1.md` and CLAUDE.md
-//! "visual identity is modular".
+//! touching adapter logic.
 //!
 //! ## Canonical portal token keys (profile-scoped, pre-promotion)
 //!
@@ -66,7 +64,7 @@
 //! | `portal.transition.in_ms` | transitions | collapsed→expanded duration (ms) |
 //! | `portal.transition.out_ms` | transitions | expanded→collapsed duration (ms) |
 //!
-//! ### §6b Window management tokens (amendment 2026-06-10)
+//! ### Window management tokens
 //!
 //! | Key | Part | Property |
 //! |-----|------|----------|
@@ -78,7 +76,7 @@
 //! | `portal.scroll_indicator.width_px` | scroll indicator | track width in px |
 //! | `portal.scroll_indicator.min_height_px` | scroll indicator | minimum thumb height in px |
 //!
-//! ### Compliance amendment (portal visual-token gaps, hud-khfgx)
+//! ### Composer and portal affordance tokens
 //!
 //! | Key | Part | Property |
 //! |-----|------|----------|
@@ -130,15 +128,14 @@ pub const PORTAL_TOKEN_TRANSCRIPT_FONT_SIZE: &str = "portal.transcript.font_size
 /// Per-turn role-attribution color for non-assistant agent-side OUTPUT turns
 /// (tool / status / error / other), distinguishing them from the assistant's
 /// own conversational prose (which uses `portal.transcript.text_color`) within
-/// the same OUTPUT transcript (text-stream-portals §Conversational Turn Model
-/// and Per-Turn Role Attribution, hud-26869). Attribution is derived from each
+/// the same OUTPUT transcript. Attribution is derived from each
 /// unit's runtime-assigned `OutputKind` and carried as a real `color_run` span
 /// over that turn's text — never a hardcoded compositor color. Ambient by
 /// design: a muted family-consistent hue that reads as "system/tool scaffolding"
 /// beside the brighter assistant text without escalating attention.
 pub const PORTAL_TOKEN_TRANSCRIPT_SYSTEM_COLOR: &str = "portal.transcript.system_color";
 
-// ── Transcript markdown-subset styling (Promotion P2, hud-8691s) ─────────────
+// ── Transcript markdown-subset styling  ─────────────
 //
 // Portal-scoped canonical keys for the Phase-1 markdown subset the transcript
 // renders (fenced/inline code, links). Before promotion these values were only
@@ -150,12 +147,10 @@ pub const PORTAL_TOKEN_TRANSCRIPT_SYSTEM_COLOR: &str = "portal.transcript.system
 // default (no canonical schema default exists for the generic keys either), so
 // the transcript renders exactly as today until a profile opts in.
 //
-// CONSTRAINT (hud-hjckr): the `portal.*`-over-generic preference is applied in
-// the compositor's SINGLE global `MarkdownTokens` (the markdown parse cache is
-// keyed on content only), so it is effectively GLOBAL. This is safe only while
-// the text-stream portal is the sole governed markdown surface. Before ANY
-// second governed markdown surface ships, markdown token resolution must become
-// per-tile-scoped, or these portal keys will leak onto that surface.
+// Portal keys are intended for portal markdown. A future non-portal markdown
+// consumer must resolve MarkdownScope::Generic rather than inheriting them.
+// The parse cache includes resolved token identity, so identical content under
+// different token sets does not share an incompatible parse.
 /// Background fill behind fenced/inline code spans in the transcript (RGBA hex).
 /// Prefer over the generic `color.code.background`.
 pub const PORTAL_TOKEN_TRANSCRIPT_CODE_BACKGROUND: &str = "portal.transcript.code_background";
@@ -169,7 +164,7 @@ pub const PORTAL_TOKEN_TRANSCRIPT_LINK_COLOR: &str = "portal.transcript.link_col
 /// Prefer over the generic `typography.code.family`.
 pub const PORTAL_TOKEN_TRANSCRIPT_CODE_FONT_FAMILY: &str = "portal.transcript.code_font_family";
 
-// ── Degraded / disconnect tokens (portal-disconnect-resume-ux §2/§3) ─────────
+// ── Degraded / disconnect tokens  ─────────
 //
 // Token-resolved degraded treatment for a portal whose driving stream/session
 // has dropped (lifecycle `Degraded`/`HudUnavailable`). The retained transcript
@@ -188,7 +183,7 @@ pub const PORTAL_TOKEN_TRANSCRIPT_DIM_BACKGROUND: &str = "portal.transcript.dim_
 /// not self-escalate attention).
 pub const PORTAL_TOKEN_STALE_MARKER_COLOR: &str = "portal.stale_marker.color";
 
-/// Color of the visible disconnect badge (hud-jgf41): a small token-styled
+/// Color of the visible disconnect badge: a small token-styled
 /// geometry affordance — the existing left-edge lifecycle-accent bar,
 /// recolored — shown while the portal is connection-degraded. Unlike the
 /// lifecycle accent (which clears under redaction because `lifecycle_state`
@@ -203,14 +198,14 @@ pub const PORTAL_TOKEN_DISCONNECT_BADGE_COLOR: &str = "portal.disconnect_badge.c
 /// left-edge accent-bar rendering.
 pub const PORTAL_TOKEN_DISCONNECT_BADGE_WIDTH_PX: &str = "portal.disconnect_badge.width_px";
 
-/// Color of the ambient unread-output-count indicator (hud-meqet). A presence
+/// Color of the ambient unread-output-count indicator. A presence
 /// engine surfaces a quiet count, never a loud notification badge — this
 /// defaults to the same muted-slate tone as the other ambient/quiet-signal
 /// tokens (`transcript.dim_text_color`, `composer.placeholder_color`) rather
 /// than an alarming accent.
 pub const PORTAL_TOKEN_UNREAD_INDICATOR_COLOR: &str = "portal.unread_indicator.color";
 
-/// Color of the ambient awaiting-reply (question) indicator (hud-jip0k). Set
+/// Color of the ambient awaiting-reply (question) indicator. Set
 /// when the owning LLM marks a published output as `expects_reply`, signaling
 /// the just-published output is a question awaiting a viewer reply — a core
 /// presence semantic, not a chatbot affordance. Ambient by design, matching
@@ -218,16 +213,14 @@ pub const PORTAL_TOKEN_UNREAD_INDICATOR_COLOR: &str = "portal.unread_indicator.c
 /// escalates this into an alert.
 pub const PORTAL_TOKEN_AWAITING_REPLY_COLOR: &str = "portal.awaiting_reply.color";
 
-/// Color of the friendly first-run empty-portal treatment (hud-g1ena.6,
-/// portal-chat-grade-affordances §First-Run Empty Portal Treatment) shown when a
+/// Color of the friendly first-run empty-portal treatment shown when a
 /// connected portal's retained transcript is empty, replacing the literal
 /// `<empty projection stream>`. Quiet and inviting — a presence engine's empty
 /// surface reads as calm and ready, never as an error — so it defaults to the
 /// same muted quiet-signal family as the other ambient tokens.
 pub const PORTAL_TOKEN_EMPTY_STATE_COLOR: &str = "portal.empty_state.color";
 
-/// Color of the connecting-state marker (portal-chat-grade-affordances
-/// §Connecting State Distinction) shown while a portal is attached but its owning
+/// Color of the connecting-state marker shown while a portal is attached but its owning
 /// session has never connected (`has_ever_connected == false`). Deliberately a
 /// cool "spinning up" hue that is visually DISTINCT from the amber degraded/stale
 /// marker (`portal.stale_marker.color`) so a starting-up portal never reads as a
@@ -238,7 +231,6 @@ pub const PORTAL_TOKEN_CONNECTING_MARKER_COLOR: &str = "portal.connecting_marker
 // ── Agent activity / streaming-cursor tokens ─────────────────────────────────
 //
 // Ambient cue that the owning adapter is actively appending to the transcript
-// (portal-chat-grade-affordances §Agent Activity and Streaming Cue, hud-g1ena.5).
 // DERIVED from observed append activity (`appended_at_wall_us` vs render-time
 // now) — never from a separate adapter "typing" protocol message. Strictly
 // subordinate to the ambient attention model: continuous streaming never
@@ -260,8 +252,7 @@ pub const PORTAL_TOKEN_STREAMING_CURSOR_COLOR: &str = "portal.streaming_cursor.c
 // ── Viewer-turn delivery-acknowledgement tokens ──────────────────────────────
 //
 // Ambient per-turn cue reflecting the runtime's already-tracked input delivery
-// state on the viewer's ECHOED turn (portal-chat-grade-affordances §Viewer Turn
-// Delivery Acknowledgement, hud-g1ena.1). DERIVED entirely from runtime-owned
+// state on the viewer's ECHOED turn. Derived entirely from runtime-owned
 // delivery state — never a new adapter round trip, and rendering it discloses no
 // viewer read/seen state back to the adapter. Three presentation classes fold the
 // six `InputDeliveryState` variants: in-flight (Pending/Deferred), delivered
@@ -285,7 +276,7 @@ pub const PORTAL_TOKEN_DELIVERY_DELIVERED_COLOR: &str = "portal.delivery.deliver
 /// Color of the ambient failed (Rejected/Expired) viewer-turn delivery cue — the
 /// reply was rejected by the adapter or expired before delivery. A muted, warm
 /// clay tone that reads as "did not arrive" WITHOUT the alarm of the amber stale
-/// marker or a red error: per doctrine the failed cue stays ambient on the turn
+/// marker or a red error: the failed cue stays ambient on the turn
 /// and never escalates the portal's interruption class.
 pub const PORTAL_TOKEN_DELIVERY_FAILED_COLOR: &str = "portal.delivery.failed_color";
 
@@ -293,8 +284,7 @@ pub const PORTAL_TOKEN_DELIVERY_FAILED_COLOR: &str = "portal.delivery.failed_col
 //
 // Ambient presentation of each transcript unit's RUNTIME-ASSIGNED wall-clock
 // arrival metadata (`appended_at_wall_us`, WALL-CLOCK domain — distinct from the
-// media/display clock, never conflated with presentation timing) per
-// portal-chat-grade-affordances §Ambient Per-Turn Timestamps (hud-g1ena.4). The
+// media/display clock, never conflated with presentation timing). The
 // stamp is secondary/subordinate to turn content: quiet, token-styled, and never
 // a source of attention escalation. Timestamp VISIBILITY/GRANULARITY is governed
 // by the component profile via `portal.timestamp.granularity` (per-turn, grouped,
@@ -314,13 +304,12 @@ pub const PORTAL_TOKEN_TIMESTAMP_COLOR: &str = "portal.timestamp.color";
 /// from the runtime-assigned wall-clock arrival time.
 pub const PORTAL_TOKEN_TIMESTAMP_GRANULARITY: &str = "portal.timestamp.granularity";
 
-// ── Lifecycle affordance tokens (cooperative-hud-projection §lifecycle) ───────
+// ── Lifecycle affordance tokens  ───────
 //
 // Token-resolved accent colors driving the viewer-facing affordance for a
 // projection's published `lifecycle_state` (active / attached-ready /
-// attention / inactive). Each is ambient by design — the cooperative-projection
-// and text-stream-portal specs require portal activity to stay ambient/gentle and
-// MUST NOT self-escalate interruption class. The adapter maps each
+// attention / inactive). Portal activity stays ambient and gentle without
+// escalating interruption class. The adapter maps each
 // `ProjectionLifecycleState` variant onto one of these four semantic accents; no
 // literal color ever appears in the render path (CLAUDE.md "visual identity is
 // modular").
@@ -342,13 +331,12 @@ pub const PORTAL_TOKEN_LIFECYCLE_INACTIVE_COLOR: &str = "portal.lifecycle.inacti
 /// Width (px) of the lifecycle affordance accent bar painted along the portal
 /// tile's left edge. Geometry only — the accent *color* is token-resolved via the
 /// four `portal.lifecycle.*_color` keys above; this token sizes the bar so the
-/// adapter/compositor never hardcodes a literal width either (hud-m48i0).
+/// adapter/compositor never hardcodes a literal width either.
 pub const PORTAL_TOKEN_LIFECYCLE_ACCENT_WIDTH_PX: &str = "portal.lifecycle.accent_width_px";
 
 pub const PORTAL_TOKEN_DIVIDER_COLOR: &str = "portal.divider.color";
 
-/// Color of the in-transcript unread divider (hud-g1ena.2,
-/// portal-chat-grade-affordances §Unread Divider and Ambient Unread Count). The
+/// Color of the in-transcript unread divider. The
 /// rule marks the boundary before the oldest retained unseen agent-authored turn
 /// when the viewer returns to a portal with unread content. Distinct from the
 /// generic turn separator `portal.divider.color` so a viewer can tell the unread
@@ -366,24 +354,24 @@ pub const PORTAL_TOKEN_COLLAPSED_FONT_SIZE: &str = "portal.collapsed_card.font_s
 pub const PORTAL_TOKEN_TRANSITION_IN_MS: &str = "portal.transition.in_ms";
 pub const PORTAL_TOKEN_TRANSITION_OUT_MS: &str = "portal.transition.out_ms";
 
-// ── §6b Window management tokens (amendment 2026-06-10) ──────────────────────
+// ── Window management tokens ──────────────────────
 
-/// Minimum portal width in pixels (legibility bound per §6b.3).
+/// Minimum portal width in pixels (legibility bound ).
 pub const PORTAL_TOKEN_WINDOW_MIN_WIDTH_PX: &str = "portal.window.min_width_px";
-/// Minimum portal height in pixels (legibility bound per §6b.3).
+/// Minimum portal height in pixels (legibility bound ).
 pub const PORTAL_TOKEN_WINDOW_MIN_HEIGHT_PX: &str = "portal.window.min_height_px";
-/// Pixels per focus-scoped Ctrl+`+`/`=`/`-` resize step (§6b.2).
+/// Pixels per focus-scoped Ctrl+`+`/`=`/`-` resize step.
 pub const PORTAL_TOKEN_WINDOW_RESIZE_STEP_PX: &str = "portal.window.resize_step_px";
-/// Width/height of the pointer capture region on frame edges/corners (§6b.1).
+/// Width/height of the pointer capture region on frame edges/corners.
 pub const PORTAL_TOKEN_WINDOW_RESIZE_AFFORDANCE_PX: &str = "portal.window.resize_affordance_px";
 
-// ── §6b Scroll-position indicator tokens ─────────────────────────────────────
+// ── Scroll-position indicator tokens ─────────────────────────────────────
 
-/// Thumb color for scroll-position indicator (RGBA hex); redaction-safe (§6b.5).
+/// Thumb color for scroll-position indicator (RGBA hex); redaction-safe.
 pub const PORTAL_TOKEN_SCROLL_INDICATOR_COLOR: &str = "portal.scroll_indicator.color";
-/// Track width of the scroll-position indicator in px (§6b.5).
+/// Track width of the scroll-position indicator in px.
 pub const PORTAL_TOKEN_SCROLL_INDICATOR_WIDTH_PX: &str = "portal.scroll_indicator.width_px";
-/// Minimum thumb height in px — prevents thumb from vanishing on deep content (§6b.5).
+/// Minimum thumb height in px — prevents thumb from vanishing on deep content.
 pub const PORTAL_TOKEN_SCROLL_INDICATOR_MIN_HEIGHT_PX: &str =
     "portal.scroll_indicator.min_height_px";
 
@@ -466,8 +454,7 @@ pub const PORTAL_TOKEN_TRANSCRIPT_MAX_MEASURE_PX: &str = "portal.transcript.max_
 // ── Ambient per-turn timestamp granularity ───────────────────────────────────
 
 /// Component-profile-governed visibility/granularity of the ambient per-turn
-/// arrival timestamp (portal-chat-grade-affordances §Ambient Per-Turn Timestamps,
-/// hud-g1ena.4). Resolved from [`PORTAL_TOKEN_TIMESTAMP_GRANULARITY`].
+/// arrival timestamp. Resolved from [`PORTAL_TOKEN_TIMESTAMP_GRANULARITY`].
 ///
 /// This governs PRESENTATION only — how often a stamp is shown — never the clock
 /// domain. Every presented time still derives from the runtime-assigned
@@ -529,14 +516,14 @@ impl TimestampGranularity {
 /// palette. `tze_hud_portal::tokens::PortalVisualTokens::default()` derives
 /// from `PortalPartTokens::default()` (which parses these constants) via
 /// `portal_visual_tokens_from_part_tokens`, so changing a value here propagates to
-/// both sides automatically (hud-dcynv consolidation).
+/// both sides automatically.
 mod defaults {
     /// Portal frame backdrop fill (RGBA hex). Opaque near-black that matches the
     /// transcript pane (`TRANSCRIPT_BACKGROUND`) so the thin frame gap around the
     /// panes reads as off-black — backdrop-independent (identical regardless of
     /// the desktop wallpaper behind the HUD).
     ///
-    /// hud-a328c: this was `#111720` — an OPAQUE slate that resolves to
+    /// this was `#111720` — an OPAQUE slate that resolves to
     /// rgba(0.067,0.090,0.125,1.0). On the runtime-handshake token path (the
     /// production path: the exemplar/portal driver adopts the runtime's resolved
     /// tokens) an unset `portal.frame.background` falls back to this default, so
@@ -574,7 +561,7 @@ mod defaults {
     /// portal's cool ambient family (near the slate unread count / divider).
     pub const TRANSCRIPT_SYSTEM_COLOR: &str = "#8A97AD";
 
-    // Degraded / disconnect treatment (§2/§3). Dim text/background read as
+    // Degraded / disconnect treatment. Dim text/background read as
     // "inactive" relative to the live transcript palette above; the stale
     // marker uses a muted amber (matching the at-capacity convention) so it is
     // ambient, not alarming.
@@ -582,7 +569,7 @@ mod defaults {
     pub const TRANSCRIPT_DIM_BACKGROUND: &str = "#07090C";
     pub const STALE_MARKER_COLOR: &str = "#B87333";
     /// Same hue as `STALE_MARKER_COLOR` — the geometry badge and the text
-    /// marker read as one ambient "stale" signal (hud-jgf41).
+    /// marker read as one ambient "stale" signal.
     pub const DISCONNECT_BADGE_COLOR: &str = "#B87333";
     /// Mirrors `LIFECYCLE_ACCENT_WIDTH_PX`: the badge reuses the same
     /// left-edge accent-bar geometry.
@@ -601,7 +588,7 @@ mod defaults {
     /// quiet "ready" signal rather than an error or an existing meaning.
     pub const EMPTY_STATE_COLOR: &str = "#5F8A78";
     /// Muted cyan — a calm "spinning up" hue for the never-connected connecting
-    /// state (§Connecting State Distinction). Its cool cyan is deliberately
+    /// state. Its cool cyan is deliberately
     /// distinct from the amber `STALE_MARKER_COLOR` (degraded/disconnected) so a
     /// starting-up portal never reads as failing; it is also distinct from the
     /// sage empty-state and periwinkle awaiting-reply tones so connecting carries
@@ -633,14 +620,14 @@ mod defaults {
     pub const DELIVERY_DELIVERED_COLOR: &str = "#57A88E";
     /// Muted warm clay — the ambient failed (Rejected/Expired) viewer-turn delivery
     /// cue. Deliberately NOT the amber `STALE_MARKER_COLOR` nor an alarm red: per
-    /// doctrine a failed delivery stays ambient on the turn and never escalates the
+    /// rule a failed delivery stays ambient on the turn and never escalates the
     /// portal's interruption class, so the tone reads as "did not arrive" quietly.
     pub const DELIVERY_FAILED_COLOR: &str = "#B5827A";
 
     /// Muted slate — the ambient per-turn arrival timestamp. Shares the quiet
     /// secondary tone of `TRANSCRIPT_DIM_TEXT_COLOR` / `UNREAD_INDICATOR_COLOR` /
     /// `COMPOSER_PLACEHOLDER_COLOR` so a stamp reads as subordinate metadata, not
-    /// as primary turn content or an alert (§secondary presentation).
+    /// as primary turn content or an alert.
     pub const TIMESTAMP_COLOR: &str = "#6B7689";
     /// Ambient timestamps default OFF — visibility is profile-governed and the base
     /// surface stays calm (a presence engine, not a chat log). A component profile
@@ -668,8 +655,8 @@ mod defaults {
     // Collapsed/minimized portal card backdrop. Off-black in the portal palette
     // family — a hair lifted from the frame (`FRAME_BACKGROUND` #0A0D11) so a
     // minimized card stays perceptible against the desktop, but no longer reads
-    // as the grey it used to (`#1A1F28`). hud-0hj7f: the frame fix (hud-a328c,
-    // #0A0D11) only covered the expanded frame; the minimized state kept a
+    // as the grey it used to (`#1A1F28`). The expanded frame's `#0A0D11`
+    // treatment did not cover the minimized state, which kept a
     // separate grey token, so window-mgmt minimize still flashed grey.
     pub const COLLAPSED_BACKGROUND: &str = "#12161C";
     pub const COLLAPSED_TEXT_COLOR: &str = "#C8D6E8";
@@ -678,7 +665,7 @@ mod defaults {
     pub const TRANSITION_IN_MS: &str = "120";
     pub const TRANSITION_OUT_MS: &str = "80";
 
-    // §6b window management defaults
+    // window management defaults
     /// Legible minimum portal width (px). Chosen to fit at least two columns of
     /// readable text at default font size.
     pub const WINDOW_MIN_WIDTH_PX: &str = "240";
@@ -692,7 +679,7 @@ mod defaults {
     /// 8px balances discoverability with accidental activation avoidance.
     pub const WINDOW_RESIZE_AFFORDANCE_PX: &str = "8";
 
-    // §6b scroll-indicator defaults
+    // scroll-indicator defaults
     pub const SCROLL_INDICATOR_COLOR: &str = "#4A5568";
     pub const SCROLL_INDICATOR_WIDTH_PX: &str = "4";
     pub const SCROLL_INDICATOR_MIN_HEIGHT_PX: &str = "24";
@@ -725,8 +712,8 @@ mod defaults {
     /// Header strip height. Matches the header/drag-band height the compositor
     /// uses today (the declared surface `Header` part drives the draggable header
     /// band via `SceneGraph::portal_header_band_anchors`, so this default MUST
-    /// equal `PORTAL_HEADER_DRAG_BAND_PX_DEFAULT` = 52 to keep the band unchanged;
-    /// hud-zn6yw). `portal.header.drag_band_px` remains the raw-tile-fallback knob.
+    /// equal `PORTAL_HEADER_DRAG_BAND_PX_DEFAULT` = 52 to keep the band unchanged).
+    /// `portal.header.drag_band_px` remains the raw-tile-fallback knob.
     pub const SPACING_HEADER_HEIGHT_PX: &str = "52";
     /// Inter-section vertical gap.
     pub const SPACING_SECTION_GAP_PX: &str = "8";
@@ -760,9 +747,9 @@ pub struct PortalPartTokens {
     pub composer_background: Rgba,
     pub composer_text_color: Rgba,
     pub composer_font_size_px: f32,
-    /// Indicator color rendered when the draft is at its byte cap (§4.1 / §4.8).
+    /// Indicator color rendered when the draft is at its byte cap.
     /// Applied as a distinct visual signal within the composer region; never
-    /// hardcoded in the compositor — always token-driven per CLAUDE.md doctrine.
+    /// hardcoded in the compositor — always token-driven.
     pub composer_at_capacity_color: Rgba,
 
     // Transcript body
@@ -771,45 +758,42 @@ pub struct PortalPartTokens {
     pub transcript_font_size_px: f32,
     /// Per-turn role-attribution color for non-assistant agent-side OUTPUT turns
     /// (tool / status / error / other), distinct from `transcript_text_color`
-    /// used for the assistant's own conversational turns (text-stream-portals
-    /// §Conversational Turn Model and Per-Turn Role Attribution, hud-26869).
+    /// used for the assistant's own conversational turns.
     pub transcript_system_color: Rgba,
 
-    // Degraded / disconnect treatment (portal-disconnect-resume-ux §2/§3).
+    // Degraded / disconnect treatment.
     /// Dimmed transcript text shown while the portal is disconnected/stale.
     pub transcript_dim_text_color: Rgba,
     /// Dimmed transcript background shown while the portal is disconnected/stale.
     pub transcript_dim_background: Rgba,
     /// Color of the content-free stale/disconnect marker (ambient, not alarming).
     pub stale_marker_color: Rgba,
-    /// Color of the visible disconnect badge (hud-jgf41): a token-styled
+    /// Color of the visible disconnect badge: a token-styled
     /// geometry affordance shown while connection-degraded, driven by the
     /// redaction-independent `connection_degraded` flag so it stays visible
     /// for a restricted viewer (geometry-only).
     pub disconnect_badge_color: Rgba,
     /// Width (px) of the disconnect badge accent bar.
     pub disconnect_badge_width_px: f32,
-    /// Color of the ambient unread-output-count indicator (hud-meqet). Muted by
+    /// Color of the ambient unread-output-count indicator. Muted by
     /// design — a presence engine surfaces a quiet count, never a loud
     /// notification badge.
     pub unread_indicator_color: Rgba,
-    /// Color of the ambient awaiting-reply (question) indicator (hud-jip0k).
+    /// Color of the ambient awaiting-reply (question) indicator.
     /// Set when the owning LLM's most recently published output has
     /// `expects_reply == true`. Ambient by design, matching the muted tone
     /// convention of the other quiet-signal tokens.
     pub awaiting_reply_color: Rgba,
-    /// Color of the friendly first-run empty-portal treatment (hud-g1ena.6)
+    /// Color of the friendly first-run empty-portal treatment
     /// shown when a connected portal's retained transcript is empty. Quiet and
     /// inviting — reads as calm and ready, never as an error.
     pub empty_state_color: Rgba,
-    /// Color of the connecting-state marker (portal-chat-grade-affordances
-    /// §Connecting State Distinction) shown while a portal is attached but has
+    /// Color of the connecting-state marker shown while a portal is attached but has
     /// never connected. Cool "spinning up" hue, visually distinct from the amber
     /// `stale_marker_color` so a starting-up portal does not read as failing.
     pub connecting_marker_color: Rgba,
 
-    // Agent activity / streaming cursor (portal-chat-grade-affordances
-    // §Agent Activity and Streaming Cue, hud-g1ena.5). Ambient cues derived from
+    // Agent activity and streaming cursors derive their ambient cues from
     // observed appends; the adapter never hardcodes these hues.
     /// Color of the ambient header activity cue shown while the agent is actively
     /// appending (compact typing-style header indicator).
@@ -818,8 +802,7 @@ pub struct PortalPartTokens {
     /// agent is actively appending.
     pub streaming_cursor_color: Rgba,
 
-    // Viewer-turn delivery acknowledgement (portal-chat-grade-affordances
-    // §Viewer Turn Delivery Acknowledgement, hud-g1ena.1). Three ambient cue
+    // Viewer-turn delivery acknowledgement. Three ambient cue
     // classes derived from the runtime's already-tracked `InputDeliveryState`; the
     // adapter never hardcodes these hues and never issues a round trip to render
     // them.
@@ -831,8 +814,7 @@ pub struct PortalPartTokens {
     /// Muted, not an alarm: a failed cue stays ambient on the turn.
     pub delivery_failed_color: Rgba,
 
-    // Ambient per-turn timestamps (portal-chat-grade-affordances
-    // §Ambient Per-Turn Timestamps, hud-g1ena.4). Secondary presentation of each
+    // Ambient per-turn timestamps. Secondary presentation of each
     // unit's runtime-assigned wall-clock arrival time; the adapter never hardcodes
     // the hue or the granularity.
     /// Color of the ambient per-turn arrival timestamp (secondary/dim).
@@ -841,7 +823,7 @@ pub struct PortalPartTokens {
     /// by the component profile (`off` / `per_turn` / `grouped`).
     pub timestamp_granularity: TimestampGranularity,
 
-    // Lifecycle affordance accents (cooperative-hud-projection §lifecycle).
+    // Lifecycle affordance accents.
     // Each maps a `ProjectionLifecycleState` group onto an ambient accent; the
     // adapter never hardcodes a lifecycle color.
     /// Accent for the actively-working state (`Active`).
@@ -854,12 +836,12 @@ pub struct PortalPartTokens {
     pub lifecycle_inactive_color: Rgba,
     /// Width (px) of the left-edge lifecycle accent bar. Geometry only — the bar
     /// *color* comes from the four accents above; this keeps the adapter and
-    /// compositor free of any literal accent dimension (hud-m48i0).
+    /// compositor free of any literal accent dimension.
     pub lifecycle_accent_width_px: f32,
 
     // Divider
     pub divider_color: Rgba,
-    /// Color of the in-transcript unread divider (hud-g1ena.2). Marks the boundary
+    /// Color of the in-transcript unread divider. Marks the boundary
     /// before the oldest retained unseen agent-authored turn; distinct from the
     /// generic `divider_color` turn separator, ambient by design.
     pub unread_divider_color: Rgba,
@@ -873,22 +855,22 @@ pub struct PortalPartTokens {
     pub transition_in_ms: u32,
     pub transition_out_ms: u32,
 
-    // §6b Window management (amendment 2026-06-10)
-    /// Legible minimum portal width in pixels (§6b.3 legibility bound).
+    // Window management
+    /// Legible minimum portal width in pixels.
     pub window_min_width_px: f32,
-    /// Legible minimum portal height in pixels (§6b.3 legibility bound).
+    /// Legible minimum portal height in pixels.
     pub window_min_height_px: f32,
-    /// Pixels per Ctrl+`+`/`=`/`-` resize step (§6b.2 token-defined step).
+    /// Pixels per Ctrl+`+`/`=`/`-` resize step.
     pub window_resize_step_px: f32,
-    /// Width/height of pointer capture region on frame edges/corners (§6b.1).
+    /// Width/height of pointer capture region on frame edges/corners.
     pub window_resize_affordance_px: f32,
 
-    // §6b Scroll-position indicators (amendment 2026-06-10)
-    /// Scroll indicator thumb color — geometry-only, carries no content (§6b.5).
+    // Scroll-position indicators
+    /// Scroll indicator thumb color — geometry-only, carries no content.
     pub scroll_indicator_color: Rgba,
-    /// Scroll indicator track width in px (§6b.5).
+    /// Scroll indicator track width in px.
     pub scroll_indicator_width_px: f32,
-    /// Minimum scroll indicator thumb height in px (§6b.5).
+    /// Minimum scroll indicator thumb height in px.
     pub scroll_indicator_min_height_px: f32,
 
     // Composer caret / selection / placeholder (vd-caret-selection-placeholder-not-tokenized).
@@ -1024,7 +1006,7 @@ impl Default for PortalPartTokens {
                 .expect("transition out default is valid numeric")
                 as u32,
 
-            // §6b window management defaults
+            // window management defaults
             window_min_width_px: parse_numeric(defaults::WINDOW_MIN_WIDTH_PX)
                 .expect("window min width default is valid numeric"),
             window_min_height_px: parse_numeric(defaults::WINDOW_MIN_HEIGHT_PX)
@@ -1034,7 +1016,7 @@ impl Default for PortalPartTokens {
             window_resize_affordance_px: parse_numeric(defaults::WINDOW_RESIZE_AFFORDANCE_PX)
                 .expect("window resize affordance default is valid numeric"),
 
-            // §6b scroll indicator defaults
+            // scroll indicator defaults
             scroll_indicator_color: parse_color_hex(defaults::SCROLL_INDICATOR_COLOR)
                 .expect("scroll indicator color default is valid hex"),
             scroll_indicator_width_px: parse_numeric(defaults::SCROLL_INDICATOR_WIDTH_PX)
@@ -1366,7 +1348,7 @@ pub fn resolve_portal_tokens(token_map: &DesignTokenMap) -> PortalPartTokens {
         transition_in_ms: resolve_u32!(PORTAL_TOKEN_TRANSITION_IN_MS, defaults.transition_in_ms),
         transition_out_ms: resolve_u32!(PORTAL_TOKEN_TRANSITION_OUT_MS, defaults.transition_out_ms),
 
-        // §6b window management
+        // window management
         window_min_width_px: resolve_f32!(
             PORTAL_TOKEN_WINDOW_MIN_WIDTH_PX,
             defaults.window_min_width_px
@@ -1384,7 +1366,7 @@ pub fn resolve_portal_tokens(token_map: &DesignTokenMap) -> PortalPartTokens {
             defaults.window_resize_affordance_px
         ),
 
-        // §6b scroll indicators
+        // scroll indicators
         scroll_indicator_color: resolve_color!(
             PORTAL_TOKEN_SCROLL_INDICATOR_COLOR,
             defaults.scroll_indicator_color
@@ -1491,12 +1473,12 @@ mod tests {
             tokens.composer_at_capacity_color.a > 0.0,
             "at-capacity color must have non-zero alpha so it is visible"
         );
-        // §6b window management fields
+        // window management fields
         assert!(tokens.window_min_width_px > 0.0);
         assert!(tokens.window_min_height_px > 0.0);
         assert!(tokens.window_resize_step_px > 0.0);
         assert!(tokens.window_resize_affordance_px > 0.0);
-        // §6b scroll indicator fields
+        // scroll indicator fields
         assert!(tokens.scroll_indicator_width_px > 0.0);
         assert!(tokens.scroll_indicator_min_height_px > 0.0);
     }
@@ -1533,7 +1515,7 @@ mod tests {
     fn profile_override_propagates_to_portal_tokens() {
         // Verify that a profile-scoped override for portal.transcript.text_color
         // propagates through resolve_portal_tokens — this is the pre-promotion
-        // §6.1 contract: token change → portal reskin, no adapter logic change.
+        // contract: token change → portal reskin, no adapter logic change.
         let mut overrides = DesignTokenMap::new();
         overrides.insert(
             PORTAL_TOKEN_TRANSCRIPT_TEXT_COLOR.to_string(),
@@ -1579,11 +1561,11 @@ mod tests {
         assert_eq!(tokens.transition_out_ms, 150);
     }
 
-    // ── Profile-swap reskin (§6.4 core scenario) ─────────────────────────
+    // ── Profile-swap reskin ─────────────────────────
 
     /// Profile swap reskins portal without adapter logic change.
     ///
-    /// Demonstrates §6.1: a profile change propagates to all portal parts
+    /// Demonstrates: a profile change propagates to all portal parts
     /// through `resolve_portal_tokens`, with zero adapter code changes.
     /// The "adapter logic change" is defined as changing the code path that
     /// calls `resolve_portal_tokens` — here we prove that only token values
@@ -1666,7 +1648,7 @@ mod tests {
         );
     }
 
-    // ── Token propagation on republish (§6.4) ────────────────────────────
+    // ── Token propagation on republish ────────────────────────────
 
     /// Verifies that a token value change propagates through the portal token
     /// map on every republish without requiring any adapter code change.
@@ -1776,7 +1758,7 @@ mod tests {
         );
     }
 
-    // ── §6b window management token tests ────────────────────────────────
+    // ── window management token tests ────────────────────────────────
 
     #[test]
     fn window_management_tokens_default_values_are_valid() {
@@ -1841,7 +1823,7 @@ mod tests {
         );
     }
 
-    // ── §6b scroll indicator token tests ─────────────────────────────────
+    // ── scroll indicator token tests ─────────────────────────────────
 
     #[test]
     fn scroll_indicator_tokens_default_values_are_valid() {
@@ -1879,8 +1861,7 @@ mod tests {
 
     /// The lifecycle accent-bar width resolves to a positive default and a
     /// profile-scoped override propagates — the bar geometry is token-driven so
-    /// neither the adapter nor the compositor hardcodes the accent dimension
-    /// (hud-m48i0).
+    /// neither the adapter nor the compositor hardcodes the accent dimension.
     #[test]
     fn lifecycle_accent_width_default_and_override() {
         let defaults = resolve_portal_tokens(&empty_map());
@@ -1902,10 +1883,10 @@ mod tests {
         );
     }
 
-    // ── §2/§3 degraded / disconnect token tests ─────────────────────────
+    // ── degraded / disconnect token tests ─────────────────────────
 
     /// Degraded-treatment tokens resolve to valid, visible colors and read as
-    /// distinctly dimmer than the live transcript palette (spec §2: the retained
+    /// distinctly dimmer than the live transcript palette (the retained
     /// window is dimmed rather than blanked).
     #[test]
     fn degraded_tokens_default_values_are_valid() {
@@ -1929,7 +1910,7 @@ mod tests {
     }
 
     /// Profile-scoped overrides for the degraded tokens propagate through
-    /// `resolve_portal_tokens` (spec §2: degraded treatment is token-resolved,
+    /// `resolve_portal_tokens` (degraded treatment is token-resolved,
     /// not hardcoded — a profile change reskins it with no adapter change).
     #[test]
     fn degraded_token_overrides_propagate() {
@@ -1959,7 +1940,7 @@ mod tests {
         );
     }
 
-    // ── §Connecting State Distinction token tests (hud-g1ena.7) ──────────
+    // ── State Distinction token tests ──────────
 
     /// The connecting-marker token resolves to a valid, visible color and is
     /// distinct from the amber degraded/stale marker — the core spec requirement
@@ -1974,7 +1955,7 @@ mod tests {
         assert_ne!(
             tokens.connecting_marker_color, tokens.stale_marker_color,
             "connecting must be visually distinct from the degraded/stale marker \
-             (§Connecting State Distinction)"
+            "
         );
     }
 
@@ -1998,7 +1979,7 @@ mod tests {
         );
     }
 
-    // ── Diagnostic warn path (hud-dcynv) ─────────────────────────────────
+    // ── Diagnostic warn path ─────────────────────────────────
 
     /// Verifies that a present-but-unparseable token (color) falls back to the
     /// default value and does NOT panic. The `tracing::warn!` is emitted on the
@@ -2135,11 +2116,11 @@ mod tests {
         }
     }
 
-    // ── Compliance amendment tokens (hud-khfgx) ──────────────────────────────
+    // ── Compliance amendment tokens ──────────────────────────────
     //
     // Caret/selection/placeholder + focus-ring + resize-grip + spacing/measure.
     // Each group asserts (a) sane defaults and (b) profile-override propagation
-    // through `resolve_portal_tokens` — the pre-promotion §6.1 contract.
+    // through `resolve_portal_tokens` — the pre-promotion contract.
 
     #[test]
     fn caret_selection_placeholder_defaults_are_valid() {
@@ -2322,7 +2303,7 @@ mod tests {
         );
     }
 
-    /// hud-a328c regression: a config whose `[design_tokens]` sets SOME portal
+    /// regression: a config whose `[design_tokens]` sets SOME portal
     /// keys but NOT `portal.frame.background` must resolve the frame background
     /// to the reviewed opaque off-black default `#0A0D11`, not the old grey
     /// slate `#111720` that painted the frame rim grey.
@@ -2349,7 +2330,7 @@ mod tests {
         );
     }
 
-    // ── Ambient per-turn timestamp tokens (hud-g1ena.4) ───────────────────
+    // ── Ambient per-turn timestamp tokens ───────────────────
 
     #[test]
     fn timestamp_granularity_parses_all_variants_case_insensitively() {

@@ -1,6 +1,6 @@
 //! Phase-1 Markdown subset parser for tze_hud portal text.
 //!
-//! # Design contract (hud-5jbra.2)
+//! # Design contract
 //!
 //! Parsing happens **at content-commit time**, never on the per-frame render
 //! path.  The compositor calls [`MarkdownCache::prime`] once after each
@@ -122,7 +122,7 @@ pub struct MarkdownTokens {
     /// Must be in `[0.0, 4.0]`.
     pub list_item_spacing: f32,
     /// Color of a thematic-break (`---`/`***`/`___`) divider — the transcript
-    /// turn separator (hud-nx7yq.4).  `None` disables separator rendering: a
+    /// turn separator. `None` disables separator rendering: a
     /// thematic-break line then renders as ordinary text (no divider), preserving
     /// pre-existing behavior for surfaces with no separator token configured.
     ///
@@ -130,7 +130,7 @@ pub struct MarkdownTokens {
     /// the break's line — content-free, so it carries no text and reveals nothing
     /// under redaction (the transcript units are zeroed upstream when redacted).
     pub separator_color: Option<Rgba>,
-    /// Thickness (physical px) of the thematic-break divider quad (hud-nx7yq.4).
+    /// Thickness (physical px) of the thematic-break divider quad.
     ///
     /// Resolved from `portal.divider.thickness_px`.  Default `1.0`; clamped to a
     /// sane minimum at render time so a stray `0` cannot make the divider vanish.
@@ -160,11 +160,11 @@ impl Default for MarkdownTokens {
     }
 }
 
-/// Which markdown surface a token set is being resolved for (hud-3ryie).
+/// Which markdown surface a token set is being resolved for.
 ///
 /// The text-stream portal transcript is a *governed* markdown surface: it may
 /// restyle its own code/link/divider treatment via `portal.*`-namespaced token
-/// keys (minted in hud-8691s). Any *other* markdown surface must resolve only
+/// keys. Any *other* markdown surface must resolve only
 /// the generic (`color.*` / `typography.*`) keys, so a portal-scoped preference
 /// can never leak onto it.
 ///
@@ -203,7 +203,7 @@ impl MarkdownTokens {
     }
 
     /// Resolve styling from a design-token map for a specific markdown
-    /// [`MarkdownScope`] (hud-3ryie).
+    /// [`MarkdownScope`].
     ///
     /// [`MarkdownScope::Portal`] prefers `portal.*`-namespaced keys (code/link
     /// treatment, divider) over their generic fallbacks;
@@ -236,7 +236,7 @@ impl MarkdownTokens {
             }
         }
 
-        // Portal markdown-subset preference (Promotion P2, hud-8691s): for the
+        // Portal markdown-subset preference (Promotion P2): for the
         // markdown-subset code/link styling the transcript renders, prefer the
         // portal-scoped canonical keys (`portal.transcript.*`) over the generic
         // ones (`color.code.*` / `color.link.text` / `typography.code.family`),
@@ -244,7 +244,7 @@ impl MarkdownTokens {
         // a portal profile restyle its own code/link treatment while the generic
         // markdown defaults are preserved when no portal key is present.
         //
-        // Per-tile scoping (hud-3ryie): for the portal surface, prefer the
+        // Per-tile scoping: for the portal surface, prefer the
         // portal-scoped key over the generic fallback; for any non-portal
         // surface (`Generic`), resolve ONLY the generic key so a portal
         // preference can never leak onto it. The resolved token-set identity is
@@ -263,7 +263,7 @@ impl MarkdownTokens {
         }
 
         // Code family: portal.transcript.code_font_family → typography.code.family
-        // = "monospace" | "sans-serif" | ...
+        // = "monospace" | "sans-serif" |...
         if let Some(fam) = prefer(
             "portal.transcript.code_font_family",
             "typography.code.family",
@@ -335,10 +335,10 @@ impl MarkdownTokens {
             }
         }
 
-        // Transcript turn separator: portal.divider.color / .thickness_px (hud-nx7yq.4).
+        // Transcript turn separator: portal.divider.color /.thickness_px.
         // These are `portal.`-namespaced, so they resolve for the portal scope
         // only; a non-portal (`Generic`) surface leaves the separator disabled
-        // (a `---` line renders as ordinary text) (hud-3ryie).
+        // (a `---` line renders as ordinary text).
         if scope == MarkdownScope::Portal {
             if let Some(c) = map
                 .get("portal.divider.color")
@@ -365,8 +365,7 @@ impl MarkdownTokens {
     }
 
     /// Fold every parse-affecting styling field into `hasher` so the markdown
-    /// parse cache can key on the *token-set identity* alongside the content
-    /// (hud-3ryie).
+    /// parse cache can key on the *token-set identity* alongside the content.
     ///
     /// Two `MarkdownTokens` with identical field values hash the same and are
     /// interchangeable — they produce byte-identical [`ParsedMarkdown`], so
@@ -402,7 +401,7 @@ impl MarkdownTokens {
 }
 
 /// Fold an `Option<Rgba>` into `hasher` with a presence tag so `None` and a
-/// fully-transparent color hash differently (hud-3ryie).
+/// fully-transparent color hash differently.
 fn hash_opt_rgba(hasher: &mut blake3::Hasher, color: Option<Rgba>) {
     match color {
         None => {
@@ -585,7 +584,7 @@ pub struct ParsedMarkdown {
     /// width for hanging-indent layout.
     pub list_items: Vec<ListItemSpan>,
     /// Byte offsets (into `plain_text`) of thematic-break divider lines — the
-    /// transcript turn separators (hud-nx7yq.4).  Each offset points at the start
+    /// transcript turn separators. Each offset points at the start
     /// of a blank line the renderer draws a token-styled divider quad on.
     ///
     /// Non-empty only when `tokens.separator_color` is `Some`; a thematic break
@@ -633,7 +632,7 @@ impl MarkdownCache {
     /// if it has not been primed yet.
     ///
     /// The lookup key folds both the content and the token-set identity
-    /// (hud-3ryie), so the same content parsed under a different token set is a
+    ///, so the same content parsed under a different token set is a
     /// distinct entry — never mis-served.  This hashes `content` on every call
     /// (O(content_bytes)).  Prefer [`MarkdownCache::get_by_key`] when a
     /// precomputed key is available (e.g. stored on the scene node at commit
@@ -659,8 +658,8 @@ impl MarkdownCache {
     /// The key folds the raw content **and** the token-set identity
     /// ([`MarkdownTokens::hash_into`]) behind a domain separator, so the same
     /// content under two different token sets (e.g. a portal vs. a non-portal
-    /// surface) yields two distinct keys and never collides in the cache
-    /// (hud-3ryie).  Two token sets with identical parse-affecting fields hash
+    /// surface) yields two distinct keys and never collides in the cache.
+    /// Two token sets with identical parse-affecting fields hash
     /// the same — correct, since they produce identical parses.
     ///
     /// Call this once at content-commit time with the tile's scoped tokens and
@@ -741,7 +740,7 @@ impl MarkdownCache {
                 // Carry forward the already-parsed entry (cheap Arc/Vec clone).
                 entries.insert(job.key, existing.clone());
             } else if let Some(content) = &job.content {
-                // Parse with the job's own scoped tokens (hud-3ryie): each job
+                // Parse with the job's own scoped tokens: each job
                 // carries the token set its owning tile resolved (portal vs.
                 // generic), so a single rebuild may mix scopes.  `job.key`
                 // already folds this token identity, so entries never collide.
@@ -770,11 +769,11 @@ impl MarkdownCache {
 pub(crate) struct PrimeJob {
     /// BLAKE3 cache key (see [`MarkdownCache::compute_key`]) — folds the content
     /// **and** [`Self::tokens`]' identity, so a portal and a non-portal surface
-    /// with identical content occupy distinct entries (hud-3ryie).
+    /// with identical content occupy distinct entries.
     pub(crate) key: [u8; 32],
     /// Raw markdown source — `Some` only when this key needs parsing.
     pub(crate) content: Option<Arc<str>>,
-    /// The scoped token set this content must be parsed with (hud-3ryie).
+    /// The scoped token set this content must be parsed with.
     ///
     /// Selected per owning tile: [`MarkdownScope::Portal`] tokens for a governed
     /// portal transcript surface, [`MarkdownScope::Generic`] tokens otherwise.
@@ -796,11 +795,11 @@ pub(crate) struct PrimeJob {
 /// 64 KiB payload dominating; a few KiB is negligible).
 const INLINE_PARSE_BYTE_THRESHOLD: usize = 4096;
 
-/// Async, lock-free front end for the markdown parse cache (hud-33qo7).
+/// Async, lock-free front end for the markdown parse cache.
 ///
 /// # What this adds over [`MarkdownCache`]
 ///
-/// hud-380dl (Option A) moved parsing **off the per-frame render path** by
+/// (Option A) moved parsing **off the per-frame render path** by
 /// priming at scene-commit time — but the parse still ran synchronously on the
 /// commit thread.  For very large payloads that parse cost lands on the commit
 /// thread and can eat into the Stage 4 budget.
@@ -814,7 +813,7 @@ const INLINE_PARSE_BYTE_THRESHOLD: usize = 4096;
 /// # Why a dedicated thread, not rayon/tokio
 ///
 /// The compositor crate does not depend on rayon or a tokio runtime (only a
-/// dev-dependency), and the dependency bar (`about/craft-and-care`) prefers std
+/// dev-dependency), and the dependency policy prefers std
 /// over new crates.  A single owned `std::thread` mirrors how the runtime crate
 /// already structures off-thread work (`threads.rs`, `chrome.rs`) and adds no
 /// new dependency.  One worker thread suffices: prime jobs are serialized per
@@ -833,7 +832,7 @@ const INLINE_PARSE_BYTE_THRESHOLD: usize = 4096;
 ///   node inline (non-lossy), so a racing frame is always correct — just not
 ///   zero-cost for that single frame until the swap lands.
 ///
-/// # hud-u4lq2: why the ordering token is NOT `SceneGraph::version`
+/// # Why the ordering token is independent of `SceneGraph::version`
 ///
 /// Earlier versions of this type gated the stale-clobber guard on the
 /// caller-supplied `scene.version` directly. That is broken: `SceneGraph::version`
@@ -843,17 +842,16 @@ const INLINE_PARSE_BYTE_THRESHOLD: usize = 4096;
 /// `MarkdownPrimer`) that gets reused across multiple, independently
 /// constructed `SceneGraph`s — e.g. a benchmark/test loop that builds a fresh
 /// scene per scenario iteration while reusing one `Compositor`, such as
-/// `scroll_reshape_reuse_hud991cj` — can dispatch a legitimate prime for a NEW
+/// `scroll_reshape_reuse` — can dispatch a legitimate prime for a NEW
 /// scene whose `version` is *lower* than the value already recorded from a
 /// PRIOR scene. Gating on that raw number then makes `publish_if_newer` treat
 /// the new scene's correctly-parsed background result as "stale" and silently,
 /// PERMANENTLY drop it: the cache never gains an entry for that content's key,
 /// so every subsequent frame's `collect_text_items_from_node` lookup misses and
 /// pays a full synchronous re-parse forever (the documented-as-rare inline
-/// fallback in `renderer/text.rs`), matching the exact symptom reported in
-/// hud-u4lq2 (confirmed via `publish_if_newer` instrumentation: the dispatch for
-/// the 64KiB scenario carried `version=4` while `published_version` was already
-/// `5` from the prior scenario, so `4 < 5` unconditionally dropped it).
+/// fallback in `renderer/text.rs`). For example, a new scene dispatching
+/// `version=4` while `published_version` holds `5` from the prior scene has its
+/// valid result discarded because `4 < 5`.
 ///
 /// The fix: `MarkdownPrimer` now stamps every [`Self::prime`]/[`Self::reset`]
 /// dispatch with its OWN internally generated, ever-increasing epoch
@@ -867,7 +865,7 @@ pub(crate) struct MarkdownPrimer {
     cache: Arc<arc_swap::ArcSwap<MarkdownCache>>,
     /// Highest internal epoch for which a snapshot has been published. Guards
     /// against a late background result clobbering a newer snapshot. See the
-    /// hud-u4lq2 note on [`MarkdownPrimer`] for why this is an
+    /// note on [`MarkdownPrimer`] for why this is an
     /// internally-generated epoch rather than the caller's scene version.
     published_epoch: Arc<std::sync::atomic::AtomicU64>,
     /// Source of the next epoch handed out by [`Self::prime`]/[`Self::reset`].
@@ -888,7 +886,7 @@ struct PrimeRequest {
     /// Snapshot to rebuild from (carry-forward source for already-parsed entries).
     base: Arc<MarkdownCache>,
     /// Complete live job set for this dispatch. Each job carries its own
-    /// scoped token set (hud-3ryie), so the rebuild needs no ambient tokens.
+    /// scoped token set, so the rebuild needs no ambient tokens.
     jobs: Vec<PrimeJob>,
     /// Internally-generated epoch this rebuild targets (store is gated on it).
     epoch: u64,
@@ -958,7 +956,7 @@ impl MarkdownPrimer {
     ///   render path's cache-miss fallback keeps frames correct until the swap
     ///   lands.
     ///
-    /// Every call claims a fresh internal epoch up front (see the hud-u4lq2 note
+    /// Every call claims a fresh internal epoch up front (see the note
     /// on [`MarkdownPrimer`]) so the stale-clobber guard orders purely by this
     /// primer's own call sequence, never by caller-supplied scene numbering.
     pub(crate) fn prime(&self, jobs: Vec<PrimeJob>) {
@@ -1084,7 +1082,7 @@ fn distinct_key_count(jobs: &[PrimeJob]) -> usize {
 /// never lose a newer store to a race.
 ///
 /// `epoch` must come from [`MarkdownPrimer`]'s own internally-generated
-/// [`MarkdownPrimer::next_epoch`] counter (see the hud-u4lq2 note on that
+/// [`MarkdownPrimer::next_epoch`] counter (see the note on that
 /// type), never from caller-supplied scene numbering — the latter is only
 /// guaranteed monotonic within one `SceneGraph` instance's lifetime, and a
 /// `MarkdownPrimer` reused across instances would silently and permanently
@@ -1141,7 +1139,7 @@ fn tx_if_worker_spawned(
 #[cfg(test)]
 thread_local! {
     /// Test-only PER-THREAD counter of [`parse_markdown_subset`] invocations, so
-    /// tests can prove a code path performs ZERO markdown parses (hud-5wx09: the
+    /// tests can prove a code path performs zero markdown parses (the
     /// per-frame flow measurement MUST NOT re-parse cached content). Counting the
     /// actual behavior is stronger than asserting which branch was taken.
     ///
@@ -1175,7 +1173,7 @@ pub(crate) fn parse_markdown_subset(content: &str, tokens: &MarkdownTokens) -> P
     let mut code_panels: Vec<CodePanelSpan> = Vec::new();
     // Per-list-item hanging-indent metadata.
     let mut list_items: Vec<ListItemSpan> = Vec::new();
-    // Thematic-break divider offsets (transcript turn separators, hud-nx7yq.4).
+    // Thematic-break divider offsets (transcript turn separators).
     let mut thematic_breaks: Vec<usize> = Vec::new();
     // Fenced code block contents (copy targets, hud-ljhku.2).
     let mut code_blocks: Vec<(usize, usize)> = Vec::new();
@@ -1305,7 +1303,7 @@ pub(crate) fn parse_markdown_subset(content: &str, tokens: &MarkdownTokens) -> P
         // Gated on a configured separator color so surfaces without the
         // `portal.divider.color` token keep the prior behavior (a `---` line
         // renders as ordinary text). The break occupies one blank line the
-        // renderer draws a token-styled divider quad on (hud-nx7yq.4).
+        // renderer draws a token-styled divider quad on.
         if !in_fenced_block && tokens.separator_color.is_some() && is_thematic_break(raw) {
             // Close the previous line so the break sits on its own row.
             if !prev_was_empty && !plain.is_empty() {
@@ -1486,7 +1484,7 @@ pub(crate) fn parse_markdown_subset(content: &str, tokens: &MarkdownTokens) -> P
 }
 
 /// Whether `line` is a CommonMark thematic break: three or more matching `-`,
-/// `*`, or `_` characters, optionally separated by spaces (hud-nx7yq.4).
+/// `*`, or `_` characters, optionally separated by spaces.
 ///
 /// Used to render transcript turn separators. Kept intentionally simple (the
 /// leading-indent and internal-space allowances of full CommonMark are a
@@ -2564,7 +2562,7 @@ mod tests {
         parse_markdown_subset(s, &tokens())
     }
 
-    // ─── Transcript turn separators (hud-nx7yq.4) ────────────────────────────
+    // ─── Transcript turn separators ────────────────────────────
 
     fn tokens_with_separator() -> MarkdownTokens {
         MarkdownTokens {
@@ -2788,7 +2786,7 @@ mod tests {
 
     /// Ordered list items (`1. item`) render with their ordinal preserved.
     ///
-    /// Before hud-f8jb0 the ordinal was stripped and replaced with "• ",
+    /// Before the ordinal was stripped and replaced with "• ",
     /// causing "1. first" to appear as "• first".  This test codifies the
     /// correct behaviour: the ordinal number and punctuation are preserved.
     #[test]
@@ -2879,14 +2877,14 @@ mod tests {
     /// its validated target on a [`LinkSpan`] while only its text is drawn.
     #[test]
     fn https_link_keeps_its_href_and_draws_only_text() {
-        let md = parse("see [RFC 0001](https://internal.example/rfc/0001) now");
-        assert_eq!(&*md.plain_text, "see RFC 0001 now");
+        let md = parse("see [the docs](https://example.com/guide) now");
+        assert_eq!(&*md.plain_text, "see the docs now");
         assert_eq!(
             md.links,
             vec![LinkSpan {
                 start_byte: 4,
                 end_byte: 12,
-                href: "https://internal.example/rfc/0001".into(),
+                href: "https://example.com/guide".into(),
             }]
         );
         let long = format!("[x](https://example.com/{})", "a".repeat(2048));
@@ -3036,7 +3034,7 @@ mod tests {
         cache.prime(content_b, &t);
         assert_eq!(cache.len(), 2);
 
-        // Key folds content + token identity (hud-3ryie), so derive it via
+        // Key folds content + token identity, so derive it via
         // compute_key rather than a raw content hash.
         let keep_key = MarkdownCache::compute_key(content_a, &t);
         cache.evict_except(&[keep_key]);
@@ -3095,11 +3093,11 @@ mod tests {
         assert!(c.b > c.r, "blue must dominate for #0066FF");
     }
 
-    // ── Portal markdown-subset token preference (Promotion P2, hud-8691s) ──────
+    // ── Portal markdown-subset token preference (Promotion P2) ──────
 
     /// When BOTH a portal-scoped key and its generic counterpart are set, the
     /// portal key wins for the markdown-subset code/link styling the transcript
-    /// renders (hud-8691s preference).
+    /// renders (preference).
     #[test]
     fn portal_transcript_keys_win_over_generic() {
         let mut map = HashMap::new();
@@ -3152,7 +3150,7 @@ mod tests {
     }
 
     /// When a portal-scoped key is UNSET, the generic key is used (fallback), so
-    /// nothing regresses for maps that only carry the generic keys (hud-8691s).
+    /// nothing regresses for maps that only carry the generic keys.
     #[test]
     fn portal_transcript_falls_back_to_generic_when_portal_unset() {
         let mut map = HashMap::new();
@@ -3182,7 +3180,7 @@ mod tests {
 
     /// With neither the portal nor the generic key set, the markdown-subset code/
     /// link styling stays unset (canonical default = unset), so the transcript
-    /// renders exactly as before promotion (hud-8691s propagation/default).
+    /// renders exactly as before promotion (propagation/default).
     #[test]
     fn portal_transcript_unset_leaves_defaults() {
         let map = HashMap::new();
@@ -3194,8 +3192,8 @@ mod tests {
     }
 
     /// A profile swap (changing only the portal-scoped keys) reskins the resolved
-    /// markdown tokens on the next resolve — the propagation the AC requires
-    /// (hud-8691s). Distinct portal values yield distinct resolved colors.
+    /// markdown tokens on the next resolve — the propagation the AC requires.
+    /// Distinct portal values yield distinct resolved colors.
     #[test]
     fn portal_transcript_profile_swap_reskins_markdown_tokens() {
         let mut profile_a = HashMap::new();
@@ -3416,7 +3414,7 @@ mod tests {
         }
     }
 
-    // ── Paren/backtick semantic correctness tests (hud-xq0uo) ────────────────
+    // ── Paren/backtick semantic correctness tests ────────────────
 
     /// Normal link `[text](url)` is correctly parsed after paren table is built.
     ///
@@ -3497,7 +3495,7 @@ mod tests {
         );
     }
 
-    // ── hud-f8jb0: styling-gap fixes ─────────────────────────────────────────
+    // ──: styling-gap fixes ─────────────────────────────────────────
     //
     // (a) heading_scale is now applied via size_scale on StyleAttr/StyledSpan.
     // (b) color.code.background is now read from tokens and applied.
@@ -3807,7 +3805,7 @@ mod tests {
         );
     }
 
-    // ── Block-spacing token tests (hud-bq0gl) ─────────────────────────────────
+    // ── Block-spacing token tests ─────────────────────────────────
 
     /// `line_height_multiplier` token parses correctly from token map.
     #[test]
@@ -4003,7 +4001,7 @@ mod tests {
         );
     }
 
-    // ── MarkdownPrimer — async swap-in (hud-33qo7) ────────────────────────────
+    // ── MarkdownPrimer — async swap-in ────────────────────────────
 
     /// Build a `PrimeJob` for `content`, marking it as a cache miss (content
     /// attached) so the primer parses it.
@@ -4116,7 +4114,7 @@ mod tests {
         assert!(primer.is_empty(), "reset must clear the snapshot");
     }
 
-    /// hud-u4lq2 regression (primer-level): a `MarkdownPrimer` that has already
+    /// regression (primer-level): a `MarkdownPrimer` that has already
     /// serviced many unrelated `prime()` dispatches (modeling a `Compositor`
     /// reused across many prior scenes/content generations) must still land a
     /// background-parsed snapshot for a brand-new large payload.
@@ -4127,7 +4125,7 @@ mod tests {
     /// numbering is globally monotonic across the primer's ENTIRE lifetime —
     /// but callers legitimately reset their own numbering per `SceneGraph`
     /// instance (`version` restarts at 0 for every new scene). A `Compositor`
-    /// reused across scenes (confirmed in `scroll_reshape_reuse_hud991cj`)
+    /// reused across scenes (confirmed in `scroll_reshape_reuse`)
     /// could therefore dispatch a later, LOWER-numbered prime that
     /// `publish_if_newer` would treat as stale and silently, permanently drop
     /// — even though it was the most recent, correct dispatch.
@@ -4156,10 +4154,9 @@ mod tests {
         primer.prime(vec![job]);
 
         let snap = wait_for_key(&primer, &key, 200);
-        let parsed = snap.get_by_key(&key).expect(
-            "large payload must land even after many prior prime() dispatches \
-                 -- hud-u4lq2 regression",
-        );
+        let parsed = snap
+            .get_by_key(&key)
+            .expect("large payload must land even after many prior prime() dispatches");
         assert!(parsed.plain_text.contains("New Scene"));
         assert!(parsed.plain_text.contains("emphasis"));
     }
@@ -4229,7 +4226,7 @@ mod tests {
 
         // Hammer the primer with alternating live sets. Each `prime()` call
         // claims a fresh, strictly-increasing internal epoch on its own
-        // (hud-u4lq2), so no caller-supplied version is needed here.
+        //, so no caller-supplied version is needed here.
         for v in 2..200u64 {
             let content = format!("# Doc {v}\n\n{}", "body ".repeat(1000));
             primer.prime(vec![miss_job(&content)]);
@@ -4238,7 +4235,7 @@ mod tests {
         reader.join().unwrap();
     }
 
-    // ── Per-tile markdown token scoping (hud-3ryie) ───────────────────────────
+    // ── Per-tile markdown token scoping ───────────────────────────
 
     /// A map that sets BOTH a portal-scoped and a generic key for link color,
     /// plus a portal-only code background (no generic fallback), so the two
@@ -4263,7 +4260,7 @@ mod tests {
     }
 
     /// (b) A non-portal (`Generic`) surface must NOT receive `portal.transcript.*`
-    /// (or any `portal.*`) preference, while the portal surface does (hud-3ryie).
+    /// (or any `portal.*`) preference, while the portal surface does.
     #[test]
     fn generic_scope_never_receives_portal_preferences() {
         let map = scoped_token_map();
@@ -4296,7 +4293,7 @@ mod tests {
         );
 
         // The default portal wrapper stays identical to the explicit Portal scope
-        // (v1 behavior unchanged, hud-3ryie).
+        // (v1 behavior unchanged).
         let default_portal = MarkdownTokens::from_token_map(&map);
         assert_eq!(default_portal.link_color, portal.link_color);
         assert_eq!(default_portal.code_background, portal.code_background);
@@ -4305,7 +4302,7 @@ mod tests {
 
     /// (a) The parse cache must not mis-serve entries across differing token
     /// sets: the SAME content under two different token sets yields two distinct
-    /// cached parses keyed independently (no collision) (hud-3ryie).
+    /// cached parses keyed independently (no collision).
     #[test]
     fn same_content_two_token_sets_do_not_collide_in_cache() {
         let map = scoped_token_map();

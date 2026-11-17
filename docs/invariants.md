@@ -49,6 +49,16 @@ row test, and `integration::poc_panel_runtime_rows_apply_save_and_stage_a_restar
 cover saved/default source, save-first failure behavior and both live server
 bridges. Source tests are distinct from Windows owner interaction evidence.
 
+Admin `holdings`/`warnings` are content-free observations of existing owners.
+Their independent nonblocking snapshots cannot renew, apply or sweep retained
+content, advance portal liveness, consume input or wake rendering. Busy/missing
+sources and omissions are explicit; due retained records remain `cleanup_due`
+until normal cleanup. This cross-agent metadata remains behind `admin_guard`,
+separate from ordinary `hud_surfaces` and agent snapshots. Existing admin-status
+and authenticated HTTP publish/readback tests cover privacy, expiry and bounds;
+startup warning and doctor tests cover actual producers and bounded consumption.
+These observations make no claim about owner visual acceptance or pixels.
+
 ## 2. Three message classes, kept distinct
 
 Transactional (create, lease, release: reliable, ordered, acknowledged),
@@ -66,7 +76,12 @@ that same FIFO. Accepted callback/human-X wins before local removal; replacement
 expiry, stack trim and clear latch only the first unanswered terminal reason.
 A full notification stack trims its oldest card that is not an unanswered
 question, on both admission planes; only an all-question stack drops its oldest
-question. A trimmed, unanswered, unexpired card queues exactly one `displaced`
+question. The shared regular-stack layout presents unanswered questions first,
+newest-first within each group, using the same scene predicate as admission.
+Drawing, hit regions, keyboard order and operator geometry use those same slots;
+answered, expired and URL-only cards have no question priority. A fixed-height
+zone may omit later cards, but cannot put a retained question behind status cards.
+Alert banners retain severity ordering. A trimmed, unanswered, unexpired card queues exactly one `displaced`
 FIFO item for its own publisher, unless an armed wait on that exact card takes
 the displacement instead; expiry, clear and same-key replacement queue nothing.
 Receipts never grow at publish rate: one per key and at most
@@ -218,6 +233,14 @@ the default in-session; fresh bootstrap retains IDs and starts with defaults.
 Regression owners (existing parents extended, Tests: +0 ~6 -0):
 
 - Runtime [`windowed_post_render_refresh_updates_drag_handles_before_snapshot`](../crates/tze_hud_runtime/src/windowed/hittest.rs): actual rendered handle, runtime drag and refreshed grip/X/action translation.
+- Hover-only move pills: the same post-render parent checks painted notification
+  hover bounds, frontmost overlapping body selection and the card-to-grip gap
+  without body/corridor capture;
+  `armed_cursor_entry_never_wakes_compositor_until_hover_changes`
+  exercises passthrough entry/exit and unchanged-target quiet turns. Compositor
+  `drag_handle_opacity_switches_to_active_on_hover_state`, `drag_visual_feedback_applied_during_active_drag`
+  and `idle_render_gate_renders_for_composer_echo_and_caret_blink` cover semantic
+  geometry, active feedback and one-frame mirror invalidation.
 - Runtime [`header_band_anchor_is_the_frame_and_band_drag_is_position_only`](../crates/tze_hud_runtime/src/windowed/portal.rs): Tile controls and Zone deferred terminal, replacement, cancellation and no persistence/event.
 - Runtime [`action_button_hover_and_press_are_local_and_frame_only_on_change`](../crates/tze_hud_runtime/src/windowed/event_loop_harness.rs): moved four-action controls, lifetime and epoch accounting.
 - Runtime [`bootstrap_round_trip_reuses_ids_across_restart`](../crates/tze_hud_runtime/src/element_store.rs): clear/republish retains placement; restart restores defaults without new saved overrides.
@@ -285,8 +308,12 @@ and [`hit_region_wire_cannot_enable_local_composer`](../crates/tze_hud_protocol/
 
 
 Native portal INPUT history and OUTPUT have independent local scroll tracking.
-Typing/submit resets only INPUT; appends retain the OUTPUT reading anchor and
-fixed pane scissor. Bounds come from the actual full wrapped paint buffer, not
+Typing/submit resets only INPUT. A busy scene/shared-state lock retains the
+post-edit reset in the existing keyboard FIFO; recovery neither replays the
+accepted edit nor sends a reply. Retained wheel input and keyboard work keep
+arrival order through the existing pointer FIFO, so a later wheel wins over
+an earlier reset and a later edit resets after an earlier wheel. Appends retain
+the OUTPUT reading anchor and fixed pane scissor. Bounds come from the actual full wrapped paint buffer, not
 combined raw newline counts. Unchanged measured layouts schedule no frame.
 The existing compositor regression
 [`expanded_portal_chrome_stays_fixed_while_document_content_scrolls_after_resize`](../crates/tze_hud_compositor/src/renderer/tests/scroll.rs)
@@ -423,8 +450,8 @@ leased content. No public scene snapshot exposes that origin or scene nodes.
 - `tze_hud_compositor` (badge draw command) [`orphaned_tile_emits_disconnection_badge_draw_cmd`](../crates/tze_hud_compositor/src/renderer/tests/focus_chrome.rs)
 - `integration` (POC acceptance, over gRPC and MCP with `production.toml`)
   [`poc_portal_abandoned_is_reclaimed`](../tests/integration/poc_acceptance.rs)
-- `tze_hud_scene` [`tile_lease_reap_keeps_same_namespace_mcp_publications`](../crates/tze_hud_scene/src/graph/spec_scenarios.rs),
-  [`revoked_lease_clears_only_its_publications`](../crates/tze_hud_scene/src/graph/spec_scenarios.rs)
+- `tze_hud_scene` [`tile_lease_reap_keeps_same_namespace_mcp_publications`](../crates/tze_hud_scene/src/graph/behavior_tests.rs),
+  [`revoked_lease_clears_only_its_publications`](../crates/tze_hud_scene/src/graph/behavior_tests.rs)
 
 ## 5. Leases hold time; safe mode pauses it
 
@@ -623,7 +650,24 @@ The existing runtime `action_button_hover_and_press_are_local_and_frame_only_on_
 and `portal_resize_state_pruning_preserves_live_and_cleans_removed_tiles` parents
 cover the split-borrow lock miss and both busy owners.
 No new idle poll or timer is introduced. Ambiguous completed/active receipts,
-mismatched history or bounded-admission failure disable notification actions
-until a clean runtime restart. Valid reentrant histories may trigger that
-availability limit; its frequency has not been measured. Unrelated pointer input
-continues, and this source model does not replace held-press/release owner proof.
+mismatched history or bounded-admission failure pause notification actions.
+The existing between-turn settle boundary resynchronizes history only after
+cancellation reaches the scene, retained pointer edges drain while still inert,
+and no recorded native delivery or application edge is active. It keeps cancelled
+receipts until their matching application edges arrive: winit may still have
+buffered those events during an earlier handler. Fault-era or queue-overflow
+native edges retain bounded per-install cancellation debt; that window remains
+inert until their application delivery drains it. Counter exhaustion stays
+fail-closed. Recovery keeps old presses cancelled and preserves monotonic
+installation/frame identities; stale Down/Up cannot borrow a fresh press's
+receipts, including after reinstallation. Once cancelled delivery debt drains,
+a complete fresh press can act without restarting.
+Deferred pointer buttons retain their original notification authorization;
+replay also checks current permission, so denied old input cannot inherit a
+later press's receipt while the scene is busy.
+Recovery neither installs a missing observer nor bypasses registration/receipt
+bounds. Faulted, unobserved, full-queue and safe-mode notification buttons show no hover or
+press feedback; drag handles keep their independent feedback. Valid reentrant
+histories may trigger that availability limit; its frequency has not been
+measured. Unrelated pointer input continues, and this source model does not
+replace held-press/release owner proof.

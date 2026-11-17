@@ -32,9 +32,9 @@ const LOCAL_IDENTITY: &str = "offline-render-scene-not-a-paired-credential";
 const HELP: &str = "Usage: render-scene (--fixture FILE | --system-card JSON | --widget BUNDLE --params JSON) --output PNG\n\
     [--config TOML (scene/card mode)] [--theme tonal-glass|classic|blueprint] [--tokens TOML]\n\
     [--width PX] [--height PX]\n\
-    [--capture-at-ms MS]\n\
+    [--capture-at-ms MS] [--drag-hover-at X,Y (fixture only)]\n\
 Scene defaults: 1920x1080, tonal-glass, fixture checkpoint at 250ms (explicit 0ms is the first frame).\n\
-Capture bounds: 1..8192 per axis, <=16M pixels; checkpoint <=5000ms.\n\
+Capture bounds: 1..8192 per axis, <=16M pixels; scenes also require device texture support; checkpoint <=5000ms.\n\
 Output must not exist. JSON manifest is printed to stdout; compile time is separate.";
 
 #[derive(Clone, Debug)]
@@ -49,6 +49,7 @@ struct Args {
     width: u32,
     height: u32,
     capture_at_ms: u64,
+    drag_hover_at: Option<[f32; 2]>,
     output: PathBuf,
 }
 
@@ -69,6 +70,7 @@ fn parse_args(values: impl IntoIterator<Item = String>) -> Result<Option<Args>> 
         width: 1920,
         height: 1080,
         capture_at_ms: DEFAULT_SCENE_CAPTURE_MS,
+        drag_hover_at: None,
         output: PathBuf::new(),
     };
     let mut seen = std::collections::HashSet::new();
@@ -101,6 +103,12 @@ fn parse_args(values: impl IntoIterator<Item = String>) -> Result<Option<Args>> 
             "--width" => args.width = value.parse()?,
             "--height" => args.height = value.parse()?,
             "--capture-at-ms" => args.capture_at_ms = value.parse()?,
+            "--drag-hover-at" => {
+                let (x, y) = value
+                    .split_once(',')
+                    .ok_or_else(|| error("drag hover needs X,Y"))?;
+                args.drag_hover_at = Some([x.parse()?, y.parse()?]);
+            }
             "--output" => args.output = value.into(),
             _ => return Err(error(format!("unknown argument {flag}; use --help"))),
         }
@@ -142,6 +150,20 @@ fn validate_args(args: &Args) -> Result<()> {
         return Err(error(
             "dimensions must be positive, <=8192 per axis and <=16M pixels",
         ));
+    }
+    if let Some([x, y]) = args.drag_hover_at {
+        if args.fixture.is_none()
+            || !x.is_finite()
+            || !y.is_finite()
+            || x < 0.0
+            || y < 0.0
+            || x >= args.width as f32
+            || y >= args.height as f32
+        {
+            return Err(error(
+                "drag hover belongs to fixture mode and must be inside the viewport",
+            ));
+        }
     }
     if args.capture_at_ms > 5000 {
         return Err(error("capture checkpoint exceeds 5000ms"));
@@ -458,6 +480,8 @@ async fn render_fixture(args: &Args, raw: &RawConfig) -> Result<(CapturedFrame, 
         ));
     }
     let adapter = json!({"name":adapter.name,"backend":adapter.backend,"device_type":adapter.device_type,"driver":adapter.driver,"driver_info":adapter.driver_info});
+    let device_limits =
+        json!({"max_texture_dimension_2d":compositor.device.limits().max_texture_dimension_2d});
     let format = wgpu::TextureFormat::Rgba8UnormSrgb;
     compositor.init_text_renderer(format);
     compositor.init_widget_renderer(format);
@@ -497,7 +521,19 @@ async fn render_fixture(args: &Args, raw: &RawConfig) -> Result<(CapturedFrame, 
     let mut scene = handle.lock().await;
     compositor.prime_markdown_cache(&scene);
     compositor.prime_truncation_cache(&scene);
-    let build = compositor.build_windowed_frame(&mut scene, args.width, args.height);
+    let mut build = compositor.build_windowed_frame(&mut scene, args.width, args.height);
+    let mut drag_handle_hovered = false;
+    if let Some([x, y]) = args.drag_hover_at {
+        // Authoring intent only: resolve against the actual frame snapshot,
+        // using the same hover mirror as the runtime. No OS input is injected.
+        compositor.populate_zone_hit_regions(&mut scene, args.width as f32, args.height as f32);
+        let target =
+            tze_hud_runtime::HitTestSnapshot::from_scene(&scene).drag_handle_hover_target(x, y);
+        drag_handle_hovered = target.is_some();
+        *compositor.drag_handle_hover_state.lock().unwrap() = target;
+        compositor.drain_local_composer_and_needs_render();
+        build = compositor.build_windowed_frame(&mut scene, args.width, args.height);
+    }
     let frame = compositor.capture_windowed_frame(
         &build,
         &FrameTarget::primary(args.width, args.height),
@@ -505,7 +541,7 @@ async fn render_fixture(args: &Args, raw: &RawConfig) -> Result<(CapturedFrame, 
     )?;
     Ok((
         frame,
-        json!({"pipeline":"windowed build/capture","fixture":path,"fixture_sha256":hash(&bytes),"messages_applied":messages.len(),"owner_only_system_card":args.system_card.is_some(),"checkpoint":"after all ordered messages; latest-wins per surface","capture_at_ms":args.capture_at_ms,"adapter":adapter}),
+        json!({"pipeline":"windowed build/capture","fixture":path,"fixture_sha256":hash(&bytes),"messages_applied":messages.len(),"owner_only_system_card":args.system_card.is_some(),"checkpoint":"after all ordered messages; latest-wins per surface","capture_at_ms":args.capture_at_ms,"drag_hover_at":args.drag_hover_at,"drag_handle_hovered":drag_handle_hovered,"adapter":adapter,"device_limits":device_limits}),
     ))
 }
 
@@ -650,7 +686,28 @@ async fn execute(args: &Args) -> Result<Value> {
         .filter(|o| o.status.success())
         .and_then(|o| String::from_utf8(o.stdout).ok())
         .map(|s| s.trim().to_owned());
+    // The binary's own build provenance: a run from a stale build (a shared
+    // target dir, another checkout's binary) reports the head it was built
+    // from, so a manifest never vouches for pixels from other source.
+    let built_from = env!("RENDER_SCENE_BUILD_HEAD");
+    let built_dirty = env!("RENDER_SCENE_BUILD_DIRTY");
+    let provenance_consistent = git.as_deref() == Some(built_from) && built_dirty == "false";
+    if !provenance_consistent {
+        eprintln!(
+            "render-scene: provenance mismatch: built from {built_from} (dirty: {built_dirty}), \
+             checkout HEAD {}; commit and rebuild before using these pixels as evidence",
+            git.as_deref().unwrap_or("unknown")
+        );
+    }
     manifest["checkout_head_at_invocation"] = json!(git);
+    manifest["compiled_head"] = json!(built_from);
+    // "unknown" (no git at build time) stays a string, never a false clean.
+    manifest["compiled_tree_dirty"] = match built_dirty {
+        "true" => json!(true),
+        "false" => json!(false),
+        other => json!(other),
+    };
+    manifest["provenance_consistent"] = json!(provenance_consistent);
     manifest["config_source"] = json!(args.config);
     manifest["config_sha256"] = json!(config_sha256);
     manifest["compiled_example_source_sha256"] = json!(hash(include_bytes!("render_scene.rs")));
@@ -726,6 +783,7 @@ mod tests {
             width: 252,
             height: 96,
             capture_at_ms: 0,
+            drag_hover_at: None,
             output: output.clone(),
         };
         for (width, height) in [(0, 1), (1, 0), (8193, 1), (8192, 8192)] {
@@ -992,6 +1050,31 @@ mod tests {
         let settled_manifest = execute(&settled_args).await.unwrap();
         let settled_bytes = fs::read(&settled_args.output).unwrap();
         let settled = image::load_from_memory(&settled_bytes).unwrap().to_rgba8();
+        let hover_args = Args {
+            drag_hover_at: Some([1500.0, 100.0]),
+            output: dir.join("notification-hover.png"),
+            ..settled_args.clone()
+        };
+        let hover_manifest = execute(&hover_args).await.unwrap();
+        assert_eq!(hover_manifest["drag_handle_hovered"], true);
+        let hovered = image::open(&hover_args.output).unwrap().to_rgba8();
+        let grip_ink = (39..52)
+            .flat_map(|y| (1640..1680).map(move |x| (x, y)))
+            .filter(|&(x, y)| hovered.get_pixel(x, y) != settled.get_pixel(x, y))
+            .count();
+        assert!(
+            grip_ink > 20,
+            "actual rounded hover pill changes the grip row pixels"
+        );
+        for point in [[f32::NAN, 0.0], [-1.0, 0.0], [1920.0, 100.0]] {
+            assert!(
+                validate_args(&Args {
+                    drag_hover_at: Some(point),
+                    ..hover_args.clone()
+                })
+                .is_err()
+            );
+        }
         assert_eq!(first_manifest["capture_at_ms"], 0);
         assert_eq!(settled_manifest["capture_at_ms"], DEFAULT_SCENE_CAPTURE_MS);
         assert_eq!(settled_manifest["messages_applied"], 4);
@@ -1044,6 +1127,38 @@ mod tests {
                 "{title} must paint its card interior, not just text or unrelated chrome"
             );
         }
+        // GPU fixture bounds must cover ordinary 4K, beyond downlevel's
+        // 2048 texture default, while CPU widget mode keeps its own bounds.
+        let wide_widget = Args {
+            width: 4096,
+            height: 1,
+            output: dir.join("wide-widget.png"),
+            ..args.clone()
+        };
+        execute(&wide_widget).await.unwrap();
+        assert_eq!(
+            image::open(&wide_widget.output)
+                .unwrap()
+                .to_rgba8()
+                .dimensions(),
+            (4096, 1)
+        );
+        let scene_4k = Args {
+            width: 3840,
+            height: 2160,
+            output: dir.join("notification-4k.png"),
+            ..settled_args.clone()
+        };
+        let manifest_4k = execute(&scene_4k).await.expect("4K scene must capture");
+        let pixels_4k = image::open(&scene_4k.output).unwrap().to_rgba8();
+        assert_eq!(pixels_4k.dimensions(), (3840, 2160));
+        assert!(pixels_4k.pixels().any(|pixel| pixel[3] > 0));
+        assert!(
+            manifest_4k["device_limits"]["max_texture_dimension_2d"]
+                .as_u64()
+                .unwrap()
+                >= 3840
+        );
         // The task controller retains this fixture directory as evidence.
     }
 }

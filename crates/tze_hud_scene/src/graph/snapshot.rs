@@ -16,7 +16,7 @@ impl SceneGraph {
 
     /// Take a deterministic full scene snapshot at the current sequence number.
     ///
-    /// Implements RFC 0001 §4.1 — produces a complete, deterministic serialization
+    /// — produces a complete, deterministic serialization
     /// of the scene graph. All maps use BTreeMap for deterministic iteration.
     ///
     /// # Checksum
@@ -31,7 +31,7 @@ impl SceneGraph {
     ///
     /// # v1 Constraints
     /// - Resources are referenced by ResourceId only; no blob data is included.
-    /// - effective_geometry is NOT included (post-v1 per spec line 360).
+    /// - effective_geometry is NOT included.
     /// - Incremental diff is NOT available (snapshot-only reconnect in v1).
     pub fn take_snapshot(&self, wall_us: u64, mono_us: u64) -> SceneGraphSnapshot {
         // Tabs: keyed by display_order for deterministic ordering.
@@ -52,7 +52,7 @@ impl SceneGraph {
         // Portal surfaces: keyed by host tile SceneId (BTreeMap — deterministic).
         //
         // Overlay state (RuntimeOverlayState::portal_surfaces, #[serde(skip)]) that
-        // must be recoverable on reconnect (hud-ruynm). Cloned verbatim: a part
+        // must be recoverable on reconnect. Cloned verbatim: a part
         // whose backing node was nulled by revalidate_portal_surface_part_nodes is
         // serialized with node = None, never fabricated. Visibility mirrors `tiles`
         // — each surface is keyed by its host tile, so a namespace-filtered view of
@@ -77,7 +77,7 @@ impl SceneGraph {
         // instance binding is implicit (one per tab per zone type when a zone is loaded).
         // Consumers of this snapshot MUST NOT rely on zone_instances being populated;
         // any instance bindings must be derived from zone_types and current tab/node state.
-        // Post-v1: explicit ZoneInstance tracking will populate this field.
+        // Explicit ZoneInstance tracking is not supported, so this stays empty.
         let zone_instances: Vec<ZoneInstance> = Vec::new();
 
         // Active publications: BTreeMap keyed by zone name; each Vec is already

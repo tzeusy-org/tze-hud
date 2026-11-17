@@ -9,7 +9,7 @@
 //!   Ctrl/Alt + Delete).
 //! - Paste with UTF-8-boundary truncation at the cap; at-capacity feedback.
 //!
-//! ## Excluded operations (normative §4.4)
+//! ## Excluded operations
 //!
 //! - No IME composition (v1-reserved).
 //! - No undo/redo.
@@ -17,7 +17,7 @@
 //! - No multi-caret.
 //! - Editing keystrokes are never terminal input.
 //!
-//! ## Governance (§4.5)
+//! ## Governance
 //!
 //! Under safe mode the draft suspends: `insert`, `paste`, and submit are
 //! rejected while `suspended == true`. Caret and selection queries still work
@@ -33,7 +33,7 @@
 use tze_hud_scene::SceneId;
 use unicode_segmentation::UnicodeSegmentation;
 
-/// Hard ceiling matching the TextMarkdownNode content limit (spec §4.3, §4.5).
+/// Hard ceiling matching the TextMarkdownNode content limit.
 pub const MAX_DRAFT_BYTES: usize = 65_535;
 
 /// Default lower draft cap (suitable for typical composer inputs).
@@ -106,7 +106,7 @@ impl Selection {
     }
 }
 
-// ─── Visual (wrapped) line layout (hud-21o6x) ───────────────────────────────
+// ─── Visual (wrapped) line layout ───────────────────────────────
 
 /// One visual (wrapped) line of the composer draft, in RAW-draft byte space.
 ///
@@ -134,15 +134,15 @@ pub struct ComposerVisualLine {
 /// Published by the compositor (`Compositor::prime_composer_scroll_offset`) from
 /// its own `composer_input_box` geometry so the input layer never re-derives the
 /// box — the compositor is the single source of the box placement, and the two
-/// cannot drift (craft-and-care engineering-bar §9, single geometry authority).
+/// cannot drift.
 ///
-/// # Why the input layer needs this (hud-lw60x)
+/// # Why the input layer needs this
 ///
 /// For a full-tile-HitRegion PROJECTION composer the HitRegion spans the WHOLE
-/// portal (click-anywhere-to-focus, hud-v4k1h) but the draft renders in a
+/// portal (click-anywhere-to-focus) but the draft renders in a
 /// short, BOTTOM-anchored input box (`box_y = region.y + region.height −
-/// box_height`, hud-2zsbf / hud-nx7yq.1). Splitting the FULL node height evenly
-/// across rows (the pre-hud-lw60x fallback below) therefore maps a click on the
+/// box_height`). Splitting the full node height evenly
+/// across rows therefore maps a click on the
 /// visible text strip to `frac_y ≈ 1.0` → always the last row, leaving the upper
 /// visible rows unreachable. Mapping the click through THIS box instead makes
 /// every visible row hittable.
@@ -170,12 +170,12 @@ pub struct ComposerInputBoxGeometry {
     /// `first_visible_row` this bounds the pointer hit-test to the VISIBLE window
     /// `[first_visible_row, first_visible_row + visible_rows − 1]`, so a click in
     /// the box's own top/bottom padding while scrolled resolves to the nearest
-    /// visible row instead of a clipped row above/below the window (hud-lw60x).
+    /// visible row instead of a clipped row above/below the window.
     pub visible_rows: usize,
 }
 
 /// The composer draft's wrapped layout: the ordered visual rows plus the draft
-/// length it was measured for (a staleness guard, hud-21o6x).
+/// length it was measured for (a staleness guard).
 ///
 /// Local presentation state published from the compositor render thread to the
 /// input thread via a shared slot (mirrors the forward `LocalComposerState`
@@ -191,12 +191,12 @@ pub struct ComposerVisualLayout {
     /// Rendered input-box vertical geometry, when the compositor published it
     /// (the multi-line profile always does; `None` on the single-line profile
     /// and until the first post-focus frame). Drives `byte_at_point`'s pointer-Y
-    /// → visual-row mapping (hud-lw60x); when `None`, `byte_at_point` falls back
+    /// → visual-row mapping; when `None`, `byte_at_point` falls back
     /// to splitting the passed content height evenly across the rows.
     pub input_box: Option<ComposerInputBoxGeometry>,
     /// Horizontal caret-follow scroll (px) applied when this layout was
     /// rendered — single-line profile only; `0.0` for the multi-line profile
-    /// (which wraps instead of scrolling horizontally, hud-hxhnt finding 3).
+    /// (which wraps instead of scrolling horizontally, finding 3).
     ///
     /// `glyph_x` / `x_at_cursor` are measured in UNSCROLLED draft space (the
     /// natural single-line width, `Wrap::None`); consumers that need the
@@ -204,8 +204,8 @@ pub struct ComposerVisualLayout {
     /// (`composer_ime_caret_anchor`) — must subtract this to land in rendered
     /// screen space, mirroring the chrome-layer caret quad's own
     /// `caret_x - h_scroll_px` (`append_composer_caret_vertices`). The
-    /// pointer hit-test (`byte_at_point`/`byte_at_x`) intentionally does NOT
-    /// apply this yet — that is the tracked, separate hud-uui70 follow-up.
+    /// pointer hit-test methods (`byte_at_point`/`byte_at_x`) consume
+    /// unscrolled coordinates; the runtime caller adds `h_scroll_px` first.
     pub h_scroll_px: f32,
 }
 
@@ -289,11 +289,11 @@ impl ComposerVisualLayout {
 
     /// Raw byte nearest the point `(x, y)` in composer-NODE-local pixel space —
     /// `y` measured from the composer HitRegion's top edge, `x` from the content
-    /// box's left after the caller has de-inset the horizontal margin (hud-etrs0
+    /// box's left after the caller has de-inset the horizontal margin (
     /// pointer hit-test).
     ///
     /// Row selection: when the compositor published the rendered input-box
-    /// geometry ([`Self::input_box`], the multi-line PROJECTION path, hud-lw60x),
+    /// geometry ([`Self::input_box`], the multi-line PROJECTION path),
     /// `y` is clamped into the visible box and mapped to a visual row through
     /// `row0_top`/`line_height`, then clamped into the visible row window — so a
     /// click on the short, bottom-anchored text strip of a TALL projection portal
@@ -306,7 +306,7 @@ impl ComposerVisualLayout {
     /// one, and a multi-line composer may not yet on the first post-focus frame):
     /// split `content_height` evenly across `self.lines`. That even split is
     /// exact only while the box height equals the node height and nothing has
-    /// scrolled; it is the pre-hud-lw60x behavior, retained for the
+    /// scrolled; it is the previous behavior, retained for the
     /// no-geometry case.
     ///
     /// Either way, `x` maps to a byte via the selected row's real glyph geometry
@@ -317,7 +317,7 @@ impl ComposerVisualLayout {
             return 0;
         };
         let row = match self.input_box {
-            // Map the pointer Y through the RENDERED input box (hud-lw60x). Clamp
+            // Map the pointer Y through the RENDERED input box. Clamp
             // into the visible strip first, then locate the row band. `row0_top`
             // already folds in the vertical scroll, so a click while scrolled
             // lands on the correct absolute row. Finally clamp the row into the
@@ -365,7 +365,7 @@ impl ComposerVisualLayout {
 /// - `cursor` and `selection_anchor` are valid byte offsets into `text`
 /// - `cursor <= text.len()` and `selection_anchor <= text.len()`
 ///
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ComposerDraft {
     text: String,
     /// Cursor position in bytes (insert/caret position).
@@ -374,7 +374,7 @@ pub struct ComposerDraft {
     selection_anchor: usize,
     /// Byte cap (≤ MAX_DRAFT_BYTES).
     cap: usize,
-    /// True when the draft is suspended under safe mode (§4.5).
+    /// True when the draft is suspended under safe mode.
     suspended: bool,
 }
 
@@ -442,7 +442,7 @@ impl ComposerDraft {
 
     // ── Governance ────────────────────────────────────────────────────────
 
-    /// Suspend the draft under safe mode (§4.5).
+    /// Suspend the draft under safe mode.
     ///
     /// While suspended, mutating operations return `EditOutcome::Suspended`.
     /// The draft text is preserved but not modified. Submission is also
@@ -464,7 +464,7 @@ impl ComposerDraft {
         if self.suspended {
             return EditOutcome::Suspended;
         }
-        // Reject control characters and line endings (spec §4.4: no newlines in draft)
+        // Reject control characters and line endings
         if character
             .chars()
             .any(|c| c == '\r' || c == '\n' || c.is_control())
@@ -496,7 +496,7 @@ impl ComposerDraft {
     }
 
     /// Insert a newline (`\n`) at the cursor as a LOCAL draft edit — the
-    /// Ctrl+Enter / Shift+Enter path for multi-line composer drafts (hud-nx7yq.2).
+    /// Ctrl+Enter / Shift+Enter path for multi-line composer drafts.
     ///
     /// Unlike [`Self::insert`], which rejects line endings (Enter alone submits),
     /// this is the explicit multi-line-newline path. If a selection is active it
@@ -531,7 +531,7 @@ impl ComposerDraft {
     /// Oversized content is truncated and `AtCapacity` is returned. No
     /// untruncated bytes are stored or submitted.
     ///
-    /// Spec: §4.5 (Composer Draft Bounds and Paste Caps).
+    /// (Composer Draft Bounds and Paste Caps).
     pub fn paste(&mut self, text: &str) -> EditOutcome {
         if self.suspended {
             return EditOutcome::Suspended;
@@ -604,7 +604,6 @@ impl ComposerDraft {
     /// Word-wise backspace: delete from cursor to the start of the preceding word.
     ///
     /// Mirrors the behaviour of Ctrl/Alt + Backspace in the exemplar adapter.
-    /// Spec: §4.2, §4.7 (word-wise delete scenario).
     pub fn word_backspace(&mut self) -> EditOutcome {
         if self.suspended {
             return EditOutcome::Suspended;
@@ -716,7 +715,7 @@ impl ComposerDraft {
         EditOutcome::Mutated
     }
 
-    // ── Vertical movement across hard-newline lines (hud-nx7yq.2) ─────────
+    // ── Vertical movement across hard-newline lines ─────────
     //
     // The draft buffer is the source of truth for logical lines (delimited by
     // embedded '\n' from Ctrl/Shift+Enter). Vertical movement here is over those
@@ -824,8 +823,8 @@ impl ComposerDraft {
         }
     }
 
-    /// Move the caret to an absolute byte offset, collapsing any selection
-    /// (hud-21o6x). Used by visual-line vertical movement, which computes a target
+    /// Move the caret to an absolute byte offset, collapsing any selection.
+    /// Used by visual-line vertical movement, which computes a target
     /// byte from the compositor's wrapped-line layout. The byte is clamped to
     /// `text.len()` and snapped down to a char boundary so a stale layout can
     /// never place the caret mid-character.
@@ -840,7 +839,7 @@ impl ComposerDraft {
     }
 
     /// Extend the selection to an absolute byte offset without collapsing the
-    /// anchor (Shift + visual vertical move, hud-21o6x).
+    /// anchor (Shift + visual vertical move).
     pub fn select_to_byte(&mut self, byte: usize) -> EditOutcome {
         let target = self.snap_byte(byte);
         if target == self.cursor {
@@ -855,7 +854,7 @@ impl ComposerDraft {
     /// of it. Returns `Unchanged` for an empty draft or when the whole buffer is
     /// already selected (idempotent — no spurious redraw).
     ///
-    /// Spec: §"Local-First Composer Draft Editing" — selection (keyboard).
+    /// Keyboard selection edits the local draft.
     pub fn select_all(&mut self) -> EditOutcome {
         let end = self.text.len();
         if end == 0 || (self.selection_anchor == 0 && self.cursor == end) {
@@ -1048,7 +1047,7 @@ impl Default for ComposerDraft {
 /// stop when the next cluster would push us past `max_bytes`. Returns the largest
 /// grapheme-aligned prefix that fits within `max_bytes`.
 ///
-/// Spec: §4.5 — paste truncated at a UTF-8 grapheme-cluster boundary at the cap.
+/// paste truncated at a UTF-8 grapheme-cluster boundary at the cap.
 fn truncate_at_utf8_boundary(s: &str, max_bytes: usize) -> &str {
     if s.len() <= max_bytes {
         return s;
@@ -1066,7 +1065,7 @@ fn truncate_at_utf8_boundary(s: &str, max_bytes: usize) -> &str {
 }
 
 /// Byte offset of the start of the logical line (delimited by `\n`) containing
-/// `pos`: one past the nearest preceding `\n`, or `0` (hud-nx7yq.2).
+/// `pos`: one past the nearest preceding `\n`, or `0`.
 fn logical_line_start(text: &str, pos: usize) -> usize {
     match text[..pos].rfind('\n') {
         Some(nl) => nl + 1,
@@ -1075,7 +1074,7 @@ fn logical_line_start(text: &str, pos: usize) -> usize {
 }
 
 /// Byte offset of the end of the logical line containing `pos`: the next `\n` at
-/// or after `pos`, or `text.len()` (hud-nx7yq.2).
+/// or after `pos`, or `text.len()`.
 fn logical_line_end(text: &str, pos: usize) -> usize {
     match text[pos..].find('\n') {
         Some(off) => pos + off,
@@ -1089,8 +1088,8 @@ fn grapheme_count(s: &str) -> usize {
 }
 
 /// Byte offset of the `col`-th grapheme boundary within the line `[line_start,
-/// line_end)`, clamped to `line_end` when the line is shorter than `col`
-/// (hud-nx7yq.2). Used to land a vertical move at the goal column.
+/// line_end)`, clamped to `line_end` when the line is shorter than `col`.
+/// Used to land a vertical move at the goal column.
 fn byte_at_grapheme_col(text: &str, line_start: usize, line_end: usize, col: usize) -> usize {
     let line = &text[line_start..line_end];
     let mut offset = 0usize;
@@ -1186,14 +1185,14 @@ pub struct ComposerDraftManager {
     /// hint). Reset to `None` on every `on_focus_gained` call; the caller
     /// (which holds scene access this manager does not) resolves the
     /// focused node's config and supplies it via `set_focused_placeholder`
-    /// immediately afterward. Source: hud-se6hs, follow-up to hud-evk0j.
+    /// immediately afterward.
     focused_placeholder: Option<String>,
     /// One keyed unsent draft retained alongside the active draft.
     retained_draft: Option<(SceneId, ComposerDraft)>,
     /// Goal column (grapheme count from the logical-line start) preserved across
     /// a run of consecutive vertical caret moves (ArrowUp/ArrowDown), so the
     /// caret tracks the same column when passing through shorter lines — standard
-    /// editor "desired column" behavior (hud-nx7yq.2).
+    /// editor "desired column" behavior.
     ///
     /// Set on the first vertical move of a run and cleared by any other key, so
     /// horizontal movement or editing re-establishes the column on the next
@@ -1202,13 +1201,13 @@ pub struct ComposerDraftManager {
     /// hard newlines. See [`Self::route_key_down`].
     vertical_goal_col: Option<usize>,
     /// Pixel goal-x preserved across a run of vertical moves when a fresh visual
-    /// layout is available (hud-21o6x). The visual-line path uses this instead of
+    /// layout is available. The visual-line path uses this instead of
     /// `vertical_goal_col` so the caret tracks the same on-screen x across
     /// soft-wrapped rows of differing character widths. Set/cleared with the same
     /// lifecycle as `vertical_goal_col`.
     vertical_goal_x: Option<f32>,
     /// Latest wrapped-line layout for the active composer, pushed from the
-    /// compositor render thread each frame (hud-21o6x). Consumed by ArrowUp/Down
+    /// compositor render thread each frame. Consumed by ArrowUp/Down
     /// for visual-row vertical movement; `None` when no multi-line composer is
     /// active. May be one frame stale — guarded by `text_len` before use.
     latest_visual_layout: Option<ComposerVisualLayout>,
@@ -1311,7 +1310,7 @@ impl ComposerDraftManager {
         };
         // Route multiline/control text through paste() after sanitisation so
         // it is consumed by the composer rather than falling through to the
-        // agent's raw character stream (§4.4 / hud-083az).
+        // agent's raw character stream.
         if character
             .chars()
             .any(|c| c == '\r' || c == '\n' || c.is_control())
@@ -1337,8 +1336,7 @@ impl ComposerDraftManager {
     ///
     /// Returns `EditOutcome::Unchanged` when no composer is focused.
     ///
-    /// Spec: §4.1 — pointer selection into the runtime-owned draft buffer
-    /// (hud-083az).
+    /// pointer selection into the runtime-owned draft buffer.
     pub fn route_pointer_selection(&mut self, anchor: usize, cursor: usize) -> EditOutcome {
         let Some(draft) = self.draft.as_mut() else {
             return EditOutcome::Unchanged;
@@ -1441,8 +1439,8 @@ impl ComposerDraftManager {
                 // Prefer the compositor's wrapped-line layout when it is FRESH
                 // (measured for exactly this draft) and actually multi-row, so the
                 // caret steps between VISUAL rows (soft-wrap aware) at a pixel
-                // goal-x (hud-21o6x). Otherwise fall back to hard-newline movement
-                // at a grapheme goal-column (hud-nx7yq.2) — used for the
+                // goal-x. Otherwise fall back to hard-newline movement
+                // at a grapheme goal-column — used for the
                 // single-line profile and for the one keystroke right after a
                 // wrap-changing edit, before the next frame re-measures.
                 let fresh_layout = self
@@ -1512,7 +1510,7 @@ impl ComposerDraftManager {
                 // is focused.  The actual paste content arrives separately via
                 // `route_character` (dispatch_character_event reads the
                 // clipboard and fires a RawCharacterEvent immediately after the
-                // KeyDown — hud-083az).
+                // KeyDown — ).
                 (true, ComposerOutcome::Unchanged)
             }
             "KeyA" if ctrl && !alt => {
@@ -1564,8 +1562,8 @@ impl ComposerDraftManager {
         }
     }
 
-    /// Update the wrapped-line layout used for visual-row vertical caret movement
-    /// (hud-21o6x). Called by the runtime each time it observes a fresh layout
+    /// Update the wrapped-line layout used for visual-row vertical caret movement.
+    /// Called by the runtime each time it observes a fresh layout
     /// from the compositor (before dispatching an ArrowUp/ArrowDown). `None`
     /// clears it (no multi-line composer active), reverting to hard-newline
     /// vertical movement.
@@ -1771,7 +1769,7 @@ mod tests {
 
     // ─── Paste and cap ────────────────────────────────────────────────────
 
-    /// Spec §4.5 + §4.7: oversized paste truncates at UTF-8 boundary; at-capacity
+    /// oversized paste truncates at UTF-8 boundary; at-capacity
     /// result returned; no overflow bytes in local text or submission.
     #[test]
     fn paste_truncates_at_cap() {
@@ -1813,7 +1811,7 @@ mod tests {
 
     // ─── Submit / Cancel ──────────────────────────────────────────────────
 
-    /// Spec §4.7: submit-content fidelity — submitted text equals local buffer.
+    /// submit-content fidelity — submitted text equals local buffer.
     #[test]
     fn submit_returns_exact_buffer_and_clears() {
         let mut draft = ComposerDraft::new(DEFAULT_DRAFT_CAP);
@@ -1834,7 +1832,7 @@ mod tests {
 
     // ─── Governance: safe-mode suspension ────────────────────────────────
 
-    /// Spec §4.5 + §4.7: draft suspends under safe mode; insert is rejected.
+    /// draft suspends under safe mode; insert is rejected.
     #[test]
     fn suspended_draft_rejects_insert() {
         let mut draft = ComposerDraft::new(DEFAULT_DRAFT_CAP);
@@ -1883,7 +1881,7 @@ mod tests {
 
     // ─── Keystroke non-passthrough ────────────────────────────────────────
 
-    /// Spec §4.7: editing keystrokes are never terminal input.
+    /// editing keystrokes are never terminal input.
     /// This is enforced by design — the draft buffer never routes to
     /// a terminal / provider byte stream. The test confirms that after
     /// editing operations, the draft contains only the locally rendered
@@ -2073,7 +2071,7 @@ mod tests {
         );
     }
 
-    // ─── ComposerDraftManager: per-composer placeholder override (hud-se6hs) ──
+    // ─── ComposerDraftManager: per-composer placeholder override ──
 
     /// With no override set, `focused_placeholder` reports `None` — the
     /// caller (widgets.rs) falls back to its own global default.
@@ -2326,7 +2324,7 @@ mod tests {
         );
     }
 
-    // ─── Submit-key contract + newline + vertical movement (hud-nx7yq.2) ──────
+    // ─── Submit-key contract + newline + vertical movement ──────
 
     /// `insert_newline` adds a literal `\n` at the caret and advances the cursor,
     /// unlike `insert` which rejects line endings.
@@ -2594,7 +2592,7 @@ mod tests {
         );
     }
 
-    // ─── Soft-wrap visual-line vertical movement (hud-21o6x) ──────────────────
+    // ─── Soft-wrap visual-line vertical movement ──────────────────
 
     /// Build a synthetic 2-row layout for "abcdef" wrapped as "abc" / "def" at a
     /// uniform 10px advance (each row's x restarts at 0, as cosmic-text reports).
@@ -2680,7 +2678,7 @@ mod tests {
         assert_eq!(empty.byte_at_point(20.0, 10.0, 100.0), 0);
     }
 
-    // ─── Tall-projection input-box pointer hit-test (hud-lw60x) ───────────────
+    // ─── Tall-projection input-box pointer hit-test ───────────────
 
     /// A TALL full-portal PROJECTION composer: three wrapped rows rendered in a
     /// short, BOTTOM-anchored input box inside a much taller HitRegion (the
@@ -2766,7 +2764,7 @@ mod tests {
 
     #[test]
     fn byte_at_point_without_geometry_reproduces_even_split_regression() {
-        // SAME rows, but no published box geometry (the pre-hud-lw60x path / the
+        // SAME rows, but no published box geometry (the previous path / the
         // single-line + first-frame fallback): the node height is split evenly, so
         // a click on the visible strip of a tall portal (y=240 of 300) lands on the
         // LAST row — the exact defect the geometry mapping above fixes. Kept as a
@@ -2830,7 +2828,7 @@ mod tests {
         // content inset, so its top padding [228, 234) sits over the clipped row 0
         // and its bottom padding (294, 300] over the clipped row 4. A click in
         // that padding must resolve to the nearest VISIBLE row (1 or 3), never the
-        // clipped row that happens to fall under the padding band (hud-lw60x P2).
+        // clipped row that happens to fall under the padding band.
         let geom = ComposerInputBoxGeometry {
             box_top: 228.0,
             box_height: 72.0,

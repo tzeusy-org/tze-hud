@@ -13,8 +13,11 @@
 #   T13 gesture scenarios only for rendered, input or portal paths, keeping
 #   the PR run near 10 min and off the shared runner pool; main pushes run
 #   everything, so the capture baseline and idle trend stay complete.
+#   Graduated gesture scenarios (GESTURES_REQUIRED) fail windows-build in its
+#   last step, after every upload, so a required failure on main withholds the
+#   `dev` prerelease; other scenarios stay informational .
 #   Informational: omit merge_group while this check is not required. Restore
-#   merge_group in the same hud-bstmy.8.8 change that makes it required.
+#   merge_group in the same change that makes it required.
 #   Docs-only PR/main updates skip; tag and manual runs are unaffected.
 #   Non-tag events use release-dev; v* tags keep the full release profile.
 # release — signs the exe with minisign (secret MINISIGN_SECRET_KEY; public key
@@ -171,27 +174,41 @@ jobs:
         timeout-minutes: 5
         run: python scripts/ci/windows_install_smoke.py --exe "target/$env:HUD_BUILD_PROFILE/tze_hud.exe"
 
-      # T13 tier W, informational: real SendInput into a HUD this step starts
-      # (fullscreen WARP, then overlay lavapipe including native tray controls),
-      # asserting on /admin/status. Overflow leaves an explicit menu-proof limit.
-      # It refuses if any tze_hud.exe is already running. Scenarios and guards:
+      # T13 tier W: real SendInput into a HUD this step starts (fullscreen
+      # WARP, then overlay lavapipe including native tray controls), asserting
+      # on /admin/status. Overflow leaves an explicit menu-proof limit. It
+      # refuses if any tze_hud.exe is already running. Scenarios and guards:
       # scripts/ci/hud_gestures.py. Results land in the step summary.
-      - name: Gesture scenarios (informational, SendInput)
+      # GESTURES_REQUIRED lists graduated scenarios. One joins only through a
+      # PR citing 10 consecutive main run ids where it PASSed (per scenario,
+      # from the gestures artifact, not the job conclusion); one that flakes
+      # leaves at once by a PR citing the failing run, never by a retry.
+      # Graduated 2026-11-15: overlay-pointer, tray.
+      # continue-on-error keeps the uploads running; "Required gesture verdict"
+      # fails the job afterwards, fail-closed if this step never set its output.
+      # Required scenarios run first within each HUD boot, but the timeout is
+      # shared: an informational run that hangs past it also fails the job.
+      - name: Gesture scenarios (SendInput)
         id: gestures
         if: steps.changes.outputs.gestures == 'true'
         continue-on-error: true
-        timeout-minutes: 6
+        timeout-minutes: 8
         env:
           GH_TOKEN: ${{ github.token }}
+          GESTURES_REQUIRED: overlay-pointer,tray
         shell: pwsh
         run: |
-          python scripts/ci/hud_gestures.py --injector sendinput --exe "target/$env:HUD_BUILD_PROFILE/tze_hud.exe" --out "$env:RUNNER_TEMP/gestures"
+          python scripts/ci/hud_gestures.py --injector sendinput --exe "target/$env:HUD_BUILD_PROFILE/tze_hud.exe" --out "$env:RUNNER_TEMP/gestures" --required "$env:GESTURES_REQUIRED"
           $fullscreenExit = $LASTEXITCODE
           # Install the software Vulkan ICD only after WARP has finished. The
           # wrapper verifies the pinned archive before extraction and removes
           # its exact registry value in finally, including on scenario failure.
-          python scripts/ci/windows_overlay_gestures.py --exe "target/$env:HUD_BUILD_PROFILE/tze_hud.exe" --out "$env:RUNNER_TEMP/gestures/overlay"
-          if ($fullscreenExit -ne 0 -or $LASTEXITCODE -ne 0) { exit 1 }
+          python scripts/ci/windows_overlay_gestures.py --exe "target/$env:HUD_BUILD_PROFILE/tze_hud.exe" --out "$env:RUNNER_TEMP/gestures/overlay" --required "$env:GESTURES_REQUIRED"
+          $overlayExit = $LASTEXITCODE
+          # Each script exits non-zero only for a blocking verdict.
+          $blocking = $fullscreenExit -ne 0 -or $overlayExit -ne 0
+          "required_failed=$($blocking.ToString().ToLower())" >> $env:GITHUB_OUTPUT
+          if ($blocking) { exit 1 }
 
       - name: Upload gesture evidence
         if: always() && steps.gestures.outcome != 'skipped'
@@ -247,6 +264,23 @@ jobs:
           name: tze_hud-windows-msvc
           path: dist/
           if-no-files-found: error
+
+      # Keep last: every artifact above is uploaded before this fails the job.
+      - name: Required gesture verdict
+        if: always() && steps.gestures.outcome != 'skipped' && steps.gestures.outputs.required_failed != 'false'
+        shell: pwsh
+        run: |
+          $failed = @()
+          foreach ($v in @("$env:RUNNER_TEMP/gestures/verdict.json", "$env:RUNNER_TEMP/gestures/overlay/verdict.json")) {
+            if (Test-Path $v) {
+              $verdict = Get-Content $v -Raw | ConvertFrom-Json
+              $failed += $verdict.required_failed
+              $failed += $verdict.required_unproven | ForEach-Object { "$_ (not run: $($verdict.harness_failure))" }
+            }
+          }
+          $named = if ($failed) { "required failed: $($failed -join ', ')" } else { "harness failure, timeout or setup failure with required scenarios" }
+          Write-Output "::error title=Required gesture scenarios::$named (see the gesture step summary and gestures artifact)"
+          exit 1
 
   release:
     name: sign + publish release

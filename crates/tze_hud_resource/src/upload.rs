@@ -1,8 +1,5 @@
 //! Upload state machine and resource store.
 //!
-//! Implements the full upload protocol from RFC 0011 §3 and
-//! resource-store/spec.md lines 46-124:
-//!
 //! ## Fast path (inline, ≤ 64 KiB)
 //!
 //! A `ResourceUploadStart` with `inline_data` populated is processed in a
@@ -118,7 +115,7 @@ impl AgentUploads {
 /// use tze_hud_resource::{ResourceStore, ResourceStoreConfig};
 ///
 /// let store = ResourceStore::new(ResourceStoreConfig::default());
-/// // ... handle_upload_start, handle_upload_chunk, handle_upload_complete
+/// //... handle_upload_start, handle_upload_chunk, handle_upload_complete
 /// ```
 #[derive(Clone)]
 pub struct ResourceStore {
@@ -217,7 +214,7 @@ impl ResourceStore {
         check_resource_type(req.resource_type)?;
 
         // Dedup fast path: check expected_hash against known resources.
-        // Latency contract: < 100 µs (spec lines 112-113).
+        // Latency contract: < 100 µs.
         // Only treat as a dedup hit if the stored resource_type matches the
         // requested type — different types with the same hash bytes are a
         // conflict (e.g. an IMAGE_RGBA8 that happens to be also valid PNG bytes).
@@ -710,7 +707,7 @@ mod tests {
         assert!(!store.dedup_index().contains(&ResourceId::from_bytes(hash)));
     }
 
-    // Acceptance: inline upload for small resource (spec lines 78-79).
+    // Acceptance: inline upload for small resource.
     #[tokio::test]
     async fn inline_upload_requires_no_chunks_or_complete() {
         let store = default_store();
@@ -739,7 +736,7 @@ mod tests {
 
     // ─── Dedup fast path ──────────────────────────────────────────────────────
 
-    // Acceptance: dedup hit returns existing with was_deduplicated=true (spec lines 108-109).
+    // Acceptance: dedup hit returns existing with was_deduplicated=true.
     #[tokio::test]
     async fn dedup_hit_returns_immediately() {
         let store = default_store();
@@ -788,7 +785,7 @@ mod tests {
         assert_eq!(first.resource_id, second.resource_id);
     }
 
-    // Acceptance: identical bytes produce identical ResourceId (spec lines 11-12).
+    // Acceptance: identical bytes produce identical ResourceId.
     #[tokio::test]
     async fn identical_bytes_same_resource_id() {
         let store = default_store();
@@ -816,7 +813,7 @@ mod tests {
 
     // ─── Chunked upload ───────────────────────────────────────────────────────
 
-    // Acceptance: chunked upload 3-phase success (spec lines 62-64).
+    // Acceptance: chunked upload 3-phase success.
     #[tokio::test]
     async fn chunked_upload_success() {
         let store = default_store();
@@ -873,7 +870,7 @@ mod tests {
         assert_eq!(result.resource_id.as_bytes(), &hash);
     }
 
-    // Acceptance: hash mismatch rejected (spec lines 66-68).
+    // Acceptance: hash mismatch rejected.
     #[tokio::test]
     async fn chunked_upload_hash_mismatch() {
         let store = default_store();
@@ -922,7 +919,7 @@ mod tests {
 
     // ─── Capability check ─────────────────────────────────────────────────────
 
-    // Acceptance: guest agent rejected (spec lines 88-90).
+    // Acceptance: guest agent rejected.
     #[tokio::test]
     async fn upload_denied_without_capability() {
         let store = default_store();
@@ -950,7 +947,7 @@ mod tests {
 
     // ─── Concurrent upload limit ──────────────────────────────────────────────
 
-    // Acceptance: 5th concurrent upload rejected (spec lines 122-124).
+    // Acceptance: 5th concurrent upload rejected.
     #[tokio::test]
     async fn too_many_concurrent_uploads() {
         let store = default_store();

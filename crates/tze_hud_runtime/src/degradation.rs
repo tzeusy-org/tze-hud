@@ -33,7 +33,7 @@ const RECOVERY_THRESHOLD_US: u64 = 12_000; // 12ms
 
 /// Immutable cadence-derived thresholds and elapsed windows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct DegradationEnvelope {
+pub(crate) struct DegradationEnvelope {
     pub effective_fps: u32,
     pub period_us: u64,
     pub entry_threshold_us: u64,
@@ -46,7 +46,7 @@ pub struct DegradationEnvelope {
 
 impl DegradationEnvelope {
     /// Derive the frozen runtime envelope from the validated effective cadence.
-    pub fn from_effective_fps(effective_fps: u32) -> Option<Self> {
+    pub(crate) fn from_effective_fps(effective_fps: u32) -> Option<Self> {
         if effective_fps == 0 {
             return None;
         }
@@ -91,7 +91,7 @@ pub(crate) fn effective_degradation_fps(
 
 /// Runtime degradation level.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub enum DegradationLevel {
+pub(crate) enum DegradationLevel {
     /// Full quality rendering.
     Normal = 0,
     /// Simplified rendering: large textures downscaled, translucency drawn
@@ -101,7 +101,7 @@ pub enum DegradationLevel {
 
 impl DegradationLevel {
     /// Numeric representation for telemetry.
-    pub fn as_u8(self) -> u8 {
+    pub(crate) fn as_u8(self) -> u8 {
         self as u8
     }
 }
@@ -119,7 +119,7 @@ impl std::fmt::Display for DegradationLevel {
 
 /// Configurable parameters for simplified rendering.
 #[derive(Clone, Debug)]
-pub struct DegradationConfig {
+pub(crate) struct DegradationConfig {
     /// Textures with linear dimensions exceeding this value (pixels)
     /// are scaled down by `texture_scale_factor`.
     /// Default: 512.
@@ -186,7 +186,7 @@ impl DegradationController {
     }
 
     /// Create a controller with a cadence envelope frozen by startup resolution.
-    pub fn with_envelope(config: DegradationConfig, envelope: DegradationEnvelope) -> Self {
+    pub(crate) fn with_envelope(config: DegradationConfig, envelope: DegradationEnvelope) -> Self {
         Self {
             level: DegradationLevel::Normal,
             frame_times: VecDeque::with_capacity(RECOVERY_WINDOW),
@@ -205,7 +205,7 @@ impl DegradationController {
     }
 
     /// The current degradation level.
-    pub fn level(&self) -> DegradationLevel {
+    pub(crate) fn level(&self) -> DegradationLevel {
         self.level
     }
 
@@ -235,7 +235,7 @@ impl DegradationController {
     }
 
     /// Record a successful active frame at an injected monotonic completion time.
-    pub fn record_frame_at(
+    pub(crate) fn record_frame_at(
         &mut self,
         frame_time_us: u64,
         completed_at_us: u64,
@@ -327,7 +327,7 @@ impl DegradationController {
     }
 
     /// Report a scheduler tick whose canonical predicate proved true quiescence.
-    pub fn record_quiescent_at(&mut self, now_us: u64) -> Option<DegradationEvent> {
+    pub(crate) fn record_quiescent_at(&mut self, now_us: u64) -> Option<DegradationEvent> {
         self.virtual_now_us = self.virtual_now_us.max(now_us);
         if self.level == DegradationLevel::Normal {
             self.quiescent_since_us = Some(now_us);
@@ -359,7 +359,7 @@ impl DegradationController {
     /// Next monotonic instant at which quiescent recovery can advance one
     /// level. `None` means either normal operation or quiescence has not yet
     /// been observed by the scheduler.
-    pub fn next_quiescent_recovery_at_us(&self) -> Option<u64> {
+    pub(crate) fn next_quiescent_recovery_at_us(&self) -> Option<u64> {
         (self.level != DegradationLevel::Normal)
             .then(|| {
                 self.quiescent_since_us
@@ -369,7 +369,7 @@ impl DegradationController {
     }
 
     /// Build the compositor policy for the frame being built.
-    pub fn compositor_policy(&self) -> CompositorDegradationPolicy {
+    pub(crate) fn compositor_policy(&self) -> CompositorDegradationPolicy {
         let level = match self.level {
             DegradationLevel::Normal => tze_hud_scene::DegradationLevel::Nominal,
             DegradationLevel::Simplified => tze_hud_scene::DegradationLevel::Simplified,
@@ -382,14 +382,14 @@ impl DegradationController {
     }
 
     /// Runtime-to-wire mapping. Simplified maps to `RENDERING_SIMPLIFIED`.
-    pub fn protocol_level(&self) -> ProtocolDegradationLevel {
+    pub(crate) fn protocol_level(&self) -> ProtocolDegradationLevel {
         match self.level {
             DegradationLevel::Normal => ProtocolDegradationLevel::Normal,
             DegradationLevel::Simplified => ProtocolDegradationLevel::RenderingSimplified,
         }
     }
 
-    pub fn protocol_notice(&self, timestamp_wall_us: u64) -> DegradationNotice {
+    pub(crate) fn protocol_notice(&self, timestamp_wall_us: u64) -> DegradationNotice {
         let level = self.protocol_level();
         DegradationNotice {
             level: level as i32,

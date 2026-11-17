@@ -935,6 +935,28 @@ impl PortalHub {
         reclaimed
     }
 
+    /// Borrow only ownership/lifetime facts for authenticated admin diagnostics.
+    /// Degradation is authoritative even while a portal has a hold or liveness
+    /// is suspended; a finite hold end is never a reclaim deadline.
+    pub fn visit_holdings(&self, mut visit: impl FnMut(&PortalKey, Option<u64>, &'static str)) {
+        for (key, portal) in &self.portals {
+            if !portal.live() {
+                continue;
+            }
+            let (deadline, basis) = if let Some(since) = portal.degraded_since_us {
+                (
+                    Some(since.saturating_add(self.limits.reclaim_after_us)),
+                    "idle_reclaim",
+                )
+            } else if portal.hold_until_us == Some(u64::MAX) {
+                (None, "until_clear")
+            } else {
+                (None, "activity")
+            };
+            visit(key, deadline, basis);
+        }
+    }
+
     /// Live portals per agent.
     pub fn live_counts(&self) -> std::collections::BTreeMap<String, usize> {
         let mut counts = std::collections::BTreeMap::new();
@@ -1527,7 +1549,7 @@ mod tests {
     }
 
     /// The owner's Clear reclaims all of one agent's portals, like a viewer
-    /// dismiss, and nobody else's (hud-vniri.6).
+    /// dismiss, and nobody else's.
     #[test]
     fn reclaim_agent_reclaims_only_that_agents_portals() {
         let mut hub = PortalHub::default();

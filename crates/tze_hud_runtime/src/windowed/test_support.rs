@@ -1,5 +1,5 @@
 use super::{WindowedConfig, WindowedRuntimeState, WinitApp};
-use crate::channels::{INPUT_EVENT_CAPACITY, frame_ready_channel};
+use crate::channels::frame_ready_channel;
 use crate::pipeline::FramePipeline;
 use crate::runtime_context::RuntimeContext;
 use crate::threads::ShutdownToken;
@@ -8,7 +8,6 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use tze_hud_input::{InputProcessor, KeyboardProcessor};
-use tze_hud_telemetry::TelemetryCollector;
 
 use tokio::sync::Mutex as TokioMutex;
 use tze_hud_input::{FocusManager, FocusRequest};
@@ -70,8 +69,6 @@ pub(super) fn make_shared_state() -> Arc<TokioMutex<SharedState>> {
         safe_mode_atomic: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         active_tab_mirror: Arc::new(std::sync::Mutex::new(None)),
         token_store: TokenStore::new(),
-        input_capture_tx: None,
-        input_capture_wake: tze_hud_scene::render_wake::RenderWakeNotifier::default(),
     }))
 }
 
@@ -236,7 +233,6 @@ pub(super) fn make_windowed_keyboard_test_app(
     let portals =
         tze_hud_mcp::PortalHandle::new(tze_hud_portal::hub::PortalHub::default(), scene.clock());
     let shared_state = make_shared_state();
-    let (input_capture_tx, input_capture_rx) = tokio::sync::mpsc::unbounded_channel();
     let (frame_ready_tx, frame_ready_rx) = frame_ready_channel();
     let input_event_tx = tze_hud_protocol::session_server::InputEventSender::new(8);
     let input_event_rx = input_event_tx.subscribe_all();
@@ -279,25 +275,17 @@ pub(super) fn make_windowed_keyboard_test_app(
             false,
             Default::default(),
         )),
-        pairing: None,
         control_panel: None,
-        input_ring: Arc::new(std::sync::Mutex::new(
-            std::collections::VecDeque::with_capacity(INPUT_EVENT_CAPACITY),
-        )),
         pending_input_latency: Arc::new(StdMutex::new(VecDeque::new())),
         frame_ready_rx,
         deferred_present: false,
         frame_ready_tx: Some(frame_ready_tx),
         frame_presented_tx: None,
         degradation_notices: None,
-        compositor: None,
         window_surface: None,
         input_processor,
-        input_capture_rx,
-        pending_input_capture_commands: std::collections::VecDeque::new(),
         focus_manager,
         keyboard_processor: KeyboardProcessor::new(),
-        telemetry: TelemetryCollector::new(),
         pipeline: FramePipeline::new(),
         shutdown: ShutdownToken::new(),
         quiescent_failed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -314,6 +302,7 @@ pub(super) fn make_windowed_keyboard_test_app(
         static_hit_regions: Vec::new(),
         widget_hover_trackers: std::collections::HashMap::new(),
         pending_widget_svgs: Vec::new(),
+        startup_diagnostics: None,
         text_fit: Default::default(),
         modifiers: winit::keyboard::ModifiersState::empty(),
         primary_monitor: None,
@@ -357,6 +346,7 @@ pub(super) fn make_windowed_keyboard_test_app(
         surface_ui: Default::default(),
         resize_grip_hover_state: Arc::new(StdMutex::new(None)),
         tile_close_hover_state: Arc::new(StdMutex::new(None)),
+        drag_handle_hover_state: Arc::new(StdMutex::new(None)),
         cursor_left_window: false,
         composer_visual_layout: Arc::new(StdMutex::new(None)),
         portal_projection_driver: crate::portal::PortalDriver::new(portals),
@@ -364,10 +354,9 @@ pub(super) fn make_windowed_keyboard_test_app(
         pending_keyboard_events: VecDeque::new(),
         pending_scroll: VecDeque::new(),
         pending_pointer_move: false,
+        pending_pointer_buttons: VecDeque::new(),
         interaction_feedback_lock_misses: std::sync::atomic::AtomicU64::new(0),
     };
-
-    drop(input_capture_tx);
 
     (WinitApp { state }, input_event_rx)
 }
@@ -542,7 +531,7 @@ mod tests {
     use tze_hud_scene::HitResult;
     use tze_hud_scene::types::ZoneInteractionKind;
 
-    /// Regression (hud-dwcr7): composer keystroke echo must apply to the draft
+    /// Regression: composer keystroke echo must apply to the draft
     /// even while the scene mutex is held by a gRPC mutation batch.
     ///
     /// Before the fix, keyboard dispatch read `scene.active_tab` by `try_lock`ing
@@ -661,7 +650,7 @@ mod tests {
         drop(st);
     }
 
-    /// Regression (hud-dwcr7): the pending-keyboard drain must DRAIN, not
+    /// Regression: the pending-keyboard drain must DRAIN, not
     /// livelock.
     ///
     /// The bug: `dispatch_key_down_event` (the public Stage-1 entry) re-queues
@@ -678,7 +667,7 @@ mod tests {
     /// keystroke is applied to a real composer draft — while a guarded
     /// (public-style) dispatcher would rotate and never drain.
     ///
-    /// NOTE (hud-nu0ea): the drain loop *reconstruction* below now has a
+    /// NOTE: the drain loop *reconstruction* below now has a
     /// production-path counterpart. `event_loop_harness::tests::
     /// drain_routes_characters_through_real_dispatch_into_composer_draft` drives
     /// the genuine `WinitApp::drain_pending_keyboard_events` through the headless
@@ -807,10 +796,10 @@ mod tests {
         );
     }
 
-    // ── Surface dimension resolution (hud-q5hx regression) ───────────────
+    // ── Surface dimension resolution ───────────────
     //
     // These tests document the contract for the `window.inner_size()` fallback
-    // logic added to fix the crash at non-default dimensions (hud-q5hx).
+    // logic added to fix the crash at non-default dimensions.
     //
     // The actual window creation path cannot be tested without a real GPU and
     // display, but we can verify the helper logic for dimension fallback.
@@ -851,7 +840,7 @@ mod tests {
         assert_eq!(h, 1440, "configured size must be used when actual is zero");
     }
 
-    // ── DPI scaling correctness (hud-22by) ────────────────────────────────────
+    // ── DPI scaling correctness ────────────────────────────────────
 
     /// At 125% DPI on a 2560x1440 monitor, `MonitorHandle::size()` returns
     /// physical pixels (2560, 1440) when the process has per-monitor DPI
@@ -953,14 +942,14 @@ mod tests {
         assert_eq!(old_surface_w, 3200, "old code over-counted surface width");
     }
 
-    // ── Zone interaction: dismiss hit wiring (hud-ltgk.6) ────────────────────
+    // ── Zone interaction: dismiss hit wiring ────────────────────
 
     use tze_hud_scene::types::{NotificationPayload, Rect, ZoneHitRegion};
 
     /// Pointer-up on a zone dismiss hit-region must remove the notification from
     /// `zone_registry.active_publishes`.
     ///
-    /// This is the regression test for hud-ltgk.6: the dismiss button rendered
+    /// Previously the dismiss button rendered
     /// visually but clicks had no effect because the `InputResult` was discarded
     /// without acting on `HitResult::ZoneInteraction { kind: Dismiss }`.
     #[test]
@@ -1080,7 +1069,7 @@ mod tests {
         assert_eq!(
             scene.zone_registry.active_for_zone("alert-banner").len(),
             0,
-            "notification must be removed after dismiss pointer-up [hud-ltgk.6 regression]"
+            "notification must be removed after dismiss pointer-up"
         );
 
         // The hit region must also be pruned immediately (local feedback first).
@@ -1163,14 +1152,14 @@ mod tests {
         );
     }
 
-    // ── Click-to-focus tab resolution (hud-dwcr7) ───────────────────────────
+    // ── Click-to-focus tab resolution ───────────────────────────
 
     /// Regression: click-to-focus must acquire focus on a composer tile whose
     /// tab is NOT the global active_tab.  Keying focus off the stale active_tab
     /// (the pre-fix behavior) drops the focus transition at FocusManager::on_click
     /// (focus.rs tab-mismatch guard); resolving the tab from the hit tile fixes
     /// it.  This pins the core behavior the windowed pointer-down handler relies
-    /// on (hud-dwcr7).
+    /// on.
     #[test]
     fn click_focus_uses_hit_tile_tab_not_stale_active_tab() {
         use tze_hud_input::{FocusManager, InputProcessor, PointerEvent, PointerEventKind};
@@ -1238,8 +1227,7 @@ mod tests {
     }
 
     /// Verify that `PendingKeyboardEvent` can hold all three keyboard event
-    /// variants without loss, and that the variants are `Debug`-printable
-    /// (hud-2fz34).
+    /// variants without loss, and that the variants are `Debug`-printable.
     ///
     /// This is a lightweight structural test confirming the enum is correctly
     /// wired.  The runtime-level deferral logic (try_lock → push_back →
@@ -1313,7 +1301,7 @@ mod tests {
 
     /// Verify that `active_tab_for_keyboard_dispatch` returns `None` (lock-busy
     /// signal) when the shared-state Tokio mutex is already held, and returns
-    /// `Some(inner)` when the lock is available (hud-2fz34).
+    /// `Some(inner)` when the lock is available.
     ///
     /// This is the core no-blocking contract: the function must never call
     /// `blocking_lock` on the event-loop thread.
@@ -1343,7 +1331,7 @@ mod tests {
 
     /// Verify that a non-empty `pending_keyboard_events` queue preserves FIFO
     /// ordering — a new incoming event must be pushed to the back, never bypass
-    /// already-queued events (hud-fyaog / hud-2fz34).
+    /// already-queued events.
     ///
     /// This tests the queue data-structure invariant directly without spinning
     /// up the full winit runtime.  The entry-point FIFO guards in
@@ -1415,8 +1403,7 @@ mod tests {
     }
 
     /// Verify that `drain_pending_keyboard_events` stops immediately when the
-    /// lock check returns busy, preserving FIFO order across the queue boundary
-    /// (hud-fyaog / hud-2fz34).
+    /// lock check returns busy, preserving FIFO order across the queue boundary.
     ///
     /// The pre-pop lock check (`active_tab_for_keyboard_dispatch().is_none()` →
     /// break) is the authoritative FIFO barrier in the drain loop.  When the
@@ -1489,7 +1476,7 @@ mod tests {
     }
 
     /// Ordering contract: safe_mode_atomic check precedes the FIFO guard in
-    /// all three dispatch functions (hud-e8qwo).
+    /// all three dispatch functions.
     ///
     /// `dispatch_key_down_event`, `dispatch_key_up_event`, and
     /// `dispatch_character_event` all share the same ordering invariant:

@@ -1,38 +1,27 @@
 //! Headless runtime — runs the full 8-stage frame pipeline without a display server.
 //! Suitable for testing, CI, and artifact generation.
 //!
-//! The headless runtime runs all pipeline stages sequentially in the same task
-//! (no cross-thread signalling). This is correct for testing because the pipeline
-//! contract (stage order, per-stage telemetry, ArcSwap snapshot, overflow counter)
-//! is identical to the windowed runtime; only the thread assignment differs.
+//! Stage 4 sweep, animation/cache/composer preparation and the idle decision
+//! share `pipeline::FrameTurnState::run_frame_turn` with the windowed compositor
+//! and event-loop harness. Public render/readback calls carry explicit fresh-frame
+//! demand. Input response correlation and telemetry stay with this adapter.
 //!
-//! # Headless Mode Parity
-//!
-//! Per runtime-kernel/spec.md Requirement: Headless Mode (line 198):
-//! "Headless mode MUST use the same process, code path, and pipeline as
-//! windowed mode.  The only difference SHALL be the render surface."
-//!
-//! `HeadlessRuntime` wires the full pipeline:
-//! - `Compositor` (GPU device + wgpu render pipeline)
-//! - `HeadlessSurface` (offscreen render target, `present()` is a no-op)
-//! - `InputProcessor` (hit-test, local feedback)
-//! - `TelemetryCollector` (per-frame telemetry)
-//! - `SharedState` (scene + session registry)
-//! - gRPC server (HudSession streaming — optional)
+//! The offscreen backend copies real rendered pixels before queue submission.
+//! It does not run winit, OS presentation or an implicit portal service.
 //!
 //! # Software GPU
 //!
 //! `HeadlessRuntime::new` respects the `HEADLESS_FORCE_SOFTWARE` environment
-//! variable (spec line 409).  When set to `1`, wgpu adapter selection uses
+//! variable.  When set to `1`, wgpu adapter selection uses
 //! `force_fallback_adapter = true` (llvmpipe on Linux, WARP on Windows).
 //!
 //! # Session Limits & Hot-Connect
 //!
-//! Per spec Requirement: Session Limits (line 355): headless mode still runs
+//! Headless mode still runs
 //! the gRPC session server — agents connect normally, session limits are
 //! enforced identically.
 //!
-//! Per spec Requirement: Hot-Connect (line 346): agents connecting to headless
+//! Agents connecting to a headless
 //! runtime receive the full scene snapshot (handled by `HudSessionImpl`).
 //!
 //! # grpc_port = 0
@@ -165,6 +154,7 @@ pub struct HeadlessRuntime {
     pub config: HeadlessConfig,
     /// The 8-stage frame pipeline orchestrator.
     pub pipeline: FramePipeline,
+    frame_turn: crate::pipeline::FrameTurnState,
     /// Immutable runtime context built from validated config at startup.
     ///
     /// Holds profile budgets.
@@ -176,7 +166,7 @@ pub struct HeadlessRuntime {
     _runtime_widget_store: Option<RuntimeWidgetStore>,
     /// Actual input samples; response context exists only for applied batches.
     pending_input_latency: PendingInputLatencySamples,
-    /// Broadcast sender for batch-correlated present acknowledgments (hud-91uu6).
+    /// Broadcast sender for batch-correlated present acknowledgments.
     ///
     /// When set, `render_frame` drains the scene's present-ack queue after each
     /// presented frame and emits a [`FramePresented`] pairing the applied
@@ -194,7 +184,7 @@ impl HeadlessRuntime {
     /// Create a new headless runtime.
     ///
     /// Respects `HEADLESS_FORCE_SOFTWARE=1` — when set, the wgpu adapter
-    /// selection uses `force_fallback_adapter = true` (spec line 211).
+    /// selection uses `force_fallback_adapter = true`.
     ///
     /// If `config.config_toml` is provided, the runtime builds an immutable
     /// `RuntimeContext` from the loaded config (profile budgets). If config is
@@ -221,7 +211,7 @@ impl HeadlessRuntime {
         compositor.set_resident_ledger(runtime_context.resident_ledger.clone());
         // Apply the resolved per-surface truncation-input bound so the
         // viewport-adjacent-window fallback engages at the operator-configured
-        // threshold rather than the compositor's built-in default (hud-59p2z).
+        // threshold rather than the compositor's built-in default.
         compositor.set_max_truncation_input_bytes(
             runtime_context.profile.max_truncation_input_bytes as usize,
         );
@@ -313,8 +303,6 @@ impl HeadlessRuntime {
             safe_mode_atomic: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             active_tab_mirror: Arc::new(std::sync::Mutex::new(None)),
             token_store: tze_hud_protocol::token::TokenStore::new(),
-            input_capture_tx: None,
-            input_capture_wake: tze_hud_scene::render_wake::RenderWakeNotifier::default(),
         }));
 
         tracing::info!(
@@ -332,6 +320,7 @@ impl HeadlessRuntime {
             state,
             config,
             pipeline: FramePipeline::new(),
+            frame_turn: crate::pipeline::FrameTurnState::default(),
             runtime_context,
             agents,
             _runtime_widget_store: runtime_widget_store,
@@ -349,7 +338,7 @@ impl HeadlessRuntime {
     }
 
     /// Wire a `FramePresented` broadcast sender so the render loop emits
-    /// batch-correlated present acknowledgments (hud-91uu6).
+    /// batch-correlated present acknowledgments.
     ///
     /// Pass `HudSessionImpl::frame_presented_tx.clone()` to deliver present acks
     /// to gRPC agents subscribed to TELEMETRY_FRAMES, or a standalone sender in
@@ -428,139 +417,102 @@ impl HeadlessRuntime {
         let scene_arc = state.scene.clone();
         drop(state);
         let mut scene_guard = scene_arc.lock().await;
-        // Register runtime-uploaded widget SVG assets before rendering so new
-        // registrations are visible on the next frame.
-        process_pending_widget_svgs(
-            self.compositor.widget_renderer_mut(),
-            scene_guard.drain_pending_widget_svg_assets(),
-        );
-
-        // Timed content, expired publications, and elapsed leases
-        // (invariants 1 and 4), all cleared before the next frame. Headless
-        // keeps no session fan-out for the returned expiries; the scene-side
-        // reclaim is what matters here.
-        let _ = crate::pipeline::sweep_timed_scene_state(&mut scene_guard);
-
-        // Drain the removal notification queue populated by remove_tile_and_nodes.
-        // Without this, the queue grows unboundedly in headless / server runtimes
-        // that delete tiles but have no windowed event loop to consume it.
-        // The windowed path drains this in prune_portal_resize_states; headless
-        // has no portal_resize_states consumer, so we simply discard here.
-        let _ = scene_guard.drain_removed_tile_ids();
-
-        // Per-publication TTL fade-out sweep: seed/tick animation states and
-        // prune publications whose 150ms fade-out has completed.
-        self.compositor.update_publication_animations(&scene_guard);
-        self.compositor.prune_faded_publications(&mut scene_guard);
-
-        // ── Capture compositor render work upfront ────────────────────────────
-        // The headless pipeline runs all stages in-process. The compositor's
-        // render_frame() handles stages 6 (encode) and 7 (submit) internally.
-        // We split timing manually below.
-
-        // Stage 1: Input Drain (headless — no OS event queue to drain)
-        let s1_start = Instant::now();
-        let stage1_us = s1_start.elapsed().as_micros() as u64;
-
-        // Stage 2: Local Feedback (load ArcSwap snapshot — no mutex)
-        // Per spec §3.2: Stage 2 reads the snapshot published after Stage 4 of the
-        // *previous* frame. It must not publish a new snapshot (that is Stage 4's job).
-        let s2_start = Instant::now();
-        let _snap_ref = self.pipeline.hit_test_snapshot.load();
-        let input_result = input
-            .as_ref()
-            .map(|(event, _)| self.input_processor.process(event, &mut scene_guard));
-        let stage2_us = s2_start.elapsed().as_micros() as u64;
-
-        // Stage 3: Mutation Intake (ordinary headless mutations arrive before render;
-        // a controlled input handler applies its actual response at this boundary).
-        let s3_start = Instant::now();
-        let mut associated_response = false;
-        let response = input.and_then(|(_, respond)| {
-            let result = input_result.as_ref()?;
-            let dispatch = result.dispatch.as_ref()?;
-            let sequence_before = scene_guard.sequence_number;
-            let (batch, response) = respond(dispatch, &mut scene_guard)?;
-            let matches_target = batch.agent_namespace == dispatch.namespace
-                && !batch.mutations.is_empty()
-                && batch.mutations.iter().all(|mutation| match mutation {
-                    SceneMutation::UpdateNodeContent { tile_id, .. }
-                    | SceneMutation::UpdateTileOpacity { tile_id, .. } => {
-                        *tile_id == dispatch.tile_id
-                    }
-                    _ => false,
-                });
-            let newly_applied = response.applied
-                && response.batch_id == batch.batch_id
-                && response.sequence_number.is_some_and(|sequence| {
-                    sequence > sequence_before && sequence == scene_guard.sequence_number
-                });
-            if matches_target && newly_applied {
-                record_committed_input_response(
-                    &self.pending_input_latency,
-                    input_started_at.expect("input entry has a timestamp"),
-                    result.local_ack_us,
-                    batch.batch_id,
-                    Instant::now(),
-                );
-                associated_response = true;
-            }
-            Some(response)
-        });
-        if let Some(result) = &input_result
-            && !associated_response
-        {
-            record_pending_input_latency(
-                &self.pending_input_latency,
-                input_started_at.expect("input entry has a timestamp"),
-                result.local_ack_us,
-            );
-        }
-        let stage3_us = s3_start.elapsed().as_micros() as u64;
-
-        // Stage 4: Scene Commit (headless — scene already committed)
-        let s4_start = Instant::now();
-        let new_snap = HitTestSnapshot::from_scene(&scene_guard);
-        self.pipeline.hit_test_snapshot.store(Arc::new(new_snap));
-
-        // ── Commit-time markdown cache prime (hud-380dl) ──────────────────────
-        // Prime the markdown parse cache here, at the end of Stage 4 (scene
-        // commit), before any render stage executes.  This moves parsing off the
-        // render thread entirely: render_frame_headless finds the cache already
-        // populated and does no parse work.  The prime is gated internally on
-        // scene.version so it is a no-op when the scene has not changed.
-        // Install landed system fallback fonts before the primes (hud-ljhku.13).
-        self.compositor.poll_font_fallback();
-        let markdown_prime_start = Instant::now();
-        self.compositor.prime_markdown_cache(&scene_guard);
-        let markdown_prime_us = markdown_prime_start.elapsed().as_micros() as u64;
-
-        // ── Commit-time truncation cache prime (hud-v2z6u) ───────────────────
-        // Prime the truncation cache after markdown, at the end of Stage 4,
-        // so render_frame_headless never does shaping work in the frame loop.
-        // Gated internally on scene.version; no-op when unchanged.
-        self.compositor.prime_truncation_cache(&scene_guard);
-
         let applied_degradation_level = self.degradation_controller.level();
-        self.compositor
-            .set_degradation_policy(self.degradation_controller.compositor_policy());
+        let turn = self.frame_turn.run_frame_turn(
+            &mut scene_guard,
+            Some(&mut self.compositor),
+            crate::pipeline::FrameTurnRequest {
+                demand: crate::pipeline::FrameDemand::Readback,
+                degradation: Some(self.degradation_controller.compositor_policy()),
+                ..Default::default()
+            },
+            |scene_guard| {
+                // No windowed portal-resize consumer exists in this driver.
+                let _ = scene_guard.drain_removed_tile_ids();
+                // Stage 1: Input Drain (headless — no OS event queue to drain)
+                let s1_start = Instant::now();
+                let stage1_us = s1_start.elapsed().as_micros() as u64;
 
-        let stage4_us = s4_start.elapsed().as_micros() as u64;
+                // Stage 2: Local Feedback (load ArcSwap snapshot — no mutex)
+                // Stage 2 reads the snapshot published after Stage 4 of the
+                // *previous* frame. It must not publish a new snapshot (that is Stage 4's job).
+                let s2_start = Instant::now();
+                let _snap_ref = self.pipeline.hit_test_snapshot.load();
+                let input_result = input
+                    .as_ref()
+                    .map(|(event, _)| self.input_processor.process(event, scene_guard));
+                let stage2_us = s2_start.elapsed().as_micros() as u64;
 
-        // Stage 5: Layout Resolve
-        let s5_start = Instant::now();
-        let stage5_us = s5_start.elapsed().as_micros() as u64;
+                // Stage 3: Mutation Intake (ordinary headless mutations arrive before render;
+                // a controlled input handler applies its actual response at this boundary).
+                let s3_start = Instant::now();
+                let mut associated_response = false;
+                let response = input.and_then(|(_, respond)| {
+                    let result = input_result.as_ref()?;
+                    let dispatch = result.dispatch.as_ref()?;
+                    let sequence_before = scene_guard.sequence_number;
+                    let (batch, response) = respond(dispatch, scene_guard)?;
+                    let matches_target = batch.agent_namespace == dispatch.namespace
+                        && !batch.mutations.is_empty()
+                        && batch.mutations.iter().all(|mutation| match mutation {
+                            SceneMutation::UpdateNodeContent { tile_id, .. }
+                            | SceneMutation::UpdateTileOpacity { tile_id, .. } => {
+                                *tile_id == dispatch.tile_id
+                            }
+                            _ => false,
+                        });
+                    let newly_applied = response.applied
+                        && response.batch_id == batch.batch_id
+                        && response.sequence_number.is_some_and(|sequence| {
+                            sequence > sequence_before && sequence == scene_guard.sequence_number
+                        });
+                    if matches_target && newly_applied {
+                        record_committed_input_response(
+                            &self.pending_input_latency,
+                            input_started_at.expect("input entry has a timestamp"),
+                            result.local_ack_us,
+                            batch.batch_id,
+                            Instant::now(),
+                        );
+                        associated_response = true;
+                    }
+                    Some(response)
+                });
+                if let Some(result) = &input_result
+                    && !associated_response
+                {
+                    record_pending_input_latency(
+                        &self.pending_input_latency,
+                        input_started_at.expect("input entry has a timestamp"),
+                        result.local_ack_us,
+                    );
+                }
+                let stage3_us = s3_start.elapsed().as_micros() as u64;
 
-        // Stages 6 + 7: Render Encode + GPU Submit (handled by Compositor::render_frame_headless)
-        // Must use render_frame_headless (not render_frame) so copy_to_buffer is called
-        // before queue.submit(), making read_pixels() return actual rendered pixel data.
-        // render_frame_headless takes &mut SceneGraph to populate zone_hit_regions after
-        // rendering so that interactive zone affordances are ready for the next frame's
-        // hit-testing.
-        let (compositor_telemetry, frame_submitted) = self
-            .compositor
-            .render_frame_headless_with_submission(&mut scene_guard, &self.surface);
-        let submitted_at = frame_submitted.then(Instant::now);
+                (stage1_us, stage2_us, stage3_us, input_result, response)
+            },
+            |compositor, scene, needs_render| {
+                debug_assert!(needs_render, "explicit readback always needs fresh pixels");
+                let snapshot_started = Instant::now();
+                let new_snap = HitTestSnapshot::from_scene(scene);
+                self.pipeline.hit_test_snapshot.store(Arc::new(new_snap));
+                let snapshot_us = snapshot_started.elapsed().as_micros() as u64;
+                let (telemetry, submitted) =
+                    compositor.render_frame_headless_with_submission(scene, &self.surface);
+                let submitted_at = submitted.then(Instant::now);
+                crate::pipeline::FrameTurnBuild {
+                    work: (telemetry, snapshot_us, submitted_at),
+                    submitted,
+                }
+            },
+        );
+        let (stage1_us, stage2_us, stage3_us, input_result, response) = turn.committed;
+        let markdown_prime_us = turn.markdown_prime_us;
+        let (compositor_telemetry, snapshot_us, submitted_at) =
+            turn.work.expect("headless renderer is attached");
+        let stage4_us = turn.stage4_us.saturating_add(snapshot_us);
+        let stage5_us = 0;
+        let frame_submitted = turn.submitted;
         // Total frame time from Compositor covers encode + submit
         let stage6_us = compositor_telemetry.stage6_render_encode_us;
         let stage7_us = compositor_telemetry.stage7_gpu_submit_us;
@@ -569,7 +521,7 @@ impl HeadlessRuntime {
         let frame_time_us = frame_start.elapsed().as_micros() as u64;
         let degradation_work_time_us = degradation_work_start.elapsed().as_micros() as u64;
 
-        // ── Batch-correlated present acknowledgment (hud-91uu6) ───────────────
+        // ── Batch-correlated present acknowledgment ───────────────
         // Successful local GPU work drains pending internal batch ids even when
         // no sender/subscriber is attached. An explicitly wired optional sender
         // pairs them with the frame number and emitter wall-clock; the headless
@@ -640,7 +592,7 @@ impl HeadlessRuntime {
         telemetry.mutations_applied = compositor_telemetry.mutations_applied;
         telemetry.hit_region_updates = compositor_telemetry.hit_region_updates;
         telemetry.widget_rasterized = compositor_telemetry.widget_rasterized;
-        // Propagate commit-time markdown prime cost (hud-380dl).
+        // Propagate commit-time markdown prime cost.
         // Non-zero only when scene.version changed this frame (new/changed content
         // required a parse pass); zero on steady-state frames (cache hit, no work).
         telemetry.markdown_prime_us = markdown_prime_us;
@@ -685,17 +637,17 @@ impl HeadlessRuntime {
     ///
     /// Returns RGBA8 data (width × height × 4 bytes).  Blocks until GPU is idle.
     ///
-    /// Per spec line 208: "pixel readback MUST be on-demand via copy_texture_to_buffer."
+    /// Per: "pixel readback MUST be on-demand via copy_texture_to_buffer."
     pub fn read_pixels(&self) -> Vec<u8> {
         self.surface.read_pixels(&self.compositor.device)
     }
 
     /// Start the gRPC server in the background, serving the HudSession streaming service.
     ///
-    /// Per spec Requirement: Session Limits (line 355): headless runtime still
+    /// The headless runtime still
     /// runs the gRPC server — agents connect normally.
     ///
-    /// Per spec Requirement: Hot-Connect (line 346): the `HudSessionImpl` sends
+    /// The `HudSessionImpl` sends
     /// a full scene snapshot to each agent on connect.
     ///
     /// Returns the server task handle.  The caller must retain it to keep the
@@ -1174,7 +1126,7 @@ mod tests {
         );
         assert!(runtime.compositor.take_work_counts().is_none());
         eprintln!(
-            "hud-b1adb 50 AB: cold={cold_work:?} warm={warm_work:?} AB->BA={mutation_work:?} repeat={repeat_work:?}"
+            "50 AB: cold={cold_work:?} warm={warm_work:?} AB->BA={mutation_work:?} repeat={repeat_work:?}"
         );
         for work in [warm_work, mutation_work, repeat_work] {
             assert_eq!(
@@ -1319,7 +1271,7 @@ mod tests {
         );
         assert!(runtime.compositor.take_work_counts().is_none());
         eprintln!(
-            "hud-b1adb bounds: shrink={shrink_work:?} regrow={regrow_work:?} warm={regrow_warm_work:?} replacement={replacement_work:?} reintroduced={obsolete_work:?} warm={obsolete_warm_work:?}"
+            "bounds: shrink={shrink_work:?} regrow={regrow_work:?} warm={regrow_warm_work:?} replacement={replacement_work:?} reintroduced={obsolete_work:?} warm={obsolete_warm_work:?}"
         );
     }
 
@@ -1473,7 +1425,7 @@ mod tests {
         );
 
         // Verify alpha channel is 255 (fully opaque clear color).
-        // RGBA8 layout: [R, G, B, A, R, G, B, A, ...]
+        // RGBA8 layout: [R, G, B, A, R, G, B, A,...]
         let alpha_nonopaque = pixels.chunks(4).any(|px| px[3] != 255);
         assert!(
             !alpha_nonopaque,
@@ -1557,8 +1509,8 @@ mod tests {
     /// token-driven properties (e.g. severity colors for alert-banner) are
     /// resolved at render time rather than falling back to hardcoded constants.
     ///
-    /// Regression test for hud-kz2l: HeadlessRuntime was not calling
-    /// run_scene_startup, so design tokens were never applied even when
+    /// HeadlessRuntime must call
+    /// run_scene_startup so design tokens are applied when
     /// config_toml with [design_tokens] was supplied.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_design_tokens_applied_when_config_toml_provided() {

@@ -39,15 +39,6 @@
 //! pipeline completes for every scene without crash or OOM.  Both buffer-size
 //! and colour assertions must pass unconditionally in CI.
 //!
-//! # Spec references
-//!
-//! - validation-framework/spec.md DR-V2 (line 186): headless frame pipeline
-//! - validation-framework/spec.md DR-V5 (line 228): `cargo test --features dev-mode`
-//! - scene-graph/spec.md lines 45-64: z-order rendering
-//! - scene-graph/spec.md lines 185-200: zone rendering
-//! - policy-arbitration/spec.md lines 91-104: Level 2 Privacy Evaluation
-//! - input-model/spec.md lines 11-22: focus indicators
-//! - configuration/spec.md lines 123-134: zone types
 
 use crate::pixel_helpers;
 
@@ -598,7 +589,7 @@ async fn test_color_13_three_agents_contention_high_prio_tile() {
 ///
 /// The scene has two tiles:
 /// - Content tile (z=1): full-display HitRegion — invisible (no rect emitted;
-///   HitRegion is a pure interaction primitive, RFC 0004 §6.5).
+///   HitRegion is a pure interaction primitive).
 /// - Overlay tile (z=20): passthrough SolidColor [0.0, 0.0, 0.0, 0.15] — slight
 ///   darkening drawn on top of the clear background via alpha blending.
 ///
@@ -682,7 +673,7 @@ async fn test_color_15_disconnect_reclaim_multiagent_agents_visible() {
 /// chatty_dashboard_touch: 50 HitRegionNode tiles in 5×10 grid.
 ///
 /// HitRegion is a pure interaction primitive — it paints nothing in its default
-/// state (RFC 0004 §6.5).  With all 50 tiles invisible, sampled points show the
+/// state. With all 50 tiles invisible, sampled points show the
 /// compositor background clear only: linear (0.05, 0.05, 0.10) → sRGB BG_SRGB.
 ///
 /// Grid layout on 1920×1080: 5 cols × 10 rows, each cell 384×108.  (400, 300) is
@@ -879,7 +870,7 @@ async fn test_color_23_zone_disconnect_cleanup_tile_initially_visible() {
     );
 }
 
-// ─── color_runs pixel readback [hud-r52v] ────────────────────────────────────
+// ─── color_runs pixel readback ────────────────────────────────────
 
 /// TextMarkdownNode with color_runs: a large red text paragraph.
 ///
@@ -897,7 +888,7 @@ async fn test_color_23_zone_disconnect_cleanup_tile_initially_visible() {
 /// WHEN TextMarkdownNode with color_runs rendered
 /// THEN text region contains strongly red-dominant pixels.
 ///
-/// Acceptance criterion AC-5 [hud-r52v].
+/// Acceptance criterion AC-5.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_color_runs_red_error_text_rendered() {
     use tze_hud_scene::{
@@ -964,7 +955,7 @@ async fn test_color_runs_red_error_text_rendered() {
 
     // Sample the text area: look for at least one red-dominant pixel.
     // The first letter 'E' at font_size=48px will be somewhere in the
-    // region x=[tile_x+margin .. tile_x+120], y=[tile_y+margin .. tile_y+60].
+    // region x=[tile_x+margin.. tile_x+120], y=[tile_y+margin.. tile_y+60].
     // The margin from from_text_markdown_node is about 1..6 px.
     // We scan a generous region to tolerate sub-pixel variation.
     let scan_x0 = (tile_x + 5.0) as u32;

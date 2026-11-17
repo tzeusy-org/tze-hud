@@ -5,7 +5,7 @@
 //!
 //! # Performance contract
 //!
-//! Dedup lookups MUST complete within 100 μs (spec line 103, lines 112-113).
+//! Dedup lookups MUST complete within 100 μs.
 //! The implementation uses `DashMap` — a sharded concurrent hash map —
 //! so read operations are lock-free for non-contended shards and scale with
 //! CPU count.  On modern hardware a `DashMap::contains_key` on a warm cache
@@ -14,8 +14,7 @@
 //! # Immutability guarantee
 //!
 //! Once inserted, a `ResourceRecord` is never mutated.  The content at a
-//! given `ResourceId` is immutable for the lifetime of the store
-//! (spec lines 20-24).
+//! given `ResourceId` is immutable for the lifetime of the store.
 
 use std::sync::Arc;
 
@@ -73,7 +72,7 @@ impl DedupIndex {
 
     /// Check whether `resource_id` is already in the store.
     ///
-    /// Latency contract: MUST complete within 100 μs (spec lines 112-113).
+    /// Latency contract: MUST complete within 100 μs.
     /// DashMap read is O(1) and lock-free for non-contended shards.
     #[cfg(any(test, feature = "test-support"))]
     #[inline]

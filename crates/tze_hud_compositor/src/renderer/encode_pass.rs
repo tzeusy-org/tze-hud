@@ -2,7 +2,7 @@
 //!
 //! Moved from `renderer/mod.rs` (the "Color helpers + encode passes" and
 //! "Rounded rect" clusters, formerly ~L5850–6380 at plan date) by Step R-6 of
-//! the renderer module split (hud-fgryk).  No logic was changed; only
+//! the renderer module split. No logic was changed; only
 //! visibility modifiers were added where Rust's module-privacy rules require
 //! them (listed in the PR body).
 //!
@@ -122,8 +122,7 @@ impl super::Compositor {
     /// Encode a widget render pass that composites all widget textures into the frame.
     ///
     /// Widget tiles use z_order >= WIDGET_TILE_Z_MIN (0x9000_0000), placing them
-    /// above zone tiles but below chrome (spec §Requirement: Widget Contention and
-    /// Governance, §Requirement: Widget Input Mode).
+    /// above zone tiles but below chrome.
     ///
     /// This is a no-op when the widget renderer is not initialized or the registry
     /// has no instances with cached textures.
@@ -172,7 +171,7 @@ impl super::Compositor {
         wr.composite_widgets(&mut widget_pass, registry, surf_w, surf_h, &self.device);
     }
 
-    /// Collect the scene-side widget draw geometry (hud-uyhpn).
+    /// Collect the scene-side widget draw geometry.
     ///
     /// Thin Compositor-level wrapper over
     /// [`crate::widget::WidgetRenderer::collect_widget_draw_quads`] that also
@@ -193,7 +192,7 @@ impl super::Compositor {
         }
     }
 
-    /// Encode the widget pass from precomputed, scene-free quads (hud-uyhpn).
+    /// Encode the widget pass from precomputed, scene-free quads.
     ///
     /// The scene-free counterpart to [`Self::encode_widget_pass`]. Consumes the
     /// owned [`crate::widget::WidgetDrawQuad`]s produced by
@@ -390,8 +389,7 @@ impl super::Compositor {
     ///   too (its glyph is text).
     /// - Notification action buttons (every Stack zone) draw here, after their
     ///   backdrop, as filled and outlined controls. Action and dismiss buttons
-    ///   take the hover/pressed fill from `scene.overlay.chrome_states`
-    ///   (hud-paslt).
+    ///   take the hover/pressed fill from `scene.overlay.chrome_states`.
     ///
     /// Mirrors the backdrop-resolution logic in `render_zone_content` so color
     /// derivation (severity tokens, urgency colors, opacity) is consistent.
@@ -459,8 +457,8 @@ impl super::Compositor {
             match zone_def.contention_policy {
                 ContentionPolicy::Stack { .. } => {
                     // Slot geometry is computed once by zone_slot_layout and shared
-                    // with collect_text_items / render_zone_content (hud-qlerb).
-                    let layout = self.zone_slot_layout(zone_name, publishes, policy, h, w);
+                    // with collect_text_items / render_zone_content.
+                    let layout = self.zone_slot_layout(scene, zone_name, publishes, policy, h, w);
                     let style = NotificationStyle::for_zone(zone_name, zone_tokens, policy);
                     for (pub_idx, slot) in layout.iter_visible(Rect::new(x, y, w, h)) {
                         let record = &publishes[pub_idx];
@@ -743,10 +741,9 @@ impl super::Compositor {
                 // recursive node visit — it is constant across all nodes in
                 // the same tile.
                 let (scroll_x, scroll_y) = self.display_tile_scroll_offset(scene, tile.id);
-                // Compute the whole-tile fade once per tile (drag + §6.3 portal
+                // Compute the whole-tile fade once per tile (drag + portal
                 // transition) so a rounded backdrop fades with the rest of the tile
-                // instead of staying opaque while the flat backdrop/text fade
-                // (hud-b0x0m; same class as the hud-w41ef flat-backdrop fix).
+                // instead of staying opaque while the flat backdrop/text fade.
                 let tile_opacity = self.tile_effective_opacity(tile, scene);
                 self.collect_tile_rounded_rect_cmds_from_node(
                     root_id,
@@ -766,7 +763,7 @@ impl super::Compositor {
 
     // `tile_opacity` is the whole-tile fade computed once per tile by the caller
     // and threaded unchanged through the recursion (like `scroll_x`/`scroll_y`),
-    // so every rounded backdrop in the subtree fades with the tile (hud-b0x0m).
+    // so every rounded backdrop in the subtree fades with the tile.
     #[allow(clippy::too_many_arguments)]
     fn collect_tile_rounded_rect_cmds_from_node(
         &self,
@@ -785,7 +782,7 @@ impl super::Compositor {
 
         if let NodeData::SolidColor(sc) = &node.data {
             if let Some(radius) = sc.radius.filter(|r| *r > 0.0) {
-                // hud-xe37d (review finding on hud-pd9bp, confirmed real): a
+                // (review finding on, confirmed real): a
                 // rounded SolidColor is emitted here, not by render_node's flat-
                 // quad path (which explicitly skips radius > 0), so it needs the
                 // SAME `effective_y` vertical-flow substitution `render_node`

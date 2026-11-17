@@ -21,7 +21,7 @@ use std::fmt;
 /// The configured window mode for the runtime.
 ///
 /// Modes are set at startup. Switching at runtime is possible but requires
-/// surface recreation (spec line 175).
+/// surface recreation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum WindowMode {
     /// Compositor owns the entire display. Opaque. All input captured.
@@ -99,7 +99,7 @@ impl Default for WindowConfig {
 /// Decide whether a pointer event at (px, py) should be captured by the
 /// runtime or passed through to the desktop.
 ///
-/// Spec line 182: "WHEN runtime is in overlay mode and pointer event lands
+///: "WHEN runtime is in overlay mode and pointer event lands
 /// outside any active hit-region THEN event MUST pass through to underlying
 /// desktop."
 ///

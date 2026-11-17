@@ -1,6 +1,6 @@
 use super::*;
 
-/// hud-991cj regression: a pure scroll (and a steady-state re-render) must
+/// regression: a pure scroll (and a steady-state re-render) must
 /// re-shape ZERO text buffers, because `prepare_text_items` now reuses a shaped
 /// `Buffer` keyed by a scroll-invariant `ShapeKey` (content+geometry+font+runs,
 /// NOT offset). A content append re-shapes exactly the one changed item.
@@ -12,7 +12,7 @@ use super::*;
 /// readback → no llvmpipe deadlock). The counters are the contract; frame
 /// timings belong to the benchmark tier, not this unit test.
 #[tokio::test]
-async fn scroll_reshape_reuse_hud991cj() {
+async fn scroll_reshape_reuse() {
     use tze_hud_scene::types::{
         FontFamily, NodeData, Rect, TextAlign, TextMarkdownNode, TextOverflow,
     };
@@ -107,7 +107,7 @@ async fn scroll_reshape_reuse_hud991cj() {
         let scroll_reshapes = compositor.text_shape_call_count() - before_scroll;
 
         // ── APPEND: change content once → exactly one re-shape (one item). ──
-        let appended = format!("{content}Appended tail line for hud-991cj.\n");
+        let appended = format!("{content}Appended tail line.\n");
         scene.set_tile_root(tile_id, make_node(appended)).unwrap();
         compositor.prime_markdown_cache(&scene);
         compositor.prime_truncation_cache(&scene);
@@ -134,8 +134,8 @@ async fn scroll_reshape_reuse_hud991cj() {
 
 /// Shared test helper: build a scrollable single-tile scene whose root is a
 /// markdown transcript of `repeat` copies of a fixed 45-byte line, mirroring
-/// `scroll_reshape_reuse_hud991cj`'s scenario shape (hud-u4lq2).
-fn hud_u4lq2_scenario_scene(repeat: usize) -> SceneGraph {
+/// `scroll_reshape_reuse`'s scenario shape.
+fn large_markdown_scene(repeat: usize) -> SceneGraph {
     use tze_hud_scene::types::{
         FontFamily, NodeData, Rect, TextAlign, TextMarkdownNode, TextOverflow,
     };
@@ -172,18 +172,18 @@ fn hud_u4lq2_scenario_scene(repeat: usize) -> SceneGraph {
     scene
 }
 
-/// hud-u4lq2 baseline: a fresh, single-use `Compositor` (no reuse across
+/// baseline: a fresh, single-use `Compositor` (no reuse across
 /// scenarios) must observe its own `prime_markdown_cache` background-parsed
 /// snapshot for a large (>`INLINE_PARSE_BYTE_THRESHOLD`) transcript within a
 /// few frames. This was never actually broken (the bug required Compositor
-/// reuse across scenes, see `reused_compositor_across_scenes_lands_markdown_primer_hud_u4lq2`
+/// reuse across scenes, see `reused_compositor_across_scenes_lands_markdown_primer`
 /// below) but is kept as a fast sanity baseline for the miss-counter mechanism.
 #[tokio::test]
-async fn markdown_primer_landing_converges_on_render_path_hud_u4lq2() {
+async fn markdown_primer_landing_converges_on_render_path() {
     let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(256, 256).await);
     compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
 
-    let mut scene = hud_u4lq2_scenario_scene(1440); // ~64KiB, matching hud-991cj's large case.
+    let mut scene = large_markdown_scene(1440); // ~64KiB large case.
     compositor.prime_markdown_cache(&scene);
     compositor.prime_truncation_cache(&scene);
 
@@ -221,14 +221,14 @@ async fn markdown_primer_landing_converges_on_render_path_hud_u4lq2() {
         converged,
         "markdown cache misses on the render path never stopped growing within \
          the 1s poll budget (misses so far: {}) -- the primer's background-parsed \
-         snapshot never became visible to collect_text_items_from_node [hud-u4lq2]",
+         snapshot never became visible to collect_text_items_from_node",
         compositor.markdown_cache_miss_count(),
     );
 }
 
-/// hud-u4lq2 regression (the confirmed bug): reuse ONE `Compositor` across a
+/// regression (the confirmed bug): reuse ONE `Compositor` across a
 /// "small" (inline, under `INLINE_PARSE_BYTE_THRESHOLD`) scenario THEN a
-/// "64KiB" scenario, exactly mirroring `scroll_reshape_reuse_hud991cj`'s
+/// "64KiB" scenario, exactly mirroring `scroll_reshape_reuse`'s
 /// shared-compositor-across-scenarios shape.
 ///
 /// # Root cause (confirmed via direct instrumentation of `publish_if_newer`)
@@ -249,11 +249,11 @@ async fn markdown_primer_landing_converges_on_render_path_hud_u4lq2() {
 /// `publish_if_newer: version=4 cur=5 will_drop=true`. The 64KiB content's
 /// entry never landed in the primer's cache, so EVERY subsequent frame's
 /// `collect_text_items_from_node` lookup missed and paid a full synchronous
-/// re-parse, exactly matching the measured hud-991cj symptom (5-15ms/frame
+/// re-parse, exactly matching the measured symptom (5-15ms/frame
 /// steady-state cost against a 16.6ms/4ms budget).
 ///
 /// The fix makes `MarkdownPrimer` stamp every dispatch with its OWN internal,
-/// ever-increasing epoch (see the hud-u4lq2 note on `MarkdownPrimer`) instead
+/// ever-increasing epoch (see the note on `MarkdownPrimer`) instead
 /// of trusting the caller's scene-relative version — an epoch can never go
 /// backwards regardless of how many `SceneGraph` instances share the primer,
 /// so this scenario can no longer drop a legitimate background result.
@@ -264,23 +264,23 @@ async fn markdown_primer_landing_converges_on_render_path_hud_u4lq2() {
 /// non-reused baseline above. Fails on unpatched code: the 64KiB scenario
 /// never converges within the budget (misses grow every frame).
 #[tokio::test]
-async fn reused_compositor_across_scenes_lands_markdown_primer_hud_u4lq2() {
+async fn reused_compositor_across_scenes_lands_markdown_primer() {
     let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(256, 256).await);
     compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
 
     for (label, repeat) in [("small", 12usize), ("64KiB", 1440usize)] {
-        let mut scene = hud_u4lq2_scenario_scene(repeat);
+        let mut scene = large_markdown_scene(repeat);
 
         compositor.prime_markdown_cache(&scene);
         compositor.prime_truncation_cache(&scene);
 
-        // A content append (mirroring hud-991cj's append step) exercises the
+        // A content append (mirroring 's append step) exercises the
         // same re-prime path the original bench does, without which the
         // "small" scenario would never advance the primer's internal epoch
         // the way the confirmed repro did.
         let tile_id = *scene.tiles.keys().next().unwrap();
         let appended = format!(
-            "{}Appended tail line for hud-u4lq2.\n",
+            "{}Appended tail line.\n",
             "The quick brown fox jumps over the lazy dog.\n".repeat(repeat)
         );
         let node = Node {
@@ -345,7 +345,7 @@ async fn reused_compositor_across_scenes_lands_markdown_primer_hud_u4lq2() {
         assert!(
             converged,
             "[{label}] markdown cache misses never stopped growing on a Compositor \
-             reused across scenes (misses so far: {}) -- the confirmed hud-u4lq2 \
+             reused across scenes (misses so far: {}) -- the reused-compositor primer \
              regression: MarkdownPrimer's stale-clobber guard dropped the \
              background-parsed snapshot because it compared raw scene.version \
              across independently-constructed SceneGraph instances",

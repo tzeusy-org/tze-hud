@@ -22,12 +22,11 @@ use tze_hud_telemetry::{
     QuiescentEfficiencyValidation, QuiescentMeasurementStatus,
 };
 
-use crate::channels::{InputEvent, InputEventKind};
 use crate::window::WindowMode;
 
 use super::input_dispatch::{
     dispatch_capture_released_event, dispatch_focus_event, dispatch_pointer_event,
-    dispatch_scroll_offset_event, enqueue_input, nanoseconds_since_start,
+    dispatch_scroll_offset_event,
 };
 use super::portal::{
     DragRelease, DragTarget, PortalResizePointerOutcome, PrimaryDragGesture,
@@ -73,6 +72,9 @@ struct ChromeCaptureInstall {
     native: Option<std::rc::Rc<ChromeCapturePress>>,
     app: Option<std::rc::Rc<ChromeCapturePress>>,
     permit: bool,
+    /// Native edges omitted from the bounded receipt queue still owe inert
+    /// application delivery. None is counter exhaustion: never reauthorize it.
+    quarantined_edges: Option<u64>,
 }
 
 #[cfg(any(target_os = "windows", test))]
@@ -132,29 +134,34 @@ impl ChromeCaptureLedger {
             native: None,
             app: None,
             permit: false,
+            quarantined_edges: Some(0),
         });
         Some(nonce)
     }
 
     pub(super) fn begin(&mut self, nonce: u64, down: bool) -> Option<u64> {
-        if self.faulted {
-            return None;
-        }
-        if self.active.len() + self.completed.len() >= Self::MAX_RECEIPTS {
-            self.fault();
-            return None;
-        }
-        let Some(frame) = self.next_frame.checked_add(1) else {
-            self.fault();
-            return None;
-        };
         let i = self
             .installs
             .iter()
             .position(|s| s.nonce == nonce && s.enabled)?;
+        if self.faulted || self.has_quarantined_edges(self.installs[i].window) {
+            self.quarantine_edge(i);
+            return None;
+        }
+        if self.active.len() + self.completed.len() >= Self::MAX_RECEIPTS {
+            self.fault();
+            self.quarantine_edge(i);
+            return None;
+        }
+        let Some(frame) = self.next_frame.checked_add(1) else {
+            self.fault();
+            self.quarantine_edge(i);
+            return None;
+        };
         if down {
             let Some(generation) = self.installs[i].generation.checked_add(1) else {
                 self.fault();
+                self.quarantine_edge(i);
                 return None;
             };
             let install = &mut self.installs[i];
@@ -197,31 +204,30 @@ impl ChromeCaptureLedger {
 
     pub(super) fn consume(&mut self, window: winit::window::WindowId, down: bool) -> bool {
         self.last_retired = false;
-        if self.faulted {
-            return false;
-        }
         let pending = self.completed.iter().position(|r| r.window == window);
         let active = self
             .active
             .iter()
             .rposition(|r| r.window == window && !r.consumed);
         if pending.is_some() && active.is_some() {
+            // Ambiguous delivery cannot authorize either press. It still
+            // retires one matching, now-cancelled edge: that application event
+            // has arrived and must not leave phantom debt behind recovery.
             self.fault();
-            return false;
         }
-        let receipt = if let Some(i) = pending {
+        let receipt = if let Some(i) = pending.filter(|&i| self.completed[i].down == down) {
             self.completed.remove(i).expect("selected receipt exists")
-        } else if let Some(i) = active {
+        } else if let Some(i) = active.filter(|&i| self.active[i].down == down) {
             self.active[i].consumed = true;
             self.active[i].clone()
+        } else if self.consume_quarantined_edge(window) {
+            return false;
         } else {
+            // Keep a differently directed receipt for its actual application
+            // edge. Removing it here could lend a future receipt to stale input.
             self.fault();
             return false;
         };
-        if receipt.down != down {
-            self.fault();
-            return false;
-        }
         let Some(i) = self.installs.iter().position(|s| s.nonce == receipt.nonce) else {
             self.fault();
             return false;
@@ -232,6 +238,9 @@ impl ChromeCaptureLedger {
             return false;
         }
         self.installs[i].permit = false;
+        if self.faulted || self.has_quarantined_edges(window) {
+            return false;
+        }
         let Some(token) = receipt.token else {
             return false;
         };
@@ -276,6 +285,7 @@ impl ChromeCaptureLedger {
 
     pub(super) fn permit(&self, window: winit::window::WindowId) -> bool {
         !self.faulted
+            && !self.has_quarantined_edges(window)
             && self
                 .installs
                 .iter()
@@ -346,10 +356,56 @@ impl ChromeCaptureLedger {
         self.prune();
     }
 
+    /// Between event-loop turns, cancel desynchronized presses while retaining
+    /// their unmatched delivery history. Winit may still hold application edges.
+    /// Installation and frame identities remain monotonic; every old press
+    /// stays cancelled, including a held press whose Up arrives later.
+    pub(super) fn recover(&mut self) -> bool {
+        if !self.faulted || !self.active.is_empty() {
+            return false;
+        }
+        self.fault();
+        self.app_armed = None;
+        for install in &mut self.installs {
+            install.app = None;
+            install.permit = false;
+        }
+        self.faulted = false;
+        self.prune();
+        true
+    }
+
+    fn quarantine_edge(&mut self, install: usize) {
+        let install = &mut self.installs[install];
+        install.quarantined_edges = install.quarantined_edges.and_then(|n| n.checked_add(1));
+        install.permit = false;
+    }
+
+    fn has_quarantined_edges(&self, window: winit::window::WindowId) -> bool {
+        self.installs
+            .iter()
+            .any(|install| install.window == window && install.quarantined_edges != Some(0))
+    }
+
+    fn consume_quarantined_edge(&mut self, window: winit::window::WindowId) -> bool {
+        let Some(install) = self
+            .installs
+            .iter_mut()
+            .find(|install| install.window == window && install.quarantined_edges != Some(0))
+        else {
+            return false;
+        };
+        install.quarantined_edges = install.quarantined_edges.map(|n| n - 1);
+        self.last_retired = !install.enabled;
+        self.prune();
+        true
+    }
+
     fn prune(&mut self) {
         self.installs.retain(|s| {
             s.enabled
                 || s.app.is_some()
+                || s.quarantined_edges != Some(0)
                 || self.active.iter().any(|r| r.nonce == s.nonce)
                 || self.completed.iter().any(|r| r.nonce == s.nonce)
         });
@@ -413,7 +469,7 @@ fn chrome_native_fault() {
     });
     if first {
         tracing::error!(
-            "notification capture history unavailable; notification actions disabled until restart"
+            "notification capture history unavailable; notification actions paused until resynchronized"
         );
     }
     if !wakes.is_empty() && CHROME_NATIVE_FAULT_NOTIFIED.with(|notified| !notified.replace(true)) {
@@ -771,6 +827,63 @@ fn native_chrome_permits(window: Option<winit::window::WindowId>) -> bool {
     {
         let _ = window;
         true
+    }
+}
+
+/// Hover needs an installed observer, not an already armed press. A missing
+/// or retired observer stays inert even after another window resynchronizes.
+fn native_chrome_available(window: Option<winit::window::WindowId>) -> bool {
+    #[cfg(all(test, not(target_os = "windows")))]
+    if !chrome_capture_under_test() {
+        return true;
+    }
+    #[cfg(any(target_os = "windows", test))]
+    {
+        !CHROME_NATIVE_FAULT.with(std::cell::Cell::get)
+            && CHROME_NATIVE_OWNER.with(|owner| {
+                owner.try_borrow().ok().is_some_and(|owner| {
+                    !owner.ledger.faulted
+                        && !window.is_some_and(|window| owner.ledger.has_quarantined_edges(window))
+                        && owner.ledger.active.len() + owner.ledger.completed.len()
+                            < ChromeCaptureLedger::MAX_RECEIPTS
+                        && owner
+                            .ledger
+                            .installs
+                            .iter()
+                            .any(|install| install.enabled && Some(install.window) == window)
+                })
+            })
+    }
+    #[cfg(not(any(target_os = "windows", test)))]
+    {
+        let _ = window;
+        true
+    }
+}
+
+/// Only called at the between-turn settle boundary, after fault cancellation
+/// reached the scene. No native delivery or application edge may be in flight.
+fn native_chrome_recover() {
+    #[cfg(any(target_os = "windows", test))]
+    if CHROME_NATIVE_FAULT.with(std::cell::Cell::get) {
+        let recovered = CHROME_NATIVE_OWNER.with(|owner| {
+            let Ok(mut owner) = owner.try_borrow_mut() else {
+                return false;
+            };
+            owner.ledger.fault();
+            if !owner.fault_delivered || owner.app_edge.is_some() || !owner.ledger.recover() {
+                return false;
+            }
+            owner.fault_delivered = false;
+            true
+        });
+        if recovered {
+            CHROME_NATIVE_FAULT.with(|fault| fault.set(false));
+            CHROME_NATIVE_FAULT_NOTIFIED.with(|notified| notified.set(false));
+            tracing::info!(
+                "notification capture fault cleared; cancelled delivery history retained"
+            );
+        }
     }
 }
 
@@ -1288,7 +1401,7 @@ pub(super) fn focus_window_for_text_input(window: &Window) {
             // receives mouse input (mouse is routed via SetCapture, which does
             // not require keyboard focus) but NO WindowEvent::KeyboardInput —
             // typing and focus-scoped hotkeys (Ctrl+/-) are dead even though the
-            // composer is focused at the scene level (hud-dwcr7).
+            // composer is focused at the scene level.
             //
             // The standard Win32 workaround is to temporarily attach this
             // thread's input queue to the current foreground window's thread.
@@ -1342,7 +1455,7 @@ pub(super) fn focus_window_for_text_input(window: &Window) {
                 if !sfw || (attach_required && !attached) || timeout_may_be_left_altered {
                     let fg_after = GetForegroundWindow();
                     crate::diag::diag_write(&format!(
-                        "FOCUS-WARN(hud-ktwsz): foreground focus repair incomplete for overlay \
+                        "FOCUS-WARN: foreground focus repair incomplete for overlay \
                          hwnd={:?} fg_before={:?} attached={} attach_required={} \
                          prev_lock_timeout={:?} lock_cleared={} lock_restored={:?} \
                          timeout_may_be_left_altered={} set_foreground_window={} \
@@ -1412,59 +1525,8 @@ fn left_mouse_button_is_physically_down() -> Option<bool> {
     }
 }
 
-#[cfg(target_os = "windows")]
 pub(super) fn read_windows_clipboard_text() -> Option<String> {
-    use windows::Win32::Foundation::{HGLOBAL, HWND};
-    use windows::Win32::System::DataExchange::{
-        CloseClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard,
-    };
-    use windows::Win32::System::Memory::{GlobalLock, GlobalUnlock};
-
-    const CF_UNICODETEXT_FORMAT: u32 = 13;
-
-    // SAFETY: Clipboard access is confined to the window event-loop thread.
-    unsafe {
-        if IsClipboardFormatAvailable(CF_UNICODETEXT_FORMAT).is_err() {
-            return None;
-        }
-        if OpenClipboard(HWND::default()).is_err() {
-            return None;
-        }
-
-        struct ClipboardGuard;
-        impl Drop for ClipboardGuard {
-            fn drop(&mut self) {
-                // SAFETY: Balances a successful OpenClipboard call.
-                unsafe {
-                    let _ = CloseClipboard();
-                }
-            }
-        }
-        let _guard = ClipboardGuard;
-
-        let handle = GetClipboardData(CF_UNICODETEXT_FORMAT).ok()?;
-        let hglobal = HGLOBAL(handle.0);
-        let ptr = GlobalLock(hglobal);
-        if ptr.is_null() {
-            return None;
-        }
-
-        let mut len = 0usize;
-        let wide = ptr as *const u16;
-        while *wide.add(len) != 0 {
-            len += 1;
-        }
-        let slice = std::slice::from_raw_parts(wide, len);
-        let text = String::from_utf16_lossy(slice);
-        let _ = GlobalUnlock(hglobal);
-
-        if text.is_empty() { None } else { Some(text) }
-    }
-}
-
-#[cfg(not(target_os = "windows"))]
-pub(super) fn read_windows_clipboard_text() -> Option<String> {
-    None
+    crate::clipboard::read_text().ok().flatten()
 }
 
 /// Drive the drag-handle long-press state machine for a single pointer event.
@@ -1530,7 +1592,7 @@ pub(super) fn spin_acquire<T>(
     }
 }
 
-/// [`spin_acquire`] plus interaction-feedback miss telemetry (hud-uyhpn).
+/// [`spin_acquire`] plus interaction-feedback miss telemetry.
 ///
 /// Identical acquisition semantics to [`spin_acquire`], but on a budget timeout
 /// (the guaranteed-feedback gesture is about to drop a scene update) it bumps
@@ -1554,7 +1616,7 @@ pub(super) fn spin_acquire_recording<'a, T>(
         if n == 1 || n % 30 == 0 {
             crate::diag::diag_write(&format!(
                 "INTERACTION-FEEDBACK-MISS: guaranteed-feedback gesture dropped a scene \
-                 update (spin_acquire exceeded {}ms budget) — cumulative {n} [hud-uyhpn]",
+                 update (spin_acquire exceeded {}ms budget) — cumulative {n}",
                 budget.as_millis(),
             ));
         }
@@ -1571,7 +1633,7 @@ pub(super) fn spin_acquire_recording<'a, T>(
 /// portal frame's resize affordance.
 ///
 /// The resize case MUST mirror [`super::portal::apply_portal_resize_pointer_event`]'s
-/// pointer-down path (hud-yno2r): the gesture is resolved from the tile UNDER THE
+/// pointer-down path: the gesture is resolved from the tile UNDER THE
 /// POINTER — not the focused tile — and starts for a portal *frame*: the topmost
 /// hit tile that is itself scrollable (raw-tile portal) OR that spatially
 /// contains a scrollable same-namespace constituent surface (the non-scrollable
@@ -1618,7 +1680,7 @@ pub(super) fn pointer_down_starts_guaranteed_feedback_gesture(
 }
 
 /// Convert a pointer event's window-space `(x, y)` into coordinates local to
-/// `tile_id`'s bounds (hud-etrs0 composer hit-test). Falls back to the raw
+/// `tile_id`'s bounds (composer hit-test). Falls back to the raw
 /// pointer coordinates when the tile is not currently in the scene (e.g. a
 /// drag that outlives the tile it started on).
 fn tile_local_pointer_xy(
@@ -1653,35 +1715,9 @@ pub(super) fn drain_windowed_input_latency(
     )
 }
 
-/// Decide whether the windowed compositor must build and present this frame.
-///
-pub(super) fn windowed_frame_needs_render(
-    scene_changed: bool,
-    geometry_changed: bool,
-    animation_inflight: bool,
-    composer_needs_render: bool,
-    surface_repaint_pending: bool,
-) -> bool {
-    scene_changed
-        || geometry_changed
-        || animation_inflight
-        || composer_needs_render
-        || surface_repaint_pending
-}
-
-/// Carry a recovered-surface repaint requirement until its first fresh submit.
-///
-/// A successful reconfigure can race with a temporarily held scene lock. The
-/// compositor must retain the repaint requirement across that lock miss (and
-/// across a failed subsequent acquire) so an unchanged scene does not strand a
-/// recovered swapchain without visible content.
-pub(super) const fn update_surface_repaint_pending(
-    was_pending: bool,
-    surface_recovered: bool,
-    frame_submitted: bool,
-) -> bool {
-    (was_pending || surface_recovered) && !frame_submitted
-}
+#[cfg(test)]
+use crate::pipeline::frame_needs_render;
+pub(super) use crate::pipeline::update_surface_repaint_pending;
 
 /// Maximum time to wait for the first real surface presentation before the
 /// bounded measurement emits a fail-closed diagnostic artifact.
@@ -2143,7 +2179,7 @@ pub(super) fn notification_exit_ms(
 
 impl WinitApp {
     /// Best-effort per-frame reconvergence of the lock-free `active_tab_mirror`
-    /// from the authoritative scene (hud-dwcr7).  Non-blocking: uses `try_lock`
+    /// from the authoritative scene. Non-blocking: uses `try_lock`
     /// on both the shared-state and scene mutexes and silently skips this frame
     /// if either is busy.  This is a safety net — the mirror is primarily kept
     /// fresh at the point of each active_tab change — so it must never stall the
@@ -2162,7 +2198,7 @@ impl WinitApp {
     /// portal clear removed. A composer on that tile is blurred and its local
     /// echo cleared; otherwise the compositor keeps blinking a caret for a
     /// composer that no longer exists, presenting a frame per blink on an
-    /// otherwise idle HUD (hud-oyo7k).
+    /// otherwise idle HUD.
     /// Non-blocking: skips this frame if the scene lock is busy.
     pub(super) fn clear_focus_on_removed_tile(&mut self) {
         let composer_lost = {
@@ -2190,7 +2226,7 @@ impl WinitApp {
     }
 
     /// Publish the active tab's current keyboard-focus owner to the compositor's
-    /// chrome-layer focus-ring pass (hud-k6yvb).
+    /// chrome-layer focus-ring pass.
     ///
     /// Maps the `FocusManager` owner to a [`FocusRingOwner`]: a focusable node
     /// (`Some(node_id)`) or a tile-level stop (`None`). `FocusOwner::None` and
@@ -2256,7 +2292,7 @@ impl WinitApp {
     }
 
     /// Publish the portal tile whose bottom-right resize corner the pointer is
-    /// over to the compositor's grip pass (hud-wgiys).
+    /// over to the compositor's grip pass.
     ///
     /// Per-frame + latest-wins, exactly like [`WinitApp::push_focus_ring_owner`]:
     /// the compositor swaps that tile's resize-grip mark to `hover_color` and
@@ -2272,7 +2308,7 @@ impl WinitApp {
     }
 
     /// Publish the tile under the pointer to the compositor so it shows that
-    /// tile's viewer close button (hud-jm8nq.11).
+    /// tile's viewer close button.
     ///
     /// Resolved from the polled cursor and the lock-free hit-test snapshot, so
     /// it works in passthrough overlay mode (where the OS delivers no pointer
@@ -2286,68 +2322,10 @@ impl WinitApp {
         }
     }
 
-    pub(super) fn drain_input_capture_commands(&mut self) {
-        while let Ok(command) = self.state.input_capture_rx.try_recv() {
-            self.state.pending_input_capture_commands.push_back(command);
-        }
-
-        while let Some(command) = self.state.pending_input_capture_commands.pop_front() {
-            let Ok(state) = self.state.shared_state.try_lock() else {
-                tracing::warn!("input capture command deferred: shared_state lock busy");
-                self.state
-                    .pending_input_capture_commands
-                    .push_front(command);
-                break;
-            };
-            let Ok(scene) = state.scene.try_lock() else {
-                tracing::warn!("input capture command deferred: scene lock busy");
-                self.state
-                    .pending_input_capture_commands
-                    .push_front(command);
-                break;
-            };
-
-            match command {
-                tze_hud_protocol::session::InputCaptureCommand::Request {
-                    tile_id,
-                    node_id,
-                    device_id,
-                    release_on_up,
-                } => {
-                    let req = tze_hud_input::CaptureRequest {
-                        tile_id,
-                        node_id,
-                        device_id,
-                    };
-                    if let Some(dispatch) =
-                        self.state
-                            .input_processor
-                            .request_capture(&req, &scene, release_on_up)
-                    {
-                        tracing::debug!(
-                            tile_id = ?tile_id,
-                            node_id = ?node_id,
-                            device_id,
-                            kind = ?dispatch.kind,
-                            "session input capture request applied"
-                        );
-                    } else {
-                        tracing::warn!(
-                            tile_id = ?tile_id,
-                            node_id = ?node_id,
-                            device_id,
-                            "session input capture request ignored: target not found"
-                        );
-                    }
-                }
-                tze_hud_protocol::session::InputCaptureCommand::Release { device_id } => {
-                    let req = tze_hud_input::CaptureReleaseRequest { device_id };
-                    if let Some(dispatch) = self.state.input_processor.release_capture(&req, &scene)
-                    {
-                        dispatch_capture_released_event(&self.state.input_event_tx, dispatch);
-                    }
-                }
-            }
+    /// Publish only the element identity; repeated motion inside it stays quiet.
+    pub(super) fn push_drag_handle_hover(&self) {
+        if let Ok(mut slot) = self.state.drag_handle_hover_state.lock() {
+            *slot = self.drag_handle_hover_target();
         }
     }
 
@@ -2430,6 +2408,37 @@ impl WinitApp {
             return native_chrome_permits(self.state.press_window);
         }
         self.state.window.is_none() || native_chrome_permits(self.state.press_window)
+    }
+
+    fn notification_feedback_permitted(&self, down: bool) -> bool {
+        if down {
+            return self.notification_pointer_permitted();
+        }
+        if self
+            .state
+            .safe_mode_atomic
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            return false;
+        }
+        let window = self
+            .state
+            .cursor_window
+            .or(self.state.press_window)
+            .or_else(|| self.state.window.as_ref().map(|window| window.id()));
+        #[cfg(test)]
+        if chrome_capture_under_test() {
+            return native_chrome_available(window);
+        }
+        self.state.window.is_none() || native_chrome_available(window)
+    }
+
+    pub(super) fn recover_chrome_capture(&mut self) {
+        if !self.state.input_processor.chrome_feedback_cancel_pending
+            && self.state.pending_pointer_buttons.is_empty()
+        {
+            native_chrome_recover();
+        }
     }
 
     /// Route a delivered mouse edge through panel ownership and native chrome
@@ -2515,7 +2524,7 @@ impl WinitApp {
         }
         // The press already ended: `synthesize_left_release_if_physically_up`
         // saw the button up before this event arrived and sent the Up. A
-        // second Up would repeat the release (hud-z21e9).
+        // second Up would repeat the release.
         if !self.state.left_button_down {
             return;
         }
@@ -2628,7 +2637,7 @@ impl WinitApp {
     }
 
     /// Map a composer-node-local pointer position to a draft byte offset
-    /// (hud-etrs0 pointer caret hit-test). `tile_local_x`/`tile_local_y` are
+    /// (pointer caret hit-test). `tile_local_x`/`tile_local_y` are
     /// pointer coordinates already converted to the owning tile's local space
     /// (see `tile_local_pointer_xy`); this clamps them into the node's bounds
     /// before hit-testing. Returns `None` when `node_id` does not resolve to a
@@ -2636,7 +2645,7 @@ impl WinitApp {
     ///
     /// Prefers the real glyph-geometry hit-test: `byte_at_point` against the
     /// wrapped visual-row layout the compositor already publishes for
-    /// ArrowUp/ArrowDown (`self.state.composer_visual_layout`, hud-21o6x).
+    /// ArrowUp/ArrowDown (`self.state.composer_visual_layout`).
     /// That layout is measured with the composer's content x origin inset by
     /// `portal.spacing.content_inset_px`, so the node-local x is de-inset to
     /// match before the lookup. Mirrors the arrow-key path's freshness guard
@@ -2646,20 +2655,20 @@ impl WinitApp {
     /// The node-local `local_y` is passed straight through: `byte_at_point` maps
     /// it to a visual row via the input-box geometry the compositor publishes in
     /// the same layout (bottom-anchored short box on a tall projection portal,
-    /// hud-lw60x), and `node_h` serves only as the even-split fallback height
+    /// ), and `node_h` serves only as the even-split fallback height
     /// when no geometry is present.
     ///
     /// Falls back to the previous linear `(local_x / node_width) *
     /// text_byte_len` proportion when there is no fresh layout — the
     /// single-line composer profile (`portal.composer.max_lines == 1`,
-    /// hud-zlfi4) never publishes one, and a multi-line composer may not have
+    /// ) never publishes one, and a multi-line composer may not have
     /// one yet on the first frame after focus gain.
     ///
     /// `layout.h_scroll_px` is folded back into the de-inset screen-space x
-    /// before the lookup (hud-uui70): the single-line profile's `glyph_x`
+    /// before the lookup: the single-line profile's `glyph_x`
     /// table is measured in UNSCROLLED draft space
     /// (`TextRasterizer::measure_composer_single_line_layout`), but once a
-    /// long draft triggers caret-follow horizontal scroll (hud-zlfi4) the
+    /// long draft triggers caret-follow horizontal scroll the
     /// on-screen glyphs are shifted left by `h_scroll_px` — the inverse of
     /// the chrome-layer caret quad's `caret_x - h_scroll_px`
     /// (`append_composer_caret_vertices`) and `composer_ime_caret_anchor`'s
@@ -2709,35 +2718,94 @@ impl WinitApp {
             return Some(layout.byte_at_point(text_x, local_y, node_h));
         }
 
-        // Fallback: the pre-hud-etrs0 crude linear proportion.
+        // Fallback: the previous crude linear proportion.
         let frac = (local_x / node_w) as f64;
         Some((frac * draft_text_len.unwrap_or(0) as f64).round() as usize)
     }
 
-    /// Enqueue a pointer event into the input ring buffer.
-    ///
-    /// Maps a `PointerEventKind` to the corresponding `InputEventKind` variant
-    /// understood by the channel topology and compositor pipeline.
+    /// Handle one pointer event: local feedback, drags and agent dispatch.
     ///
     /// In overlay mode, dynamically toggles cursor hittest based on whether the
-    /// cursor is inside any active hit-region (spec §Overlay click-through, line 181):
+    /// cursor is inside any active hit-region:
     /// - Inside a hit-region → `set_cursor_hittest(true)` (window captures events).
     /// - Outside all hit-regions → `set_cursor_hittest(false)` (events pass through).
     pub(super) fn enqueue_pointer_event(&mut self, kind: PointerEventKind) {
-        self.handle_pointer_event(kind, true);
+        // A press or release behind retained ones waits its turn:
+        // replaying them in order is what keeps a click a click.
+        if !self.state.pending_pointer_buttons.is_empty() {
+            if kind == PointerEventKind::Move {
+                // Hover follows once the buttons ahead of it have replayed.
+                self.state.pending_pointer_move = true;
+                self.schedule_shared_scene_availability_wake();
+            } else {
+                self.retain_pointer_button(kind, Instant::now());
+            }
+            return;
+        }
+        self.process_pointer_event(kind, true, Instant::now(), None);
     }
 
-    /// `record` is false only when replaying a retained Move (hud-65gpz): the
-    /// input ring already holds the original event.
-    fn handle_pointer_event(&mut self, kind: PointerEventKind, record: bool) {
+    /// Retain a press or release the scene lock could not take,
+    /// with everything it arrived with: cursor position, pressed window and
+    /// time. Bounded: under pathological contention the oldest entry is
+    /// dropped rather than growing memory.
+    fn retain_pointer_button(&mut self, kind: PointerEventKind, at: Instant) {
+        let event = RetainedPointerEvent::Button {
+            kind,
+            x: self.state.cursor_x,
+            y: self.state.cursor_y,
+            press_window: self.state.press_window,
+            at,
+            notification_permitted: self.notification_pointer_permitted(),
+        };
+        self.retain_pointer(event);
+    }
+
+    fn retain_pointer(&mut self, event: RetainedPointerEvent) {
+        if self.state.pending_pointer_buttons.len() >= RETAINED_BUTTON_MAX {
+            // Shed wheel input before any press or release.
+            let evict = self
+                .state
+                .pending_pointer_buttons
+                .iter()
+                .position(|r| matches!(r.event, RetainedPointerEvent::Wheel(_)))
+                .unwrap_or(0);
+            self.state.pending_pointer_buttons.remove(evict);
+        }
+        // Keys already waiting arrived first and replay first.
+        let keys_ahead = self.state.pending_keyboard_events.len();
+        self.state
+            .pending_pointer_buttons
+            .push_back(RetainedButton { keys_ahead, event });
+        self.schedule_shared_scene_availability_wake();
+    }
+
+    /// Keyboard events drained ahead of retained pointer input no longer
+    /// precede it.
+    pub(super) fn note_keys_drained(&mut self, drained: usize) {
+        for retained in &mut self.state.pending_pointer_buttons {
+            retained.keys_ahead = retained.keys_ahead.saturating_sub(drained);
+        }
+    }
+
+    /// Run one pointer event through hit-testing and the scene. Returns false
+    /// when a press or release could not reach the scene; with `retain` it is
+    /// then queued, while a replay leaves it at the queue's front.
+    fn process_pointer_event(
+        &mut self,
+        kind: PointerEventKind,
+        retain: bool,
+        at: Instant,
+        notification_permitted: Option<bool>,
+    ) -> bool {
         if kind == PointerEventKind::Down && self.state.answer_keyboard.focus.take().is_some() {
             self.state.input_processor.chrome_feedback_cancel_pending = true;
         }
         if self.state.context_menu_press.is_some() {
             // The context menu owns the pointer; a retained Move is moot and
-            // must not keep the deferred-work wake alive (hud-65gpz).
+            // must not keep the deferred-work wake alive.
             self.state.pending_pointer_move = false;
-            return;
+            return true;
         }
         // A press or release hit-tests the content the earlier wheel
         // notches scrolled to, so settle them first when the lock allows.
@@ -2760,11 +2828,15 @@ impl WinitApp {
                 .as_ref()
                 .is_some_and(|gesture| gesture.terminal.is_some())
             {
+                self.schedule_shared_scene_availability_wake();
                 if kind == PointerEventKind::Move {
                     self.state.pending_pointer_move = true;
+                    return true;
                 }
-                self.schedule_shared_scene_availability_wake();
-                return;
+                if retain {
+                    self.retain_pointer_button(kind, at);
+                }
+                return false;
             }
         }
         let original_window_is_live = self.primary_drag_window_is_live();
@@ -2783,29 +2855,22 @@ impl WinitApp {
 
         self.tick_widget_hover_tracking();
 
-        let channel_kind = match kind {
-            PointerEventKind::Move => InputEventKind::PointerMove { x, y },
-            PointerEventKind::Down => InputEventKind::PointerPress { x, y, button: 0 },
-            PointerEventKind::Up => InputEventKind::PointerRelease { x, y, button: 0 },
-        };
-        let input_event = InputEvent {
-            timestamp_ns: nanoseconds_since_start(),
-            kind: channel_kind,
-        };
-        if record {
-            enqueue_input(&self.state.input_ring, input_event);
-        }
-
         // Also feed the InputProcessor for local feedback (Stage 2).
-        // This happens synchronously on the main thread per spec §Stage 2.
+        // This happens synchronously on the main thread per Stage 2.
         let input_started_at = Instant::now();
         let pointer_event = PointerEvent {
             x,
             y,
             kind,
             device_id: 0,
-            timestamp: Some(input_started_at),
+            // A replayed press keeps its arrival time, so retained clicks
+            // never merge into a multi-click they were not.
+            timestamp: Some(at),
         };
+        self.state.input_processor.notification_actions_enabled = self
+            .notification_feedback_permitted(pointer_event.kind == PointerEventKind::Down)
+            && (pointer_event.kind != PointerEventKind::Down
+                || notification_permitted.unwrap_or(true));
         // Acquire the scene lock directly (without going through SharedState) so that
         // the main-thread input path does not contend with session handlers that hold
         // both the SharedState lock and the scene lock.
@@ -2822,13 +2887,13 @@ impl WinitApp {
         let portal_resize_outcome: Option<PortalResizePointerOutcome>;
         // Flag set when a composer focus-lost transition is detected inside the
         // locked block below; consumed after the lock is released to call
-        // clear_local_composer_echo() without a borrow conflict (hud-r3ax6).
+        // clear_local_composer_echo() without a borrow conflict.
         let mut composer_focus_lost = false;
         // Flag set when a pointer caret placement / drag-select mutates the
         // composer draft selection inside the locked block below; consumed
         // after the lock is released to push the updated echo to the
         // compositor (which renders caret/selection from the local echo slot,
-        // not the input processor) without a borrow conflict (hud-etrs0).
+        // not the input processor) without a borrow conflict.
         let mut composer_selection_changed = false;
         let mut take_text_focus = false;
         let mut reading_effect = None;
@@ -2878,7 +2943,7 @@ impl WinitApp {
         // borrow of `self` is released at the end of this if-let/else — the
         // post-lock section below needs `&mut self` (drag-release persist,
         // composer-echo clear).
-        // The interaction-feedback miss counter (hud-uyhpn) is bumped inside
+        // The interaction-feedback miss counter is bumped inside
         // `spin_acquire_recording`, which wraps `spin_acquire` and — on a budget
         // timeout during a guaranteed-feedback gesture — records the dropped scene
         // update. Kept in the `if`-scrutinee position (not a named `let`) so the
@@ -2915,7 +2980,7 @@ impl WinitApp {
                 // broadcast FocusGainedEvent / FocusLostEvent to agents via
                 // dispatch_focus_event on the input_event_tx channel.
                 // Resolve the tab that should receive focus for this pointer
-                // event.  Click-to-focus is per-tab (RFC 0004 §1.1/§1.2), so the
+                // event. Click-to-focus is per-tab, so the
                 // authoritative tab is the one that OWNS the tile under the
                 // pointer — not the global `active_tab`.  A resident gRPC /
                 // projection session (e.g. a text-stream portal) creates tiles
@@ -2923,7 +2988,7 @@ impl WinitApp {
                 // tab carries no widgets boot with `active_tab == None`, and
                 // tab activation can otherwise drift; in either case keying focus
                 // off the stale/absent global `active_tab` silently drops focus
-                // acquisition (hud-dwcr7).  Pointer-down on a tile therefore
+                // acquisition. Pointer-down on a tile therefore
                 // activates that tile's tab so focus + keyboard routing (which
                 // reads `active_tab`) target the surface the operator clicked.
                 if pointer_event.kind == PointerEventKind::Down {
@@ -2940,7 +3005,7 @@ impl WinitApp {
                                     scene.active_tab = Some(hit_tab);
                                 }
                                 // Keep the lock-free keyboard-dispatch mirror in
-                                // sync with the tab we just activated (hud-dwcr7).
+                                // sync with the tab we just activated.
                                 state.refresh_active_tab_mirror(&scene);
                                 tracing::debug!(
                                     tab_id = ?hit_tab,
@@ -3010,12 +3075,12 @@ impl WinitApp {
                     dispatch_focus_event(&self.state.input_event_tx, transition);
                 }
 
-                // ── Composer pointer-selection routing (§4.1 / hud-083az, hud-etrs0) ──
+                // ── Composer pointer-selection routing  ──
                 // On pointer-Down, if a composer region is focused and the hit
                 // landed on that same node, position the draft cursor via a
                 // real glyph-geometry hit-test (`byte_at_point`, backed by the
                 // wrapped visual-row layout the compositor already publishes
-                // for ArrowUp/ArrowDown — hud-21o6x), falling back to the
+                // for ArrowUp/ArrowDown — ), falling back to the
                 // previous linear (local_x / node_width) * text_len
                 // approximation when no layout is available yet (single-line
                 // composer profile, or the first frame after focus). See
@@ -3123,12 +3188,12 @@ impl WinitApp {
                 // managed zone interaction element (e.g. a notification dismiss
                 // button).  Dismiss actions are applied synchronously here so the
                 // stale affordance disappears before the next rendered frame —
-                // satisfying the "local feedback first" doctrine.
+                // satisfying the "local feedback first" rule.
                 //
                 // Callback and human-X events enter their publisher's retained
                 // MCP input lane; notification tokens are delivered unlocked.
                 //
-                // Button semantics (hud-z21e9): a release activates an
+                // Button semantics: a release activates an
                 // affordance only when the press began on that same
                 // affordance, so a release that lands elsewhere (the cursor
                 // moved, or a press that started off the button) never fires
@@ -3145,7 +3210,8 @@ impl WinitApp {
                                 kind,
                                 ZoneInteractionKind::Dismiss | ZoneInteractionKind::Action { .. }
                             );
-                            let allowed = self.notification_pointer_permitted();
+                            let allowed = self.notification_pointer_permitted()
+                                && notification_permitted.unwrap_or(true);
                             (!notification || allowed).then(|| interaction_id.clone())
                         }
                         _ => None,
@@ -3164,7 +3230,8 @@ impl WinitApp {
                         && (!matches!(
                             kind,
                             ZoneInteractionKind::Dismiss | ZoneInteractionKind::Action { .. }
-                        ) || self.notification_pointer_permitted())
+                        ) || (self.notification_pointer_permitted()
+                            && notification_permitted.unwrap_or(true)))
                     {
                         match kind {
                             ZoneInteractionKind::Dismiss | ZoneInteractionKind::Action { .. } => {
@@ -3214,7 +3281,7 @@ impl WinitApp {
                                 // Local feedback first: snap the tile's
                                 // viewport back to the tail synchronously, in
                                 // the same pointer-up dispatch that produced
-                                // the hit — no adapter roundtrip (hud-9ci61).
+                                // the hit — no adapter roundtrip.
                                 let changed = self
                                     .state
                                     .input_processor
@@ -3294,7 +3361,7 @@ impl WinitApp {
                     self.state.primary_drag_gesture = None;
                 }
 
-                // ── Pointer-affordance portal resize (§6b.1) ─────────────────
+                // ── Pointer-affordance portal resize ─────────────────
                 // Hit-test the focused portal's resize affordance strip on every
                 // pointer event.  On PointerDown inside an affordance, starts the
                 // drag gesture (gesture_active = true → adapter publishes blocked).
@@ -3383,7 +3450,7 @@ impl WinitApp {
             self.perform_reading_effect(effect);
         }
 
-        // A busy scene lock must not lose hover/hit-test (hud-65gpz): retain the
+        // A busy scene lock must not lose hover/hit-test: retain the
         // Move and replay it at the then-current cursor when the lock frees.
         // Any processed pointer event subsumes a retained Move.
         if pointer_processed {
@@ -3397,6 +3464,16 @@ impl WinitApp {
         if !pointer_processed && pointer_event.kind == PointerEventKind::Down {
             self.state.zone_press = None;
         }
+        // Nor may it be lost: a dropped Down left focus and buttons untouched
+        // while the Up still landed. Retain it, and the Up that
+        // follows, for an in-order replay once the lock frees. A drag's Up is
+        // already retained as the gesture's terminal below.
+        let retained_as_terminal =
+            pointer_event.kind == PointerEventKind::Up && self.state.primary_drag_gesture.is_some();
+        let retain_button = (!pointer_processed
+            && pointer_event.kind != PointerEventKind::Move
+            && !retained_as_terminal)
+            .then(|| pointer_event.kind.clone());
 
         if !pointer_processed
             && pointer_event.kind == PointerEventKind::Up
@@ -3421,7 +3498,7 @@ impl WinitApp {
         // intermediate (move) and final (up) geometry changes.  GestureStarted
         // (down) events are also emitted so adapters can observe gesture
         // lifecycle.  Fire-and-forget (best-effort coalescible state-stream
-        // delivery per §6b.4).
+        // delivery ).
         if let Some(outcome) = portal_resize_outcome {
             self.finish_portal_resize_members(
                 &outcome.members,
@@ -3432,9 +3509,9 @@ impl WinitApp {
         }
 
         // Post-lock: clear local composer echo if composer focus was lost inside
-        // the shared_state lock scope above (hud-r3ax6). A stale pointer
+        // the shared_state lock scope above. A stale pointer
         // drag-select anchor from that same composer must not leak into
-        // whatever region focuses next (hud-etrs0).
+        // whatever region focuses next.
         if composer_focus_lost {
             self.clear_local_composer_echo();
             self.state.composer_pointer_drag_anchor = None;
@@ -3442,16 +3519,23 @@ impl WinitApp {
             // A pointer caret placement or drag-select changed the draft
             // selection; publish the refreshed snapshot so the compositor
             // renders the new caret/highlight on the next frame rather than
-            // leaving it stale until the next keystroke (hud-etrs0, §4.1
-            // local-feedback-first).
+            // leaving it stale until the next keystroke.
             self.push_local_composer_echo(input_started_at);
         }
 
         // Update the OS resize/move cursor to reflect the affordance under the
-        // pointer (hud-g5yu1).  Runs after the gesture state machines above so
+        // pointer. Runs after the gesture state machines above so
         // `active_edge`/`drag_active` reflect the event we just processed; the
         // CursorIconTracker suppresses redundant winit calls on the move stream.
         self.update_portal_cursor_icon();
+
+        let reached = retain_button.is_none();
+        if let Some(kind) = retain_button
+            && retain
+        {
+            self.retain_pointer_button(kind, at);
+        }
+        reached
     }
 
     /// Enqueue and process a local-first scroll event.
@@ -3459,7 +3543,7 @@ impl WinitApp {
     /// Applies the offset locally (< 4ms p99 path) and, if the tile owner is
     /// subscribed, dispatches a `ScrollOffsetChangedEvent` to the agent via the
     /// `INPUT_EVENTS` channel. A busy scene lock retains the delta instead of
-    /// dropping it (hud-65gpz); it applies, in order, on the next successful
+    /// dropping it; it applies, in order, on the next successful
     /// lock via one coalesced availability wake.
     /// `delta_y` is in `step` units (hud-ljhku.13); the target sizes lines
     /// and pages when the delta applies.
@@ -3474,6 +3558,36 @@ impl WinitApp {
         let y = self.state.cursor_y;
         self.update_overlay_cursor_hittest();
 
+        // Earlier keyboard work and retained clicks keep their place ahead of
+        // this wheel, including a post-edit INPUT reset still awaiting the scene.
+        if !self.state.pending_keyboard_events.is_empty()
+            || !self.state.pending_pointer_buttons.is_empty()
+        {
+            let scroll = RetainedScroll {
+                x,
+                y,
+                delta_x,
+                delta_y,
+                step,
+            };
+            // Consecutive notches share one entry and coalesce there, so a
+            // burst of wheel input can never evict the click ahead of it.
+            let keys_ahead = self.state.pending_keyboard_events.len();
+            if let Some(RetainedButton {
+                keys_ahead: back_keys,
+                event: RetainedPointerEvent::Wheel(deltas),
+            }) = self.state.pending_pointer_buttons.back_mut()
+                && *back_keys == keys_ahead
+            {
+                retain_scroll(deltas, scroll);
+                return;
+            }
+            self.retain_pointer(RetainedPointerEvent::Wheel(
+                std::collections::VecDeque::from([scroll]),
+            ));
+            return;
+        }
+
         retain_scroll(
             &mut self.state.pending_scroll,
             RetainedScroll {
@@ -3485,7 +3599,9 @@ impl WinitApp {
             },
         );
         if self.apply_retained_scroll().is_none() {
-            self.schedule_shared_scene_availability_wake();
+            // A later key must see this wheel in the same arrival-order FIFO.
+            let deltas = std::mem::take(&mut self.state.pending_scroll);
+            self.retain_pointer(RetainedPointerEvent::Wheel(deltas));
         }
     }
 
@@ -3496,8 +3612,20 @@ impl WinitApp {
         if self.state.pending_scroll.is_empty() {
             return Some(false);
         }
+        self.apply_scroll_with(std::collections::VecDeque::new())
+    }
+
+    /// Apply retained wheel deltas, then `later` ones, under one scene lock.
+    /// None leaves both untouched for a retry.
+    fn apply_scroll_with(
+        &mut self,
+        later: std::collections::VecDeque<RetainedScroll>,
+    ) -> Option<bool> {
         let state = self.state.shared_state.try_lock().ok()?;
         let mut scene = state.scene.try_lock().ok()?;
+        for scroll in later {
+            retain_scroll(&mut self.state.pending_scroll, scroll);
+        }
         for retained in self.state.pending_scroll.drain(..) {
             if let Some(ev) = self.state.input_processor.process_wheel_event(
                 &tze_hud_input::ScrollEvent {
@@ -3515,21 +3643,125 @@ impl WinitApp {
         Some(true)
     }
 
-    /// Retry pointer input a busy scene lock deferred (hud-65gpz): retained
+    /// Retry pointer input a busy scene lock deferred: retained
     /// wheel deltas first (they arrived at their own positions), then one
     /// Move at the current cursor. True when either reached the scene.
     pub(super) fn drain_retained_pointer_input(&mut self) -> bool {
         let scrolled = self.apply_retained_scroll().unwrap_or(false);
+        // Presses and releases replay in arrival order, each at the position
+        // it arrived at; the first that still finds the lock busy
+        // stops the replay and keeps its place.
+        let mut pressed = false;
+        while let Some(retained) = self.state.pending_pointer_buttons.front().cloned() {
+            if retained.keys_ahead > 0 {
+                // Keys typed before this pointer input go first.
+                self.drain_pending_keyboard_events();
+                if self
+                    .state
+                    .pending_pointer_buttons
+                    .front()
+                    .is_some_and(|front| front.keys_ahead > 0)
+                {
+                    break;
+                }
+            }
+            let reached = match retained.event {
+                RetainedPointerEvent::Wheel(deltas) => {
+                    // Earlier wheel deltas are already ahead of these in
+                    // `pending_scroll`; joining them keeps their order. A busy
+                    // lock keeps the entry, and what follows it, in place.
+                    self.apply_scroll_with(deltas).is_some()
+                }
+                RetainedPointerEvent::Button {
+                    kind,
+                    x,
+                    y,
+                    press_window,
+                    at,
+                    notification_permitted,
+                } => {
+                    let live = (
+                        self.state.cursor_x,
+                        self.state.cursor_y,
+                        self.state.press_window,
+                    );
+                    (
+                        self.state.cursor_x,
+                        self.state.cursor_y,
+                        self.state.press_window,
+                    ) = (x, y, press_window);
+                    // A release first moves to where it happened, so a
+                    // press-drag whose moves were deferred still travels.
+                    let reached = (kind != PointerEventKind::Up
+                        || self.process_pointer_event(PointerEventKind::Move, false, at, None))
+                        && self.process_pointer_event(
+                            kind,
+                            false,
+                            at,
+                            Some(notification_permitted),
+                        );
+                    (
+                        self.state.cursor_x,
+                        self.state.cursor_y,
+                        self.state.press_window,
+                    ) = live;
+                    reached
+                }
+            };
+            if !reached {
+                break;
+            }
+            self.state.pending_pointer_buttons.pop_front();
+            pressed = true;
+        }
+        if pressed {
+            // Replay hit-tested at past positions and windows; re-derive
+            // overlay capture from the live pointer.
+            self.update_overlay_cursor_hittest();
+        }
+        if pressed && self.state.pending_pointer_buttons.is_empty() {
+            // Keys typed after the replayed pointer input follow it now.
+            self.drain_pending_keyboard_events();
+        }
         let mut moved = false;
         if self.state.pending_pointer_move {
-            self.handle_pointer_event(PointerEventKind::Move, false);
+            self.enqueue_pointer_event(PointerEventKind::Move);
             moved = !self.state.pending_pointer_move;
         }
-        scrolled || moved
+        scrolled || pressed || moved
     }
 }
 
-/// One wheel delta retained across a busy scene lock (hud-65gpz).
+/// Pointer input retained in arrival order behind a press or release that
+/// found the scene lock busy.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct RetainedButton {
+    /// Keyboard events queued before this input arrived; they replay first.
+    pub(super) keys_ahead: usize,
+    pub(super) event: RetainedPointerEvent,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(super) enum RetainedPointerEvent {
+    Button {
+        kind: PointerEventKind,
+        x: f32,
+        y: f32,
+        press_window: Option<winit::window::WindowId>,
+        at: Instant,
+        /// A denied edge cannot inherit a later native press's authorization.
+        /// Replay still checks current permission, so faults remain fail-closed.
+        notification_permitted: bool,
+    },
+    /// Wheel deltas that arrived behind a retained press or release,
+    /// coalesced as `pending_scroll` coalesces them.
+    Wheel(std::collections::VecDeque<RetainedScroll>),
+}
+
+/// Upper bound on retained presses and releases.
+const RETAINED_BUTTON_MAX: usize = 16;
+
+/// One wheel delta retained across a busy scene lock.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct RetainedScroll {
     pub(super) x: f32,
@@ -3581,7 +3813,6 @@ impl WinitApp {
     /// Check the `FrameReadySignal` and present the frame if the compositor
     /// has signalled one.
     ///
-    /// Per spec §Compositor Thread Ownership (line 54-55):
     /// "WHEN a frame is ready for presentation THEN the compositor thread MUST
     /// signal the main thread via FrameReadySignal, and only the main thread
     /// SHALL call surface.present()."
@@ -4098,21 +4329,19 @@ mod tests {
 
     #[test]
     fn unchanged_windowed_scene_sleeps_after_animation_completes() {
-        assert!(!windowed_frame_needs_render(
-            false, false, false, false, false
-        ));
+        assert!(!frame_needs_render(false, false, false, false, false));
         for (scene, geometry, animation, composer) in [
             (true, false, false, false),
             (false, true, false, false),
             (false, false, true, false),
             (false, false, false, true),
         ] {
-            assert!(windowed_frame_needs_render(
+            assert!(frame_needs_render(
                 scene, geometry, animation, composer, false
             ));
         }
         assert!(
-            !windowed_frame_needs_render(false, false, false, false, false),
+            !frame_needs_render(false, false, false, false, false),
             "the same production consumer sleeps after the transition lands"
         );
     }
@@ -4120,7 +4349,7 @@ mod tests {
     #[test]
     fn successful_surface_recovery_repaints_an_unchanged_scene() {
         assert!(
-            windowed_frame_needs_render(false, false, false, false, true),
+            frame_needs_render(false, false, false, false, true),
             "a reconfigured surface needs one fresh frame even when scene state is unchanged"
         );
     }
@@ -4130,7 +4359,7 @@ mod tests {
         let pending_after_recovery = update_surface_repaint_pending(false, true, false);
         assert!(pending_after_recovery);
         assert!(
-            windowed_frame_needs_render(false, false, false, false, pending_after_recovery),
+            frame_needs_render(false, false, false, false, pending_after_recovery),
             "the recovered surface must request a fresh frame even for an unchanged scene"
         );
 
@@ -4154,7 +4383,7 @@ mod tests {
     /// hard-block — once a holder outlasts the budget.  This is what keeps a
     /// dragged window tracking the pointer instead of jumping in bursts, and a
     /// `Ctrl+`/`-` resize landing the same frame, without ever freezing the UI
-    /// thread on a pathological lock holder (hud-0xudd).  Deliberately a plain
+    /// thread on a pathological lock holder. Deliberately a plain
     /// `#[test]` (no runtime) to also assert it works off the async runtime.
     #[test]
     fn spin_acquire_waits_out_brief_holder_but_yields_on_overrun() {
@@ -4216,7 +4445,7 @@ mod tests {
     use tze_hud_input::{FocusManager, InputProcessor, PointerEventKind};
 
     /// Retained wheel input keeps order across positions, sums a burst at one
-    /// position, and stays bounded however long the lock is held (hud-65gpz).
+    /// position, and stays bounded however long the lock is held.
     #[test]
     fn retained_scroll_coalesces_bursts_and_stays_bounded() {
         use super::{RETAINED_SCROLL_MAX, RetainedScroll, retain_scroll};
@@ -4561,7 +4790,7 @@ mod tests {
         );
     }
 
-    /// hud-yno2r: the pre-lock guaranteed-feedback predicate must also fire when
+    /// the pre-lock guaranteed-feedback predicate must also fire when
     /// the pointer is on the resize corner of a NON-scrollable portal *frame*
     /// that contains scrollable panes — the first-class / multi-surface layout.
     /// Before the fix this keyed off the focused tile being scrollable, so a
@@ -4584,7 +4813,7 @@ mod tests {
                 PortalWindowTokens::default(),
             ),
             "PointerDown on a multi-surface portal frame's resize corner must spin-acquire \
-             even though the frame tile is not itself scrollable (hud-yno2r)"
+             even though the frame tile is not itself scrollable"
         );
     }
 
@@ -4604,7 +4833,7 @@ mod tests {
         );
     }
 
-    /// hud-yno2r regression (end-to-end): drive the *full* pointer pipeline
+    /// regression (end-to-end): drive the *full* pointer pipeline
     /// (`WinitApp::enqueue_pointer_event`) so click-to-focus and the resize
     /// handler run in their real order on one pointer-down — the coverage the
     /// live OS-injection sweep found was missing.
@@ -4683,7 +4912,7 @@ mod tests {
         assert!(
             frame_after.width > frame_before.width && frame_after.height > frame_before.height,
             "dragging the frame corner must grow the whole portal even though \
-             click-to-focus moved focus off the scrollable pane (hud-yno2r)"
+             click-to-focus moved focus off the scrollable pane"
         );
 
         // Release the gesture.
@@ -4833,7 +5062,7 @@ mod tests {
     /// portal, or the lease expires) must blur the composer and clear the
     /// local echo. Otherwise the compositor keeps a caret blinking for a
     /// composer that no longer exists and presents a frame per blink on an
-    /// otherwise idle HUD (hud-oyo7k).
+    /// otherwise idle HUD.
     #[test]
     fn removing_focused_composer_tile_clears_local_echo() {
         use tze_hud_input::{FocusManager, InputProcessor};
@@ -5081,7 +5310,7 @@ mod tests {
         );
         // The compositor renders the caret/selection from the local echo slot,
         // not the input processor, so the pointer caret must be published there
-        // too (hud-etrs0 local-feedback-first) or the visible caret stays stale
+        // too (local-feedback-first) or the visible caret stays stale
         // until the next keystroke.
         let echo = app
             .state
@@ -5116,7 +5345,7 @@ mod tests {
              the new pointer position"
         );
         // The drag-extended selection must also reach the local echo slot so
-        // the highlight repaints live during the drag (hud-etrs0), not only
+        // the highlight repaints live during the drag, not only
         // after a later keystroke.
         let echo = app
             .state
@@ -5151,10 +5380,10 @@ mod tests {
         );
     }
 
-    /// hud-uui70: the single-line profile's `glyph_x` table is measured in
-    /// UNSCROLLED draft space (`measure_composer_single_line_layout`); once a
-    /// long draft triggers caret-follow horizontal scroll (`h_scroll_px`,
-    /// hud-zlfi4), `composer_pointer_byte_offset` must fold that scroll back
+    /// The single-line profile's `glyph_x` table is measured in
+    /// unscrolled draft space (`measure_composer_single_line_layout`); once a
+    /// long draft triggers caret-follow horizontal scroll (`h_scroll_px`),
+    /// `composer_pointer_byte_offset` must fold that scroll back
     /// into the de-inset screen-space x before consulting the glyph table —
     /// otherwise a click's screen x is looked up directly against unscrolled
     /// draft coordinates and lands on the WRONG byte.
@@ -5164,7 +5393,7 @@ mod tests {
     /// 20.0` (`input_box: None`, matching what the single-line profile
     /// actually publishes). A click at node-local x=26 de-insets to
     /// screen-space text_x=20:
-    /// - WITHOUT the h_scroll correction (the pre-hud-uui70 bug), 20 is
+    /// - WITHOUT the h_scroll correction (the previous bug), 20 is
     ///   nearest to byte 2 (glyph x=15, distance 5) — the exact wrong byte
     ///   the sibling multi-line test's row 0 also resolves to at this same
     ///   pixel, proving this is a real, distinct mismatch and not a fixture

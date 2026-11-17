@@ -204,8 +204,8 @@ pub fn bootstrap_scene_element_store_with_path(
 
     let now_ms = now_wall_ms();
     let changed = reconcile_scene_ids(scene, &mut store, now_ms);
-    // Bounded retention for orphan tile entries (hud-fwgv7 override-bearing,
-    // hud-m1ok3 override-free). Runs before tiles are recreated (they are
+    // Bounded retention for orphan tile entries (override-bearing,
+    // override-free). Runs before tiles are recreated (they are
     // republished after bootstrap), so every tile entry is an orphan here;
     // `adopt_orphaned_tile_overrides` later reclaims override-bearing ones whose
     // portals republish, while override-free entries for republishing portals are
@@ -215,7 +215,7 @@ pub fn bootstrap_scene_element_store_with_path(
     if !gc.pruned.is_empty() {
         tracing::info!(
             pruned = gc.pruned.len(),
-            "element_store: pruned orphan tile entries past retention bound (hud-fwgv7, hud-m1ok3)"
+            "element_store: pruned orphan tile entries past retention bound"
         );
     }
     relock_tiles_with_durable_override(scene, &store);
@@ -233,7 +233,7 @@ pub fn bootstrap_scene_element_store_with_path(
 }
 
 /// Re-establish viewer geometry authority for every tile that loaded with a
-/// durable user geometry override (hud-8vejp).
+/// durable user geometry override.
 ///
 /// The `viewer_geometry_locked` set is ephemeral (serde-skip), so a runtime
 /// restart drops it. Without re-locking, an adapter `UpdateTileBounds`
@@ -719,7 +719,7 @@ mod tests {
         let _ = std::fs::remove_file(path);
     }
 
-    /// hud-8vejp: the `viewer_geometry_locked` set is serde-skip (dropped on
+    /// the `viewer_geometry_locked` set is serde-skip (dropped on
     /// restart), so bootstrap must re-establish the lock for every tile that
     /// loaded a durable geometry override — otherwise an adapter republish could
     /// reposition a portal member post-restart. A tile without an override, and

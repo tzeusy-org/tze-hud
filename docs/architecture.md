@@ -31,6 +31,21 @@ flowchart TD
     HUB -->|"hud_input replies"| MCP
 ```
 
+The production frame turn is [`FrameTurnState::run_frame_turn`](../crates/tze_hud_runtime/src/pipeline.rs):
+widget registration, timed sweep, animation/prune, fallback fonts, markdown then
+truncation prime, composer drain, idle decision and backend build/result accounting.
+The windowed [`frame_work`](../crates/tze_hud_runtime/src/windowed/frame_work.rs)
+adapter builds under the scene lock, releases it before surface submission, and
+acknowledges only successful ordinary primary work. Winit still owns settle and
+OS presentation; display retry/chrome/degradation wake adapters remain windowed.
+[`HeadlessRuntime`](../crates/tze_hud_runtime/src/headless.rs) uses the same turn
+with explicit fresh-readback demand and its original input-response boundary.
+The [`event-loop harness`](../crates/tze_hud_runtime/src/windowed/event_loop_harness.rs)
+runs real settle followed by that turn; GPU-free construction reports renderer
+absence, while its opt-in dev backend performs real offscreen builds/submissions
+against the harness scene. Local GPU completion proves neither Windows scanout
+nor owner acceptance.
+
 The runtime returns per-frame telemetry to its caller and records cumulative
 session totals with bounded recent latency samples; the collector retains no
 frame history. Headless benchmarks own their artifact samples separately.
@@ -88,7 +103,15 @@ write; delayed admission retains that deadline in the scheduled mutation. Neithe
 path retimes existing content, and changing the default does not wake rendering.
 The
 Layout card edits widget instances in the scene and their `[[tabs.widgets]]`
-entries (`tze_hud_config::set_widget`); the Input card's chord changes go
+entries (`tze_hud_config::set_widget`). Its zone-to-monitor choices share a
+private [`DisplayControl`](../crates/tze_hud_runtime/src/shell/control_panel/displays.rs)
+with the main thread: topology publication supplies selectable overlay keys
+and only aliases the all-connected hardware matcher resolves uniquely; owner
+edits coalesce until the next event-loop turn, and the existing display publisher
+updates the compositor layout, scales and operator status without hardware
+rediscovery. `set_zone_display` uses the same serialized atomic config writer
+and retains comments; a failed save keeps the live change for this session.
+The Input card's chord changes go
 through [`ChordControl`](../crates/tze_hud_runtime/src/shell/control_panel/chords.rs)
 to the Windows hotkey thread. The Appearance and Advanced tokens cards, and
 edits to `[design_tokens]` in the config file (watched by
@@ -107,6 +130,24 @@ Network listeners bind loopback and local Tailscale-interface addresses
 admin-authorized `/admin/*` outside the five MCP tools. Installation, firewall,
 restart and signed-update semantics belong in the
 [Windows runbook](operations/windows-install.md), not in agent payloads.
+
+**Operator diagnostics.** [`graph/holdings`](../crates/tze_hud_scene/src/graph/holdings.rs)
+visits borrowed ownership metadata beside the scene's real publication, lease,
+scheduled-batch and orphan owners. `PortalHub::visit_holdings` exposes only live
+authenticated keys and reclaim metadata. Neither reader copies payloads or runs
+cleanup. Runtime [`operator/diagnostics`](../crates/tze_hud_runtime/src/operator/diagnostics.rs)
+collects them through separate nonblocking locks into the bounded admin-only
+projection; ordinary agent discovery stays unchanged.
+
+The widget loader captures typed failures in its existing scan, and
+`scene_startup` carries them beside SVG assets. The font builder retains its
+actual load/fallback observations in `TextRasterizer`; the compositor getter
+supplies the first configured initialization to one runtime `StartupDiagnostics`.
+That state freezes after fonts finish, independently of global log suppression.
+Missing producers and lock contention are qualified explicitly. The existing
+`hud_admin.py doctor` curates the authenticated status metadata into a validated
+3072-byte result envelope while retaining its owned-child deadlines, cleanup and
+first-failure diagnosis. This path adds no sampler, persistence or render wake.
 
 **Windows desktop presence.** The existing hidden top-level display-watcher
 window/thread owns the tray icon, native menu, Explorer restart recovery and

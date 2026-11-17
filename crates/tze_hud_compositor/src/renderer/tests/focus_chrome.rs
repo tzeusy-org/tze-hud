@@ -9,8 +9,8 @@ use super::*;
 /// This is a draw-list-level assertion (no pixel readback) so it is safe to run
 /// synchronously without the headless llvmpipe readback deadlock.
 ///
-/// hud-k6yvb: the ring now emits from the CHROME-LAYER pass
-/// (`append_focus_ring_vertices`, above all content, §416) driven by the
+/// the ring now emits from the CHROME-LAYER pass
+/// (`append_focus_ring_vertices`, above all content) driven by the
 /// runtime-plumbed focus owner — not from `render_node`. The behavioral
 /// guarantee is preserved and asserted here: a focused node produces a visible,
 /// token-colored ring of four edge quads in overlay mode at the node's
@@ -168,7 +168,7 @@ async fn test_portal_tile_emits_resize_grip_in_overlay_mode() {
     }
 }
 
-/// hud-wgiys: the resize grip swaps to `hover_color` for the tile named by the
+/// the resize grip swaps to `hover_color` for the tile named by the
 /// runtime-plumbed `resize_grip_hover` slot, and stays resting for every other
 /// tile. Draw-list-level assertion on the emitted vertex colors.
 #[tokio::test]
@@ -241,7 +241,7 @@ async fn test_resize_grip_swaps_to_hover_color_for_hovered_tile() {
     );
 }
 
-/// hud-jm8nq.12: an orphaned tile (agent disconnected, within grace) emits a
+/// an orphaned tile (agent disconnected, within grace) emits a
 /// token-colored accent bar down its left edge; resuming the lease clears it.
 /// Draw-list-level assertion (no pixel readback).
 #[tokio::test]
@@ -344,7 +344,7 @@ async fn orphaned_tile_emits_disconnection_badge_draw_cmd() {
     );
 }
 
-/// hud-k6yvb: a TILE-LEVEL focus owner (a non-passthrough tile with no focusable
+/// a TILE-LEVEL focus owner (a non-passthrough tile with no focusable
 /// nodes) must get a visible ring around the whole tile from the chrome pass —
 /// the case #988 could not draw because tile-level focus has no scene state.
 #[tokio::test]
@@ -390,7 +390,7 @@ async fn test_tile_level_focus_owner_emits_ring_in_overlay_mode() {
     }
 }
 
-/// hud-k6yvb: a focusable node in a COMPOSER-LESS tile still gets a ring (the
+/// a focusable node in a COMPOSER-LESS tile still gets a ring (the
 /// ring is independent of typing-recovery / composer presence).
 #[tokio::test]
 async fn test_composerless_node_focus_emits_ring() {
@@ -445,7 +445,7 @@ async fn test_composerless_node_focus_emits_ring() {
     );
 }
 
-/// hud-k6yvb: the ring is per-tab — an owner on a non-active tab draws nothing.
+/// the ring is per-tab — an owner on a non-active tab draws nothing.
 #[tokio::test]
 async fn test_focus_ring_suppressed_on_non_active_tab() {
     let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(400, 300).await);
@@ -481,7 +481,7 @@ async fn test_focus_ring_suppressed_on_non_active_tab() {
     );
 }
 
-/// hud-i2e10.4: the runtime system card emits rounded shapes and text items
+/// The runtime system card emits rounded shapes and text items
 /// only while set; re-setting an identical card requests no repaint.
 #[tokio::test]
 async fn system_card_emits_draw_cmds_only_while_set() {

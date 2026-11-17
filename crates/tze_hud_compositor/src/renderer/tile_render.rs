@@ -2,7 +2,7 @@
 //!
 //! Moved from `renderer/mod.rs` (the "Drag-boost helpers" + tile/node
 //! rendering cluster, formerly ~L7900–8213 at plan date) by Step R-9 of the
-//! renderer module split (hud-fgryk).  No logic was changed; `pub(super)`
+//! renderer module split. No logic was changed; `pub(super)`
 //! visibility was added to the methods called from sibling modules or from
 //! `mod.rs`:
 //!
@@ -127,7 +127,7 @@ pub(super) fn degradation_tile_opacity(opacity: f32, level: DegradationLevel) ->
 // The composer's content inset (historically the `COMPOSER_TEXT_MARGIN = 6.0`
 // literal) is now token-driven: it resolves from the shared
 // `portal.spacing.content_inset_px` token into
-// [`ComposerOverlayTokens::content_inset_px`] (hud-ar10c) and is threaded through
+// [`ComposerOverlayTokens::content_inset_px`] and is threaded through
 // the composer geometry (`composer_input_box`, the caret-follow window, the draft
 // `pixel_x`/clip) so no spacing literal survives in
 // the composer render path. The token defaults to 6.0, reproducing the prior
@@ -135,7 +135,7 @@ pub(super) fn degradation_tile_opacity(opacity: f32, level: DegradationLevel) ->
 // the caret x-origin is `region.x + content_inset`, so the inset and the caret
 // stay in lockstep.
 
-/// Compute divider rectangles for transcript turn separators (hud-nx7yq.4).
+/// Compute divider rectangles for transcript turn separators.
 ///
 /// Pure geometry: for each thematic-break byte offset in `breaks`, count the
 /// newlines in `plain[..offset]` to find the break's blank-line index, then place
@@ -180,7 +180,7 @@ pub(super) fn transcript_separator_rects(
 /// text:
 /// - a placeholder hint -> the dimmed `portal.composer.placeholder_color`;
 /// - a live draft **at capacity** -> the token-driven
-///   `portal.composer.at_capacity_color` (hud-9gyao). This is the precise,
+///   `portal.composer.at_capacity_color`. This is the precise,
 ///   bounded, per-line at-capacity treatment that replaced the Phase-1
 ///   zero-length color-run sentinel: the whole draft line takes the at-capacity
 ///   hue the instant the byte cap is hit, reinforced by the 2px left-edge accent
@@ -408,7 +408,7 @@ impl Compositor {
     }
 
     /// Emit the keyboard focus ring for the current focus owner into `vertices`,
-    /// for the chrome-layer pass drawn above all agent content (hud-k6yvb).
+    /// for the chrome-layer pass drawn above all agent content.
     ///
     /// Reads the runtime-plumbed [`focus_ring::FocusRingOwner`] (drained into
     /// `self.focus_ring_owner`). Draws nothing when focus is cleared, on a
@@ -476,7 +476,7 @@ impl Compositor {
     /// Emit the composer caret as a thin, token-styled, ZERO-WIDTH-RELATIVE
     /// vertical quad into `vertices`, for the chrome-layer pass drawn above the
     /// composer draft text — the SAME layer/primitive as the keyboard focus ring
-    /// (`append_focus_ring_vertices`, immediately above) (hud-hxhnt finding 2).
+    /// (`append_focus_ring_vertices`, immediately above).
     ///
     /// Replaces the previous approach of inserting a `▌` (U+258C) glyph into the
     /// rendered draft string: that glyph occupied width, so every blink toggle
@@ -489,10 +489,10 @@ impl Compositor {
     /// - no composer is active, or its owning tile cannot be located this frame;
     /// - the empty-draft placeholder hint is showing (mirrors
     ///   `collect_composer_text_item`'s placeholder gate — the placeholder is a
-    ///   static hint with no caret, hud-evk0j);
+    ///   static hint with no caret);
     /// - the blink phase is hidden AND no selection is active. While a selection
     ///   is active the caret marks the moving selection edge, so it stays solid
-    ///   (mirrors the pre-hud-hxhnt "recolor caret glyph" gate exactly).
+    ///   (mirrors the previous "recolor caret glyph" gate exactly).
     ///
     /// Geometry:
     /// - **Single-line profile** (`self.composer_layout.wrap == false`): x is the
@@ -502,7 +502,7 @@ impl Compositor {
     ///   (`h_scroll_px`) so the quad and the text never drift apart. y/height span
     ///   the single input line.
     /// - **Multi-line profile** (`wrap == true`): x/row come from the published
-    ///   `self.composer_visual_layout` (the hud-21o6x reverse channel) —
+    ///   `self.composer_visual_layout` (the reverse channel) —
     ///   `x_at_cursor` / `line_of` — the SAME measurement the input layer's
     ///   soft-wrap vertical-caret-movement uses, so the quad can never disagree
     ///   with where the text pipeline actually painted the row. A stale layout
@@ -564,7 +564,7 @@ impl Compositor {
         // Caret x/y, box-local (relative to the input box's top-left interior).
         let (caret_x, caret_y, caret_h) = if layout.wrap {
             // Multi-line profile: locate the caret's visual row + x via the
-            // published ComposerVisualLayout (hud-21o6x channel) — the SAME
+            // published ComposerVisualLayout (channel) — the SAME
             // measurement the input layer's soft-wrap navigation uses.
             let Ok(guard) = self.composer_visual_layout.lock() else {
                 return;
@@ -605,7 +605,7 @@ impl Compositor {
             caret_h,
         );
 
-        // caret_color is stored sRGB u8 (StyledRunItem-encoding, hud-khfgx); the
+        // caret_color is stored sRGB u8 (StyledRunItem-encoding); the
         // flat-rect quad pipeline wants linear f32 like the focus ring / resize
         // grip, so round-trip it back through srgb_to_linear.
         let [cr, cg, cb, ca] = tokens.caret_color;
@@ -790,7 +790,7 @@ impl Compositor {
     /// [`ResizeGripTokens::mark_color`](super::token_colors::ResizeGripTokens::mark_color):
     /// the tile named by the runtime-plumbed [`resize_grip_hover`] slot — the
     /// focused portal whose bottom-right resize corner the pointer is over
-    /// (hud-wgiys) — renders in `hover_color`; every other grip stays resting.
+    /// — renders in `hover_color`; every other grip stays resting.
     /// Dots are clipped to the owning tile so an undersized tile never bleeds the
     /// mark outside its bounds.
     ///
@@ -942,7 +942,7 @@ impl Compositor {
     }
 
     /// Effective per-frame render opacity for a tile: scene-level tile opacity
-    /// (with drag boost) multiplied by the §6.3 portal-transition fade opacity
+    /// (with drag boost) multiplied by the portal-transition fade opacity
     /// for scrollable (portal) tiles, clamped to `[0, 1]`.
     ///
     /// This is the single source of truth for "how faded is the whole tile this
@@ -954,11 +954,11 @@ impl Compositor {
     /// `tile.opacity` stays 1 — equals this value.) A backdrop site that omits it
     /// paints at full opacity while its neighbours fade, leaving that region
     /// see-through relative to the rest of the tile on any fade or geometry change
-    /// that exposes it (hud-w41ef).
+    /// that exposes it.
     pub(super) fn tile_effective_opacity(&self, tile: &Tile, scene: &SceneGraph) -> f32 {
         // Base opacity from drag state (scene-level tile.opacity × drag boost).
         let base_opacity = self.rendered_tile_opacity(tile, scene);
-        // §6.3: multiply portal tile animation opacity for scrollable (portal) tiles.
+        //: multiply portal tile animation opacity for scrollable (portal) tiles.
         let opacity = (base_opacity * self.portal_tile_anim_opacity(tile.id)).clamp(0.0, 1.0);
         degradation_tile_opacity(opacity, self.degradation_policy.level)
     }
@@ -968,7 +968,7 @@ impl Compositor {
     /// Colors are resolved from design tokens (`color.tile.background.*`) with
     /// documented fallback constants — no naked color literals here.  The opacity
     /// channel is derived from the tile's effective opacity (drag state) multiplied
-    /// by the portal tile animation opacity (§6.3 transition tokens) when the tile
+    /// by the portal tile animation opacity when the tile
     /// has a registered `TileScrollConfig`.
     ///
     /// Returns `None` when the tile's rounded root node should be solely
@@ -1012,7 +1012,7 @@ impl Compositor {
                 NodeData::HitRegion(_) => {
                     // HitRegion is an invisible interaction primitive. Its visible
                     // footprint is supplied by sibling content nodes; the runtime
-                    // only paints local-feedback tints on hover/press (RFC 0004 §6.5).
+                    // only paints local-feedback tints on hover/press.
                     return None;
                 }
                 NodeData::StaticImage(_) => {
@@ -1040,12 +1040,12 @@ impl Compositor {
     /// left edge and spans the full tile height; its width is the token-resolved
     /// `accent.width_px` clamped to `[0, tile width]` so an out-of-range token
     /// value can never push it past the tile edge. The returned color is the
-    /// token-resolved accent color (no literal visual value here, §6.1) with the
+    /// token-resolved accent color (no literal visual value here) with the
     /// caller-supplied combined tile opacity folded into the alpha channel, so the
     /// accent fades with the tile (matching the tile background).
     ///
     /// Returns `None` for a zero/negative width or non-positive opacity (nothing
-    /// visible to draw). Source: hud-m48i0.
+    /// visible to draw).
     pub(super) fn lifecycle_accent_bar_geom(
         tile_bounds: Rect,
         accent: LifecycleAccent,
@@ -1095,8 +1095,8 @@ impl Compositor {
             return;
         };
         // Confine the composer chrome to the input box so it does not paint over
-        // the whole portal (hud-2zsbf). The box grows upward with the wrapped-line
-        // count primed into `composer_layout` (hud-nx7yq.1); `visible_lines == 1`
+        // the whole portal. The box grows upward with the wrapped-line
+        // count primed into `composer_layout`; `visible_lines == 1`
         // keeps the single-line strip. Kept in lockstep with
         // `collect_composer_text_item`, which anchors the draft to the same box.
         let line_height_multiplier =
@@ -1170,11 +1170,11 @@ impl Compositor {
     }
 
     /// Confine the rendered composer echo to a single input-line strip at the
-    /// BOTTOM of the composer region (hud-2zsbf).
+    /// BOTTOM of the composer region.
     ///
     /// The composer HitRegion published by the projection authority spans the
     /// WHOLE portal (`resident_grpc::local_bounds_for_state` → `x:0, y:0, w, h`)
-    /// so a pointer-down anywhere in the portal focuses the composer (hud-v4k1h).
+    /// so a pointer-down anywhere in the portal focuses the composer.
     /// That full-portal region is the correct *pointer/focus* target, but using
     /// it verbatim as the echo's layout+clip box laid the single unwrapped draft
     /// line across the entire portal width at the portal's TOP — reading live as
@@ -1193,12 +1193,12 @@ impl Compositor {
     ///
     /// Height is `visible_lines` text lines plus symmetric vertical padding (equal
     /// to the horizontal text margin), clamped to the region height.
-    /// `visible_lines == 1.0` reproduces the single input-line strip (hud-2zsbf)
+    /// `visible_lines == 1.0` reproduces the single input-line strip
     /// exactly, so single-line behaviour is unchanged.
     ///
-    /// Vertical placement is selected by `anchor` (hud-nottc):
+    /// Vertical placement is selected by `anchor`:
     /// - [`ComposerVerticalAnchor::Bottom`] (default profile) — the box pins to the
-    ///   BOTTOM edge of the region and grows UPWARD (hud-nx7yq.1). Growth is
+    ///   BOTTOM edge of the region and grows UPWARD. Growth is
     ///   viewer-local: the box extends upward over the transcript, which yields the
     ///   space by occlusion; the portal's outer geometry is untouched.
     /// - [`ComposerVerticalAnchor::Top`] — the box pins to the TOP edge of the
@@ -1252,8 +1252,8 @@ impl Compositor {
     }
 
     /// Recompute the active composer's per-frame layout into `self.composer_layout`,
-    /// ready for the following `collect_text_items` pass (hud-zlfi4 single-line
-    /// caret-follow + hud-nx7yq.1 multi-line wrap / upward growth / vertical scroll).
+    /// ready for the following `collect_text_items` pass (single-line
+    /// caret-follow + multi-line wrap / upward growth / vertical scroll).
     ///
     /// Must be called once per frame BEFORE `collect_text_items` (it measures the
     /// draft against the composer font via the mutable text rasterizer, which the
@@ -1263,7 +1263,7 @@ impl Compositor {
     ///
     /// Two profiles, selected by the `portal.composer.max_lines` token:
     /// - **max_lines == 1** — single-line profile: measure the caret x and pin a
-    ///   horizontal scroll offset so the caret stays visible (hud-zlfi4).
+    ///   horizontal scroll offset so the caret stays visible.
     /// - **max_lines > 1** — multi-line profile: wrap-measure the draft to the box
     ///   width, size the box to grow upward to at most `max_lines`, and pin a
     ///   vertical scroll once the draft exceeds that bound.
@@ -1273,7 +1273,7 @@ impl Compositor {
     /// state — no adapter round trip.
     pub(crate) fn prime_composer_scroll_offset(&mut self, scene: &SceneGraph) {
         self.composer_layout = ComposerLayout::default();
-        // Clear the reverse visual-layout channel by default (hud-21o6x); only the
+        // Clear the reverse visual-layout channel by default; only the
         // multi-line branch below republishes a fresh layout. Every early return
         // (no composer / no rasterizer / no region / single-line) leaves it `None`,
         // so the input layer falls back to hard-newline vertical movement.
@@ -1307,7 +1307,7 @@ impl Compositor {
         let tokens = resolve_composer_overlay_tokens(&self.token_map);
         let font_size_px = self.scaled_portal_font(tokens.font_size_px, tile_id, scene);
         let max_lines = tokens.max_lines.max(1);
-        // Token-driven composer content inset (hud-ar10c); the caret-follow window
+        // Token-driven composer content inset; the caret-follow window
         // and keep-visible margin below key off the same value the draft render
         // uses, so caret geometry stays in lockstep with the box padding.
         let content_inset = tokens.content_inset_px;
@@ -1328,7 +1328,7 @@ impl Compositor {
         };
 
         if max_lines <= 1 {
-            // ── Single-line profile (hud-zlfi4): horizontal caret-follow. ──
+            // ── Single-line profile: horizontal caret-follow. ──
             let (caret_x, content_width) =
                 tr.measure_composer_caret(&text, cursor_byte, font_size_px, line_height_multiplier);
             self.composer_layout = ComposerLayout {
@@ -1342,7 +1342,7 @@ impl Compositor {
                 content_width,
                 // Stashed raw (pre-scroll) so the chrome-layer caret quad
                 // (append_composer_caret_vertices) can relocate the caret without
-                // its own text-rasterizer pass (hud-hxhnt finding 2).
+                // its own text-rasterizer pass.
                 caret_x,
                 visible_lines: 1.0,
                 total_lines: 1.0,
@@ -1350,7 +1350,7 @@ impl Compositor {
             };
 
             // Publish a one-row ComposerVisualLayout for the single-line profile
-            // too (hud-hxhnt finding 1): before this, only the multi-line branch
+            // too (finding 1): before this, only the multi-line branch
             // below published one, so the runtime's pointer hit-test
             // (`composer_pointer_byte_offset`) fell back to a crude linear
             // byte-fraction guess for every single-line composer. `input_box:
@@ -1359,7 +1359,7 @@ impl Compositor {
             let mut visual_layout =
                 tr.measure_composer_single_line_layout(&text, font_size_px, line_height_multiplier);
             // Stamp the same-frame caret-follow scroll onto the published layout
-            // (hud-hxhnt finding 3) so a consumer that needs the caret's actual
+            // so a consumer that needs the caret's actual
             // on-screen x — the IME anchor — can recover rendered screen space
             // from the layout's unscrolled `glyph_x` by subtracting this. Mirrors
             // `ComposerLayout.h_scroll_px` above exactly (same frame, same value).
@@ -1370,8 +1370,8 @@ impl Compositor {
             return;
         }
 
-        // ── Multi-line profile (hud-nx7yq.1): wrap, grow upward, vscroll. ──
-        // Measure the RAW draft text (hud-hxhnt): the caret is a chrome-layer
+        // ── Multi-line profile: wrap, grow upward, vscroll. ──
+        // Measure the RAW draft text: the caret is a chrome-layer
         // quad now, not an inserted glyph, so the rendered text is always the raw
         // draft and this measures the same string the render pass shapes — a
         // zero-width caret at a wrap boundary clips harmlessly (no glyph there).
@@ -1383,7 +1383,7 @@ impl Compositor {
             line_height_multiplier,
         );
         // Bound growth AND vertical scroll to what the composer REGION actually
-        // fits (hud-nottc), not just the `max_lines` token. A short composer pane
+        // fits, not just the `max_lines` token. A short composer pane
         // (e.g. the exemplar's top input strip, ~2 lines) would otherwise grow the
         // box past its bounds while the scroll math — keyed on `max_lines` — left
         // the caret line clipped outside the visible box. `composer_input_box`
@@ -1408,7 +1408,7 @@ impl Compositor {
         };
 
         // Publish the wrapped VISUAL-LINE layout for the input thread's soft-wrap
-        // vertical caret movement (hud-21o6x). Measured on the RAW draft (byte
+        // vertical caret movement. Measured on the RAW draft (byte
         // space the caret uses), same wrap width as the render, so the input layer
         // maps caret byte ↔ visual row ↔ pixel x.
         let mut visual_layout = tr.measure_composer_visual_layout(
@@ -1420,7 +1420,7 @@ impl Compositor {
 
         // Publish the RENDERED input-box vertical geometry alongside the rows so
         // the input layer's pointer hit-test maps pointer Y through the box the
-        // draft actually renders in — NOT the full node height (hud-lw60x). The
+        // draft actually renders in — NOT the full node height. The
         // box is bottom-anchored and short for a full-portal projection composer,
         // so an even split of the node height sends every click to the last row.
         // Derive it from the SAME `composer_input_box` the render path uses so the
@@ -1443,7 +1443,7 @@ impl Compositor {
             line_height,
             // Visible row window: the pointer hit-test clamps into this so a click
             // in the box padding while scrolled cannot land on a clipped row
-            // outside the window (hud-lw60x).
+            // outside the window.
             first_visible_row: first_visible,
             visible_rows: visible_lines,
         });
@@ -1461,7 +1461,7 @@ impl Compositor {
     /// - The tile does not contain the focused composer node.
     ///
     /// The rendered text is the RAW draft (or the placeholder hint) — no caret
-    /// glyph is inserted (hud-hxhnt finding 2). The caret is drawn separately as a
+    /// glyph is inserted. The caret is drawn separately as a
     /// chrome-layer quad (`append_composer_caret_vertices`, above all composer
     /// content, mirroring the focus ring), so this text is blink-invariant: toggling
     /// the caret on/off never reflows a single glyph in the draft.
@@ -1474,7 +1474,7 @@ impl Compositor {
     /// then renders a highlight quad behind the selected characters using
     /// glyph-level geometry — no separate geometry pass is required. The run sets
     /// `fill_line_width` so the text pipeline draws the standard multi-line
-    /// text-selection shape (hud-scgyw): partial first/last line, full-width
+    /// text-selection shape: partial first/last line, full-width
     /// interior lines.
     pub(super) fn collect_composer_text_item(
         &self,
@@ -1490,9 +1490,9 @@ impl Compositor {
         let layout = self.composer_layout;
         let font_size_px = self.scaled_portal_font(tokens.font_size_px, tile.id, scene);
         // The full HitRegion spans the whole portal (click-anywhere-to-focus,
-        // hud-v4k1h); confine the rendered draft to the input box at its bottom
-        // edge so it does not stretch across the portal (hud-2zsbf). The box grows
-        // upward with the wrapped-line count (hud-nx7yq.1); `visible_lines == 1`
+        // ); confine the rendered draft to the input box at its bottom
+        // edge so it does not stretch across the portal. The box grows
+        // upward with the wrapped-line count; `visible_lines == 1`
         // reproduces the single input-line strip.
         let input_box = Self::composer_input_box(
             region,
@@ -1503,7 +1503,7 @@ impl Compositor {
             tokens.content_inset_px,
         );
 
-        // Empty-draft placeholder (hud-evk0j): when the draft buffer is empty and
+        // Empty-draft placeholder: when the draft buffer is empty and
         // the composer carries a non-empty placeholder hint, render that hint in
         // the dimmed placeholder color instead of the (empty) draft. The
         // placeholder is render-only — it is not in `cs.text`, so it is never
@@ -1519,7 +1519,7 @@ impl Compositor {
 
         let text_margin = tokens.content_inset_px;
 
-        // Horizontal caret-follow (hud-zlfi4, single-line profile only): shift the
+        // Horizontal caret-follow (single-line profile only): shift the
         // draft LEFT by the per-frame scroll offset primed in
         // `prime_composer_scroll_offset` so the caret stays visible once the draft
         // is wider than the box.  Only the draft `pixel_x` moves; the clip stays
@@ -1533,7 +1533,7 @@ impl Compositor {
         // CAPACITY uses the token-driven at-capacity color so the whole draft line
         // reads in the at-capacity hue the instant the byte cap is hit; a normal live
         // draft uses the composer text color. The selection styled run below still
-        // overrides its own sub-range (hud-9gyao, hud-evk0j).
+        // overrides its own sub-range.
         let text_color = composer_draft_base_color(tokens, cs.at_capacity, placeholder.is_some());
 
         let bw = (region.width - text_margin * 2.0).max(1.0);
@@ -1545,7 +1545,7 @@ impl Compositor {
         let _ = sh;
 
         // Build a selection-highlight styled run when a non-empty selection
-        // exists, over the RAW text byte range (hud-hxhnt: no caret glyph, so no
+        // exists, over the RAW text byte range (no caret glyph, so no
         // +3-byte shift to account for).
         //
         // `cursor_byte` and `selection_anchor` are agent-provided; clamp with
@@ -1553,7 +1553,7 @@ impl Compositor {
         // cannot panic.
         let styled_runs: Box<[crate::text::StyledRunItem]> = if placeholder.is_some() {
             // Placeholder is a static dimmed hint: no selection highlight — the
-            // whole run is the placeholder color (hud-evk0j).
+            // whole run is the placeholder color.
             Box::new([])
         } else {
             let anchor = cs.selection_anchor.min(cs.text.len());
@@ -1571,7 +1571,7 @@ impl Compositor {
                     background_color: Some(tokens.selection_bg),
                     size_scale: None,
                     // Standard multi-line text-selection shape: full-width
-                    // interior lines when the selection wraps (hud-scgyw).
+                    // interior lines when the selection wraps.
                     fill_line_width: true,
                 }])
             } else {
@@ -1580,12 +1580,12 @@ impl Compositor {
         };
 
         // Per-profile text layout:
-        // - Single-line (hud-zlfi4): lay the draft on ONE unwrapped line — layout
+        // - Single-line: lay the draft on ONE unwrapped line — layout
         //   width is the wider of the box and the measured content width plus a
         //   small slack margin (sub-pixel shaping-rounding safety; no caret glyph
-        //   needs room for any more, hud-hxhnt), so word-wrap never triggers and
+        //   needs room for any more), so word-wrap never triggers and
         //   the draft slides horizontally + clips instead of wrapping.
-        // - Multi-line (hud-nx7yq.1): layout width is the box interior so glyphon
+        // - Multi-line: layout width is the box interior so glyphon
         //   word-wraps within it; layout height is the FULL wrapped-content height
         //   so every line lays out, and the box then clips + vertically scrolls it.
         let (layout_width, bounds_height) = if layout.wrap {
@@ -1609,7 +1609,7 @@ impl Compositor {
             bounds_height,
             // Clip stays pinned to the input box interior so scrolled-off text
             // (horizontally or vertically) is clipped at the box edge, never painted
-            // outside it. The box grows upward with the wrapped-line count (hud-nx7yq.1).
+            // outside it. The box grows upward with the wrapped-line count.
             clip_pixel_x: region.x + text_margin,
             clip_pixel_y: input_box.y,
             clip_bounds_width: bw.max(1.0),
@@ -1632,8 +1632,7 @@ impl Compositor {
     }
 
     /// Build a `TextItem` for the ambient unread-count badge the jump-to-latest
-    /// pill MAY carry (hud-g1ena.3, portal-chat-grade-affordances §Jump-to-Latest
-    /// Affordance).
+    /// pill may carry.
     ///
     /// Scroll affordances draw after OUTPUT glyphs on their own text layer.
     pub(super) fn collect_scroll_affordances(
@@ -1866,7 +1865,7 @@ impl Compositor {
         })
     }
 
-    /// Resolve the per-frame vertical-flow layout (hud-pd9bp): for every
+    /// Resolve the per-frame vertical-flow layout: for every
     /// `NodeLayout::VerticalFlow` node in the scene, stack its children and store
     /// each child's resolved tile-local `y` in [`Self::tile_flow_offsets`], which
     /// the `&self` geometry sites (`render_node`, the text-collect walks, and the
@@ -1893,36 +1892,36 @@ impl Compositor {
         }
         let gap = resolve_section_gap_px(&self.token_map);
         // Measure flow child heights against the RENDER rasterizer's OWN
-        // `FontSystem` (hud-9gopx) — the same one that shapes the glyphs — so any
+        // `FontSystem` — the same one that shapes the glyphs — so any
         // agent-uploaded font loaded via `load_font_data` is reflected in the
         // stacked heights, keeping "measured == painted" true for uploaded fonts
         // too. Clone the token set first so the `&self.markdown_tokens` borrow ends
         // before the rasterizer is taken mutably (mirrors
         // the two-phase borrow discipline); the resolver
-        // gets a real `&MarkdownTokens` (hud-ysyis) so markdown / attributed turns
+        // gets a real `&MarkdownTokens` so markdown / attributed turns
         // measure on the same basis the render constructors paint them.
         //
         // If the rasterizer is not yet initialized, fall back to a fresh
-        // `bundled_font_system()` (hud-tfm3p review fix) — matching this
-        // function's pre-hud-9gopx behavior for that state exactly. Flow
+        // `bundled_font_system()` (review fix) — matching this
+        // function's previous behavior for that state exactly. Flow
         // resolution positions EVERY `VerticalFlow` child, not just text
         // (`SolidColor` / `StaticImage` / `HitRegion` children read
-        // `tile_flow_offsets` too, per hud-pd9bp), so gating the whole resolve on
+        // `tile_flow_offsets` too), so gating the whole resolve on
         // rasterizer presence would silently drop stacking for non-text geometry
         // that never needed a `FontSystem` in the first place — a real regression
-        // Codex caught on this PR versus the pre-hud-9gopx baseline, which ran
+        // Codex caught on this PR versus the previous baseline, which ran
         // unconditionally. There can be no agent-uploaded fonts to reflect when
         // there is no rasterizer yet anyway, so the bundled fallback is exactly
         // as accurate as the code it replaces.
         let markdown_tokens = self.markdown_tokens.clone();
-        // hud-5wx09: measure markdown flow children against the commit-time cached
+        // measure markdown flow children against the commit-time cached
         // parse the render path already produced, NOT a fresh per-frame parse
         // (text-stream-portals MUST). Pin the render `MarkdownCache` snapshot (a
         // cheap atomic `Arc` load) and build a `SceneId -> &ParsedMarkdown` lookup
         // BEFORE the `&mut FontSystem` borrow below.
         let cache = self.markdown_cache();
 
-        // hud-wrlv1: content over the async-parse threshold parses on the
+        // content over the async-parse threshold parses on the
         // background worker, so the AUTHORITATIVE snapshot misses for several
         // frames after a commit. Without self-heal, a large unchanged flow child
         // would take the resolver's parse-on-miss fallback EVERY frame of that
@@ -1933,7 +1932,7 @@ impl Compositor {
         // re-parses at most once per content version, not per frame. The
         // `borrow_mut()` (populate) is scoped to a block so it is released before
         // the `borrow()` (consult) — the render path's own `BorrowMutError`
-        // discipline (hud-u4lq2).
+        // discipline.
         let flow_child_ids: std::collections::HashSet<SceneId> = scene
             .nodes
             .values()
@@ -2007,7 +2006,7 @@ impl Compositor {
             Some(n) => n,
             None => return,
         };
-        // hud-pd9bp: a child of a `NodeLayout::VerticalFlow` node takes its
+        // a child of a `NodeLayout::VerticalFlow` node takes its
         // runtime-resolved stacked y (from `prime_vertical_flow_layout`) in place
         // of its own `bounds.y`. Absent from the map — every node in an Absolute
         // scene — yields its own `bounds.y`, so the substitutions below are
@@ -2023,11 +2022,11 @@ impl Compositor {
             node_id,
             self.display_tile_scroll_offset(scene, tile.id),
         );
-        // §6.3 fade: the whole tile (backdrop + content backgrounds + text) must
+        // fade: the whole tile (backdrop + content backgrounds + text) must
         // fade as one unit. `tile_background_color` and `collect_text_items`
         // already apply this; the content-node backgrounds below MUST match, or a
         // faded/resized tile shows the content background at full opacity while
-        // the flat backdrop around it goes see-through (hud-w41ef).
+        // the flat backdrop around it goes see-through.
         let tile_opacity = self.tile_effective_opacity(tile, scene);
 
         match &node.data {
@@ -2087,13 +2086,13 @@ impl Compositor {
                     // lines in the parsed plain text up to the panel byte range.
                     // Inline panel pixel-exact geometry is deferred to Phase 2.
                     if let Some(code_bg) = self.markdown_tokens.code_background {
-                        // Load the current snapshot lock-free (hud-33qo7); pinned
+                        // Load the current snapshot lock-free; pinned
                         // by the Arc for the lookup + panel emit below.
                         let markdown_cache = self.markdown_cache();
                         if let Some(key) = self.node_key_cache.get(&node_id) {
                             if let Some(parsed) = markdown_cache.get_by_key(key) {
                                 // Match the portal-resize-scaled font the text
-                                // glyphs are laid out with (hud-6n9iv): at the
+                                // glyphs are laid out with: at the
                                 // default scale this is byte-identical to
                                 // `tm.font_size_px`, but under a whole-portal
                                 // resize the panel tracks the scaled line pitch
@@ -2157,7 +2156,7 @@ impl Compositor {
                         }
                     }
                     // Transcript turn separators: thin token-styled divider quads on
-                    // thematic-break (`---`) lines (hud-nx7yq.4). Same line-counted
+                    // thematic-break (`---`) lines. Same line-counted
                     // geometry approximation as code panels. Content-free geometry —
                     // no text, so nothing is revealed under redaction (the transcript
                     // units are zeroed upstream when redacted, removing the breaks).
@@ -2167,7 +2166,7 @@ impl Compositor {
                             if let Some(parsed) = markdown_cache.get_by_key(key) {
                                 // Match the portal-resize-scaled font the text
                                 // glyphs use so the divider stays glued to the
-                                // entries it separates (hud-6n9iv). No-op at the
+                                // entries it separates. No-op at the
                                 // default scale (scaled_portal_font returns the
                                 // base font unchanged); under a whole-portal
                                 // resize the divider tracks the scaled line pitch
@@ -2263,7 +2262,7 @@ impl Compositor {
             NodeData::HitRegion(hr) => {
                 // HitRegion is an invisible interaction primitive. Default (no
                 // state) paints nothing so siblings show through. Hover + press
-                // emit sibling-over tints per RFC 0004 §6.5:
+                // emit sibling-over tints:
                 //   hover:   add 0.1 white overlay (lightening)
                 //   pressed: multiply by 0.85 (~15% darken; approximated with
                 //            a black overlay at 0.15 alpha against the sibling)
@@ -2291,8 +2290,8 @@ impl Compositor {
                 }
 
                 // The keyboard focus ring is NOT drawn here: it moved to the
-                // chrome-layer pass (`append_focus_ring_vertices`, hud-k6yvb) so it
-                // renders above all agent content (input-model §416) and covers
+                // chrome-layer pass (`append_focus_ring_vertices`) so it
+                // renders above all agent content (input-model ) and covers
                 // tile-level / composer-less focus owners the per-node scene state
                 // cannot express.
             }
@@ -2319,9 +2318,9 @@ impl Compositor {
                             w: clipped.width,
                             h: clipped.height,
                             uv_rect: clipped_uv,
-                            // Fade the image with the whole tile (drag + §6.3 portal
+                            // Fade the image with the whole tile (drag + portal
                             // transition), matching the tile backdrop/text so a
-                            // faded/resized tile stays uniform (hud-b0x0m).
+                            // faded/resized tile stays uniform.
                             tint: [1.0, 1.0, 1.0, tile_opacity],
                         });
                     }
@@ -2373,7 +2372,7 @@ impl Compositor {
     }
 }
 
-/// Self-heal the vertical-flow markdown fallback cache (hud-wrlv1): for each flow
+/// Self-heal the vertical-flow markdown fallback cache: for each flow
 /// child markdown node missing from BOTH the authoritative `MarkdownCache` and the
 /// `fallback` side cache, parse it ONCE with its scoped tokens and store it in
 /// `fallback` — mirroring the render path's own check-then-store
@@ -2564,7 +2563,7 @@ mod lifecycle_accent_tests {
     }
 
     /// The accent bar passes the token color through unchanged and clamps its
-    /// width to the tile, folding tile opacity into the alpha (hud-m48i0).
+    /// width to the tile, folding tile opacity into the alpha.
     #[test]
     fn accent_bar_clamps_width_and_folds_opacity() {
         let accent = LifecycleAccent {
@@ -2625,7 +2624,7 @@ mod composer_draft_color_tests {
         (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8
     }
 
-    /// hud-9gyao: an at-capacity live draft takes the token-driven at-capacity
+    /// an at-capacity live draft takes the token-driven at-capacity
     /// color as its per-line base color -- a real, bounded coloring of the draft
     /// glyphs, replacing the Phase-1 zero-length color-run sentinel. Below
     /// capacity the draft uses the composer text color. Both resolve from design
@@ -2717,7 +2716,7 @@ mod flow_fallback_cache_tests {
         }
     }
 
-    /// hud-wrlv1: a large unchanged flow child that keeps authoritative-missing
+    /// a large unchanged flow child that keeps authoritative-missing
     /// (background parse still pending) must re-parse AT MOST ONCE across repeated
     /// per-frame heal calls — the self-heal side cache absorbs every frame after
     /// the first.
@@ -2779,7 +2778,7 @@ mod flow_fallback_cache_tests {
         assert_eq!(
             PARSE_MARKDOWN_SUBSET_CALLS.with(|c| c.get()),
             1,
-            "repeated frames must re-parse at most once, not per frame (hud-wrlv1)"
+            "repeated frames must re-parse at most once, not per frame"
         );
     }
 

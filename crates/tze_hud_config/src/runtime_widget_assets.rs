@@ -1,7 +1,6 @@
 //! Runtime widget SVG asset store configuration helpers.
 //!
-//! Implements configuration/spec.md §Requirement: Runtime Widget Asset Store
-//! Configuration and RFC 0006 §2.6a.
+//! Resolves the configured widget asset root and validates persisted SVG assets.
 
 use std::fs::{self, OpenOptions};
 use std::io::Write;

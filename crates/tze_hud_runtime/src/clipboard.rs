@@ -1,7 +1,26 @@
-//! The Windows clipboard (write side), shared by the composer, portal OUTPUT
-//! copy and the control panel's Connect card.
+//! Local clipboard access shared by the composer, portal OUTPUT and panel.
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+
+pub(crate) type Write = Arc<dyn Fn(&str) -> Result<(), String> + Send + Sync>;
+type Read = Arc<dyn Fn() -> Result<Option<String>, String> + Send + Sync>;
+
+/// Injectable local I/O; editor state and clipboard contents never leave the runtime.
+#[derive(Clone)]
+pub(crate) struct Clipboard {
+    pub read: Read,
+    pub write: Write,
+}
+
+impl Default for Clipboard {
+    fn default() -> Self {
+        Self {
+            read: Arc::new(read_text),
+            write: Arc::new(write_text),
+        }
+    }
+}
 
 /// Accepted (non-empty) [`write_text`] calls on every platform, for the
 /// admin `clipboard_writes` counter (hud-ljhku.2). Never the text itself.
@@ -124,6 +143,57 @@ pub(crate) fn write_text(text: &str) -> Result<(), String> {
 pub(crate) fn write_text(text: &str) -> Result<(), String> {
     record(text);
     Err("there is no clipboard on this platform".to_owned())
+}
+
+/// Read CF_UNICODETEXT. No text format is an empty clipboard; access failures
+/// remain visible to the panel. Composer callers keep their existing no-op fallback.
+#[cfg(target_os = "windows")]
+pub(crate) fn read_text() -> Result<Option<String>, String> {
+    use windows::Win32::Foundation::{HGLOBAL, HWND};
+    use windows::Win32::System::DataExchange::{
+        CloseClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard,
+    };
+    use windows::Win32::System::Memory::{GlobalLock, GlobalSize, GlobalUnlock};
+    const CF_UNICODETEXT_FORMAT: u32 = 13;
+    let busy = || "The clipboard is busy; try again".to_owned();
+    // SAFETY: guards balance clipboard and global-memory access; the UTF-16
+    // slice is bounded by the allocated object and one editor-cap overflow.
+    unsafe {
+        if IsClipboardFormatAvailable(CF_UNICODETEXT_FORMAT).is_err() {
+            return Ok(None);
+        }
+        OpenClipboard(HWND::default()).map_err(|_| busy())?;
+        struct ClipboardGuard;
+        impl Drop for ClipboardGuard {
+            fn drop(&mut self) {
+                unsafe {
+                    let _ = CloseClipboard();
+                }
+            }
+        }
+        let _clipboard = ClipboardGuard;
+        let handle = GetClipboardData(CF_UNICODETEXT_FORMAT).map_err(|_| busy())?;
+        let global = HGLOBAL(handle.0);
+        let units = (GlobalSize(global) / std::mem::size_of::<u16>())
+            .min(tze_hud_input::composer_draft::MAX_DRAFT_BYTES + 1);
+        let ptr = GlobalLock(global);
+        if ptr.is_null() {
+            return Err(busy());
+        }
+        let wide = std::slice::from_raw_parts(ptr.cast::<u16>(), units);
+        let mut len = wide.iter().position(|c| *c == 0).unwrap_or(units);
+        if len != 0 && (0xD800..=0xDBFF).contains(&wide[len - 1]) {
+            len -= 1;
+        }
+        let text = String::from_utf16_lossy(&wide[..len]);
+        let _ = GlobalUnlock(global);
+        Ok((!text.is_empty()).then_some(text))
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn read_text() -> Result<Option<String>, String> {
+    Err("There is no clipboard on this platform".to_owned())
 }
 
 #[cfg(test)]

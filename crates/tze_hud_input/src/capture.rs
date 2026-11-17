@@ -1,6 +1,6 @@
 //! Pointer capture manager.
 //!
-//! Implements RFC 0004 §2 — pointer capture semantics:
+//! — pointer capture semantics:
 //!
 //! - Only one node holds pointer capture at a time **globally across the entire
 //!   scene**, keyed by pointer device (`device_id`).
@@ -16,7 +16,7 @@
 //!
 //! - `acquire()` returns `Err(CaptureError::AlreadyCaptured)` if another node
 //!   already holds capture for the same `device_id`.  Only one node per device
-//!   at a time (spec line 114).
+//!   at a time.
 //! - `get()` returns the current capture state for a device, or `None`.
 //! - `release()` clears the capture entry (idempotent).
 

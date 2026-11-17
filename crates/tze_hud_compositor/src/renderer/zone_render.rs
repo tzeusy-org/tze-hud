@@ -2,7 +2,7 @@
 //!
 //! Moved from `renderer/mod.rs` (the "Zone rendering" and "Zone layout"
 //! clusters, formerly ~L6381–7083 at plan date) by Step R-7 of the renderer
-//! module split (hud-fgryk).  No logic was changed; only visibility modifiers
+//! module split. No logic was changed; only visibility modifiers
 //! were added where Rust's module-privacy rules require them (listed in the
 //! PR body).
 //!
@@ -64,7 +64,7 @@ impl Compositor {
     /// layer order: Background → (tiles) → Content → Chrome.
     ///
     /// No per-content-type color branching — all visual properties come from
-    /// `RenderingPolicy` fields (spec §Refactoring note, §Default Zone Rendering).
+    /// `RenderingPolicy` fields.
     #[cfg(test)]
     pub(super) fn render_zone_content(
         &self,
@@ -144,7 +144,8 @@ impl Compositor {
             // Stack zones: each publication gets its own vertically-stacked slot.
             //   For alert-banner: severity-descending (critical first), then
             //   recency-descending within the same severity.
-            //   For other Stack zones: newest-first (slot 0 = newest, at top of zone).
+            //   Other Stack zones: unanswered questions first, newest-first
+            //   within the question and non-question groups.
             //   Per-slot heights are computed via Self::per_slot_heights() and may vary
             //   by item (two-line notifications occupy a taller slot).  Dynamic zone
             //   height for alert-banner: sum(slot_heights) — zero when empty.
@@ -157,8 +158,8 @@ impl Compositor {
             match zone_def.contention_policy {
                 ContentionPolicy::Stack { .. } => {
                     // Slot geometry is computed once by zone_slot_layout and shared
-                    // with collect_text_items / collect_all_rounded_rect_cmds (hud-qlerb).
-                    let layout = self.zone_slot_layout(zone_name, publishes, policy, h, w);
+                    // with collect_text_items / collect_all_rounded_rect_cmds.
+                    let layout = self.zone_slot_layout(scene, zone_name, publishes, policy, h, w);
 
                     for (pub_idx, card) in layout.iter_visible(Rect::new(x, y, w, h)) {
                         let record = &publishes[pub_idx];
@@ -206,7 +207,7 @@ impl Compositor {
                             ZoneContent::Notification(n) => {
                                 // The card or banner style's urgency tone
                                 // (semantic container roles).
-                                // Per spec: urgency >3 clamped to 3 (critical).
+                                // urgency >3 clamped to 3 (critical).
                                 // Respect policy.backdrop contract: only emit a backdrop (and
                                 // border) when a backdrop is enabled; skip entirely when None.
                                 policy.backdrop.map(|_| {
@@ -247,7 +248,7 @@ impl Compositor {
 
                         // Action buttons are SDF commands drawn after the backdrop
                         // (`collect_all_rounded_rect_cmds`): a flat fill here would
-                        // sit under a rounded Chrome-layer backdrop (hud-paslt).
+                        // sit under a rounded Chrome-layer backdrop.
 
                         // Notification icon: emit a textured draw command for the icon
                         // left-aligned inside the slot, vertically centred.
@@ -338,7 +339,7 @@ impl Compositor {
                         ZoneContent::Notification(n) => {
                             // The card or banner style's urgency tone
                             // (semantic container roles).
-                            // Per spec: urgency >3 clamped to 3 (critical).
+                            // urgency >3 clamped to 3 (critical).
                             // Respect policy.backdrop contract: only emit a backdrop (and
                             // border) when a backdrop is enabled; skip entirely when None.
                             policy.backdrop.map(|_| {
@@ -608,17 +609,18 @@ impl Compositor {
     /// This is the single authoritative computation for zone slot geometry.
     /// All frame-path consumers (`collect_text_items`, `render_zone_content`,
     /// `collect_all_rounded_rect_cmds`) call this method instead of duplicating
-    /// the slot-height/offset/ordering logic inline (hud-qlerb).
+    /// the slot-height/offset/ordering logic inline.
     ///
     /// # Parameters
     /// - `zone_name` — used to distinguish alert-banner zones (severity sort
-    ///   + dynamic height) from regular Stack zones (newest-first, fixed height).
+    ///   + dynamic height) from regular Stack zones (question-first, fixed height).
     /// - `publishes` — the ordered publish list for this zone.
     /// - `policy` — the zone's `RenderingPolicy` (font metrics, margins).
     /// - `zh` — the configured zone height in pixels, used as `effective_h` for
     ///   non-alert-banner zones.
     pub(super) fn zone_slot_layout(
         &self,
+        scene: &SceneGraph,
         zone_name: &str,
         publishes: &[ZonePublishRecord],
         policy: &RenderingPolicy,
@@ -627,11 +629,11 @@ impl Compositor {
     ) -> super::ZoneSlotLayout {
         Self::zone_slot_layout_with_tokens(
             self.zone_tokens(zone_name),
+            scene,
             zone_name,
             publishes,
             policy,
-            zh,
-            zw,
+            (zw, zh),
             &self.notification_layouts,
         )
     }
@@ -640,17 +642,24 @@ impl Compositor {
     /// population lays slots out with the exact same function as drawing.
     pub(super) fn zone_slot_layout_with_tokens(
         token_map: &HashMap<String, String>,
+        scene: &SceneGraph,
         zone_name: &str,
         publishes: &[ZonePublishRecord],
         policy: &RenderingPolicy,
-        zh: f32,
-        zw: f32,
+        size: (f32, f32),
         layouts: &std::cell::RefCell<super::notification_layout::NotificationLayoutCache>,
     ) -> super::ZoneSlotLayout {
+        let (zw, zh) = size;
         let ordered_indices: Vec<usize> = if is_alert_banner_zone(zone_name) {
             sort_alert_banner_indices(publishes)
         } else {
-            (0..publishes.len()).rev().collect()
+            // A spared question must stay reachable when the bounded zone
+            // cannot draw every retained card. Keep newest-first within each
+            // group and use the same answered/expiry predicate as admission.
+            let mut indices: Vec<_> = (0..publishes.len()).rev().collect();
+            // Evaluate expiry once per card so its key cannot change mid-sort.
+            indices.sort_by_cached_key(|&index| !scene.is_unanswered_question(&publishes[index]));
+            indices
         };
 
         let ordered_refs: Vec<&ZonePublishRecord> =
