@@ -2540,12 +2540,19 @@ mod tests {
                 let caret = l
                     .shapes
                     .iter()
-                    .find(|s| s.fill == style.primary && s.border.is_none() && s.clip.is_some())
+                    .find(|s| {
+                        s.fill == style.primary
+                            && s.border.is_none()
+                            && s.rect.w <= style.ring.max(1.0) + 0.01
+                            && s.rect.y >= row.y
+                            && s.rect.y + s.rect.h <= row.y + row.h
+                    })
                     .expect("steady caret drawn");
-                let clip = caret.clip.unwrap();
+                let visible_caret = caret.clip.unwrap_or(caret.rect);
                 assert!(
-                    caret.rect.x >= clip.x - 0.01
-                        && caret.rect.x + caret.rect.w <= clip.x + clip.w + 0.01,
+                    visible_caret.x >= drawn.clip_pixel_x - 0.01
+                        && visible_caret.x + visible_caret.w
+                            <= drawn.clip_pixel_x + drawn.clip_bounds_width + 0.01,
                     "caret remains visible at {cursor}: {:?}",
                     caret.rect
                 );
@@ -2557,10 +2564,17 @@ mod tests {
                 }
                 if cursor != anchor && cursor == text.len() {
                     assert!(
-                        l.shapes
-                            .iter()
-                            .any(|s| s.fill == style.primary_container && s.clip == Some(clip)),
-                        "selection shares field clip"
+                        l.shapes.iter().any(|s| {
+                            let visible = s.clip.unwrap_or(s.rect);
+                            s.fill == style.primary_container
+                                && visible.w > 0.0
+                                && visible.x >= drawn.clip_pixel_x - 0.01
+                                && visible.x + visible.w
+                                    <= drawn.clip_pixel_x + drawn.clip_bounds_width + 0.01
+                                && visible.y >= row.y
+                                && visible.y + visible.h <= row.y + row.h
+                        }),
+                        "visible selection stays inside field"
                     );
                 }
             }
