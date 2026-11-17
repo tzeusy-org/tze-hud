@@ -717,6 +717,68 @@ async fn test_three_pass_ordering_independent_of_registration_order() {
         border[1] > 150 && border[1].saturating_sub(border[0]) > 60 && border[2] < 60,
         "uncovered Content border must remain green, got {border:?}"
     );
+
+    // Same-layer flat geometry uses the same name tie-break as rounded/text
+    // collection; changing registration order cannot swap the two fills.
+    for reverse in [false, true] {
+        let mut ordered = SceneGraph::new(1280.0, 720.0);
+        let mut entries = vec![
+            ("order-a", Rgba::new(1.0, 0.0, 0.0, 1.0)),
+            ("order-m", Rgba::new(0.0, 1.0, 0.0, 1.0)),
+            ("order-z", Rgba::new(0.0, 0.0, 1.0, 1.0)),
+        ];
+        if reverse {
+            entries.reverse();
+        }
+        for (name, color) in entries {
+            let mut zone = scene.zone_registry.zones["content-zone"].clone();
+            zone.name = name.into();
+            ordered.register_zone(zone);
+            ordered
+                .publish_to_zone(
+                    name,
+                    ZoneContent::SolidColor(color),
+                    "test",
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap();
+        }
+        let mut flat = Vec::new();
+        compositor.render_zone_content(
+            &ordered,
+            &mut flat,
+            &mut Vec::new(),
+            1280.0,
+            720.0,
+            Some(LayerAttachment::Content),
+        );
+        let colors: Vec<_> = flat.chunks_exact(6).map(|quad| quad[0].color).collect();
+        assert_eq!(
+            colors,
+            vec![
+                [1.0, 0.0, 0.0, 1.0],
+                [0.0, 1.0, 0.0, 1.0],
+                [0.0, 0.0, 1.0, 1.0]
+            ],
+            "flat same-layer order reverse={reverse}"
+        );
+        ordered.set_owner_hidden(tze_hud_scene::graph::SurfaceClasses {
+            zones: true,
+            ..Default::default()
+        });
+        let mut hidden = Vec::new();
+        compositor.render_zone_content(
+            &ordered,
+            &mut hidden,
+            &mut Vec::new(),
+            1280.0,
+            720.0,
+            Some(LayerAttachment::Content),
+        );
+        assert!(hidden.is_empty());
+    }
 }
 
 /// publication_fade_delay_ms derives the delay (delay until fade starts) from expires_at_wall_us

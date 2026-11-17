@@ -1566,7 +1566,11 @@ async fn test_notification_card_border_is_an_sdf_border() {
     // path and generated controls in this existing border parent.
     compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
     compositor.set_token_map(HashMap::from([
-        ("color.notification.outline".into(), "#00FF00".into()),
+        ("color.notification.outline".into(), "#FF0000".into()),
+        (
+            "color.notification.caution.outline".into(),
+            "#00FF00".into(),
+        ),
         ("color.notification.container.low".into(), "#0000FF".into()),
         ("opacity.notification".into(), "1".into()),
     ]));
@@ -1592,17 +1596,23 @@ async fn test_notification_card_border_is_an_sdf_border() {
                 } else {
                     0.75 + index as f32 * 0.001
                 },
-                y_pct: if banner { 0.0 } else { 0.02 },
+                y_pct: if banner { 0.0 } else { 40.0 / 720.0 },
                 width_pct: 0.30,
                 height_pct: 0.20,
             };
             zone.accepted_media_types.push(ZoneMediaType::SolidColor);
+            if banner {
+                // A whole-zone rounded solid fill, not a notification Stack slot.
+                zone.contention_policy = ContentionPolicy::LatestWins;
+                zone.rendering_policy.backdrop_opacity = Some(1.0);
+            }
             overlap.register_zone(zone);
             let content = if banner {
                 ZoneContent::SolidColor(Rgba::new(1.0, 0.0, 0.0, 1.0))
             } else {
                 ZoneContent::Notification(NotificationPayload {
                     text: name.clone(),
+                    urgency: if index == 7 { 1 } else { 0 },
                     actions: vec![NotificationAction {
                         label: "Act".into(),
                         callback_id: Some("act".into()),
@@ -1618,6 +1628,14 @@ async fn test_notification_card_border_is_an_sdf_border() {
         let commands = compositor
             .collect_all_rounded_rect_cmds(&overlap, 1280.0, 720.0)
             .chrome;
+        assert!(
+            commands.iter().any(|c| c.x == 896.0
+                && c.y == 0.0
+                && c.width == 384.0
+                && c.height == 144.0
+                && c.color == [1.0, 0.0, 0.0, 1.0]),
+            "the actual rounded banner fill must cover the sampled notification border"
+        );
         let xs: Vec<_> = commands
             .iter()
             // Backdrops span the full384px zone; action controls are inset.
@@ -1643,8 +1661,11 @@ async fn test_notification_card_border_is_an_sdf_border() {
         compositor.prime_truncation_cache(&overlap);
         compositor.render_frame_headless(&mut overlap, &surface);
         let pixels = surface.read_pixels(&compositor.device);
-        let offset = (14 * 1280 + 1144) * 4;
+        let offset = (40 * 1280 + 1144) * 4;
         let border = &pixels[offset..offset + 4];
+        eprintln!(
+            "[ZONE-ORDER-PIXEL] reverse={reverse} x1144row40={border:?} SDFbackdrop_xs={xs:?}"
+        );
         if !border
             .iter()
             .zip([0u8, 255, 0, 255])
