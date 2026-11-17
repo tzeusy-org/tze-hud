@@ -12,6 +12,7 @@ pub mod session_server;
 #[cfg(any(test, feature = "dev-mode"))]
 pub mod subscriptions;
 #[cfg(not(any(test, feature = "dev-mode")))]
+#[allow(unreachable_pub)]
 pub(crate) mod subscriptions;
 pub mod token;
 

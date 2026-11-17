@@ -17,25 +17,25 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 
 /// How long an answer is reused by `/admin/status` and the pairing card.
-pub const CACHE_TTL: Duration = Duration::from_secs(5);
+pub(crate) const CACHE_TTL: Duration = Duration::from_secs(5);
 
 /// Where the owner is pointed for the fix.
-pub const FIX_HINT: &str =
+pub(crate) const FIX_HINT: &str =
     "run tze_hud.exe --allow-remote with the same --mcp-port/--grpc-port overrides as the HUD";
 
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-pub const PROFILE_DOMAIN: u32 = 1;
+pub(crate) const PROFILE_DOMAIN: u32 = 1;
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-pub const PROFILE_PRIVATE: u32 = 2;
+pub(crate) const PROFILE_PRIVATE: u32 = 2;
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-pub const PROFILE_PUBLIC: u32 = 4;
+pub(crate) const PROFILE_PUBLIC: u32 = 4;
 
 const PROTO_TCP: i32 = 6;
 const PROTO_ANY: i32 = 256;
 
 /// One inbound-relevant firewall rule, as read from `INetFwRule`.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Rule {
+pub(crate) struct Rule {
     pub name: String,
     pub enabled: bool,
     pub inbound: bool,
@@ -54,7 +54,7 @@ pub struct Rule {
 
 /// The firewall policy state that matters for inbound decisions.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct FirewallSnapshot {
+pub(crate) struct FirewallSnapshot {
     /// Profiles whose firewall is on.
     pub enabled: u32,
     /// Profiles whose default inbound action is Block.
@@ -113,7 +113,7 @@ impl TailnetInbound {
 /// Only rules on a profile that is both active and enabled count. `tailnet_bound`
 /// false (nothing listens on a tailnet address) is `NotApplicable`; a failed
 /// snapshot read is `Unknown`.
-pub fn decide(
+pub(crate) fn decide(
     tailnet_bound: bool,
     snapshot: &Result<FirewallSnapshot, String>,
     exe: &Path,

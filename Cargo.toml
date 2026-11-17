@@ -162,6 +162,7 @@ windows = { version = "0.58", features = [
 [workspace.lints.rust]
 # Treat all rustc warnings as errors, consistent with the -D warnings clippy flag.
 warnings = "deny"
+unreachable_pub = "warn"
 
 [workspace.lints.clippy]
 # Deny the same lint set that -D warnings activates for clippy.

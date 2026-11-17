@@ -39,7 +39,7 @@ use super::chrome::ChromeState;
 
 /// Result of [`enter_safe_mode`].
 #[derive(Debug)]
-pub struct SafeModeEntryResult {
+pub(crate) struct SafeModeEntryResult {
     /// Whether this call performed the transition.
     pub entered: bool,
     /// Number of leases that were suspended.
@@ -50,7 +50,7 @@ pub struct SafeModeEntryResult {
 
 /// Result of [`exit_safe_mode`].
 #[derive(Debug)]
-pub struct SafeModeExitResult {
+pub(crate) struct SafeModeExitResult {
     /// Whether this call transitioned safe mode from active to inactive.
     ///
     /// An idempotent exit has no compositor-visible effect, so callers use
@@ -63,7 +63,7 @@ pub struct SafeModeExitResult {
 }
 
 /// Enter safe mode. A no-op result is returned if safe mode is already active.
-pub async fn enter_safe_mode(
+pub(crate) async fn enter_safe_mode(
     shared_state: &Arc<Mutex<SharedState>>,
     chrome_state: &Arc<RwLock<ChromeState>>,
     portals: Option<&tze_hud_mcp::PortalHandle>,
@@ -133,7 +133,7 @@ pub async fn enter_safe_mode(
 ///
 /// Agents do not re-request leases: identity, capability scope, and resource
 /// budget are preserved across the ACTIVE -> SUSPENDED -> ACTIVE cycle.
-pub async fn exit_safe_mode(
+pub(crate) async fn exit_safe_mode(
     shared_state: &Arc<Mutex<SharedState>>,
     chrome_state: &Arc<RwLock<ChromeState>>,
     portals: Option<&tze_hud_mcp::PortalHandle>,

@@ -26,7 +26,7 @@ use tze_hud_protocol::proto::session::hud_session_client::HudSessionClient;
 // ─── Timestamp ───────────────────────────────────────────────────────────────
 
 /// Current wall-clock time in microseconds since UNIX epoch.
-pub fn now_wall_us() -> u64 {
+pub(crate) fn now_wall_us() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -39,7 +39,7 @@ pub fn now_wall_us() -> u64 {
 ///
 /// Created by [`connect_agent`]. Fields are public so that test files that need
 /// direct access (e.g., to inspect `namespace` or `lease_id_bytes`) can read them.
-pub struct AgentSession {
+pub(crate) struct AgentSession {
     pub namespace: String,
     pub tx: tokio::sync::mpsc::Sender<session_proto::ClientMessage>,
     pub rx: tonic::codec::Streaming<session_proto::ServerMessage>,
@@ -48,7 +48,7 @@ pub struct AgentSession {
 
 impl AgentSession {
     /// Increment and return the next sequence number.
-    pub fn next_seq(&mut self) -> u64 {
+    pub(crate) fn next_seq(&mut self) -> u64 {
         self.sequence += 1;
         self.sequence
     }
@@ -57,7 +57,7 @@ impl AgentSession {
     ///
     /// Returns `None` if the stream has ended, or `Some(Ok(msg))` / `Some(Err(…))`
     /// otherwise. Callers typically chain `.ok_or("…")?` to convert to a `Result`.
-    pub async fn next_server_msg(
+    pub(crate) async fn next_server_msg(
         &mut self,
     ) -> Option<Result<session_proto::ServerMessage, tonic::Status>> {
         self.rx.next().await
@@ -76,7 +76,7 @@ impl AgentSession {
 ///
 /// The returned [`AgentSession`] has `sequence` pre-set to `1` (the
 /// SessionInit) so the next `next_seq()` call returns `2`.
-pub async fn connect_agent(
+pub(crate) async fn connect_agent(
     psk: &str,
     port: u16,
     agent_id: &str,
@@ -151,7 +151,7 @@ pub async fn connect_agent(
 ///
 /// All higher-level zone helpers (`publish_stream_text_to_zone_via_grpc`,
 /// `publish_notification_to_zone_via_grpc`) delegate to this function.
-pub async fn publish_zone_content_via_grpc(
+pub(crate) async fn publish_zone_content_via_grpc(
     session: &mut AgentSession,
     zone_name: &str,
     content: proto::ZoneContent,
@@ -195,7 +195,7 @@ pub async fn publish_zone_content_via_grpc(
 }
 
 /// Publish `StreamText` content to a zone (e.g., the subtitle zone).
-pub async fn publish_stream_text_to_zone_via_grpc(
+pub(crate) async fn publish_stream_text_to_zone_via_grpc(
     session: &mut AgentSession,
     zone_name: &str,
     text: &str,
@@ -211,7 +211,7 @@ pub async fn publish_stream_text_to_zone_via_grpc(
 }
 
 /// Publish a `Notification` payload to a zone (e.g., the notification-area zone).
-pub async fn publish_notification_to_zone_via_grpc(
+pub(crate) async fn publish_notification_to_zone_via_grpc(
     session: &mut AgentSession,
     zone_name: &str,
     text: &str,

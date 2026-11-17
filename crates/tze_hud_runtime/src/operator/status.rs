@@ -384,7 +384,7 @@ pub fn process_cpu_secs() -> Option<f64> {
 
 #[cfg(target_os = "linux")]
 mod imp {
-    pub fn process_cpu_secs() -> Option<f64> {
+    pub(super) fn process_cpu_secs() -> Option<f64> {
         let stat = std::fs::read_to_string("/proc/self/stat").ok()?;
         // Fields after the parenthesised comm: state is field 3, utime 14, stime 15.
         let rest = &stat[stat.rfind(')')? + 2..];
@@ -407,7 +407,7 @@ mod imp {
         ((u64::from(t.dwHighDateTime) << 32) | u64::from(t.dwLowDateTime)) as f64 / 1e7
     }
 
-    pub fn process_cpu_secs() -> Option<f64> {
+    pub(super) fn process_cpu_secs() -> Option<f64> {
         let (mut created, mut exited) = (FILETIME::default(), FILETIME::default());
         let (mut kernel, mut user) = (FILETIME::default(), FILETIME::default());
         // SAFETY: the pseudo-handle is always valid and the out-pointers are live locals.

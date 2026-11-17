@@ -88,7 +88,7 @@ impl FrameTurnState {
     /// Adapters own scene acquisition. `commit` preserves the headless Stage 2/3
     /// input boundary, and `build` implements only the surface-specific tail.
     /// Windowed builds leave submission deferred until after releasing the lock.
-    pub fn run_frame_turn<C, T>(
+    pub(crate) fn run_frame_turn<C, T>(
         &mut self,
         scene: &mut SceneGraph,
         mut compositor: Option<&mut tze_hud_compositor::Compositor>,
@@ -189,7 +189,7 @@ impl FrameTurnState {
         }
     }
 
-    pub fn record_submission(&mut self, submitted: bool, versions: (u64, u64)) {
+    pub(crate) fn record_submission(&mut self, submitted: bool, versions: (u64, u64)) {
         if submitted {
             self.last_rendered = versions;
             self.widget_repaint_pending = false;
@@ -199,7 +199,7 @@ impl FrameTurnState {
     }
 
     #[cfg(test)]
-    pub fn last_rendered(&self) -> (u64, u64) {
+    pub(crate) fn last_rendered(&self) -> (u64, u64) {
         self.last_rendered
     }
 }
@@ -455,7 +455,9 @@ impl Default for FramePipeline {
 /// TTL or orphan grace has elapsed (invariant 4). Returns the terminal lease
 /// expiries; the caller forwards them to sessions after releasing the scene
 /// lock.
-pub fn sweep_timed_scene_state(scene: &mut SceneGraph) -> Vec<tze_hud_scene::types::LeaseExpiry> {
+pub(crate) fn sweep_timed_scene_state(
+    scene: &mut SceneGraph,
+) -> Vec<tze_hud_scene::types::LeaseExpiry> {
     // Diagnostic work is opt-in; normal sweeps allocate no extra metadata.
     let scheduled = tracing::enabled!(target: "tze_hud_delay_diagnostic", tracing::Level::DEBUG)
         .then(|| {

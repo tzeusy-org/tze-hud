@@ -11,11 +11,11 @@ use tokio::sync::watch;
 ///
 /// Value `true` means "compositor has submitted GPU work, call surface.present()".
 /// Value `false` is the initial state (no frame ready yet).
-pub type FrameReadyTx = watch::Sender<bool>;
-pub type FrameReadyRx = watch::Receiver<bool>;
+pub(crate) type FrameReadyTx = watch::Sender<bool>;
+pub(crate) type FrameReadyRx = watch::Receiver<bool>;
 
 /// Create a FrameReadySignal pair (sender lives on compositor thread, receiver
 /// on main thread).
-pub fn frame_ready_channel() -> (FrameReadyTx, FrameReadyRx) {
+pub(crate) fn frame_ready_channel() -> (FrameReadyTx, FrameReadyRx) {
     watch::channel(false)
 }

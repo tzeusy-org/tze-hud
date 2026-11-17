@@ -15,6 +15,8 @@ pub mod config_write;
 pub mod displays;
 pub mod loader;
 pub mod policy_builder;
+// Inside the T7 portal boundary; narrowed when the T7 epic lands.
+#[allow(unreachable_pub)]
 pub mod portal_tokens;
 pub mod raw;
 pub mod resolver;

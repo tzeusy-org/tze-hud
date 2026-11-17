@@ -19,14 +19,14 @@ use tokio::io::{AsyncRead, AsyncReadExt};
 use tze_hud_scene::config::AgentIdentity;
 
 /// Cap on a whole request (headers + body); larger requests are dropped.
-pub const MAX_REQUEST: usize = 64 * 1024;
+pub(crate) const MAX_REQUEST: usize = 64 * 1024;
 
 /// Per-connection budget for receiving a complete request.
-pub const READ_TIMEOUT: Duration = Duration::from_secs(5);
+pub(crate) const READ_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// A parsed HTTP request.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Request {
+pub(crate) struct Request {
     pub method: String,
     /// Path without the query string.
     pub path: String,
@@ -184,7 +184,7 @@ impl OperatorError {
 
 /// Where a request goes.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Route {
+pub(crate) enum Route {
     Mcp,
     /// `POST /pair`; needs no bearer.
     Pair,
@@ -195,7 +195,7 @@ pub enum Route {
 
 /// Operator endpoints under `/admin`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AdminRoute {
+pub(crate) enum AdminRoute {
     Status,
     Logs,
     Screenshot,
@@ -208,7 +208,7 @@ pub enum AdminRoute {
 /// Gate for every `/admin/*` request, run before any admin data is read:
 /// 401 without a valid PSK, 403 `NOT_ADMIN` for a paired agent whose allow
 /// list lacks `admin` (`*` does not grant it).
-pub fn admin_guard(identity: Option<&AgentIdentity>) -> Result<(), Response> {
+pub(crate) fn admin_guard(identity: Option<&AgentIdentity>) -> Result<(), Response> {
     match identity {
         None => Err(Response::operator_error(
             401,
@@ -229,7 +229,7 @@ pub fn admin_guard(identity: Option<&AgentIdentity>) -> Result<(), Response> {
 }
 
 /// Route by `(method, path)`.
-pub fn route(method: &str, path: &str) -> Route {
+pub(crate) fn route(method: &str, path: &str) -> Route {
     match (method, path) {
         ("POST", "/" | "/mcp") => Route::Mcp,
         (_, "/" | "/mcp") => Route::Respond(Response::method_not_allowed("POST")),
@@ -251,7 +251,7 @@ pub fn route(method: &str, path: &str) -> Route {
 }
 
 /// Value of `key` in a raw query string (`a=1&b=2`), without percent-decoding.
-pub fn query_param<'a>(query: &'a str, key: &str) -> Option<&'a str> {
+pub(crate) fn query_param<'a>(query: &'a str, key: &str) -> Option<&'a str> {
     query
         .split('&')
         .filter_map(|kv| kv.split_once('=').or(Some((kv, ""))))
@@ -261,7 +261,7 @@ pub fn query_param<'a>(query: &'a str, key: &str) -> Option<&'a str> {
 
 /// Why a request could not be read.
 #[derive(Debug, PartialEq, Eq)]
-pub enum ReadError {
+pub(crate) enum ReadError {
     /// Peer closed before complete headers, or a transport read failed.
     Closed,
     /// Request exceeded [`MAX_REQUEST`].
@@ -277,7 +277,7 @@ pub enum ReadError {
 }
 
 /// Read one request, giving up after `timeout` in total.
-pub async fn read_request<R: AsyncRead + Unpin>(
+pub(crate) async fn read_request<R: AsyncRead + Unpin>(
     stream: &mut R,
     timeout: Duration,
 ) -> Result<Request, ReadError> {

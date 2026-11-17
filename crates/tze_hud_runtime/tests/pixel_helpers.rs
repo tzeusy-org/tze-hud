@@ -37,18 +37,18 @@
 //! ```
 
 #[path = "../../tze_hud_compositor/tests/common/pixels.rs"]
-pub mod pixels;
-pub use pixels::{assert_pixel_color, pixel_at};
+pub(crate) mod pixels;
+pub(crate) use pixels::{assert_pixel_color, pixel_at};
 
 // ─── Tolerance constants ─────────────────────────────────────────────────────
 
 /// CI tolerance for solid-fill pixels on llvmpipe / SwiftShader (±6/channel).
 /// All pixel assertions in `pixel_readback.rs` use this constant.
-pub const CI_SOLID_TOLERANCE: u8 = 6;
+pub(crate) const CI_SOLID_TOLERANCE: u8 = 6;
 
 /// CI tolerance for alpha-blended pixels on llvmpipe / SwiftShader (±8/channel).
 /// All pixel assertions involving alpha blending use this constant.
-pub const CI_BLEND_TOLERANCE: u8 = 8;
+pub(crate) const CI_BLEND_TOLERANCE: u8 = 8;
 
 // ─── Background clear colour ──────────────────────────────────────────────────
 
@@ -56,7 +56,7 @@ pub const CI_BLEND_TOLERANCE: u8 = 8;
 ///
 /// Compositor clears to linear (0.05, 0.05, 0.10, 1.0).
 /// sRGB ≈ (64, 64, 89, 255).
-pub const BG_SRGB: [u8; 4] = [64, 64, 89, 255];
+pub(crate) const BG_SRGB: [u8; 4] = [64, 64, 89, 255];
 
 // ─── Dimensions used across all scene tests ────────────────────────────────
 
@@ -66,10 +66,10 @@ pub const BG_SRGB: [u8; 4] = [64, 64, 89, 255];
 /// built with `TestSceneRegistry::new()` whose tile bounds are relative to a
 /// 1920×1080 canvas; using a smaller runtime would cause `BoundsOutOfRange`
 /// errors during scene construction.
-pub const SCENE_W: u32 = 1920;
+pub(crate) const SCENE_W: u32 = 1920;
 
 /// Display height used for all scene pixel tests.
-pub const SCENE_H: u32 = 1080;
+pub(crate) const SCENE_H: u32 = 1080;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -78,7 +78,7 @@ pub const SCENE_H: u32 = 1080;
 /// Uses 1920×1080 to match [`tze_hud_scene::test_scenes::TestSceneRegistry::new`]'s
 /// default display area.  Scenes are built with tile bounds relative to 1920×1080;
 /// a smaller runtime would cause `BoundsOutOfRange` at scene construction time.
-pub async fn make_scene_runtime() -> tze_hud_runtime::HeadlessRuntime {
+pub(crate) async fn make_scene_runtime() -> tze_hud_runtime::HeadlessRuntime {
     use tze_hud_runtime::headless::HeadlessConfig;
     // Share the harness initialization gate with present-ack. Release it before
     // returning the runtime so clients and rendering remain parallel.
@@ -97,7 +97,7 @@ pub async fn make_scene_runtime() -> tze_hud_runtime::HeadlessRuntime {
 
 /// Replace the runtime's scene with `scene`, render one frame, and return
 /// the RGBA8 pixel buffer.
-pub async fn render_scene_pixels(
+pub(crate) async fn render_scene_pixels(
     runtime: &mut tze_hud_runtime::HeadlessRuntime,
     scene: tze_hud_scene::graph::SceneGraph,
 ) -> Vec<u8> {

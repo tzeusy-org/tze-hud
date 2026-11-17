@@ -22,20 +22,20 @@ pub(crate) async fn lock_gpu_init() -> MutexGuard<'static, ()> {
     GPU_INIT_MUTEX.lock().await
 }
 
-pub async fn new_headless_serialized(w: u32, h: u32) -> Result<Compositor, CompositorError> {
+pub(crate) async fn new_headless_serialized(w: u32, h: u32) -> Result<Compositor, CompositorError> {
     let _guard = lock_gpu_init().await;
     Compositor::new_headless(w, h).await
 }
 
 /// A headless compositor plus the surface it renders into.
-pub struct Gpu {
+pub(crate) struct Gpu {
     pub compositor: Compositor,
     surface: HeadlessSurface,
     width: u32,
 }
 
 /// The sRGB bytes of one rendered frame.
-pub struct Frame {
+pub(crate) struct Frame {
     pixels: Vec<u8>,
     width: u32,
 }
@@ -43,7 +43,7 @@ pub struct Frame {
 impl Gpu {
     /// Create a compositor and surface, or `None` (skip) when
     /// `TZE_HUD_SKIP_GPU_TESTS=1` or no adapter exists.
-    pub async fn new(width: u32, height: u32) -> Option<Self> {
+    pub(crate) async fn new(width: u32, height: u32) -> Option<Self> {
         if std::env::var("TZE_HUD_SKIP_GPU_TESTS").is_ok_and(|v| v.trim() == "1") {
             eprintln!("skipping GPU test: TZE_HUD_SKIP_GPU_TESTS=1");
             return None;
@@ -66,7 +66,7 @@ impl Gpu {
     }
 
     /// Render `scene` and read the frame back. Reusable across scenes.
-    pub fn render(&mut self, scene: &mut SceneGraph) -> Frame {
+    pub(crate) fn render(&mut self, scene: &mut SceneGraph) -> Frame {
         self.compositor.prime_markdown_cache(scene);
         self.compositor.render_frame_headless(scene, &self.surface);
         Frame {
@@ -77,27 +77,31 @@ impl Gpu {
 }
 
 impl Frame {
-    pub fn at(&self, x: u32, y: u32) -> [u8; 4] {
+    pub(crate) fn at(&self, x: u32, y: u32) -> [u8; 4] {
         pixels::pixel_at(&self.pixels, self.width, x, y)
     }
 
     /// Panic unless the pixel at (x, y) is within `tol` of `expected` on every channel.
     #[track_caller]
-    pub fn expect(&self, x: u32, y: u32, expected: [u8; 4], tol: u8, what: &str) {
+    pub(crate) fn expect(&self, x: u32, y: u32, expected: [u8; 4], tol: u8, what: &str) {
         pixels::assert_pixel_color(&self.pixels, self.width, x, y, expected, tol, what)
             .unwrap_or_else(|e| panic!("{what} at ({x},{y}): {e}"));
     }
 
     /// Whether any pixel in the half-open rect is brighter than 180 on all channels
     /// (white text over a dark backdrop).
-    pub fn has_bright_pixel(&self, xs: std::ops::Range<u32>, ys: std::ops::Range<u32>) -> bool {
+    pub(crate) fn has_bright_pixel(
+        &self,
+        xs: std::ops::Range<u32>,
+        ys: std::ops::Range<u32>,
+    ) -> bool {
         ys.flat_map(|y| xs.clone().map(move |x| (x, y)))
             .any(|(x, y)| self.at(x, y)[..3].iter().all(|&c| c > 180))
     }
 }
 
 /// Publish a notification payload to `zone` as `publisher`.
-pub fn publish_notification(
+pub(crate) fn publish_notification(
     scene: &mut SceneGraph,
     zone: &str,
     urgency: u32,
