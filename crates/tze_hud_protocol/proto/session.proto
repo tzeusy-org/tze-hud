@@ -138,13 +138,13 @@ message ServerMessage {
 
   }
 
-  // Field 22 (lease_denial) was removed in the v1 vocabulary rename.
+  // Field 22 (lease_denial) was removed.
   // Reserved to prevent accidental reuse and wire-format incompatibilities.
   reserved 22;
   reserved "lease_denial";
 
-  // Field 32 (subscription_ack) was renamed to subscription_change_result (field 39)
-  // to align with the spec. Reserved to prevent accidental reuse.
+  // Field 32 (subscription_ack) was renamed to subscription_change_result (field 39).
+  // Reserved to prevent accidental reuse.
   reserved 32;
   reserved "subscription_ack";
 
@@ -175,7 +175,7 @@ message ServerMessage {
 
 // ─── Authentication credentials ──────────────────────────────
 
-// Pre-shared key credential (v1 primary auth mechanism).
+// Pre-shared key credential (the auth mechanism).
 message PreSharedKeyCredential {
   string key = 1;  // The pre-shared key value
 }

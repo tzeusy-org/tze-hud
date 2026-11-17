@@ -215,7 +215,7 @@ pub fn bootstrap_scene_element_store_with_path(
     if !gc.pruned.is_empty() {
         tracing::info!(
             pruned = gc.pruned.len(),
-            "element_store: pruned orphan tile entries past retention bound (hud-fwgv7, hud-m1ok3)"
+            "element_store: pruned orphan tile entries past retention bound"
         );
     }
     relock_tiles_with_durable_override(scene, &store);

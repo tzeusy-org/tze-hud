@@ -450,8 +450,8 @@ leased content. No public scene snapshot exposes that origin or scene nodes.
 - `tze_hud_compositor` (badge draw command) [`orphaned_tile_emits_disconnection_badge_draw_cmd`](../crates/tze_hud_compositor/src/renderer/tests/focus_chrome.rs)
 - `integration` (POC acceptance, over gRPC and MCP with `production.toml`)
   [`poc_portal_abandoned_is_reclaimed`](../tests/integration/poc_acceptance.rs)
-- `tze_hud_scene` [`tile_lease_reap_keeps_same_namespace_mcp_publications`](../crates/tze_hud_scene/src/graph/spec_scenarios.rs),
-  [`revoked_lease_clears_only_its_publications`](../crates/tze_hud_scene/src/graph/spec_scenarios.rs)
+- `tze_hud_scene` [`tile_lease_reap_keeps_same_namespace_mcp_publications`](../crates/tze_hud_scene/src/graph/behavior_tests.rs),
+  [`revoked_lease_clears_only_its_publications`](../crates/tze_hud_scene/src/graph/behavior_tests.rs)
 
 ## 5. Leases hold time; safe mode pauses it
 

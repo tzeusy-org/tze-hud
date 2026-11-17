@@ -93,9 +93,9 @@ profile = "full-display"
     assert!(has_no_tabs, "no [[tabs]] should produce CONFIG_NO_TABS");
 }
 
-// ── Layered Config Composition (v1-reserved) ────────────────────────────
+// ── Layered Config Composition (unsupported) ────────────────────────────
 
-/// WHEN config has `includes` field THEN startup error (post-v1 reserved).
+/// A config with an `includes` field is a startup error.
 #[test]
 fn includes_field_rejected() {
     let toml = r#"

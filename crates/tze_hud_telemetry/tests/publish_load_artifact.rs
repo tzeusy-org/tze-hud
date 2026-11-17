@@ -45,7 +45,6 @@ fn baseline_artifact() -> PublishLoadArtifact {
         },
         traceability: PublishLoadTraceability {
             spec_id: Some("publish-load-harness".to_string()),
-            rfc_id: Some("RFC-0005".to_string()),
             budget_id: Some("publish_load_p99".to_string()),
             threshold_id: Some("publish_load_default".to_string()),
         },

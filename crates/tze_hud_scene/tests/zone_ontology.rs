@@ -1,6 +1,6 @@
 //! # Zone Ontology Integration Tests
 //!
-//! Tests for the four-level zone model Zone Registry (line 185).
+//! Tests for the four-level zone model.
 //!
 //! ## Four-level zone ontology
 //!

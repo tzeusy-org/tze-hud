@@ -1151,8 +1151,8 @@ mod tests {
              Monospace content ({h_mono_baseline} vs {h_mono_swapped}) — proves \
              flow_child_height measures against the FontSystem instance it is \
              given, not a fixed/rebuilt bundled snapshot. If this ever starts \
-             failing, hud-9gopx's whole premise (uploaded fonts affect flow \
-             height) has silently stopped being true."
+             failing, the premise that uploaded fonts affect flow \
+             height has silently stopped being true."
         );
         assert_eq!(
             h_sans_baseline, h_sans_swapped,

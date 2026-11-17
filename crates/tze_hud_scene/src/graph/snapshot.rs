@@ -77,7 +77,7 @@ impl SceneGraph {
         // instance binding is implicit (one per tab per zone type when a zone is loaded).
         // Consumers of this snapshot MUST NOT rely on zone_instances being populated;
         // any instance bindings must be derived from zone_types and current tab/node state.
-        // Post-v1: explicit ZoneInstance tracking will populate this field.
+        // Explicit ZoneInstance tracking is not supported, so this stays empty.
         let zone_instances: Vec<ZoneInstance> = Vec::new();
 
         // Active publications: BTreeMap keyed by zone name; each Vec is already

@@ -1341,7 +1341,7 @@ pub(super) fn focus_window_for_text_input(window: &Window) {
                 if !sfw || (attach_required && !attached) || timeout_may_be_left_altered {
                     let fg_after = GetForegroundWindow();
                     crate::diag::diag_write(&format!(
-                        "FOCUS-WARN(hud-ktwsz): foreground focus repair incomplete for overlay \
+                        "FOCUS-WARN: foreground focus repair incomplete for overlay \
                          hwnd={:?} fg_before={:?} attached={} attach_required={} \
                          prev_lock_timeout={:?} lock_cleared={} lock_restored={:?} \
                          timeout_may_be_left_altered={} set_foreground_window={} \
@@ -1502,7 +1502,7 @@ pub(super) fn spin_acquire_recording<'a, T>(
         if n == 1 || n % 30 == 0 {
             crate::diag::diag_write(&format!(
                 "INTERACTION-FEEDBACK-MISS: guaranteed-feedback gesture dropped a scene \
-                 update (spin_acquire exceeded {}ms budget) — cumulative {n} [hud-uyhpn]",
+                 update (spin_acquire exceeded {}ms budget) — cumulative {n}",
                 budget.as_millis(),
             ));
         }
@@ -4646,7 +4646,7 @@ mod tests {
                 PortalWindowTokens::default(),
             ),
             "PointerDown on a multi-surface portal frame's resize corner must spin-acquire \
-             even though the frame tile is not itself scrollable (hud-yno2r)"
+             even though the frame tile is not itself scrollable"
         );
     }
 
@@ -4745,7 +4745,7 @@ mod tests {
         assert!(
             frame_after.width > frame_before.width && frame_after.height > frame_before.height,
             "dragging the frame corner must grow the whole portal even though \
-             click-to-focus moved focus off the scrollable pane (hud-yno2r)"
+             click-to-focus moved focus off the scrollable pane"
         );
 
         // Release the gesture.

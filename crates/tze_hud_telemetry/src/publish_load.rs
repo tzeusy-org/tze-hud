@@ -134,7 +134,6 @@ pub struct PublishLoadThresholds {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct PublishLoadTraceability {
     pub spec_id: Option<String>,
-    pub rfc_id: Option<String>,
     pub budget_id: Option<String>,
     pub threshold_id: Option<String>,
 }

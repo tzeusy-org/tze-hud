@@ -1257,7 +1257,7 @@ impl LeaseState {
 /// Lease caps violation error.
 #[derive(Clone, Debug, PartialEq)]
 pub enum CapsError {
-    /// Runtime-wide lease limit (64) exceeded — Requirement: Lease Caps.
+    /// Runtime-wide lease limit (64) exceeded.
     MaxRuntimeLeasesExceeded { current: usize, limit: usize },
 }
 
@@ -2350,8 +2350,6 @@ pub struct ZonePublishRecord {
 ///
 /// In v1, zone instances are static (loaded from config; one instance per tab
 /// per zone type). Agents MUST NOT create zone instances.
-///
-/// Zone Registry (line 185).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ZoneInstance {
     /// The zone type (definition) this instance belongs to.
@@ -2390,8 +2388,7 @@ pub struct ZoneRegistrySnapshot {
 // ─── Widget types ────────────────────────────────────────────────────────────
 
 /// Minimum z-order for widget tiles. Widget tiles appear above zone tiles when
-/// they overlap spatially. Per widget-system Requirement: Widget Contention
-/// and Governance.
+/// they overlap spatially.
 pub const WIDGET_TILE_Z_MIN: u32 = 0x9000_0000;
 
 /// Parameter types supported by the widget system in v1.
@@ -2973,7 +2970,7 @@ pub struct SceneGraphZoneRegistry {
     /// Zone instances sorted by zone_type_name then tab_id for determinism.
     pub zone_instances: Vec<ZoneInstance>,
     /// Active publications sorted by zone name then publisher_namespace for determinism.
-    /// Includes zone publications but MUST NOT include effective_geometry (post-v1).
+    /// Includes zone publications but MUST NOT include effective_geometry.
     pub active_publications: std::collections::BTreeMap<String, Vec<ZonePublishRecord>>,
 }
 
@@ -2992,8 +2989,8 @@ pub struct SceneGraphZoneRegistry {
 /// # v1 Scope Constraints
 /// - Resources are ephemeral: snapshot references ResourceIds but MUST NOT
 ///   embed blob data
-/// - effective_geometry is NOT included (post-v1)
-/// - Incremental diff is NOT available (post-v1)
+/// - effective_geometry is NOT included
+/// - Incremental diff is NOT available
 ///
 /// # Reconnection
 /// When an agent reconnects, the runtime MUST send a full SceneGraphSnapshot.
@@ -3047,7 +3044,7 @@ pub struct SceneGraphSnapshot {
     pub portal_surfaces: std::collections::BTreeMap<SceneId, PortalSurface>,
 
     /// Zone registry snapshot: types, instances, active publications.
-    /// Does NOT include effective_geometry (post-v1).
+    /// Does NOT include effective_geometry.
     pub zone_registry: SceneGraphZoneRegistry,
 
     /// Widget registry snapshot: types, instances, active publications.
@@ -3359,7 +3356,7 @@ impl ZoneRegistry {
     ///
     /// In v1, active publishes are global (not tab-scoped); `tab_id` is echoed
     /// through to the returned `ZoneOccupancy` but is NOT used as a filter.
-    /// Tab-scoped zone instances are a post-v1 feature. In v1, `effective_geometry`
+    /// Tab-scoped zone instances are not supported; `effective_geometry`
     /// is also not exposed.
     ///
     /// Returns `None` if the zone is not found.

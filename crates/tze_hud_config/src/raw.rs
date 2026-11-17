@@ -195,7 +195,7 @@ pub struct RawConfig {
     #[serde(default)]
     pub schema_version: Option<u32>,
 
-    /// `includes` is v1-reserved.  Presence must produce a hard error.
+    /// `includes` is unsupported.  Presence must produce a hard error.
     /// Accepts any value — detection of presence triggers the error in validation.
     pub includes: Option<AnyValue>,
 

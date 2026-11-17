@@ -195,7 +195,7 @@ fn build_projection_scene(
             data: NodeData::TextMarkdown(TextMarkdownNode {
                 content: [
                     "**Cooperative HUD Projection Proof**",
-                    "`hud-ggntn.12` | Expanded | AttentionLow",
+                    "`proof` | Expanded | AttentionLow",
                     "status: runtime-native readback artifact",
                     "note: OS desktop capture was unavailable in this session",
                     "",

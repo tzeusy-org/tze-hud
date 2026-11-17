@@ -25,7 +25,7 @@
        Without this manifest, a process launched from the task scheduler (without
        a console window) may start DPI-unaware, causing virtualized/logical pixel
        dimensions to be reported. This manifest prevents that regardless of launch
-       context. See: hud-22by, docs/design/windows-dpi.md -->
+       context. -->
   <asmv3:application>
     <asmv3:windowsSettings>
       <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">

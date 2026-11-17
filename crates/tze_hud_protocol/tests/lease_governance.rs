@@ -4,8 +4,8 @@
 //!
 //! Covers (Lease Governance Lifecycle) and (Namespace Isolation)
 //! plus the following requirements:
-//! - Requirement: Lease Orphan Handling on Disconnect (3 scenarios)
-//! - Requirement: Lease Expiry Without Renewal Removes Tile (2 scenarios)
+//! - Lease orphan handling on disconnect (3 scenarios)
+//! - Lease expiry without renewal removes the tile (2 scenarios)
 //! - Namespace isolation enforcement
 //!
 //! All tests are headless Layer 0: no display server or GPU required.

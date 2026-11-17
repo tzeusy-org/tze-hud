@@ -113,11 +113,11 @@ impl ResourceType {
     /// Return `true` iff this type is part of the v1 supported set.
     ///
     /// All six variants are v1-supported; the method exists so callers can
-    /// express intent clearly and so future post-v1 variants (VIDEO_H264, etc.)
+    /// express intent clearly and so any future variants
     /// can be added without changing call sites.
     #[inline]
     pub fn is_v1_supported(self) -> bool {
-        // All current variants are v1; post-v1 types would map to a separate
+        // All current variants are supported; new types would map to a separate
         // enum or a discriminant > the current max.
         matches!(
             self,

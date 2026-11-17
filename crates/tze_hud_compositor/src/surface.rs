@@ -12,8 +12,7 @@
 //! - [`WindowSurface`] — window-backed surface via `wgpu::Surface`.
 //!   Reserved for windowed mode; windowed rendering is post-vertical-slice.
 //!
-//! Compositor Surface Trait (line 364)
-//! the surface is abstracted behind `CompositorSurface` with `acquire_frame()`,
+//! The surface is abstracted behind `CompositorSurface` with `acquire_frame()`,
 //! `present()`, and `size()`.  `CompositorFrame` bundles the `TextureView` with
 //! an ownership guard so the `SurfaceTexture` lives until after `present()`.
 //!
@@ -1067,12 +1066,7 @@ impl CompositorSurface for WindowSurface {
 
 // ─── HeadlessSurface ─────────────────────────────────────────────────────────
 
-/// Headless offscreen surface for testing and CI.
-///
-/// Satisfies:
-/// - Requirement: Headless Mode
-/// - Requirement: DR-V2
-/// - Requirement: DR-V6
+/// Headless offscreen surface for testing, CI and offline rendering.
 pub struct HeadlessSurface {
     pub(crate) texture: wgpu::Texture,
     /// Retained view ownership; frame acquisition creates its own render view.
