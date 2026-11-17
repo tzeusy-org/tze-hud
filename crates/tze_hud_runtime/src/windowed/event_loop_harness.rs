@@ -3551,6 +3551,51 @@ mod tests {
     /// (the geometry epoch) while an unchanged move does not.
     #[test]
     fn action_button_hover_and_press_are_local_and_frame_only_on_change() {
+        // Native callbacks can complete while winit buffers their application
+        // events. A recovered press must never lend its receipt to that old pair.
+        {
+            use crate::windowed::lifecycle::{ChromeAppEdge, ChromeCaptureTestScope};
+            use winit::event::MouseButton;
+            let mut harness = approve_reject_notification_harness();
+            let approve = harness.notification_action_center("approve").unwrap();
+            let reject = harness.notification_action_center("reject").unwrap();
+            let window = winit::window::WindowId::from(7);
+            let native = ChromeCaptureTestScope::new(window);
+            for down in [true, false] {
+                let frame = native.begin(down);
+                native.complete(frame);
+            }
+            drop(ChromeAppEdge::begin(winit::window::WindowId::from(8), true));
+            assert!(!native.healthy());
+            assert!(harness.tick());
+            assert!(native.healthy());
+            for down in [true, false] {
+                let frame = native.begin(down);
+                native.complete(frame);
+            }
+            (harness.app.state.cursor_x, harness.app.state.cursor_y) = approve;
+            for down in [true, false] {
+                harness
+                    .app
+                    .handle_mouse_button(MouseButton::Left, down, window, None);
+            }
+            assert!(
+                take_action_ids(&harness).is_empty(),
+                "buffered old application pair cannot consume fresh native authorization"
+            );
+            assert_eq!(harness.zone_publication_count("notification-area"), 1);
+            (harness.app.state.cursor_x, harness.app.state.cursor_y) = reject;
+            for down in [true, false] {
+                harness
+                    .app
+                    .handle_mouse_button(MouseButton::Left, down, window, None);
+            }
+            assert_eq!(
+                take_action_ids(&harness),
+                ["reject"],
+                "only matching fresh application coordinates may act"
+            );
+        }
         // A capture fault and safe mode both make notification buttons inert.
         // Inject only native receipt delivery; routing, feedback, cancellation
         // and between-turn recovery below use the production implementations.
