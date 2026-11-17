@@ -1824,6 +1824,22 @@ async fn poc_panel_connect_prompt_pairs_an_agent() {
     .await;
     assert!(poc.hud.pairing_open());
     assert!(!poc.hud.safe_mode_active());
+
+    // A fresh Connect card discards the previous local name draft, even
+    // though the new card focuses the same row again.
+    poc.hud.panel_type("discard-me");
+    poc.wait_for("a local name draft exists", |hud| {
+        hud.control_panel_row("connect.name").is_some_and(|item| {
+            matches!(item.control, tze_hud_compositor::PanelControl::Field { ref text, .. } if text == "discard-me")
+        })
+    }).await;
+    poc.hud
+        .press_chord(tze_hud_scene::config::ChordRole::Pairing);
+    poc.wait_for("fresh Connect drops its previous draft", |hud| {
+        hud.control_panel_row("connect.name").is_some_and(|item| {
+            matches!(item.control, tze_hud_compositor::PanelControl::Field { ref text, caret: Some(_) } if text == "agent")
+        })
+    }).await;
 }
 
 /// Layout (T11): a widget is moved by typing its box and its
