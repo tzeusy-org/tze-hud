@@ -183,7 +183,7 @@ async fn markdown_primer_landing_converges_on_render_path() {
     let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(256, 256).await);
     compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
 
-    let mut scene = large_markdown_scene(1440); // ~64KiB, matching 's large case.
+    let mut scene = large_markdown_scene(1440); // ~64KiB large case.
     compositor.prime_markdown_cache(&scene);
     compositor.prime_truncation_cache(&scene);
 

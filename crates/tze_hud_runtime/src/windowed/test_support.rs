@@ -1069,7 +1069,7 @@ mod tests {
         assert_eq!(
             scene.zone_registry.active_for_zone("alert-banner").len(),
             0,
-            "notification must be removed after dismiss pointer-up [hud-ltgk.6 regression]"
+            "notification must be removed after dismiss pointer-up"
         );
 
         // The hit region must also be pruned immediately (local feedback first).
