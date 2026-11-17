@@ -471,7 +471,7 @@ pub(super) mod panel_task_tests {
                         if let Some(gate) = gate {
                             let (released, changed) = &*gate;
                             let released = released.lock().unwrap();
-                            let (_, timeout) = changed
+                            let (_released, timeout) = changed
                                 .wait_timeout_while(released, Duration::from_secs(5), |released| {
                                     !*released
                                 })
