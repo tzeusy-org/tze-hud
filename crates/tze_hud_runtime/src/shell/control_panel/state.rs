@@ -280,6 +280,18 @@ impl Open {
         }
     }
 
+    /// A fresh pairing card starts a new name draft, including when it
+    /// replaces another card focused on the same row.
+    pub(super) fn show_connect(&mut self, page: ConnectPage) {
+        self.connect = Some(page);
+        self.editing = None;
+        self.selected_field = None;
+        self.query.clear();
+        self.confirming = None;
+        self.scroll = 0.0;
+        self.focus = PanelFocus::Row(connect::NAME.to_owned());
+    }
+
     /// The row id behind the focus (a row, or a tile's row).
     fn focused_row<'a>(&'a self, nav: &'a Nav) -> Option<&'a str> {
         match &self.focus {

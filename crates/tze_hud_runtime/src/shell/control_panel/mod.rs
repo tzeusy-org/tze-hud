@@ -863,13 +863,7 @@ impl PanelTask {
     fn open_connect(&mut self) {
         match (&self.deps.connect, self.open.as_mut()) {
             (Some(control), Some(open)) => {
-                open.connect = Some(control.open());
-                open.editing = None;
-                open.selected_field = None;
-                open.query.clear();
-                open.confirming = None;
-                open.scroll = 0.0;
-                open.focus = tze_hud_compositor::PanelFocus::Row(connect::NAME.to_owned());
+                open.show_connect(control.open());
             }
             _ => {
                 if let Some(pairing) = &self.deps.pairing {
