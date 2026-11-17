@@ -72,6 +72,9 @@ struct ChromeCaptureInstall {
     native: Option<std::rc::Rc<ChromeCapturePress>>,
     app: Option<std::rc::Rc<ChromeCapturePress>>,
     permit: bool,
+    /// Native edges omitted from the bounded receipt queue still owe inert
+    /// application delivery. None is counter exhaustion: never reauthorize it.
+    quarantined_edges: Option<u64>,
 }
 
 #[cfg(any(target_os = "windows", test))]
@@ -131,29 +134,34 @@ impl ChromeCaptureLedger {
             native: None,
             app: None,
             permit: false,
+            quarantined_edges: Some(0),
         });
         Some(nonce)
     }
 
     pub(super) fn begin(&mut self, nonce: u64, down: bool) -> Option<u64> {
-        if self.faulted {
-            return None;
-        }
-        if self.active.len() + self.completed.len() >= Self::MAX_RECEIPTS {
-            self.fault();
-            return None;
-        }
-        let Some(frame) = self.next_frame.checked_add(1) else {
-            self.fault();
-            return None;
-        };
         let i = self
             .installs
             .iter()
             .position(|s| s.nonce == nonce && s.enabled)?;
+        if self.faulted || self.has_quarantined_edges(self.installs[i].window) {
+            self.quarantine_edge(i);
+            return None;
+        }
+        if self.active.len() + self.completed.len() >= Self::MAX_RECEIPTS {
+            self.fault();
+            self.quarantine_edge(i);
+            return None;
+        }
+        let Some(frame) = self.next_frame.checked_add(1) else {
+            self.fault();
+            self.quarantine_edge(i);
+            return None;
+        };
         if down {
             let Some(generation) = self.installs[i].generation.checked_add(1) else {
                 self.fault();
+                self.quarantine_edge(i);
                 return None;
             };
             let install = &mut self.installs[i];
@@ -196,31 +204,30 @@ impl ChromeCaptureLedger {
 
     pub(super) fn consume(&mut self, window: winit::window::WindowId, down: bool) -> bool {
         self.last_retired = false;
-        if self.faulted {
-            return false;
-        }
         let pending = self.completed.iter().position(|r| r.window == window);
         let active = self
             .active
             .iter()
             .rposition(|r| r.window == window && !r.consumed);
         if pending.is_some() && active.is_some() {
+            // Ambiguous delivery cannot authorize either press. It still
+            // retires one matching, now-cancelled edge: that application event
+            // has arrived and must not leave phantom debt behind recovery.
             self.fault();
-            return false;
         }
-        let receipt = if let Some(i) = pending {
+        let receipt = if let Some(i) = pending.filter(|&i| self.completed[i].down == down) {
             self.completed.remove(i).expect("selected receipt exists")
-        } else if let Some(i) = active {
+        } else if let Some(i) = active.filter(|&i| self.active[i].down == down) {
             self.active[i].consumed = true;
             self.active[i].clone()
+        } else if self.consume_quarantined_edge(window) {
+            return false;
         } else {
+            // Keep a differently directed receipt for its actual application
+            // edge. Removing it here could lend a future receipt to stale input.
             self.fault();
             return false;
         };
-        if receipt.down != down {
-            self.fault();
-            return false;
-        }
         let Some(i) = self.installs.iter().position(|s| s.nonce == receipt.nonce) else {
             self.fault();
             return false;
@@ -231,6 +238,9 @@ impl ChromeCaptureLedger {
             return false;
         }
         self.installs[i].permit = false;
+        if self.faulted || self.has_quarantined_edges(window) {
+            return false;
+        }
         let Some(token) = receipt.token else {
             return false;
         };
@@ -275,6 +285,7 @@ impl ChromeCaptureLedger {
 
     pub(super) fn permit(&self, window: winit::window::WindowId) -> bool {
         !self.faulted
+            && !self.has_quarantined_edges(window)
             && self
                 .installs
                 .iter()
@@ -345,10 +356,56 @@ impl ChromeCaptureLedger {
         self.prune();
     }
 
+    /// Between event-loop turns, cancel desynchronized presses while retaining
+    /// their unmatched delivery history. Winit may still hold application edges.
+    /// Installation and frame identities remain monotonic; every old press
+    /// stays cancelled, including a held press whose Up arrives later.
+    pub(super) fn recover(&mut self) -> bool {
+        if !self.faulted || !self.active.is_empty() {
+            return false;
+        }
+        self.fault();
+        self.app_armed = None;
+        for install in &mut self.installs {
+            install.app = None;
+            install.permit = false;
+        }
+        self.faulted = false;
+        self.prune();
+        true
+    }
+
+    fn quarantine_edge(&mut self, install: usize) {
+        let install = &mut self.installs[install];
+        install.quarantined_edges = install.quarantined_edges.and_then(|n| n.checked_add(1));
+        install.permit = false;
+    }
+
+    fn has_quarantined_edges(&self, window: winit::window::WindowId) -> bool {
+        self.installs
+            .iter()
+            .any(|install| install.window == window && install.quarantined_edges != Some(0))
+    }
+
+    fn consume_quarantined_edge(&mut self, window: winit::window::WindowId) -> bool {
+        let Some(install) = self
+            .installs
+            .iter_mut()
+            .find(|install| install.window == window && install.quarantined_edges != Some(0))
+        else {
+            return false;
+        };
+        install.quarantined_edges = install.quarantined_edges.map(|n| n - 1);
+        self.last_retired = !install.enabled;
+        self.prune();
+        true
+    }
+
     fn prune(&mut self) {
         self.installs.retain(|s| {
             s.enabled
                 || s.app.is_some()
+                || s.quarantined_edges != Some(0)
                 || self.active.iter().any(|r| r.nonce == s.nonce)
                 || self.completed.iter().any(|r| r.nonce == s.nonce)
         });
@@ -412,7 +469,7 @@ fn chrome_native_fault() {
     });
     if first {
         tracing::error!(
-            "notification capture history unavailable; notification actions disabled until restart"
+            "notification capture history unavailable; notification actions paused until resynchronized"
         );
     }
     if !wakes.is_empty() && CHROME_NATIVE_FAULT_NOTIFIED.with(|notified| !notified.replace(true)) {
@@ -770,6 +827,63 @@ fn native_chrome_permits(window: Option<winit::window::WindowId>) -> bool {
     {
         let _ = window;
         true
+    }
+}
+
+/// Hover needs an installed observer, not an already armed press. A missing
+/// or retired observer stays inert even after another window resynchronizes.
+fn native_chrome_available(window: Option<winit::window::WindowId>) -> bool {
+    #[cfg(all(test, not(target_os = "windows")))]
+    if !chrome_capture_under_test() {
+        return true;
+    }
+    #[cfg(any(target_os = "windows", test))]
+    {
+        !CHROME_NATIVE_FAULT.with(std::cell::Cell::get)
+            && CHROME_NATIVE_OWNER.with(|owner| {
+                owner.try_borrow().ok().is_some_and(|owner| {
+                    !owner.ledger.faulted
+                        && !window.is_some_and(|window| owner.ledger.has_quarantined_edges(window))
+                        && owner.ledger.active.len() + owner.ledger.completed.len()
+                            < ChromeCaptureLedger::MAX_RECEIPTS
+                        && owner
+                            .ledger
+                            .installs
+                            .iter()
+                            .any(|install| install.enabled && Some(install.window) == window)
+                })
+            })
+    }
+    #[cfg(not(any(target_os = "windows", test)))]
+    {
+        let _ = window;
+        true
+    }
+}
+
+/// Only called at the between-turn settle boundary, after fault cancellation
+/// reached the scene. No native delivery or application edge may be in flight.
+fn native_chrome_recover() {
+    #[cfg(any(target_os = "windows", test))]
+    if CHROME_NATIVE_FAULT.with(std::cell::Cell::get) {
+        let recovered = CHROME_NATIVE_OWNER.with(|owner| {
+            let Ok(mut owner) = owner.try_borrow_mut() else {
+                return false;
+            };
+            owner.ledger.fault();
+            if !owner.fault_delivered || owner.app_edge.is_some() || !owner.ledger.recover() {
+                return false;
+            }
+            owner.fault_delivered = false;
+            true
+        });
+        if recovered {
+            CHROME_NATIVE_FAULT.with(|fault| fault.set(false));
+            CHROME_NATIVE_FAULT_NOTIFIED.with(|notified| notified.set(false));
+            tracing::info!(
+                "notification capture fault cleared; cancelled delivery history retained"
+            );
+        }
     }
 }
 
@@ -2296,6 +2410,37 @@ impl WinitApp {
         self.state.window.is_none() || native_chrome_permits(self.state.press_window)
     }
 
+    fn notification_feedback_permitted(&self, down: bool) -> bool {
+        if down {
+            return self.notification_pointer_permitted();
+        }
+        if self
+            .state
+            .safe_mode_atomic
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            return false;
+        }
+        let window = self
+            .state
+            .cursor_window
+            .or(self.state.press_window)
+            .or_else(|| self.state.window.as_ref().map(|window| window.id()));
+        #[cfg(test)]
+        if chrome_capture_under_test() {
+            return native_chrome_available(window);
+        }
+        self.state.window.is_none() || native_chrome_available(window)
+    }
+
+    pub(super) fn recover_chrome_capture(&mut self) {
+        if !self.state.input_processor.chrome_feedback_cancel_pending
+            && self.state.pending_pointer_buttons.is_empty()
+        {
+            native_chrome_recover();
+        }
+    }
+
     /// Route a delivered mouse edge through panel ownership and native chrome
     /// authorization before ordinary scene input.
     pub(super) fn handle_mouse_button(
@@ -2597,7 +2742,7 @@ impl WinitApp {
             }
             return;
         }
-        self.process_pointer_event(kind, true, Instant::now());
+        self.process_pointer_event(kind, true, Instant::now(), None);
     }
 
     /// Retain a press or release the scene lock could not take,
@@ -2611,6 +2756,7 @@ impl WinitApp {
             y: self.state.cursor_y,
             press_window: self.state.press_window,
             at,
+            notification_permitted: self.notification_pointer_permitted(),
         };
         self.retain_pointer(event);
     }
@@ -2645,7 +2791,13 @@ impl WinitApp {
     /// Run one pointer event through hit-testing and the scene. Returns false
     /// when a press or release could not reach the scene; with `retain` it is
     /// then queued, while a replay leaves it at the queue's front.
-    fn process_pointer_event(&mut self, kind: PointerEventKind, retain: bool, at: Instant) -> bool {
+    fn process_pointer_event(
+        &mut self,
+        kind: PointerEventKind,
+        retain: bool,
+        at: Instant,
+        notification_permitted: Option<bool>,
+    ) -> bool {
         if kind == PointerEventKind::Down && self.state.answer_keyboard.focus.take().is_some() {
             self.state.input_processor.chrome_feedback_cancel_pending = true;
         }
@@ -2715,6 +2867,10 @@ impl WinitApp {
             // never merge into a multi-click they were not.
             timestamp: Some(at),
         };
+        self.state.input_processor.notification_actions_enabled = self
+            .notification_feedback_permitted(pointer_event.kind == PointerEventKind::Down)
+            && (pointer_event.kind != PointerEventKind::Down
+                || notification_permitted.unwrap_or(true));
         // Acquire the scene lock directly (without going through SharedState) so that
         // the main-thread input path does not contend with session handlers that hold
         // both the SharedState lock and the scene lock.
@@ -3054,7 +3210,8 @@ impl WinitApp {
                                 kind,
                                 ZoneInteractionKind::Dismiss | ZoneInteractionKind::Action { .. }
                             );
-                            let allowed = self.notification_pointer_permitted();
+                            let allowed = self.notification_pointer_permitted()
+                                && notification_permitted.unwrap_or(true);
                             (!notification || allowed).then(|| interaction_id.clone())
                         }
                         _ => None,
@@ -3073,7 +3230,8 @@ impl WinitApp {
                         && (!matches!(
                             kind,
                             ZoneInteractionKind::Dismiss | ZoneInteractionKind::Action { .. }
-                        ) || self.notification_pointer_permitted())
+                        ) || (self.notification_pointer_permitted()
+                            && notification_permitted.unwrap_or(true)))
                     {
                         match kind {
                             ZoneInteractionKind::Dismiss | ZoneInteractionKind::Action { .. } => {
@@ -3520,6 +3678,7 @@ impl WinitApp {
                     y,
                     press_window,
                     at,
+                    notification_permitted,
                 } => {
                     let live = (
                         self.state.cursor_x,
@@ -3534,8 +3693,13 @@ impl WinitApp {
                     // A release first moves to where it happened, so a
                     // press-drag whose moves were deferred still travels.
                     let reached = (kind != PointerEventKind::Up
-                        || self.process_pointer_event(PointerEventKind::Move, false, at))
-                        && self.process_pointer_event(kind, false, at);
+                        || self.process_pointer_event(PointerEventKind::Move, false, at, None))
+                        && self.process_pointer_event(
+                            kind,
+                            false,
+                            at,
+                            Some(notification_permitted),
+                        );
                     (
                         self.state.cursor_x,
                         self.state.cursor_y,
@@ -3585,6 +3749,9 @@ pub(super) enum RetainedPointerEvent {
         y: f32,
         press_window: Option<winit::window::WindowId>,
         at: Instant,
+        /// A denied edge cannot inherit a later native press's authorization.
+        /// Replay still checks current permission, so faults remain fail-closed.
+        notification_permitted: bool,
     },
     /// Wheel deltas that arrived behind a retained press or release,
     /// coalesced as `pending_scroll` coalesces them.

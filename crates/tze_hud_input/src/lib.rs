@@ -303,6 +303,9 @@ pub struct InputProcessor {
     /// A runtime terminal pointer event must clear chrome before the next
     /// scene turn or pointer event. Retained while the scene lock is busy.
     pub chrome_feedback_cancel_pending: bool,
+    /// Runtime authorization for notification hover/press feedback. Drag
+    /// handles remain interactive while notification actions are unavailable.
+    pub notification_actions_enabled: bool,
     /// Per-device long-press drag state.
     ///
     /// Keyed by `device_id`.  Each entry is independent so multi-touch devices
@@ -341,6 +344,7 @@ impl InputProcessor {
             current_chrome_hover: None,
             current_chrome_press: None,
             chrome_feedback_cancel_pending: false,
+            notification_actions_enabled: true,
             drag_states: HashMap::new(),
             drag_config: DragConfig::default(),
             rollback_tracker: RollbackTracker::new(),
@@ -1611,14 +1615,30 @@ impl InputProcessor {
         let hit_chrome_id: Option<String> = match &hit {
             HitResult::ZoneInteraction {
                 interaction_id: iid,
-                kind:
-                    ZoneInteractionKind::DragHandle { .. }
-                    | ZoneInteractionKind::Dismiss
-                    | ZoneInteractionKind::Action { .. },
+                kind: ZoneInteractionKind::DragHandle { .. },
                 ..
             } => Some(iid.clone()),
+            HitResult::ZoneInteraction {
+                interaction_id: iid,
+                kind: ZoneInteractionKind::Dismiss | ZoneInteractionKind::Action { .. },
+                ..
+            } if self.notification_actions_enabled => Some(iid.clone()),
             _ => None,
         };
+        if !self.notification_actions_enabled
+            && self.current_chrome_press.as_ref().is_some_and(|id| {
+                scene.overlay.zone_hit_regions.iter().any(|region| {
+                    &region.interaction_id == id
+                        && matches!(
+                            region.kind,
+                            ZoneInteractionKind::Dismiss | ZoneInteractionKind::Action { .. }
+                        )
+                })
+            })
+            && let Some(id) = self.current_chrome_press.take()
+        {
+            scene.set_chrome_pressed(&id, false);
+        }
 
         // ── Stage 2: Update hover state ───────────────────────────────────
         let prev_hover_node = self.current_hover.map(|(_, n)| n);
