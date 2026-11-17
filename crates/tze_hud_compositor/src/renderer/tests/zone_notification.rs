@@ -1618,7 +1618,12 @@ async fn test_notification_card_border_is_an_sdf_border() {
         let commands = compositor
             .collect_all_rounded_rect_cmds(&overlap, 1280.0, 720.0)
             .chrome;
-        let xs: Vec<_> = commands.iter().map(|c| c.x).collect();
+        let xs: Vec<_> = commands
+            .iter()
+            // Backdrops span the full384px zone; action controls are inset.
+            .filter(|c| (c.width - 384.0).abs() < 0.01)
+            .map(|c| c.x)
+            .collect();
         let expected_xs: Vec<_> = std::iter::once(0.70 * 1280.0)
             .chain((0..8).map(|i| (0.75 + i as f32 * 0.001) * 1280.0))
             .collect();
@@ -1722,7 +1727,7 @@ async fn test_notification_card_border_is_an_sdf_border() {
                 ..
             }
         ));
-        overlap.set_owner_hidden(tze_hud_scene::SurfaceClasses {
+        overlap.set_owner_hidden(tze_hud_scene::graph::SurfaceClasses {
             zones: true,
             ..Default::default()
         });
