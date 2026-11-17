@@ -653,10 +653,15 @@ No new idle poll or timer is introduced. Ambiguous completed/active receipts,
 mismatched history or bounded-admission failure pause notification actions.
 The existing between-turn settle boundary resynchronizes history only after
 cancellation reaches the scene, retained pointer edges drain while still inert,
-and no native delivery or application edge is active. It discards stale receipts,
-keeps all old presses cancelled and preserves monotonic installation/frame
-identities; a late Up cannot activate, including
-after reinstallation. A complete fresh press can act without restarting.
+and no recorded native delivery or application edge is active. It keeps cancelled
+receipts until their matching application edges arrive: winit may still have
+buffered those events during an earlier handler. Fault-era or queue-overflow
+native edges retain bounded per-install cancellation debt; that window remains
+inert until their application delivery drains it. Counter exhaustion stays
+fail-closed. Recovery keeps old presses cancelled and preserves monotonic
+installation/frame identities; stale Down/Up cannot borrow a fresh press's
+receipts, including after reinstallation. Once cancelled delivery debt drains,
+a complete fresh press can act without restarting.
 Recovery neither installs a missing observer nor bypasses registration/receipt
 bounds. Faulted, unobserved and safe-mode notification buttons show no hover or
 press feedback; drag handles keep their independent feedback. Valid reentrant

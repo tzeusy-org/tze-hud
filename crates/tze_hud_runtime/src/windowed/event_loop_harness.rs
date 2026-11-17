@@ -3556,45 +3556,79 @@ mod tests {
         {
             use crate::windowed::lifecycle::{ChromeAppEdge, ChromeCaptureTestScope};
             use winit::event::MouseButton;
-            let mut harness = approve_reject_notification_harness();
-            let approve = harness.notification_action_center("approve").unwrap();
-            let reject = harness.notification_action_center("reject").unwrap();
-            let window = winit::window::WindowId::from(7);
-            let native = ChromeCaptureTestScope::new(window);
-            for down in [true, false] {
-                let frame = native.begin(down);
-                native.complete(frame);
+            for during_fault in [false, true] {
+                let mut harness = approve_reject_notification_harness();
+                let approve = harness.notification_action_center("approve").unwrap();
+                let reject = harness.notification_action_center("reject").unwrap();
+                let window = winit::window::WindowId::from(7);
+                let native = ChromeCaptureTestScope::new(window);
+                for down in [true, false] {
+                    let frame = native.begin(down);
+                    native.complete(frame);
+                }
+                drop(ChromeAppEdge::begin(winit::window::WindowId::from(8), true));
+                assert!(!native.healthy());
+                if during_fault {
+                    for down in [true, false] {
+                        let frame = native.begin(down);
+                        assert!(frame.is_none(), "fault-era edges cannot authorize");
+                        native.complete(frame);
+                    }
+                }
+                assert!(harness.tick());
+                assert!(native.healthy());
+                if !during_fault {
+                    for down in [true, false] {
+                        let frame = native.begin(down);
+                        native.complete(frame);
+                    }
+                }
+                (harness.app.state.cursor_x, harness.app.state.cursor_y) = approve;
+                if during_fault {
+                    harness.app.state.cursor_window = Some(window);
+                    harness.app.enqueue_pointer_event(PointerEventKind::Move);
+                    assert_eq!(
+                        chrome_state(&harness, "approve"),
+                        Default::default(),
+                        "pending quarantine stays inert after fault latch recovery"
+                    );
+                }
+                for down in [true, false] {
+                    harness
+                        .app
+                        .handle_mouse_button(MouseButton::Left, down, window, None);
+                }
+                assert!(
+                    take_action_ids(&harness).is_empty(),
+                    "buffered old application pair cannot consume fresh native authorization"
+                );
+                assert_eq!(harness.zone_publication_count("notification-area"), 1);
+                (harness.app.state.cursor_x, harness.app.state.cursor_y) = reject;
+                for down in [true, false] {
+                    harness
+                        .app
+                        .handle_mouse_button(MouseButton::Left, down, window, None);
+                }
+                if during_fault {
+                    assert!(
+                        take_action_ids(&harness).is_empty(),
+                        "fault-era application pair only drains cancelled debt"
+                    );
+                    assert_eq!(harness.zone_publication_count("notification-area"), 1);
+                    for down in [true, false] {
+                        let frame = native.begin(down);
+                        harness
+                            .app
+                            .handle_mouse_button(MouseButton::Left, down, window, None);
+                        native.complete(frame);
+                    }
+                }
+                assert_eq!(
+                    take_action_ids(&harness),
+                    ["reject"],
+                    "only matching fresh application coordinates may act"
+                );
             }
-            drop(ChromeAppEdge::begin(winit::window::WindowId::from(8), true));
-            assert!(!native.healthy());
-            assert!(harness.tick());
-            assert!(native.healthy());
-            for down in [true, false] {
-                let frame = native.begin(down);
-                native.complete(frame);
-            }
-            (harness.app.state.cursor_x, harness.app.state.cursor_y) = approve;
-            for down in [true, false] {
-                harness
-                    .app
-                    .handle_mouse_button(MouseButton::Left, down, window, None);
-            }
-            assert!(
-                take_action_ids(&harness).is_empty(),
-                "buffered old application pair cannot consume fresh native authorization"
-            );
-            assert_eq!(harness.zone_publication_count("notification-area"), 1);
-            (harness.app.state.cursor_x, harness.app.state.cursor_y) = reject;
-            for down in [true, false] {
-                harness
-                    .app
-                    .handle_mouse_button(MouseButton::Left, down, window, None);
-            }
-            assert_eq!(
-                take_action_ids(&harness),
-                ["reject"],
-                "only matching fresh application coordinates may act"
-            );
         }
         // A capture fault and safe mode both make notification buttons inert.
         // Inject only native receipt delivery; routing, feedback, cancellation
@@ -4386,6 +4420,10 @@ mod tests {
             !receipts.permit(window),
             "recovery cannot authorize an old press"
         );
+        assert!(
+            !receipts.consume(window, false),
+            "buffered cancelled Up keeps its own receipt"
+        );
         let late = receipts.begin(install, false).unwrap();
         assert!(late > active, "frame identities never rewind");
         assert!(
@@ -4430,6 +4468,16 @@ mod tests {
             receipts.recover(),
             "bounded receipt failure can resynchronize"
         );
+        assert!(
+            receipts.begin(install, true).is_none(),
+            "overflow delivery debt cannot admit a new press"
+        );
+        for _ in 0..257 {
+            assert!(
+                !receipts.consume(window, true),
+                "known and overflow application edges drain inert"
+            );
+        }
         let down = receipts.begin(install, true).unwrap();
         assert!(receipts.consume(window, true));
         receipts.complete(down);
