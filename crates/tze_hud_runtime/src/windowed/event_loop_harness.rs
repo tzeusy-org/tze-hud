@@ -3630,6 +3630,61 @@ mod tests {
                 );
             }
         }
+        // Winit can deliver a fresh native frame before flushing older buffered
+        // application events. Ambiguity cancels all candidates, but each delivered
+        // edge must still retire one debt unit so the next complete click works.
+        {
+            use crate::windowed::lifecycle::{ChromeAppEdge, ChromeCaptureTestScope};
+            use winit::event::MouseButton;
+            let mut harness = approve_reject_notification_harness();
+            let approve = harness.notification_action_center("approve").unwrap();
+            let reject = harness.notification_action_center("reject").unwrap();
+            let window = winit::window::WindowId::from(7);
+            let native = ChromeCaptureTestScope::new(window);
+            for down in [true, false] {
+                let frame = native.begin(down);
+                native.complete(frame);
+            }
+            drop(ChromeAppEdge::begin(winit::window::WindowId::from(8), true));
+            assert!(harness.tick());
+            let frame = native.begin(true);
+            (harness.app.state.cursor_x, harness.app.state.cursor_y) = reject;
+            harness
+                .app
+                .handle_mouse_button(MouseButton::Left, true, window, None);
+            (harness.app.state.cursor_x, harness.app.state.cursor_y) = approve;
+            for down in [true, false] {
+                harness
+                    .app
+                    .handle_mouse_button(MouseButton::Left, down, window, None);
+            }
+            native.complete(frame);
+            let frame = native.begin(false);
+            harness
+                .app
+                .handle_mouse_button(MouseButton::Left, false, window, None);
+            native.complete(frame);
+            assert!(
+                take_action_ids(&harness).is_empty(),
+                "reentrant ambiguous delivery never activates either candidate"
+            );
+            assert_eq!(harness.zone_publication_count("notification-area"), 1);
+            assert!(harness.tick());
+            assert!(native.healthy());
+            (harness.app.state.cursor_x, harness.app.state.cursor_y) = reject;
+            for down in [true, false] {
+                let frame = native.begin(down);
+                harness
+                    .app
+                    .handle_mouse_button(MouseButton::Left, down, window, None);
+                native.complete(frame);
+            }
+            assert_eq!(
+                take_action_ids(&harness),
+                ["reject"],
+                "cancelled ambiguous edges leave no phantom debt"
+            );
+        }
         // A capture fault and safe mode both make notification buttons inert.
         // Inject only native receipt delivery; routing, feedback, cancellation
         // and between-turn recovery below use the production implementations.
@@ -4452,6 +4507,29 @@ mod tests {
             receipts.complete(edge);
         }
         assert!(!receipts.recover(), "healthy recovery is a no-op");
+
+        let mut receipts = ChromeCaptureLedger::default();
+        let old = receipts.install(window).unwrap();
+        receipts.fault();
+        assert!(receipts.begin(old, true).is_none());
+        assert!(receipts.recover());
+        receipts.retire(old);
+        let replacement = receipts.install(window).unwrap();
+        assert!(replacement > old);
+        assert!(
+            receipts.begin(replacement, true).is_none(),
+            "retired delivery debt cannot be bypassed by reinstallation"
+        );
+        assert!(!receipts.consume(window, true));
+        assert!(!receipts.consume(window, true));
+        for down in [true, false] {
+            let edge = receipts.begin(replacement, down).unwrap();
+            assert!(
+                receipts.consume(window, down),
+                "fresh replacement click follows the retired debt drain"
+            );
+            receipts.complete(edge);
+        }
 
         let mut receipts = ChromeCaptureLedger::default();
         let install = receipts.install(window).unwrap();
