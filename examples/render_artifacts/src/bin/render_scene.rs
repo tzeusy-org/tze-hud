@@ -637,7 +637,28 @@ async fn execute(args: &Args) -> Result<Value> {
         .filter(|o| o.status.success())
         .and_then(|o| String::from_utf8(o.stdout).ok())
         .map(|s| s.trim().to_owned());
+    // The binary's own build provenance: a run from a stale build (a shared
+    // target dir, another checkout's binary) reports the head it was built
+    // from, so a manifest never vouches for pixels from other source.
+    let built_from = env!("RENDER_SCENE_BUILD_HEAD");
+    let built_dirty = env!("RENDER_SCENE_BUILD_DIRTY");
+    let provenance_consistent = git.as_deref() == Some(built_from) && built_dirty == "false";
+    if !provenance_consistent {
+        eprintln!(
+            "render-scene: provenance mismatch: built from {built_from} (dirty: {built_dirty}), \
+             checkout HEAD {}; commit and rebuild before using these pixels as evidence",
+            git.as_deref().unwrap_or("unknown")
+        );
+    }
     manifest["checkout_head_at_invocation"] = json!(git);
+    manifest["compiled_head"] = json!(built_from);
+    // "unknown" (no git at build time) stays a string, never a false clean.
+    manifest["compiled_tree_dirty"] = match built_dirty {
+        "true" => json!(true),
+        "false" => json!(false),
+        other => json!(other),
+    };
+    manifest["provenance_consistent"] = json!(provenance_consistent);
     manifest["config_source"] = json!(args.config);
     manifest["config_sha256"] = json!(config_sha256);
     manifest["compiled_example_source_sha256"] = json!(hash(include_bytes!("render_scene.rs")));
