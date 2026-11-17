@@ -2528,7 +2528,7 @@ mod tests {
                 let drawn = l
                     .texts
                     .iter()
-                    .find(|t| &*t.text == text)
+                    .find(|t| t.text.as_ref() == text.as_str())
                     .expect("draft drawn");
                 assert!(
                     drawn.clip_bounds_width <= row.w * 0.45,

@@ -2090,7 +2090,7 @@ pub(super) mod panel_task_tests {
         .await;
         panel.send(PanelEvent::WindowFocus(true));
         wait("old completion drained", || {
-            panel.current_model().is_some_and(|m| !m.notice.is_some())
+            panel.current_model().is_some_and(|m| m.notice.is_none())
         })
         .await;
         assert_eq!(
