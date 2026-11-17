@@ -49,8 +49,6 @@ EXEMPT_FILES = {
     "AGENTS.md",
     "CLAUDE.md",
     ".claude/skills/user-test-performance/reference/results.csv",
-    "scripts/ci/check_current_references.py",
-    "scripts/ci/test_check_current_references.py",
     # T7 boundary files.
     "crates/tze_hud_runtime/src/portal_projection_driver.rs",
     "crates/tze_hud_runtime/src/windowed/portal.rs",
