@@ -221,8 +221,6 @@ pub struct Compositor {
     /// Opt-in work counts for the most recent completed headless frame.
     #[cfg(any(test, feature = "dev-mode"))]
     work_observation: work_observation::WorkObservation,
-    /// Latest real window-surface lifecycle outcome.
-    latest_surface_recovery: Option<SurfaceRecoveryOutcome>,
     /// When true, the clear color uses alpha=0 for transparent overlay mode.
     pub overlay_mode: bool,
     /// When true, the chrome pass draws the safe-mode overlay (see
@@ -967,7 +965,6 @@ impl Compositor {
             last_animation_frame_at: None,
             #[cfg(any(test, feature = "dev-mode"))]
             work_observation: work_observation::WorkObservation::default(),
-            latest_surface_recovery: None,
             overlay_mode: false,
             safe_mode_overlay: false,
             system_card: None,
@@ -1317,7 +1314,6 @@ impl Compositor {
             last_animation_frame_at: None,
             #[cfg(any(test, feature = "dev-mode"))]
             work_observation: work_observation::WorkObservation::default(),
-            latest_surface_recovery: None,
             overlay_mode: false,
             safe_mode_overlay: false,
             system_card: None,
@@ -1438,12 +1434,6 @@ impl Compositor {
         zone_geometry_in(&self.display_layout, zone_name, policy, sw, sh)
     }
 
-    /// Record an actual window-surface lifecycle outcome without widening any
-    /// scene, protocol, or agent-visible contract.
-    pub(super) fn record_surface_recovery_outcome(&mut self, outcome: SurfaceRecoveryOutcome) {
-        self.latest_surface_recovery = Some(outcome);
-    }
-
     /// Attempt a recovery transition queued by a real window-surface acquire
     /// failure.
     ///
@@ -1459,7 +1449,7 @@ impl Compositor {
             return WindowSurfaceRecoveryStatus::default();
         };
 
-        let status = match outcome {
+        match outcome {
             SurfaceRecoveryOutcome::Reconfigured { trigger } => {
                 let (width, height) = surface.size();
                 self.width = width;
@@ -1479,18 +1469,7 @@ impl Compositor {
                 );
                 WindowSurfaceRecoveryStatus::Terminal
             }
-        };
-        self.record_surface_recovery_outcome(outcome);
-        status
-    }
-
-    /// Drain the detailed outcome from a real surface recovery transition.
-    ///
-    /// Draining this compositor-private lifecycle evidence does not widen
-    /// WAL, protobuf, or agent-visible APIs.
-    #[allow(dead_code)] // Available for compositor-private lifecycle inspection.
-    pub(crate) fn take_latest_surface_recovery(&mut self) -> Option<SurfaceRecoveryOutcome> {
-        self.latest_surface_recovery.take()
+        }
     }
 
     /// Create a render pipeline targeting a specific texture format.
@@ -1920,9 +1899,9 @@ impl Compositor {
     /// [`TextMarkdownNode`]: tze_hud_scene::types::TextMarkdownNode
     /// Cumulative per-frame text `shape_until_scroll` count.
     ///
-    /// Zero when no text renderer is initialised. Used by the scroll-reshape
-    /// benchmark/regression to prove that a pure scroll performs no re-shapes.
-    #[allow(dead_code)] // used by the scroll-reshape benchmark
+    /// Zero when no text renderer is initialised. Tests use it to prove that
+    /// a pure scroll or an unchanged frame performs no re-shapes.
+    #[cfg(any(test, feature = "dev-mode"))]
     pub(crate) fn text_shape_call_count(&self) -> u64 {
         self.text_rasterizer
             .as_ref()
@@ -1932,12 +1911,9 @@ impl Compositor {
 
     /// Cumulative markdown-cache-miss count on the render path. See
     /// [`Self::markdown_cache_miss_count`]'s field doc for what a nonzero,
-    /// growing count means. Currently consumed only by
-    /// `renderer::tests::markdown_primer::reused_compositor_across_scenes_lands_markdown_primer_hud_u4lq2`
-    /// and its sibling baseline test; `#[allow(dead_code)]` covers the non-test
-    /// build (the field itself keeps incrementing regardless, for log-visible
-    /// `tracing::warn!` observability at the call site in `text.rs`).
-    #[allow(dead_code)]
+    /// growing count means. Read by tests; the field itself keeps counting
+    /// for the `tracing::warn!` at its increment in `text.rs`.
+    #[cfg(test)]
     pub(crate) fn markdown_cache_miss_count(&self) -> u64 {
         self.markdown_cache_miss_count.get()
     }

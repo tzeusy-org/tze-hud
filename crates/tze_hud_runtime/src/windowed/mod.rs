@@ -278,7 +278,6 @@ fn publish_degradation_transition(
 ///
 /// All fields are `Arc`-wrapped or `Send` so the app handler can be moved into
 /// the winit event loop.
-#[allow(dead_code)] // several fields are read by the compositor/shutdown path; not all are used yet
 struct WindowedRuntimeState {
     config: WindowedConfig,
     wake: WindowedWake,
@@ -328,9 +327,6 @@ struct WindowedRuntimeState {
     system_card: crate::shell::system_card::SystemCardHandle,
     /// Frame rate cap and zone outlines, changed live by the control panel.
     live: Arc<crate::launch::LiveSettings>,
-    /// First-run pairing (`None` when the MCP port is disabled); the pairing
-    /// chord and `--pair` open it.
-    pairing: Option<Arc<crate::pairing::Pairing>>,
     /// The control panel (`None` without a network runtime).
     control_panel: Option<crate::shell::control_panel::ControlPanelHandle>,
     /// Main-thread bookkeeping for the open panel: focus handoff, the
@@ -357,8 +353,6 @@ struct WindowedRuntimeState {
     /// a clone so a runtime mode switch does not sever connected sessions from
     /// later degradation transitions.
     degradation_notices: Option<tze_hud_protocol::session_server::DegradationNoticeSender>,
-    /// Compositor and surface (Some until compositor thread is spawned and takes the compositor).
-    compositor: Option<Compositor>,
     /// The window surface (main thread owns this for the lifetime of the window).
     window_surface: Option<Arc<WindowSurface>>,
     /// Input processor for local feedback.
@@ -374,8 +368,6 @@ struct WindowedRuntimeState {
     ///
     /// Stateless with respect to focus; focus is owned by `focus_manager`.
     keyboard_processor: KeyboardProcessor,
-    /// Telemetry collector.
-    telemetry: TelemetryCollector,
     /// Frame pipeline (ArcSwap hit-test snapshot, overflow counters).
     pipeline: FramePipeline,
     /// Shutdown token.
@@ -3255,7 +3247,6 @@ impl WindowedRuntime {
         );
 
         let app_state = WindowedRuntimeState {
-            pairing,
             control_panel,
             config: cfg,
             wake,
@@ -3278,12 +3269,10 @@ impl WindowedRuntime {
             frame_ready_tx: Some(frame_ready_tx),
             frame_presented_tx,
             degradation_notices,
-            compositor: None,
             window_surface: None,
             input_processor: input_processor_with_system_gestures(),
             focus_manager: FocusManager::new(),
             keyboard_processor: KeyboardProcessor::new(),
-            telemetry: TelemetryCollector::new(),
             pipeline: FramePipeline::new(),
             shutdown,
             quiescent_failed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -3459,7 +3448,8 @@ impl WindowedRuntime {
 /// time for portal OUTPUT reading (hud-ljhku.2): `SM_CXDRAG`/`SM_CYDRAG` at
 /// the system DPI and `GetDoubleClickTime` on Windows, the defaults elsewhere.
 fn input_processor_with_system_gestures() -> InputProcessor {
-    #[allow(unused_mut)]
+    // Only the Windows block below adjusts it.
+    #[cfg_attr(not(windows), allow(unused_mut))]
     let mut processor = InputProcessor::new();
     #[cfg(windows)]
     {

@@ -117,7 +117,6 @@ impl WindowedRuntimeState {
                 false,
                 Default::default(),
             )),
-            pairing: None,
             control_panel: None,
             pending_input_latency: Arc::new(StdMutex::new(VecDeque::new())),
             frame_ready_rx,
@@ -125,12 +124,10 @@ impl WindowedRuntimeState {
             frame_ready_tx: Some(frame_ready_tx),
             frame_presented_tx: None,
             degradation_notices: None,
-            compositor: None,
             window_surface: None,
             input_processor: InputProcessor::new(),
             focus_manager: FocusManager::new(),
             keyboard_processor: KeyboardProcessor::new(),
-            telemetry: tze_hud_telemetry::TelemetryCollector::new(),
             pipeline: crate::pipeline::FramePipeline::new(),
             shutdown: crate::threads::ShutdownToken::new(),
             quiescent_failed: Arc::new(AtomicBool::new(false)),
@@ -267,6 +264,9 @@ pub struct HeadlessEventLoopHarness {
     /// (`open <path>`, `firewall <action> <ports>`, `autostart <on>`),
     /// recorded instead of done.
     effects: Arc<std::sync::Mutex<Vec<String>>>,
+    /// The first-run pairing the panel's connect rows share, when booted
+    /// with an agents file.
+    pairing: Option<Arc<crate::pairing::Pairing>>,
     /// Already accepted overlay geometry, substituting for OS windows only.
     display_fixture: Option<(
         super::displays::MonitorSpec,
@@ -359,7 +359,6 @@ impl HeadlessEventLoopHarness {
                 grpc_addr.port(),
             ))
         });
-        state.pairing = pairing.clone();
         let render_wake = state.wake.render_notifier();
         state.live = Arc::new(
             crate::launch::LiveSettings::new(cfg.target_fps, cfg.debug_zones, render_wake.clone())
@@ -536,6 +535,7 @@ impl HeadlessEventLoopHarness {
             grpc_addr: Some(grpc_addr),
             clipboard,
             effects,
+            pairing,
             display_fixture: None,
         })
     }
@@ -855,9 +855,7 @@ impl HeadlessEventLoopHarness {
     /// Whether the control panel is open.
     /// Whether a pairing code is open (booted with an agents file).
     pub fn pairing_open(&self) -> bool {
-        self.app
-            .state
-            .pairing
+        self.pairing
             .as_ref()
             .is_some_and(|pairing| pairing.is_open())
     }
@@ -1333,6 +1331,7 @@ impl HeadlessEventLoopHarness {
             grpc_addr: None,
             clipboard: Arc::default(),
             effects: Arc::default(),
+            pairing: None,
             display_fixture: None,
         }
     }

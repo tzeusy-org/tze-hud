@@ -65,7 +65,6 @@ use element_persist::{
 };
 #[cfg(test)]
 use handshake::handle_session_init;
-#[allow(unused_imports)]
 use handshake::{HandshakeCtx, handle_handshake_read};
 pub use input_event_bus::{InputEventReceiver, InputEventRecvError, InputEventSender};
 pub use lifecycle::SessionState;
