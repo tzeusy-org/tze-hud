@@ -481,7 +481,7 @@ async fn prime_truncation_cache_is_commit_primed_before_render_frame_headless() 
     assert_eq!(
         compositor.truncation_cache_scene_version, scene.version,
         "after commit-time prime, truncation_cache_scene_version must match scene.version \
-             [hud-v2z6u]"
+            "
     );
 
     // ── Render frame — must not re-prime truncation cache ─────────────────
@@ -494,7 +494,7 @@ async fn prime_truncation_cache_is_commit_primed_before_render_frame_headless() 
     assert_eq!(
         compositor.truncation_cache_scene_version, scene.version,
         "render_frame_headless must not alter truncation_cache_scene_version \
-             when cache was already commit-primed [hud-v2z6u]"
+             when cache was already commit-primed"
     );
 }
 
@@ -651,7 +651,7 @@ async fn drag_move_position_only_skips_content_cache_reprimes_bench() {
     let fixed_us = fixed_start.elapsed().as_micros();
 
     eprintln!(
-        "hud-uyhpn bench (FRAMES={FRAMES}): markdown cache re-primes \
+        "bench (FRAMES={FRAMES}): markdown cache re-primes \
          baseline={md_reprimes_baseline} fixed={md_reprimes_fixed}; \
          prime wall-time baseline={baseline_us}us fixed={fixed_us}us"
     );
@@ -769,7 +769,7 @@ async fn load_font_bytes_new_font_resets_truncation_cache_scene_version() {
         compositor.truncation_cache_scene_version,
         u64::MAX,
         "load_font_bytes with a new resource_id must reset truncation_cache_scene_version \
-             to u64::MAX so the next prime re-resolves all entries [hud-v2z6u]"
+             to u64::MAX so the next prime re-resolves all entries"
     );
 
     // ── Loading the SAME resource_id again must NOT reset the sentinel ─────
@@ -803,7 +803,7 @@ async fn load_font_bytes_new_font_resets_truncation_cache_scene_version() {
     assert_eq!(
         compositor.truncation_cache_scene_version, scene.version,
         "load_font_bytes with an already-loaded resource_id must NOT reset the sentinel \
-             — dedup guard prevents spurious cache invalidation [hud-v2z6u]"
+             — dedup guard prevents spurious cache invalidation"
     );
     compositor.render_frame_headless(&mut scene, &surface);
     assert_shapes(

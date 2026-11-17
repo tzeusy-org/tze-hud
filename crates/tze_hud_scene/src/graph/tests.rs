@@ -4669,7 +4669,7 @@ fn header_band_drag_engages_across_full_empty_header_width() {
     }
     assert!(
         misses.is_empty(),
-        "hud-cpjqe: {} header points did not engage a whole-portal drag \
+        "{} header points did not engage a whole-portal drag \
          (dead spots => flaky drag). First few: {:?}",
         misses.len(),
         &misses[..misses.len().min(6)]

@@ -1388,7 +1388,7 @@ impl super::Compositor {
                         node_id = ?node_id,
                         content_len = tm.content.len(),
                         "markdown cache miss on render path — expected commit-time prime \
-                         (hud-xcp9b); parsing inline to preserve styling [hud-380dl]"
+                        ; parsing inline to preserve styling"
                     );
                     // Self-healing fallback cache (defense-in-depth):
                     // check the small side cache before paying a fresh parse.
@@ -1987,7 +1987,7 @@ pub(super) fn collect_ellipsis_text_items_from_node(
                         node_id = ?node_id,
                         content_len = tm.content.len(),
                         "markdown cache miss on ellipsis render path — expected commit-time prime \
-                         (hud-xcp9b); parsing inline to preserve styling [hud-380dl]"
+                        ; parsing inline to preserve styling"
                     );
                     let parsed =
                         crate::markdown::parse_markdown_subset(&tm.content, markdown_tokens);

@@ -631,7 +631,7 @@ impl super::Compositor {
                 self.status_bar_layouts.borrow_mut().invalidate();
                 tracing::debug!(
                     resource_id = %crate::text::format_resource_id(&resource_id),
-                    "load_font_bytes: new font loaded — truncation cache invalidated [hud-v2z6u]"
+                    "load_font_bytes: new font loaded — truncation cache invalidated"
                 );
             }
             true

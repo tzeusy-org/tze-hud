@@ -525,7 +525,7 @@ impl Compositor {
             debug_assert!(
                 false,
                 "build_windowed_frame: markdown cache was not commit-primed for scene version {} \
-                 (cache version {}); falling back to in-render prime [hud-380dl]",
+                 (cache version {}); falling back to in-render prime",
                 scene.version, self.markdown_cache_scene_version,
             );
             self.prime_markdown_cache(scene);
@@ -788,7 +788,7 @@ impl Compositor {
             tracing::error!(
                 "compositor: queue.submit/present panicked (surface texture likely \
                  destroyed mid-frame) — frame skipped, compositor thread preserved \
-                 (hud-pi5wx)"
+                "
             );
             // Zero is the established skipped-stage sentinel. The windowed
             // runtime must not signal or benchmark-count a failed submission.
@@ -1285,7 +1285,7 @@ impl Compositor {
             debug_assert!(
                 false,
                 "render_frame_headless: markdown cache was not commit-primed for scene \
-                 version {} (cache version {}); falling back to in-render prime [hud-380dl]",
+                 version {} (cache version {}); falling back to in-render prime",
                 scene.version, self.markdown_cache_scene_version,
             );
             self.prime_markdown_cache(scene);

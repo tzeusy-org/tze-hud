@@ -42,7 +42,7 @@ import hud_env
 ZONE_NAME = "ambient-background"
 
 # A valid 64-char hex resource_id (blake3 hash of b"test") used as a
-# placeholder for the static-image scenario (GPU texture upload is post-v1;
+# placeholder for the static-image scenario (GPU texture upload is not supported;
 # the runtime renders a warm-gray placeholder quad).
 PLACEHOLDER_RESOURCE_ID = "4878ca0425c739fa427f7eda20fe845f6b2f46ba5fe5ac7d6b85add8db6bb08f"
 
@@ -249,7 +249,7 @@ def phase3_static_image(url: str, token: str, req_id: int) -> tuple[int, bool]:
     ok = "error" not in response
     print(
         "\n  [visual check] Background should show warm-gray placeholder quad (v1 behavior)."
-        "\n  Full texture rendering is deferred to post-v1.",
+        "\n  Full texture rendering is not supported.",
         flush=True,
     )
     print("  Pausing 5s for visual inspection...", flush=True)

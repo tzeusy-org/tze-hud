@@ -1649,7 +1649,7 @@ async fn test_collect_text_items_at_tail_ellipsis_uses_tail_anchored_viewport() 
         at_tail_item.viewport,
         crate::overflow::TruncationViewport::TailAnchored,
         "at-tail Ellipsis tile must produce TailAnchored viewport \
-             so the per-frame key matches the primed cache entry (hud-lu50e)"
+             so the per-frame key matches the primed cache entry"
     );
 
     // 2. Prime the truncation cache and verify TailAnchored key is present.
@@ -1845,7 +1845,7 @@ async fn test_zone_stream_text_tail_anchored_opt_in_viewport() {
         items_tail[0].viewport,
         crate::overflow::TruncationViewport::TailAnchored,
         "stream_tail_anchored = Some(true) must produce TailAnchored viewport \
-         so the streaming zone shows the newest content (hud-gxz0x)"
+         so the streaming zone shows the newest content"
     );
 
     // Default: Ellipsis overflow, stream_tail_anchored = None → HeadAnchored.
@@ -1913,7 +1913,7 @@ async fn test_zone_stream_text_tail_anchored_primes_newest_content() {
         .expect("rasterizer initialised")
         .truncation_cache
         .get_by_key(&key_tail)
-        .expect("tail-anchored zone StreamText must be primed (hud-gxz0x)");
+        .expect("tail-anchored zone StreamText must be primed");
     assert!(
         cached_tail.was_truncated,
         "content must overflow the zone and be truncated"

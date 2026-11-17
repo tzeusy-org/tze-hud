@@ -6267,13 +6267,13 @@ mod tests {
         // the backdrop computation.
         assert!(
             buf.layout_runs().count() > 0,
-            "hud-9ieev: buffer produced no layout runs — shape_until_scroll may not have worked; \
+            "buffer produced no layout runs — shape_until_scroll may not have worked; \
              lines={}",
             buf.lines.len()
         );
         assert!(
             buf.layout_runs().map(|r| r.glyphs.len()).sum::<usize>() > 0,
-            "hud-9ieev: layout runs exist but contain no glyphs"
+            "layout runs exist but contain no glyphs"
         );
 
         // Pass effective_styled_runs as the new third argument.  This test uses
@@ -6284,7 +6284,7 @@ mod tests {
         // At least one quad must be returned for the "code" span.
         assert!(
             !quads.is_empty(),
-            "hud-9ieev: expected at least one backdrop quad for the 'code' styled run, got none; \
+            "expected at least one backdrop quad for the 'code' styled run, got none; \
              sr_start={code_start}, sr_end={code_end}"
         );
 
@@ -6292,7 +6292,7 @@ mod tests {
         for (i, q) in quads.iter().enumerate() {
             assert_eq!(
                 q.color, bg_color,
-                "hud-9ieev: quad[{i}] has wrong color {:?}, expected {:?}",
+                "quad[{i}] has wrong color {:?}, expected {:?}",
                 q.color, bg_color
             );
         }
@@ -6301,23 +6301,15 @@ mod tests {
         let first = &quads[0];
         assert!(
             first.x >= pixel_x,
-            "hud-9ieev: quad x ({}) must be >= item pixel_x ({pixel_x}); \
+            "quad x ({}) must be >= item pixel_x ({pixel_x}); \
              the 'code' span starts after 'hello ' so it can't be at the item origin",
             first.x
         );
-        assert!(
-            first.w > 0.0,
-            "hud-9ieev: quad width ({}) must be positive",
-            first.w
-        );
-        assert!(
-            first.h > 0.0,
-            "hud-9ieev: quad height ({}) must be positive",
-            first.h
-        );
+        assert!(first.w > 0.0, "quad width ({}) must be positive", first.w);
+        assert!(first.h > 0.0, "quad height ({}) must be positive", first.h);
         assert!(
             first.y >= pixel_y,
-            "hud-9ieev: quad y ({}) must be >= item pixel_y ({pixel_y})",
+            "quad y ({}) must be >= item pixel_y ({pixel_y})",
             first.y
         );
     }

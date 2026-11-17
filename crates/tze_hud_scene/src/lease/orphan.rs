@@ -14,12 +14,9 @@ pub const DEFAULT_GRACE_PERIOD_MS: u64 = 30_000;
 /// Visual overlay hint to display on a tile's rendered surface.
 ///
 /// The compositor renders these within one frame of a state change.
-/// Spec requirements:
-/// - `DisconnectionBadge`: "Disconnection badge MUST appear within 1 frame"
-///   (line 133).
-/// - `StaleBadge`: zone publications during ORPHANED state are "stale-badged"
-///   (lines 231–233, adapted).
-/// - `BudgetWarning`: amber border for budget ≥ 80% (line 170).
+/// - `DisconnectionBadge`: appears within one frame of the disconnect.
+/// - `StaleBadge`: zone publications during the ORPHANED state.
+/// - `BudgetWarning`: amber border for budget ≥ 80%.
 /// - `None`: normal rendering.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
 pub enum TileVisualHint {

@@ -2778,7 +2778,7 @@ mod flow_fallback_cache_tests {
         assert_eq!(
             PARSE_MARKDOWN_SUBSET_CALLS.with(|c| c.get()),
             1,
-            "repeated frames must re-parse at most once, not per frame (hud-wrlv1)"
+            "repeated frames must re-parse at most once, not per frame"
         );
     }
 

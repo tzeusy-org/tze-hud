@@ -1540,7 +1540,7 @@ pub(crate) mod tests {
         let tile_id = tile(&driver, "p");
         assert!(
             tile_markdown(&scene, tile_id).contains("UNIQUE-TRANSCRIPT-MARKER-42"),
-            "the create drain paints the first publish (the grey-tile bug, hud-utbiy)"
+            "the create drain paints the first publish (the grey-tile bug)"
         );
 
         publish(&mut driver, "p", "SECOND-TRANSCRIPT-MARKER-99", 300);
@@ -1768,7 +1768,7 @@ pub(crate) mod tests {
             let mut processor = InputProcessor::new();
             publish(&mut driver, "p", "hello", 100);
             driver.drain_inner(&mut scene, &mut processor, None, 200);
-            assert_eq!(scene.active_tab, None, "hud-zccuf");
+            assert_eq!(scene.active_tab, None, "a publish must not activate a tab");
             assert!(driver.entries[&key("p")].tile_scene_id.is_none());
             assert_eq!(scene.tile_count(), 0);
             let original_lease = lease(&driver, "p");

@@ -565,7 +565,6 @@ async fn main() -> Result<(), DynError> {
         },
         traceability: PublishLoadTraceability {
             spec_id: Some("publish-load-harness".to_string()),
-            rfc_id: Some("RFC-0005".to_string()),
             budget_id: cli
                 .target_p99_rtt_us
                 .map(|_| "publish_load_widget_p99".to_string()),

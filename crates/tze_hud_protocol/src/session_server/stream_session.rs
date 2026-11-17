@@ -1,8 +1,6 @@
 //! Per-session state types for the streaming session server.
 //!
 //! This module contains `StreamSession` (all per-session fields).
-//! Moved from `session_server/mod.rs` as Step SS-4 of the module split
-//! (docs/design/session-server-renderer-module-split-plan.md §3.4).
 
 use super::lifecycle::SessionState;
 use super::upload::UploadByteRateLimiter;

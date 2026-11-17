@@ -876,7 +876,7 @@ async fn composer_draft_text_never_contains_caret_glyph() {
     assert_eq!(
         off.text.as_ref(),
         "hello world",
-        "draft text must be identical across blink phases — blink-invariant (hud-hxhnt)"
+        "draft text must be identical across blink phases — blink-invariant"
     );
     assert_eq!(
         on.text, off.text,
@@ -1214,9 +1214,7 @@ async fn single_line_composer_publishes_visual_layout() {
         .lock()
         .unwrap()
         .clone()
-        .expect(
-            "single-line profile must now publish a ComposerVisualLayout (hud-hxhnt finding 1)",
-        );
+        .expect("single-line profile must now publish a ComposerVisualLayout");
 
     assert_eq!(visual.text_len, 2, "text_len must match the 2-byte draft");
     assert_eq!(

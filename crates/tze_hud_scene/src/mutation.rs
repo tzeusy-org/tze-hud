@@ -1320,7 +1320,7 @@ mod tests {
         );
         assert!(
             hr1.accepts_pointer && hr1.accepts_focus,
-            "attached composer must accept pointer (click-to-focus, hud-v4k1h)"
+            "attached composer must accept pointer (click-to-focus)"
         );
         assert_eq!(hr1.interaction_id, "portal-42-composer");
         // Click-to-focus resolves to the composer node via hit_test (the tile sits

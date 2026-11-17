@@ -17,7 +17,7 @@
 //!
 //! # IME v1 fallback
 //! In v1, only direct ASCII / basic Unicode input via `KeyDownEvent` and
-//! `CharacterEvent` is mandatory. Full IME composition events are v1-reserved
+//! `CharacterEvent` is mandatory. Full IME composition events are not supported
 //! (their protobuf schema is defined but Rust logic is not implemented here).
 //!
 

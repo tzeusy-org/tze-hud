@@ -842,7 +842,7 @@ const INLINE_PARSE_BYTE_THRESHOLD: usize = 4096;
 /// `MarkdownPrimer`) that gets reused across multiple, independently
 /// constructed `SceneGraph`s — e.g. a benchmark/test loop that builds a fresh
 /// scene per scenario iteration while reusing one `Compositor`, such as
-/// `scroll_reshape_reuse_hud991cj` — can dispatch a legitimate prime for a NEW
+/// `scroll_reshape_reuse` — can dispatch a legitimate prime for a NEW
 /// scene whose `version` is *lower* than the value already recorded from a
 /// PRIOR scene. Gating on that raw number then makes `publish_if_newer` treat
 /// the new scene's correctly-parsed background result as "stale" and silently,
@@ -4125,7 +4125,7 @@ mod tests {
     /// numbering is globally monotonic across the primer's ENTIRE lifetime —
     /// but callers legitimately reset their own numbering per `SceneGraph`
     /// instance (`version` restarts at 0 for every new scene). A `Compositor`
-    /// reused across scenes (confirmed in `scroll_reshape_reuse_hud991cj`)
+    /// reused across scenes (confirmed in `scroll_reshape_reuse`)
     /// could therefore dispatch a later, LOWER-numbered prime that
     /// `publish_if_newer` would treat as stale and silently, permanently drop
     /// — even though it was the most recent, correct dispatch.
@@ -4154,10 +4154,9 @@ mod tests {
         primer.prime(vec![job]);
 
         let snap = wait_for_key(&primer, &key, 200);
-        let parsed = snap.get_by_key(&key).expect(
-            "large payload must land even after many prior prime() dispatches \
-                 -- hud-u4lq2 regression",
-        );
+        let parsed = snap
+            .get_by_key(&key)
+            .expect("large payload must land even after many prior prime() dispatches");
         assert!(parsed.plain_text.contains("New Scene"));
         assert!(parsed.plain_text.contains("emphasis"));
     }

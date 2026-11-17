@@ -1,6 +1,6 @@
 //! Hit-test pipeline: point queries against the scene graph.
 //!
-//! Implements Requirement: Hit-Test Performance:
+//! Performance contract:
 //! - < 100µs p99 for 50 tiles
 //! - Traversal order: chrome layer first, then content tiles by z-order
 //!   descending, within each tile nodes in reverse tree order (last child first)

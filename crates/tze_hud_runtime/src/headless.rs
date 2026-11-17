@@ -17,11 +17,11 @@
 //!
 //! # Session Limits & Hot-Connect
 //!
-//! Requirement: Session Limits (line 355): headless mode still runs
+//! Headless mode still runs
 //! the gRPC session server — agents connect normally, session limits are
 //! enforced identically.
 //!
-//! Requirement: Hot-Connect (line 346): agents connecting to headless
+//! Agents connecting to a headless
 //! runtime receive the full scene snapshot (handled by `HudSessionImpl`).
 //!
 //! # grpc_port = 0
@@ -644,10 +644,10 @@ impl HeadlessRuntime {
 
     /// Start the gRPC server in the background, serving the HudSession streaming service.
     ///
-    /// Requirement: Session Limits (line 355): headless runtime still
+    /// The headless runtime still
     /// runs the gRPC server — agents connect normally.
     ///
-    /// Requirement: Hot-Connect (line 346): the `HudSessionImpl` sends
+    /// The `HudSessionImpl` sends
     /// a full scene snapshot to each agent on connect.
     ///
     /// Returns the server task handle.  The caller must retain it to keep the
@@ -1126,7 +1126,7 @@ mod tests {
         );
         assert!(runtime.compositor.take_work_counts().is_none());
         eprintln!(
-            "hud-b1adb 50 AB: cold={cold_work:?} warm={warm_work:?} AB->BA={mutation_work:?} repeat={repeat_work:?}"
+            "50 AB: cold={cold_work:?} warm={warm_work:?} AB->BA={mutation_work:?} repeat={repeat_work:?}"
         );
         for work in [warm_work, mutation_work, repeat_work] {
             assert_eq!(
@@ -1271,7 +1271,7 @@ mod tests {
         );
         assert!(runtime.compositor.take_work_counts().is_none());
         eprintln!(
-            "hud-b1adb bounds: shrink={shrink_work:?} regrow={regrow_work:?} warm={regrow_warm_work:?} replacement={replacement_work:?} reintroduced={obsolete_work:?} warm={obsolete_warm_work:?}"
+            "bounds: shrink={shrink_work:?} regrow={regrow_work:?} warm={regrow_warm_work:?} replacement={replacement_work:?} reintroduced={obsolete_work:?} warm={obsolete_warm_work:?}"
         );
     }
 

@@ -1,6 +1,6 @@
 //! Configuration file path resolution.
 //!
-//! Implements Requirement: Configuration File Resolution Order:
+//! Resolution order:
 //!
 //! 1. `--config <path>` CLI flag
 //! 2. `$TZE_HUD_CONFIG` environment variable

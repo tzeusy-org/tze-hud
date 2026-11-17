@@ -126,7 +126,7 @@ async fn hud_w41ef_portal_content_background_scaled_by_tile_opacity() {
     assert!(
         (node_bg_alpha - flat_alpha).abs() < 1e-4,
         "content-node backdrop ({node_bg_alpha}) and flat tile backdrop ({flat_alpha}) \
-         must paint at the SAME alpha so the tile fades uniformly (hud-w41ef)"
+         must paint at the SAME alpha so the tile fades uniformly"
     );
 }
 
@@ -178,7 +178,7 @@ async fn hud_w41ef_portal_backdrop_opaque_after_resize_grow_no_fade() {
             target_opacity: 1.0,
         },
     );
-    let resource_id = ResourceId::of(b"hud-1wizi settled drag image");
+    let resource_id = ResourceId::of(b"settled drag image");
     compositor.register_image_bytes(resource_id, std::sync::Arc::from(vec![255u8; 16]), 2, 2);
     assert!(compositor.ensure_image_texture(resource_id, 2, 2));
     scene.register_resource(resource_id);
@@ -974,7 +974,7 @@ async fn hud_b0x0m_rounded_solid_color_scaled_by_tile_opacity() {
 async fn hud_b0x0m_static_image_tint_scaled_by_tile_opacity() {
     let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);
 
-    let resource_id = ResourceId::of(b"hud-b0x0m 2x2 image");
+    let resource_id = ResourceId::of(b"2x2 image");
     // Register real RGBA bytes + upload the GPU texture so render_node takes the
     // textured (tint) path rather than the fallback placeholder.
     let rgba: std::sync::Arc<[u8]> = std::sync::Arc::from(vec![255u8; 2 * 2 * 4]);

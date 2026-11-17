@@ -101,15 +101,15 @@ impl ConfigLoader for TzeHudConfig {
             return errors;
         }
 
-        // ── (1) includes field (v1-reserved) ──────────────────────────────────
+        // ── (1) includes field (unsupported) ──────────────────────────────────
         if self.raw.includes.is_some() {
             // AnyValue wraps any TOML value; presence alone is the error.
             errors.push(ConfigError {
                 code: ConfigErrorCode::ConfigIncludesNotSupported,
                 field_path: "includes".into(),
-                expected: "field must be absent (layered composition is post-v1)".into(),
+                expected: "field must be absent (layered composition is not supported)".into(),
                 got: "includes field present".into(),
-                hint: "remove the `includes` field; layered config is reserved for post-v1".into(),
+                hint: "remove the `includes` field; layered config is not supported".into(),
             });
         }
 

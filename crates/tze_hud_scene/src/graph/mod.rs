@@ -384,9 +384,9 @@ mod tests;
 
 // Behavior suites share fixtures only in lib-test builds.
 #[cfg(test)]
-mod limits_tests;
+mod behavior_tests;
 #[cfg(test)]
-mod spec_scenarios;
+mod limits_tests;
 #[cfg(test)]
 mod stack_trim_tests;
 #[cfg(test)]

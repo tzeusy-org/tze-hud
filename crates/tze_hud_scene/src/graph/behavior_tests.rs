@@ -47,7 +47,7 @@ fn portal_resize_drain_queue_populated_by_remove_tile() {
     assert_eq!(
         removed_ids,
         vec![tile_id],
-        "drain queue must contain exactly the removed tile ID (hud-4tuw5)"
+        "drain queue must contain exactly the removed tile ID"
     );
 
     // Queue must be empty after drain (idempotent).

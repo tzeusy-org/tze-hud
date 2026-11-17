@@ -61,8 +61,8 @@ fn should_skip_gpu_tests() -> bool {
 /// `cargo test` output — indistinguishable from a test that actually
 /// exercised the render path. PR #1148's RefCell double-borrow panic escaped
 /// exactly this way: the render-path regression tests that would have caught
-/// it (`markdown_primer_landing_converges_on_render_path_hud_u4lq2`,
-/// `reused_compositor_across_scenes_lands_markdown_primer_hud_u4lq2`) silently
+/// it (`markdown_primer_landing_converges_on_render_path`,
+/// `reused_compositor_across_scenes_lands_markdown_primer`) silently
 /// no-op'd in a no-GPU sandbox; only CI's GPU/llvmpipe lane actually ran them.
 /// `require_gpu!` now `eprintln!`s a loud, greppable
 /// `"SKIPPED (no GPU)"` marker — carrying the exact call-site location and

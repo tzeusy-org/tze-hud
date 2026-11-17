@@ -89,8 +89,6 @@ pub struct ParseError {
 pub const DEFAULT_MAX_TRUNCATION_INPUT_BYTES: u32 = 4096;
 
 /// A resolved display profile with its budget values.
-///
-/// From Requirement: Display Profile full-display and related.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DisplayProfile {
     pub name: String,
@@ -199,7 +197,7 @@ pub struct ResolvedConfig {
 /// - Enforce built-in profile budget values exactly.
 /// - Reject `[agents]` (agents live in `agents.toml`).
 /// - Collect ALL validation errors before reporting.
-/// - Reject `includes` fields (post-v1 reserved).
+/// - Reject `includes` fields (unsupported).
 pub trait ConfigLoader {
     /// Parse a TOML configuration string.
     ///

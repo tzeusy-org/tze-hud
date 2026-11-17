@@ -39,8 +39,7 @@ pub enum HitTestResult {
 
 /// Resolved routing target for an event after hit-test.
 ///
-/// Produced by the event router (Requirement: Event Routing Resolution,
-/// lines 315-317).
+/// Produced by the event router.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum RouteTarget {
     /// Route to the lease owner of the given tile.
