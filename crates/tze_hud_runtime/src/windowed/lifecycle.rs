@@ -844,6 +844,8 @@ fn native_chrome_available(window: Option<winit::window::WindowId>) -> bool {
                 owner.try_borrow().ok().is_some_and(|owner| {
                     !owner.ledger.faulted
                         && !window.is_some_and(|window| owner.ledger.has_quarantined_edges(window))
+                        && owner.ledger.active.len() + owner.ledger.completed.len()
+                            < ChromeCaptureLedger::MAX_RECEIPTS
                         && owner
                             .ledger
                             .installs
@@ -879,7 +881,7 @@ fn native_chrome_recover() {
             CHROME_NATIVE_FAULT.with(|fault| fault.set(false));
             CHROME_NATIVE_FAULT_NOTIFIED.with(|notified| notified.set(false));
             tracing::info!(
-                "notification capture history resynchronized; notification actions restored"
+                "notification capture fault cleared; cancelled delivery history retained"
             );
         }
     }
@@ -2791,7 +2793,7 @@ impl WinitApp {
             }
             return;
         }
-        self.process_pointer_event(kind, true, Instant::now());
+        self.process_pointer_event(kind, true, Instant::now(), None);
     }
 
     /// Retain a press or release the scene lock could not take,
@@ -2805,6 +2807,7 @@ impl WinitApp {
             y: self.state.cursor_y,
             press_window: self.state.press_window,
             at,
+            notification_permitted: self.notification_pointer_permitted(),
         };
         self.retain_pointer(event);
     }
@@ -2839,7 +2842,13 @@ impl WinitApp {
     /// Run one pointer event through hit-testing and the scene. Returns false
     /// when a press or release could not reach the scene; with `retain` it is
     /// then queued, while a replay leaves it at the queue's front.
-    fn process_pointer_event(&mut self, kind: PointerEventKind, retain: bool, at: Instant) -> bool {
+    fn process_pointer_event(
+        &mut self,
+        kind: PointerEventKind,
+        retain: bool,
+        at: Instant,
+        notification_permitted: Option<bool>,
+    ) -> bool {
         if kind == PointerEventKind::Down && self.state.answer_keyboard.focus.take().is_some() {
             self.state.input_processor.chrome_feedback_cancel_pending = true;
         }
@@ -2909,8 +2918,10 @@ impl WinitApp {
             // never merge into a multi-click they were not.
             timestamp: Some(at),
         };
-        self.state.input_processor.notification_actions_enabled =
-            self.notification_feedback_permitted(pointer_event.kind == PointerEventKind::Down);
+        self.state.input_processor.notification_actions_enabled = self
+            .notification_feedback_permitted(pointer_event.kind == PointerEventKind::Down)
+            && (pointer_event.kind != PointerEventKind::Down
+                || notification_permitted.unwrap_or(true));
         // Acquire the scene lock directly (without going through SharedState) so that
         // the main-thread input path does not contend with session handlers that hold
         // both the SharedState lock and the scene lock.
@@ -3250,7 +3261,8 @@ impl WinitApp {
                                 kind,
                                 ZoneInteractionKind::Dismiss | ZoneInteractionKind::Action { .. }
                             );
-                            let allowed = self.notification_pointer_permitted();
+                            let allowed = self.notification_pointer_permitted()
+                                && notification_permitted.unwrap_or(true);
                             (!notification || allowed).then(|| interaction_id.clone())
                         }
                         _ => None,
@@ -3269,7 +3281,8 @@ impl WinitApp {
                         && (!matches!(
                             kind,
                             ZoneInteractionKind::Dismiss | ZoneInteractionKind::Action { .. }
-                        ) || self.notification_pointer_permitted())
+                        ) || (self.notification_pointer_permitted()
+                            && notification_permitted.unwrap_or(true)))
                     {
                         match kind {
                             ZoneInteractionKind::Dismiss | ZoneInteractionKind::Action { .. } => {
@@ -3716,6 +3729,7 @@ impl WinitApp {
                     y,
                     press_window,
                     at,
+                    notification_permitted,
                 } => {
                     let live = (
                         self.state.cursor_x,
@@ -3730,8 +3744,13 @@ impl WinitApp {
                     // A release first moves to where it happened, so a
                     // press-drag whose moves were deferred still travels.
                     let reached = (kind != PointerEventKind::Up
-                        || self.process_pointer_event(PointerEventKind::Move, false, at))
-                        && self.process_pointer_event(kind, false, at);
+                        || self.process_pointer_event(PointerEventKind::Move, false, at, None))
+                        && self.process_pointer_event(
+                            kind,
+                            false,
+                            at,
+                            Some(notification_permitted),
+                        );
                     (
                         self.state.cursor_x,
                         self.state.cursor_y,
@@ -3781,6 +3800,9 @@ pub(super) enum RetainedPointerEvent {
         y: f32,
         press_window: Option<winit::window::WindowId>,
         at: Instant,
+        /// A denied edge cannot inherit a later native press's authorization.
+        /// Replay still checks current permission, so faults remain fail-closed.
+        notification_permitted: bool,
     },
     /// Wheel deltas that arrived behind a retained press or release,
     /// coalesced as `pending_scroll` coalesces them.

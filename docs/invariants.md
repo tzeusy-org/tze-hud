@@ -662,8 +662,11 @@ fail-closed. Recovery keeps old presses cancelled and preserves monotonic
 installation/frame identities; stale Down/Up cannot borrow a fresh press's
 receipts, including after reinstallation. Once cancelled delivery debt drains,
 a complete fresh press can act without restarting.
+Deferred pointer buttons retain their original notification authorization;
+replay also checks current permission, so denied old input cannot inherit a
+later press's receipt while the scene is busy.
 Recovery neither installs a missing observer nor bypasses registration/receipt
-bounds. Faulted, unobserved and safe-mode notification buttons show no hover or
+bounds. Faulted, unobserved, full-queue and safe-mode notification buttons show no hover or
 press feedback; drag handles keep their independent feedback. Valid reentrant
 histories may trigger that availability limit; its frequency has not been
 measured. Unrelated pointer input continues, and this source model does not
