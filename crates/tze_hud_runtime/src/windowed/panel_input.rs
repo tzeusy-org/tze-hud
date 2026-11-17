@@ -2070,7 +2070,7 @@ pub(super) mod panel_task_tests {
         );
         panel.send(PanelEvent::WindowFocus(false));
         wait("duplicate drained while provider waits", || {
-            panel.current_model().is_some_and(|m| m.focus_refused)
+            panel.current_model().is_some_and(|m| m.notice.is_some())
         })
         .await;
         assert_eq!(
@@ -2090,7 +2090,7 @@ pub(super) mod panel_task_tests {
         .await;
         panel.send(PanelEvent::WindowFocus(true));
         wait("old completion drained", || {
-            panel.current_model().is_some_and(|m| !m.focus_refused)
+            panel.current_model().is_some_and(|m| !m.notice.is_some())
         })
         .await;
         assert_eq!(
@@ -2122,7 +2122,7 @@ pub(super) mod panel_task_tests {
         );
         panel.send(PanelEvent::WindowFocus(false));
         wait("shortcut drained", || {
-            panel.current_model().is_some_and(|m| m.focus_refused)
+            panel.current_model().is_some_and(|m| m.notice.is_some())
         })
         .await;
         assert_eq!(clipboard.lock().unwrap().reads, reads);
