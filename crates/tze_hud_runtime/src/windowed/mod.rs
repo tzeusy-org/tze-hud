@@ -3121,6 +3121,7 @@ impl WindowedRuntime {
         let mut tray_deps = None;
         let control_panel = network_rt.as_ref().map(|rt| {
             let deps = crate::shell::control_panel::ControlPanelDeps {
+                clipboard: Default::default(),
                 scene: Arc::clone(&shared_scene),
                 pause: crate::shell::control_panel::PauseControl::new(
                     Arc::clone(&shared_state),

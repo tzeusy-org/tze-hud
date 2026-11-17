@@ -121,6 +121,11 @@ pub(crate) enum PanelEvent {
     Refresh,
     /// The compositor laid out a row the panel asked to scroll into view.
     Geometry,
+    /// A local clipboard operation finished without holding the input task.
+    Clipboard {
+        id: u64,
+        result: Result<Option<String>, String>,
+    },
     /// A slow edit finished (sent by the panel task itself).
     Applied {
         row: String,
@@ -146,6 +151,7 @@ struct Shared {
     /// The panel waits for new geometry to scroll a row into view.
     wants_geometry: AtomicBool,
     events: mpsc::UnboundedSender<PanelEvent>,
+    clipboard_sequence: AtomicU64,
     #[cfg(any(target_os = "windows", test, feature = "test-harness"))]
     quit: RwLock<Option<crate::operator::handoff::Quit>>,
     render_wake: RenderWakeNotifier,
@@ -155,6 +161,8 @@ struct Shared {
     /// Background edits whose outcome was queued (tests order on it).
     #[cfg(test)]
     applied_sent: AtomicU64,
+    #[cfg(test)]
+    clipboard_sent: AtomicU64,
 }
 
 /// Cheap, cloneable access to the panel from every thread.
@@ -165,6 +173,11 @@ pub(crate) struct ControlPanelHandle {
 }
 
 impl ControlPanelHandle {
+    #[cfg(test)]
+    pub(crate) fn clipboard_sent(&self) -> u64 {
+        self.shared.clipboard_sent.load(Ordering::Acquire)
+    }
+
     #[cfg(any(target_os = "windows", test))]
     pub(crate) fn set_quit(&self, quit: crate::operator::handoff::Quit) {
         *self.shared.quit.write().unwrap_or_else(|e| e.into_inner()) = Some(quit);
@@ -346,6 +359,7 @@ impl ControlPanelHandle {
 /// What the panel task needs besides its sections.
 #[derive(Clone)]
 pub(crate) struct ControlPanelDeps {
+    pub clipboard: crate::clipboard::Clipboard,
     pub pause: PauseControl,
     /// The scene, for the visibility rows (its runtime-only overlay state).
     pub scene: Arc<tokio::sync::Mutex<tze_hud_scene::graph::SceneGraph>>,
@@ -447,12 +461,15 @@ pub(crate) fn spawn_control_panel(
             geometry_generation: AtomicU64::new(0),
             wants_geometry: AtomicBool::new(false),
             events: tx,
+            clipboard_sequence: AtomicU64::new(0),
             #[cfg(any(target_os = "windows", test, feature = "test-harness"))]
             quit: RwLock::new(None),
             render_wake: deps.render_wake.clone(),
             main_wake: deps.main_wake.clone(),
             #[cfg(test)]
             applied_sent: AtomicU64::new(0),
+            #[cfg(test)]
+            clipboard_sent: AtomicU64::new(0),
         }),
     };
     let sections: Arc<[Box<dyn Section>]> = sections.into();
@@ -469,6 +486,7 @@ pub(crate) fn spawn_control_panel(
             after_busy: std::collections::HashMap::new(),
             changes: std::collections::HashMap::new(),
             closed_failure: None,
+            clipboard: None,
         }
     };
     let recover = handle.clone();
@@ -542,11 +560,38 @@ struct PanelTask {
     /// A background edit that failed while the panel was closed, shown on
     /// its row when the panel next opens.
     closed_failure: Option<(String, String)>,
+    /// At most one OS operation, retained across close/reopen until completion.
+    clipboard: Option<PendingClipboard>,
+}
+
+struct PendingClipboard {
+    id: u64,
+    row: String,
+    draft: state::FieldEdit,
+    copy: Option<(String, bool)>,
+    cancelled: bool,
+}
+
+impl PendingClipboard {
+    fn matches(&self, open: Option<&Open>) -> bool {
+        !self.cancelled
+            && open.is_some_and(|open| {
+                open.focus == tze_hud_compositor::PanelFocus::Row(self.row.clone())
+                    && open
+                        .editing
+                        .as_ref()
+                        .is_some_and(|edit| edit.same_input(&self.draft))
+            })
+    }
 }
 
 impl PanelTask {
     async fn handle(&mut self, event: PanelEvent) {
         let effects = match (event, self.open.as_mut()) {
+            (PanelEvent::Clipboard { id, result }, _) => {
+                self.finish_clipboard(id, result);
+                Vec::new()
+            }
             (PanelEvent::Applied { row, result }, _) => {
                 self.busy.remove(&row);
                 self.applied(&row, result);
@@ -605,7 +650,9 @@ impl PanelTask {
                         }
                         Vec::new()
                     }
-                    PanelEvent::Chord(_) | PanelEvent::Applied { .. } => Vec::new(),
+                    PanelEvent::Chord(_)
+                    | PanelEvent::Applied { .. }
+                    | PanelEvent::Clipboard { .. } => Vec::new(),
                     #[cfg(any(target_os = "windows", test, feature = "test-harness"))]
                     PanelEvent::Tray(_) => Vec::new(),
                 }
@@ -615,7 +662,14 @@ impl PanelTask {
             match effect {
                 Effect::Close => self.close().await,
                 Effect::Apply { row, edit } => self.apply(&row, edit).await,
+                Effect::Copy { row, text, cut } => self.start_clipboard(row, Some((text, cut))),
+                Effect::Paste { row } => self.start_clipboard(row, None),
             }
+        }
+        if let Some(pending) = &mut self.clipboard
+            && !pending.matches(self.open.as_ref())
+        {
+            pending.cancelled = true;
         }
         self.rebuild().await;
         // Focus left a previewing row (a key, a click, or a search moved
@@ -642,6 +696,76 @@ impl PanelTask {
                     .wants_geometry
                     .store(false, Ordering::Release);
                 self.rebuild().await;
+            }
+        }
+    }
+
+    fn start_clipboard(&mut self, row: String, copy: Option<(String, bool)>) {
+        // Keep one in-flight job even after close/reopen. Repeated shortcuts
+        // cannot accumulate blocking OS calls or delayed edits.
+        if self.clipboard.is_some() {
+            return;
+        }
+        let Some(draft) = self.open.as_ref().and_then(|open| open.editing.clone()) else {
+            return;
+        };
+        let Ok(previous) = self.handle.shared.clipboard_sequence.fetch_update(
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+            |id| id.checked_add(1),
+        ) else {
+            return;
+        };
+        let id = previous + 1;
+        let io = self.deps.clipboard.clone();
+        let action = copy.clone();
+        let handle = self.handle.clone();
+        self.clipboard = Some(PendingClipboard {
+            id,
+            row,
+            draft,
+            copy,
+            cancelled: false,
+        });
+        tokio::spawn(async move {
+            let result = tokio::task::spawn_blocking(move || match action {
+                Some((text, _)) => (io.write)(&text).map(|()| None),
+                None => (io.read)(),
+            })
+            .await
+            .unwrap_or_else(|_| Err("Clipboard operation failed".to_owned()));
+            handle.send(PanelEvent::Clipboard { id, result });
+            #[cfg(test)]
+            handle.shared.clipboard_sent.fetch_add(1, Ordering::Release);
+        });
+    }
+
+    fn finish_clipboard(&mut self, id: u64, result: Result<Option<String>, String>) {
+        if self
+            .clipboard
+            .as_ref()
+            .is_none_or(|pending| pending.id != id)
+        {
+            return;
+        }
+        let pending = self.clipboard.take().expect("matching clipboard operation");
+        if !pending.matches(self.open.as_ref()) {
+            return;
+        }
+        let open = self.open.as_mut().expect("matching open field");
+        match result {
+            Ok(text) => match pending.copy {
+                Some((text, cut)) => state::copied(open, &pending.row, &text, cut),
+                None => {
+                    if let Some(text) = text {
+                        state::on_paste(open, &self.nav, &pending.row, &text);
+                    }
+                }
+            },
+            Err(error) => {
+                if let Some(edit) = &mut open.editing {
+                    edit.clipboard_error(error);
+                }
             }
         }
     }
@@ -739,11 +863,7 @@ impl PanelTask {
     fn open_connect(&mut self) {
         match (&self.deps.connect, self.open.as_mut()) {
             (Some(control), Some(open)) => {
-                open.connect = Some(control.open());
-                open.query.clear();
-                open.confirming = None;
-                open.scroll = 0.0;
-                open.focus = tze_hud_compositor::PanelFocus::Row(connect::NAME.to_owned());
+                open.show_connect(control.open());
             }
             _ => {
                 if let Some(pairing) = &self.deps.pairing {
@@ -781,6 +901,9 @@ impl PanelTask {
 
     /// Forget the open panel, reverting a preview it was showing.
     async fn end_preview(&mut self) {
+        if let Some(pending) = &mut self.clipboard {
+            pending.cancelled = true;
+        }
         if let Some(row) = self.open.take().and_then(|open| open.preview) {
             self.apply(&row, Edit::Revert).await;
         }

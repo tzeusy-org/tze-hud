@@ -13,7 +13,7 @@ use crate::firewall::TailnetInbound;
 use crate::pairing::{Pairing, Reach};
 
 /// Writes text to the clipboard (injected so tests can read it back).
-pub(crate) type Clipboard = Arc<dyn Fn(&str) -> Result<(), String> + Send + Sync>;
+pub(crate) use crate::clipboard::Write as Clipboard;
 
 /// The Agents row (and quick tile) that opens the card.
 pub(crate) const OPEN: &str = "agents.connect";
@@ -28,7 +28,7 @@ pub(crate) const COPY: &str = "connect.copy";
 pub(crate) const NEW_CODE: &str = "connect.new_code";
 
 /// The longest agent name `POST /pair` accepts.
-const NAME_MAX: usize = 32;
+pub(super) const NAME_MAX: usize = 32;
 /// A shown code with less time left is replaced before copying: the agent
 /// needs time to read the prompt and call `/pair`.
 const MIN_CODE_LEFT: Duration = Duration::from_secs(60);
@@ -66,33 +66,13 @@ pub(crate) enum ConnectStatus {
     Failed(String),
 }
 
-impl ConnectPage {
-    /// Type into the name: lower case, digits and dashes, as `POST /pair`
-    /// takes them.
-    pub(crate) fn erase(&mut self) {
-        if std::mem::take(&mut self.suggested) {
-            self.name.clear();
-        } else {
-            self.name.pop();
-        }
-    }
-
-    pub(crate) fn type_name(&mut self, text: &str) {
-        if std::mem::take(&mut self.suggested) {
-            self.name.clear();
-        }
-        for c in text.chars() {
-            let c = match c.to_ascii_lowercase() {
-                ' ' | '_' => '-',
-                c => c,
-            };
-            if (c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-                && self.name.len() < NAME_MAX
-            {
-                self.name.push(c);
-            }
-        }
-    }
+/// The same name alphabet for ordinary typing, selection replacement and paste.
+pub(super) fn name_character(c: char) -> Option<char> {
+    let c = match c.to_ascii_lowercase() {
+        ' ' | '_' => '-',
+        c => c,
+    };
+    (c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-').then_some(c)
 }
 
 /// Everything the card shows, read fresh on each build.
@@ -577,28 +557,40 @@ mod tests {
 
     #[test]
     fn names_type_as_pair_accepts_them() {
-        let mut page = ConnectPage {
+        use super::super::{PanelKey, state};
+        use tze_hud_compositor::PanelFocus;
+        use tze_hud_scene::config::ChordRole;
+        let mut open = state::Open::new(ChordRole::Pairing);
+        open.connect = Some(ConnectPage {
             name: "agent".into(),
             suggested: true,
             status: None,
-        };
-        page.type_name("Claude Laptop_2!");
-        assert_eq!(page.name, "claude-laptop-2");
-        assert!(valid_name(&page.name));
-        page.erase();
+        });
+        open.focus = PanelFocus::Row(NAME.into());
+        let nav = state::Nav::default();
+        state::on_text(&mut open, &nav, "Claude Laptop_2!");
+        assert_eq!(open.connect.as_ref().unwrap().name, "claude-laptop-2");
+        assert!(valid_name(&open.connect.as_ref().unwrap().name));
+        state::on_key(&mut open, &nav, PanelKey::Backspace, None);
         assert_eq!(
-            page.name, "claude-laptop-",
+            open.connect.as_ref().unwrap().name,
+            "claude-laptop-",
             "an edited name erases a character"
         );
-        page.type_name(&"x".repeat(40));
-        assert_eq!(page.name.len(), NAME_MAX);
-        let mut page = ConnectPage {
+        state::on_text(&mut open, &nav, &"x".repeat(40));
+        assert_eq!(open.connect.as_ref().unwrap().name.len(), NAME_MAX);
+        open.editing = None;
+        open.connect = Some(ConnectPage {
             name: "agent".into(),
             suggested: true,
             status: None,
-        };
-        page.erase();
-        assert_eq!(page.name, "", "erasing the suggestion clears it");
+        });
+        state::on_key(&mut open, &nav, PanelKey::Backspace, None);
+        assert_eq!(
+            open.connect.as_ref().unwrap().name,
+            "",
+            "erasing the suggestion clears it"
+        );
         assert!(!valid_name(""));
     }
 

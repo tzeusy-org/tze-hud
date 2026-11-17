@@ -4,9 +4,11 @@
 //! gathers rows, runs the resulting [`Effect`]s and publishes the model.
 
 use tze_hud_compositor::{
-    ControlPanelGeometry, ControlPanelModel, PanelBadge, PanelBody, PanelChip, PanelConnect,
-    PanelControl, PanelFocus, PanelHitTarget, PanelItem, PanelPart, PanelSection, PanelTone,
+    ControlPanelGeometry, ControlPanelModel, PanelBadge, PanelBody, PanelCaret, PanelChip,
+    PanelConnect, PanelControl, PanelFocus, PanelHitTarget, PanelItem, PanelPart, PanelSection,
+    PanelTone,
 };
+use tze_hud_input::composer_draft::{ComposerDraft, EditOutcome, MAX_DRAFT_BYTES};
 use tze_hud_scene::config::ChordRole;
 
 use super::connect::{self, ConnectPage, ConnectView};
@@ -160,6 +162,68 @@ pub(crate) const QUICK_ACTIONS: &[QuickAction] = &[
 
 // ─── Open state ──────────────────────────────────────────────────────────────
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct FieldEdit {
+    row: String,
+    draft: ComposerDraft,
+    changed: bool,
+    at_capacity: bool,
+    clipboard_error: Option<String>,
+}
+
+impl FieldEdit {
+    fn begin(row: &str, text: &str, selected: bool) -> Self {
+        let cap = if row == connect::NAME {
+            connect::NAME_MAX
+        } else {
+            MAX_DRAFT_BYTES
+        };
+        let mut draft = ComposerDraft::new(cap);
+        let at_capacity = draft.paste(text) == EditOutcome::AtCapacity;
+        if selected {
+            draft.select_all();
+        }
+        Self {
+            row: row.to_owned(),
+            draft,
+            changed: false,
+            at_capacity,
+            clipboard_error: None,
+        }
+    }
+
+    pub(super) fn same_input(&self, other: &Self) -> bool {
+        self.row == other.row
+            && self.draft == other.draft
+            && self.changed == other.changed
+            && self.at_capacity == other.at_capacity
+    }
+
+    pub(super) fn clipboard_error(&mut self, error: String) {
+        self.clipboard_error = Some(error);
+    }
+
+    fn change(&mut self, change: impl FnOnce(&mut ComposerDraft) -> EditOutcome) {
+        self.clipboard_error = None;
+        let outcome = change(&mut self.draft);
+        match outcome {
+            EditOutcome::AtCapacity => self.at_capacity = true,
+            EditOutcome::Mutated => self.at_capacity = false,
+            EditOutcome::Unchanged | EditOutcome::Suspended => {}
+        }
+        if matches!(outcome, EditOutcome::Mutated | EditOutcome::AtCapacity) {
+            self.changed = true;
+        }
+    }
+
+    fn caret(&self) -> PanelCaret {
+        PanelCaret {
+            cursor: self.draft.cursor(),
+            anchor: self.draft.selection_anchor(),
+        }
+    }
+}
+
 /// Everything the panel remembers while open. Gone when it closes.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Open {
@@ -181,9 +245,9 @@ pub(crate) struct Open {
     typing_search: bool,
     /// Connect an agent is showing in place of the sections.
     pub connect: Option<ConnectPage>,
-    /// A field row being typed into: (row id, text so far). Enter submits
-    /// it as [`Edit::Text`]; Esc or moving away drops it.
-    pub editing: Option<(String, String)>,
+    /// A local field draft. Enter submits it as [`Edit::Text`]; Esc or
+    /// moving away drops it. Connect's name remains its existing local form.
+    pub editing: Option<FieldEdit>,
     /// Explicit field selection (click or Enter), distinct from search's
     /// automatic result focus and from the replacement text not yet typed.
     selected_field: Option<String>,
@@ -214,6 +278,18 @@ impl Open {
             preview: None,
             reveal: false,
         }
+    }
+
+    /// A fresh pairing card starts a new name draft, including when it
+    /// replaces another card focused on the same row.
+    pub(super) fn show_connect(&mut self, page: ConnectPage) {
+        self.connect = Some(page);
+        self.editing = None;
+        self.selected_field = None;
+        self.query.clear();
+        self.confirming = None;
+        self.scroll = 0.0;
+        self.focus = PanelFocus::Row(connect::NAME.to_owned());
     }
 
     /// The row id behind the focus (a row, or a tile's row).
@@ -316,13 +392,26 @@ fn item_for(row: &Row, open: &Open, context: Option<&str>) -> PanelItem {
         }
         Control::Stepper { text } => PanelControl::Stepper(text.clone()),
         Control::Action { .. } => PanelControl::Action,
-        Control::Field { text, .. } => PanelControl::Value {
-            text: match &open.editing {
-                Some((id, typed)) if *id == row.id => format!("{typed}▏"),
-                _ if open.selected_field.as_deref() == Some(&row.id) => format!("{text}▏"),
-                _ => text.clone(),
+        Control::Field { text, .. } => match &open.editing {
+            Some(edit) if edit.row == row.id => PanelControl::Field {
+                text: edit.draft.text().to_owned(),
+                caret: Some(edit.caret()),
             },
-            mono: true,
+            _ => PanelControl::Field {
+                text: text.clone(),
+                caret: (open.selected_field.as_deref() == Some(&row.id)
+                    || (row.id == connect::NAME && typing_name(open)))
+                .then_some(PanelCaret {
+                    cursor: text.len(),
+                    anchor: if row.id == connect::NAME
+                        && open.connect.as_ref().is_some_and(|p| !p.suggested)
+                    {
+                        text.len()
+                    } else {
+                        0
+                    },
+                }),
+            },
         },
     };
     let mut item = PanelItem {
@@ -355,9 +444,23 @@ fn item_for(row: &Row, open: &Open, context: Option<&str>) -> PanelItem {
         item.detail = Some(message.clone());
         item.detail_tone = PanelTone::Danger;
     }
-    if open.editing.as_ref().is_some_and(|(id, _)| *id == row.id) {
+    if open.editing.as_ref().is_some_and(|edit| edit.row == row.id) {
         item.detail = Some("Enter saves · Esc cancels".to_owned());
         item.detail_tone = PanelTone::Normal;
+    }
+    if open
+        .editing
+        .as_ref()
+        .is_some_and(|edit| edit.row == row.id && edit.at_capacity)
+    {
+        item.detail = Some("Text is too long · Shorten it before saving".to_owned());
+        item.detail_tone = PanelTone::Danger;
+    }
+    if let Some(edit) = open.editing.as_ref().filter(|edit| edit.row == row.id)
+        && let Some(error) = &edit.clipboard_error
+    {
+        item.detail = Some(error.clone());
+        item.detail_tone = PanelTone::Danger;
     }
     if open.confirming.as_deref() == Some(&row.id)
         && let Some(question) = pending_question(&row.control)
@@ -413,6 +516,7 @@ pub(crate) fn build(
     // A refreshed row may disappear/change control, or Connect may take
     // focus outside this core. Neither leaves an editor behind.
     let field = match &open.focus {
+        PanelFocus::Row(id) if typing_name(open) => Some(id.as_str()),
         PanelFocus::Row(id)
             if open.connect.is_none()
                 && find(id).is_some_and(|r| matches!(r.control, Control::Field { .. })) =>
@@ -431,7 +535,7 @@ pub(crate) fn build(
     if open
         .editing
         .as_ref()
-        .is_some_and(|(id, _)| Some(id.as_str()) != field)
+        .is_some_and(|edit| Some(edit.row.as_str()) != field)
     {
         open.editing = None;
     }
@@ -665,6 +769,14 @@ pub(crate) enum PanelKey {
     Down,
     Left,
     Right,
+    SelectLeft,
+    SelectRight,
+    SelectHome,
+    SelectEnd,
+    SelectAll,
+    Copy,
+    Cut,
+    Paste,
     Tab,
     BackTab,
     Enter,
@@ -688,7 +800,18 @@ pub(crate) enum PanelKey {
 /// What an input asks the panel task to do besides updating `Open`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Effect {
-    Apply { row: String, edit: Edit },
+    Apply {
+        row: String,
+        edit: Edit,
+    },
+    Copy {
+        row: String,
+        text: String,
+        cut: bool,
+    },
+    Paste {
+        row: String,
+    },
     Close,
 }
 
@@ -833,6 +956,24 @@ pub(crate) fn on_key(
     };
     if !matches!(key, PanelKey::Enter | PanelKey::Space | PanelKey::Escape) {
         open.confirming = None;
+    }
+    if let Some(effects) = field_key(open, nav, key) {
+        return effects;
+    }
+    let key = match key {
+        PanelKey::SelectLeft => PanelKey::Left,
+        PanelKey::SelectRight => PanelKey::Right,
+        PanelKey::SelectHome => PanelKey::Home,
+        PanelKey::SelectEnd => PanelKey::End,
+        PanelKey::SelectAll | PanelKey::Copy | PanelKey::Cut | PanelKey::Paste => {
+            return Vec::new();
+        }
+        key => key,
+    };
+    if key == PanelKey::Escape && typing_name(open) {
+        // Connect has always used Esc to leave its local setup form.
+        open.editing = None;
+        open.selected_field = None;
     }
     if !matches!(
         key,
@@ -1035,15 +1176,20 @@ pub(crate) fn on_key(
                 return act(open, nav, &id, Gesture::Activate, By::Key);
             }
             PanelFocus::Row(id) => {
-                if let Some((editing, text)) = open.editing.take() {
-                    if editing == id {
+                if let Some(editing) = open.editing.take() {
+                    if editing.at_capacity {
+                        open.editing = Some(editing);
+                        return Vec::new();
+                    }
+                    if editing.row == id && editing.changed && !typing_name(open) {
+                        let text = editing.draft.text().to_owned();
                         let asks = nav
                             .control(&id)
                             .and_then(|c| c.confirm_for(&Edit::Text(text.clone())))
                             .is_some();
                         if asks && open.confirming.as_deref() != Some(id.as_str()) {
                             // Keep the typed value; the next Enter saves it.
-                            open.editing = Some((id.clone(), text));
+                            open.editing = Some(editing);
                             open.confirming = Some(id);
                             return Vec::new();
                         }
@@ -1063,17 +1209,7 @@ pub(crate) fn on_key(
             }
         },
         PanelKey::Backspace => {
-            if typing_name(open) {
-                if let Some(page) = open.connect.as_mut() {
-                    page.erase();
-                }
-            } else if let Some((_, text)) = open.editing.as_mut() {
-                text.pop();
-            } else if let Some(id) = &open.selected_field {
-                // First edit replaces the selected value, including when
-                // that edit is Backspace. It must never erase the search.
-                open.editing = Some((id.clone(), String::new()));
-            } else if open.query.pop().is_some() {
+            if open.query.pop().is_some() {
                 open.scroll = 0.0;
                 open.focus_first_result = true;
                 open.typing_search = true;
@@ -1104,6 +1240,14 @@ pub(crate) fn on_key(
                 return act(open, nav, quick.row, Gesture::Activate, By::Key);
             }
         }
+        PanelKey::SelectLeft
+        | PanelKey::SelectRight
+        | PanelKey::SelectHome
+        | PanelKey::SelectEnd
+        | PanelKey::SelectAll
+        | PanelKey::Copy
+        | PanelKey::Cut
+        | PanelKey::Paste => {}
         PanelKey::ZoomIn | PanelKey::ZoomOut => {
             let quick = QUICK_ACTIONS
                 .iter()
@@ -1184,29 +1328,169 @@ fn editing_field(open: &Open, nav: &Nav, id: &str) -> bool {
         && matches!(nav.control(id), Some(Control::Field { .. }))
 }
 
-/// Typed text goes to the focused field (the Connect name, or a section's
-/// field row), else to the search query, wherever focus is (type-to-search).
-pub(crate) fn on_text(open: &mut Open, nav: &Nav, text: &str) {
-    if typing_name(open) {
-        if let Some(page) = open.connect.as_mut() {
-            page.type_name(text);
-        }
-        return;
+/// The eligible field's local draft, created only on an editing gesture.
+fn field_edit<'a>(open: &'a mut Open, nav: &Nav) -> Option<&'a mut FieldEdit> {
+    let PanelFocus::Row(id) = &open.focus else {
+        return None;
+    };
+    let (text, selected) = if typing_name(open) {
+        let page = open.connect.as_ref()?;
+        (page.name.as_str(), page.suggested)
+    } else if open.connect.is_none() && editing_field(open, nav, id) {
+        let Control::Field { text, .. } = nav.control(id)? else {
+            return None;
+        };
+        (text.as_str(), true)
+    } else {
+        return None;
+    };
+    if open.editing.as_ref().is_none_or(|edit| edit.row != *id) {
+        open.editing = Some(FieldEdit::begin(id, text, selected));
     }
-    let typed: String = text.chars().filter(|c| !c.is_control()).collect();
-    if let PanelFocus::Row(id) = &open.focus
-        && open.connect.is_none()
-        && editing_field(open, nav, id)
+    open.editing.as_mut()
+}
+
+fn sync_name(open: &mut Open) {
+    if let Some(edit) = &open.editing
+        && edit.row == connect::NAME
+        && edit.changed
+        && let Some(page) = &mut open.connect
     {
-        // The first keystroke replaces the shown value.
-        match open.editing.as_mut() {
-            Some((editing, buffer)) if editing == id => buffer.push_str(&typed),
-            _ => open.editing = Some((id.clone(), typed)),
+        page.name = edit.draft.text().to_owned();
+        page.suggested = false;
+    }
+}
+
+/// Handle editor keys before ordinary row navigation. Home/End and Delete
+/// keep their existing row meaning until a field was explicitly selected.
+fn field_key(open: &mut Open, nav: &Nav, key: PanelKey) -> Option<Vec<Effect>> {
+    use PanelKey::*;
+    let active = open.editing.is_some() || open.selected_field.is_some() || typing_name(open);
+    if !active
+        && matches!(
+            key,
+            Home | End | SelectHome | SelectEnd | Delete | Backspace
+        )
+    {
+        return None;
+    }
+    if !matches!(
+        key,
+        Left | Right
+            | SelectLeft
+            | SelectRight
+            | Home
+            | End
+            | SelectHome
+            | SelectEnd
+            | Backspace
+            | Delete
+            | SelectAll
+            | Copy
+            | Cut
+            | Paste
+    ) {
+        return None;
+    }
+    let edit = field_edit(open, nav)?;
+    edit.clipboard_error = None;
+    let mut effects = Vec::new();
+    match key {
+        Left => {
+            edit.draft.move_left();
         }
-        open.confirming = None;
+        Right => {
+            edit.draft.move_right();
+        }
+        SelectLeft => {
+            edit.draft.select_left();
+        }
+        SelectRight => {
+            edit.draft.select_right();
+        }
+        Home => {
+            edit.draft.move_to_start();
+        }
+        End => {
+            edit.draft.move_to_end();
+        }
+        SelectHome => {
+            edit.draft.select_to_start();
+        }
+        SelectEnd => {
+            edit.draft.select_to_end();
+        }
+        SelectAll => {
+            edit.draft.select_all();
+        }
+        Backspace => edit.change(ComposerDraft::backspace),
+        Delete => edit.change(ComposerDraft::delete_forward),
+        Copy | Cut => {
+            let text = edit.draft.selected_text().to_owned();
+            if !text.is_empty() {
+                effects.push(Effect::Copy {
+                    row: edit.row.clone(),
+                    text,
+                    cut: key == Cut,
+                });
+            }
+        }
+        Paste => effects.push(Effect::Paste {
+            row: edit.row.clone(),
+        }),
+        _ => {}
+    }
+    sync_name(open);
+    Some(effects)
+}
+
+/// Complete a successful copy before cutting. Failed writes leave the text
+/// selected and intact; a stale target cannot mutate a different field.
+pub(crate) fn copied(open: &mut Open, row: &str, text: &str, cut: bool) {
+    if cut
+        && open.focus == PanelFocus::Row(row.to_owned())
+        && let Some(edit) = &mut open.editing
+        && edit.row == row
+        && edit.draft.selected_text() == text
+    {
+        edit.change(ComposerDraft::cut);
+        sync_name(open);
+    }
+}
+
+pub(crate) fn on_paste(open: &mut Open, nav: &Nav, row: &str, text: &str) {
+    if open.focus == PanelFocus::Row(row.to_owned()) && field_edit(open, nav).is_some() {
+        on_text(open, nav, text);
+    }
+}
+
+/// Typed text goes to an eligible local field, else to the search query.
+pub(crate) fn on_text(open: &mut Open, nav: &Nav, text: &str) {
+    let in_field = matches!(&open.focus, PanelFocus::Row(id) if open.connect.is_none() && editing_field(open, nav, id));
+    let typed: String = if typing_name(open) {
+        text.chars().filter_map(connect::name_character).collect()
+    } else if in_field {
+        text.replace("\r\n", "\n")
+            .chars()
+            .filter_map(|c| match c {
+                '\n' | '\r' | '\t' => Some(' '),
+                c if !c.is_control() => Some(c),
+                _ => None,
+            })
+            .collect()
+    } else {
+        text.chars().filter(|c| !c.is_control()).collect()
+    };
+    if typed.is_empty() {
         return;
     }
-    if typed.is_empty() || (open.query.is_empty() && typed.trim().is_empty()) {
+    if let Some(edit) = field_edit(open, nav) {
+        edit.change(|draft| draft.insert(&typed));
+        open.confirming = None;
+        sync_name(open);
+        return;
+    }
+    if open.query.is_empty() && typed.trim().is_empty() {
         return;
     }
     open.editing = None;
@@ -1610,9 +1894,12 @@ mod tests {
         let (item, nav) = shown(&mut open);
         assert_eq!(
             item.control,
-            PanelControl::Value {
-                text: "92 9▏".into(),
-                mono: true
+            PanelControl::Field {
+                text: "92 9".into(),
+                caret: Some(PanelCaret {
+                    cursor: 4,
+                    anchor: 4
+                }),
             }
         );
         assert_eq!(item.detail.as_deref(), Some("Enter saves · Esc cancels"));
@@ -1627,7 +1914,7 @@ mod tests {
         assert!(on_key(&mut open, &nav, PanelKey::Escape, None).is_empty());
         assert_eq!(open.editing, None, "Esc drops the edit");
         assert!(
-            matches!(&shown(&mut open).0.control, PanelControl::Value { text, .. } if text == "9090")
+            matches!(&shown(&mut open).0.control, PanelControl::Field { text, .. } if text == "9090")
         );
         assert!(on_key(&mut open, &nav, PanelKey::Escape, None) == vec![Effect::Close]);
 
@@ -1661,7 +1948,7 @@ mod tests {
             );
             let (item, nav) = shown(&mut open);
             assert!(
-                matches!(item.control, PanelControl::Value { ref text, .. } if text == "9191▏")
+                matches!(item.control, PanelControl::Field { ref text, caret: Some(_) } if text == "9191")
             );
             assert_eq!(item.detail.as_deref(), Some("Enter saves · Esc cancels"));
             assert!(on_click(&mut open, &nav, &field, None).is_empty());
@@ -1686,7 +1973,7 @@ mod tests {
             on_click(&mut open, &nav, &field, None);
             let (item, _) = shown(&mut open);
             assert!(
-                matches!(item.control, PanelControl::Value { ref text, .. } if text == "9090▏"),
+                matches!(item.control, PanelControl::Field { ref text, caret: Some(PanelCaret { cursor: 4, anchor: 0 }) } if text == "9090"),
                 "selection is visible before typing"
             );
             assert!(on_key(&mut open, &nav, PanelKey::Backspace, None).is_empty());
@@ -1695,8 +1982,10 @@ mod tests {
                 "Backspace cannot edit the retained query"
             );
             assert_eq!(
-                open.editing,
-                Some(("network.mcp_port".into(), String::new()))
+                open.editing
+                    .as_ref()
+                    .map(|edit| (edit.row.as_str(), edit.draft.text())),
+                Some(("network.mcp_port", ""))
             );
             assert!(on_key(&mut open, &nav, PanelKey::Escape, None).is_empty());
             assert_eq!(
@@ -1715,7 +2004,7 @@ mod tests {
             assert_eq!(open.query, "MCP port");
             assert!(open.editing.is_none());
             assert!(
-                matches!(shown(&mut open).0.control, PanelControl::Value { ref text, .. } if text == "9090")
+                matches!(shown(&mut open).0.control, PanelControl::Field { ref text, .. } if text == "9090")
             );
 
             // Moving or clicking away drops the draft, and search regains text.
@@ -1741,6 +2030,55 @@ mod tests {
         assert_eq!(
             open.query, "MCP port",
             "Space in an automatically focused field keeps searching"
+        );
+
+        // Once deliberately selected, a field edits at its local caret.
+        // These are panel keys and effects, rather than draft-helper calls.
+        let mut saved = Vec::new();
+        for (value, keys) in [
+            ("abcd", vec![PanelKey::Left]),
+            ("abcd", vec![PanelKey::Home]),
+            ("abcd", vec![PanelKey::Left, PanelKey::Delete]),
+            ("a👩‍💻e\u{301}z", vec![PanelKey::Left]),
+        ] {
+            let mut open = Open::new(PANEL);
+            let (_, nav) = shown(&mut open);
+            let field = PanelHitTarget::Row("network.mcp_port".into(), PanelPart::Body);
+            on_click(&mut open, &nav, &field, None);
+            on_text(&mut open, &nav, value);
+            for key in keys {
+                assert!(on_key(&mut open, &nav, key, None).is_empty());
+            }
+            on_text(&mut open, &nav, "X");
+            saved.push(on_key(&mut open, &nav, PanelKey::Enter, None));
+        }
+        assert_eq!(
+            saved,
+            ["abcXd", "Xabcd", "abcX", "a👩‍💻e\u{301}Xz"]
+                .map(|text| apply("network.mcp_port", Edit::Text(text.into())))
+        );
+        // Overflow is explicit and cannot be saved by moving the caret or
+        // issuing a no-op delete. A real shortening makes it saveable again.
+        let mut open = Open::new(PANEL);
+        let (_, nav) = shown(&mut open);
+        on_click(
+            &mut open,
+            &nav,
+            &PanelHitTarget::Row("network.mcp_port".into(), PanelPart::Body),
+            None,
+        );
+        on_text(&mut open, &nav, &"x".repeat(MAX_DRAFT_BYTES + 1));
+        assert_eq!(shown(&mut open).0.detail_tone, PanelTone::Danger);
+        on_key(&mut open, &nav, PanelKey::End, None);
+        on_key(&mut open, &nav, PanelKey::Delete, None);
+        assert!(on_key(&mut open, &nav, PanelKey::Enter, None).is_empty());
+        on_key(&mut open, &nav, PanelKey::Backspace, None);
+        assert_eq!(
+            on_key(&mut open, &nav, PanelKey::Enter, None),
+            apply(
+                "network.mcp_port",
+                Edit::Text("x".repeat(MAX_DRAFT_BYTES - 1))
+            )
         );
     }
 
@@ -2366,7 +2704,12 @@ mod tests {
         let (model, _) = built_with(&mut open, &field_sections);
         assert!(!model.hints.iter().any(|h| h == "Del reset"));
         assert!(on_key(&mut open, &nav, PanelKey::Delete, None).is_empty());
-        assert_eq!(open.editing, Some(("look.font".into(), "Seg".into())));
+        assert_eq!(
+            open.editing
+                .as_ref()
+                .map(|edit| (edit.row.as_str(), edit.draft.text())),
+            Some(("look.font", "Seg"))
+        );
         // Nor in the search: type-to-search focused a result the owner did
         // not pick.
         open.editing = None;
@@ -2394,7 +2737,12 @@ mod tests {
             on_text(&mut open, &nav, "Seg");
             assert!(on_key(&mut open, &nav, PanelKey::Delete, None).is_empty());
             assert_eq!(open.query, query);
-            assert_eq!(open.editing, Some(("look.font".into(), "Seg".into())));
+            assert_eq!(
+                open.editing
+                    .as_ref()
+                    .map(|edit| (edit.row.as_str(), edit.draft.text())),
+                Some(("look.font", "Seg"))
+            );
             let reset = PanelHitTarget::Row("look.font".into(), PanelPart::Reset);
             assert_eq!(
                 on_click(&mut open, &nav, &reset, None),

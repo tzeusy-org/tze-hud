@@ -1021,6 +1021,23 @@ Agents answer-window row offer it; ports and widget boxes take a typed value. Cl
 panel pass through to the desktop. Closing the panel always resumes
 agents. While paused, the pause tile and row turn caution-colored.
 
+Value fields edit locally. Clicking a field or pressing Enter on a field result
+selects its current value; typing replaces the selection. Left/Right move by
+Unicode grapheme, Home/End move to either end, and Shift extends the selection.
+Ctrl+A selects all; Ctrl+C copies; Ctrl+X cuts after a successful clipboard
+write; Ctrl+V pastes at the selection. Backspace/Delete edit the draft. Paste
+converts line breaks and tabs to spaces; Connect agent names keep their existing
+lowercase name alphabet and 32-byte limit. Other drafts are bounded at 65,535
+UTF-8 bytes; overflow is shown and saving waits for an edit that shortens or
+replaces it. Enter saves through the row's existing validation and confirmation;
+Esc cancels before clearing search or closing the panel. Moving away drops the
+draft. Automatic search-result focus keeps typing and clipboard shortcuts out
+of value editing until explicit selection. Clipboard access runs in the
+background with one operation at a time; a delayed result cannot modify a
+changed or reopened draft. Failed clipboard access leaves a cut intact and
+shows feedback beside the field. Caret and selection stay inside the value box;
+the caret stays steady so an idle panel needs no blink timer.
+
 The Visibility card hides portals, zones or widgets for
 the session; the Hide all tile (Alt+H) hides all of them and, when everything
 is hidden, shows it all again. Hidden content is not drawn and takes no input

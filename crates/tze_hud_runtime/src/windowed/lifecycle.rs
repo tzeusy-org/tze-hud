@@ -1411,59 +1411,8 @@ fn left_mouse_button_is_physically_down() -> Option<bool> {
     }
 }
 
-#[cfg(target_os = "windows")]
 pub(super) fn read_windows_clipboard_text() -> Option<String> {
-    use windows::Win32::Foundation::{HGLOBAL, HWND};
-    use windows::Win32::System::DataExchange::{
-        CloseClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard,
-    };
-    use windows::Win32::System::Memory::{GlobalLock, GlobalUnlock};
-
-    const CF_UNICODETEXT_FORMAT: u32 = 13;
-
-    // SAFETY: Clipboard access is confined to the window event-loop thread.
-    unsafe {
-        if IsClipboardFormatAvailable(CF_UNICODETEXT_FORMAT).is_err() {
-            return None;
-        }
-        if OpenClipboard(HWND::default()).is_err() {
-            return None;
-        }
-
-        struct ClipboardGuard;
-        impl Drop for ClipboardGuard {
-            fn drop(&mut self) {
-                // SAFETY: Balances a successful OpenClipboard call.
-                unsafe {
-                    let _ = CloseClipboard();
-                }
-            }
-        }
-        let _guard = ClipboardGuard;
-
-        let handle = GetClipboardData(CF_UNICODETEXT_FORMAT).ok()?;
-        let hglobal = HGLOBAL(handle.0);
-        let ptr = GlobalLock(hglobal);
-        if ptr.is_null() {
-            return None;
-        }
-
-        let mut len = 0usize;
-        let wide = ptr as *const u16;
-        while *wide.add(len) != 0 {
-            len += 1;
-        }
-        let slice = std::slice::from_raw_parts(wide, len);
-        let text = String::from_utf16_lossy(slice);
-        let _ = GlobalUnlock(hglobal);
-
-        if text.is_empty() { None } else { Some(text) }
-    }
-}
-
-#[cfg(not(target_os = "windows"))]
-pub(super) fn read_windows_clipboard_text() -> Option<String> {
-    None
+    crate::clipboard::read_text().ok().flatten()
 }
 
 /// Drive the drag-handle long-press state machine for a single pointer event.
