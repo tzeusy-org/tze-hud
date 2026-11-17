@@ -537,7 +537,7 @@ mod calibration {
         }
     }
 
-    pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
+    pub(crate) async fn run() -> Result<(), Box<dyn std::error::Error>> {
         let output_path = parse_output_path();
         let runtime = HeadlessRuntime::new(headless_config()).await?;
         prepare_scene(&runtime).await;

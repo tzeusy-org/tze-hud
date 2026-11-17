@@ -2,7 +2,7 @@
 //! No GPU setup or runtime dependencies; preserve the original surface helper semantics.
 
 /// Get pixel at (x, y) from raw RGBA data. Returns [r, g, b, a].
-pub fn pixel_at(data: &[u8], width: u32, x: u32, y: u32) -> [u8; 4] {
+pub(crate) fn pixel_at(data: &[u8], width: u32, x: u32, y: u32) -> [u8; 4] {
     let idx = ((y * width + x) * 4) as usize;
     [data[idx], data[idx + 1], data[idx + 2], data[idx + 3]]
 }
@@ -17,7 +17,7 @@ pub fn pixel_at(data: &[u8], width: u32, x: u32, y: u32) -> [u8; 4] {
 /// Software-rasterised GPU paths (llvmpipe / SwiftShader) may produce
 /// values that differ from the linear-space input by ±2 per channel due
 /// to sRGB conversion.  Use `tolerance = 2` for solid fills on CI.
-pub fn assert_pixel_color(
+pub(crate) fn assert_pixel_color(
     data: &[u8],
     width: u32,
     x: u32,

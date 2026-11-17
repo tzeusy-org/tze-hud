@@ -10,7 +10,7 @@ use std::time::Duration;
 
 /// Local addresses that belong to Tailscale (CGNAT `100.64.0.0/10`, ULA
 /// `fd7a:115c:a1e0::/48`), in input order.
-pub fn tailnet_addrs(all: &[IpAddr]) -> Vec<IpAddr> {
+pub(crate) fn tailnet_addrs(all: &[IpAddr]) -> Vec<IpAddr> {
     all.iter().copied().filter(is_tailnet).collect()
 }
 
@@ -35,7 +35,7 @@ fn is_tailnet(ip: &IpAddr) -> bool {
 /// treats a tailnet-range address as Tailscale (`listen_addrs`,
 /// `watch_for_tailnet`, the late-bind check, the pairing endpoint) only ever
 /// sees addresses that passed this interface filter.
-pub fn local_ips() -> Vec<IpAddr> {
+pub(crate) fn local_ips() -> Vec<IpAddr> {
     if_addrs::get_if_addrs()
         .map(|ifs| {
             usable_ips(
@@ -63,7 +63,7 @@ fn usable_ips(ifs: &[(&str, IpAddr)]) -> Vec<IpAddr> {
 
 /// The addresses to listen on given the host's addresses: IPv4 loopback first,
 /// then each Tailscale address.
-pub fn listen_addrs(all: &[IpAddr], port: u16) -> Vec<SocketAddr> {
+pub(crate) fn listen_addrs(all: &[IpAddr], port: u16) -> Vec<SocketAddr> {
     std::iter::once(IpAddr::V4(Ipv4Addr::LOCALHOST))
         .chain(tailnet_addrs(all))
         .map(|ip| SocketAddr::new(ip, port))

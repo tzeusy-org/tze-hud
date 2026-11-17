@@ -20,7 +20,7 @@ pub(super) struct WindowedFrameWork {
 }
 
 impl WindowedFrameWork {
-    pub fn new(wake: WindowedWake, frame_ready: crate::channels::FrameReadyTx) -> Self {
+    pub(super) fn new(wake: WindowedWake, frame_ready: crate::channels::FrameReadyTx) -> Self {
         // Both content and position-only mutations must render on startup.
         Self {
             turn: FrameTurnState::default(),
@@ -51,7 +51,7 @@ pub(super) struct PreparedCapture {
 }
 
 impl WindowedFrameWork {
-    pub fn prepare(
+    pub(super) fn prepare(
         &mut self,
         compositor: &mut Compositor,
         scene: &mut SceneGraph,
@@ -101,7 +101,7 @@ impl WindowedFrameWork {
     /// Only ordinary primary submissions may advance the idle gate or signal
     /// main-thread presentation. Acquisitions/submits count even if a later
     /// operation failed and cleared the aggregate stage-success sentinel.
-    pub fn record_primary_submission(
+    pub(super) fn record_primary_submission(
         &mut self,
         outcome: &WindowedPresentOutcome,
         built_versions: (u64, u64),
@@ -132,7 +132,7 @@ impl WindowedFrameWork {
     }
 
     #[cfg(test)]
-    pub fn last_rendered(&self) -> (u64, u64) {
+    pub(super) fn last_rendered(&self) -> (u64, u64) {
         self.turn.last_rendered()
     }
 }
@@ -140,7 +140,7 @@ impl WindowedFrameWork {
 impl PreparedCapture {
     /// Complete the real inbox drain after releasing the scene lock. The
     /// callback owns only offscreen rendering, never swapchain presentation.
-    pub fn finish_with(
+    pub(super) fn finish_with(
         self,
         render: impl FnOnce(&WindowedFrameBuild, Option<&str>) -> Result<CapturedFrame, CaptureError>,
     ) {

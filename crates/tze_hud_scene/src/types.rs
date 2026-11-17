@@ -3736,7 +3736,7 @@ mod tests {
     /// Validates the core Layer 0 identity invariants for `SceneId` and `ResourceId`.
     /// This function mirrors what `assert_layer0_invariants` checks at the graph level
     /// but focuses on the type-level contracts.
-    pub fn assert_identity_invariants() -> Vec<String> {
+    pub(super) fn assert_identity_invariants() -> Vec<String> {
         let mut violations = Vec::new();
 
         if size_of::<SceneId>() != 16 {

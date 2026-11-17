@@ -16,11 +16,11 @@ use tze_hud_compositor::{SystemCardKind, SystemCardModel};
 use tze_hud_scene::render_wake::RenderWakeNotifier;
 
 /// How long an update/event toast stays up.
-pub const TOAST_TTL_US: u64 = 5_000_000;
+pub(crate) const TOAST_TTL_US: u64 = 5_000_000;
 
 /// A card the runtime wants on screen, with an optional wall-clock expiry.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SystemCard {
+pub(crate) struct SystemCard {
     pub kind: SystemCardKind,
     pub title: String,
     pub lines: Vec<String>,
@@ -29,7 +29,7 @@ pub struct SystemCard {
 
 impl SystemCard {
     /// A toast that expires `TOAST_TTL_US` after `now_wall_us`.
-    pub fn toast(title: impl Into<String>, now_wall_us: u64) -> Self {
+    pub(crate) fn toast(title: impl Into<String>, now_wall_us: u64) -> Self {
         Self {
             kind: SystemCardKind::Toast,
             title: title.into(),
@@ -49,7 +49,7 @@ impl SystemCard {
 
 /// What the compositor thread needs for one loop iteration.
 #[derive(Debug, PartialEq, Eq)]
-pub struct SystemCardFrame {
+pub(crate) struct SystemCardFrame {
     /// The card to draw now (`None` when absent or expired).
     pub model: Option<SystemCardModel>,
     /// Wall-clock instant the loop must wake at to expire the card.
@@ -58,13 +58,13 @@ pub struct SystemCardFrame {
 
 /// Shared slot for the current card, stored like `ChromeState`.
 #[derive(Clone, Default)]
-pub struct SystemCardHandle {
+pub(crate) struct SystemCardHandle {
     slot: Arc<RwLock<Option<SystemCard>>>,
     render_wake: RenderWakeNotifier,
 }
 
 impl SystemCardHandle {
-    pub fn new(render_wake: RenderWakeNotifier) -> Self {
+    pub(crate) fn new(render_wake: RenderWakeNotifier) -> Self {
         Self {
             slot: Arc::default(),
             render_wake,
@@ -72,14 +72,14 @@ impl SystemCardHandle {
     }
 
     /// Show `card`, replacing any current one, and wake the render loop.
-    pub fn set(&self, card: SystemCard) {
+    pub(crate) fn set(&self, card: SystemCard) {
         *self.slot.write().unwrap_or_else(|e| e.into_inner()) = Some(card);
         self.render_wake.notify();
     }
 
     /// Transform the card only if `expected` is still the one showing
     /// (a newer code must not be overwritten by a late background result).
-    pub fn replace_if_current(
+    pub(crate) fn replace_if_current(
         &self,
         expected: &SystemCard,
         transform: impl FnOnce(&SystemCard) -> Option<SystemCard>,
@@ -114,7 +114,7 @@ impl SystemCardHandle {
 
     /// Remove the card if it is a `kind` card, leaving other cards (an
     /// update toast) alone.
-    pub fn clear_kind(&self, kind: SystemCardKind) {
+    pub(crate) fn clear_kind(&self, kind: SystemCardKind) {
         let mut slot = self.slot.write().unwrap_or_else(|e| e.into_inner());
         if slot.as_ref().is_some_and(|c| c.kind == kind) {
             *slot = None;
@@ -124,7 +124,7 @@ impl SystemCardHandle {
     }
 
     /// Remove the card, waking the render loop only if one was showing.
-    pub fn clear(&self) {
+    pub(crate) fn clear(&self) {
         let had = self
             .slot
             .write()
@@ -138,7 +138,7 @@ impl SystemCardHandle {
 
     /// Resolve the card for this loop iteration. An expired card is dropped
     /// here, so its deadline is reported exactly once.
-    pub fn frame_state(&self, now_wall_us: u64) -> SystemCardFrame {
+    pub(crate) fn frame_state(&self, now_wall_us: u64) -> SystemCardFrame {
         let mut slot = self.slot.write().unwrap_or_else(|e| e.into_inner());
         if slot
             .as_ref()

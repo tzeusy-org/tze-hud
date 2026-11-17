@@ -128,7 +128,7 @@ impl ChromeState {
 ///
 /// These are handled before tile hit-testing and are NEVER routed to agents.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ChromeShortcut {
+pub(crate) enum ChromeShortcut {
     /// Ctrl+Tab — switch to the next tab.
     Next,
     /// Ctrl+Shift+Tab — switch to the previous tab.
@@ -141,7 +141,7 @@ pub enum ChromeShortcut {
 
 /// Result of processing a keyboard event.
 #[derive(Clone, Debug)]
-pub struct ShortcutResult {
+pub(crate) struct ShortcutResult {
     /// Whether the shortcut was consumed (never route to agents if true).
     pub consumed: bool,
     /// Index of the new active tab, if a tab switch occurred.
@@ -152,7 +152,7 @@ pub struct ShortcutResult {
 ///
 /// The state write lock must be held by the caller.
 /// Shortcut events are NEVER routed to any agent.
-pub fn handle_shortcut(state: &mut ChromeState, shortcut: ChromeShortcut) -> ShortcutResult {
+pub(crate) fn handle_shortcut(state: &mut ChromeState, shortcut: ChromeShortcut) -> ShortcutResult {
     let switched = match shortcut {
         ChromeShortcut::Next => state.switch_to_next_tab(),
         ChromeShortcut::Prev => state.switch_to_prev_tab(),
@@ -187,7 +187,7 @@ pub struct DismissTileResult {
 /// the lock. Portal tiles go through
 /// `PortalDriver::viewer_dismiss_tile`, which also drops the
 /// projection.
-pub fn dismiss_tile(
+pub(crate) fn dismiss_tile(
     scene: &mut tze_hud_scene::graph::SceneGraph,
     tile_id: SceneId,
 ) -> DismissTileResult {

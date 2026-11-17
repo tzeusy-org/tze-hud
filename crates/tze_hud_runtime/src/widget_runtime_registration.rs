@@ -7,7 +7,7 @@
 use tze_hud_compositor::widget::WidgetRenderer;
 
 /// Register pending widget SVG assets in the compositor widget renderer.
-pub fn process_pending_widget_svgs<I>(
+pub(crate) fn process_pending_widget_svgs<I>(
     widget_renderer: Option<&mut WidgetRenderer>,
     pending_widget_svgs: I,
 ) where

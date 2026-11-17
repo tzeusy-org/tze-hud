@@ -63,7 +63,7 @@ const MIN_SPEED_FACTOR: f64 = 0.5;
 const MAX_SPEED_FACTOR: f64 = 50.0;
 
 /// Run the CPU calibration workload and compute the speed factor.
-pub fn calibrate() -> CpuCalibrationResult {
+pub(crate) fn calibrate() -> CpuCalibrationResult {
     let overall_start = Instant::now();
     let scene_ops = run_scene_workload();
     let hash_mbps = run_hash_workload();

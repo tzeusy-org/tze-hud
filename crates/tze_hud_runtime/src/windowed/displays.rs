@@ -72,11 +72,11 @@ impl MonitorSpec {
     }
 
     /// This monitor's bounds in scene pixels, given the primary's origin.
-    pub fn scene_origin(&self, primary: &MonitorSpec) -> (i32, i32) {
+    pub(super) fn scene_origin(&self, primary: &MonitorSpec) -> (i32, i32) {
         (self.x - primary.x, self.y - primary.y)
     }
 
-    pub fn scene_rect(&self, primary: &MonitorSpec) -> Rect {
+    pub(super) fn scene_rect(&self, primary: &MonitorSpec) -> Rect {
         let (x, y) = self.scene_origin(primary);
         Rect::new(x as f32, y as f32, self.width as f32, self.height as f32)
     }
@@ -359,14 +359,14 @@ pub(super) struct DisplayTargets {
 
 impl DisplayTargets {
     /// Report `name`'s surface as lost (once, however often it is seen).
-    pub fn report_lost(&mut self, name: &str) {
+    pub(super) fn report_lost(&mut self, name: &str) {
         if !self.lost.iter().any(|n| n == name) {
             self.lost.push(name.to_owned());
         }
     }
 
     /// Report that `name` presented a frame.
-    pub fn report_healthy(&mut self, name: &str) {
+    pub(super) fn report_healthy(&mut self, name: &str) {
         if !self.healthy.iter().any(|n| n == name) {
             self.healthy.push(name.to_owned());
         }
@@ -398,28 +398,28 @@ pub(super) struct PresentLedger {
 
 impl PresentLedger {
     /// A frame with `signature` differs from what is on screen.
-    pub fn needs_present(&self, signature: u64) -> bool {
+    pub(super) fn needs_present(&self, signature: u64) -> bool {
         self.presented != Some(signature)
     }
 
     /// A present may be attempted at `now` (not backing off).
-    pub fn ready(&self, now: Instant) -> bool {
+    pub(super) fn ready(&self, now: Instant) -> bool {
         self.retry.is_none_or(|(at, _)| now >= at)
     }
 
     /// Owed a frame and the retry time has come.
-    pub fn retry_due(&self, now: Instant) -> bool {
+    pub(super) fn retry_due(&self, now: Instant) -> bool {
         self.retry.is_some_and(|(at, _)| now >= at)
     }
 
     /// When the owed frame should be retried.
-    pub fn retry_at(&self) -> Option<Instant> {
+    pub(super) fn retry_at(&self) -> Option<Instant> {
         self.retry.map(|(at, _)| at)
     }
 
     /// Record a present attempt of `signature` made at `now`. Returns true
     /// the first time a present submits.
-    pub fn record(&mut self, signature: u64, submitted: bool, now: Instant) -> bool {
+    pub(super) fn record(&mut self, signature: u64, submitted: bool, now: Instant) -> bool {
         if submitted {
             self.presented = Some(signature);
             self.retry = None;
@@ -433,17 +433,17 @@ impl PresentLedger {
     }
 
     /// The window already shows the current frame: nothing is owed.
-    pub fn settle(&mut self) {
+    pub(super) fn settle(&mut self) {
         self.retry = None;
     }
 
     /// Forget what is on screen (reconfigured or new surface).
-    pub fn invalidate(&mut self) {
+    pub(super) fn invalidate(&mut self) {
         self.presented = None;
     }
 
     #[cfg(test)]
-    pub fn owed(&self) -> bool {
+    pub(super) fn owed(&self) -> bool {
         self.retry.is_some()
     }
 }
@@ -457,7 +457,7 @@ pub(super) struct SecondaryTarget {
 }
 
 impl SecondaryTarget {
-    pub fn frame_target(&self) -> FrameTarget {
+    pub(super) fn frame_target(&self) -> FrameTarget {
         let (width, height) = tze_hud_compositor::CompositorSurface::size(self.surface.as_ref());
         FrameTarget {
             x: self.origin.0 as f32,
@@ -890,7 +890,7 @@ impl RefitBudget {
     }
 
     /// Spend one re-fit at `now` if the budget allows it.
-    pub fn take(&mut self, now: Instant) -> bool {
+    pub(super) fn take(&mut self, now: Instant) -> bool {
         if self
             .window_start
             .is_none_or(|start| now.duration_since(start) >= REFIT_WINDOW)

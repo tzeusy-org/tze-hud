@@ -30,7 +30,9 @@
 
 pub mod debug;
 pub mod dedup;
+// Public only to test support; its `pub` items are unreachable otherwise.
 #[cfg(not(any(test, feature = "test-support")))]
+#[allow(unreachable_pub)]
 mod font_bytes_store;
 #[cfg(any(test, feature = "test-support"))]
 pub mod font_bytes_store;

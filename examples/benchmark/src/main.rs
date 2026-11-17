@@ -258,7 +258,7 @@ mod headless_impl {
 
     // ── CLI args ─────────────────────────────────────────────────────────────
 
-    pub struct Args {
+    pub(crate) struct Args {
         /// Path to emit the telemetry JSON to.
         pub emit: Option<PathBuf>,
         /// Number of benchmark frames to render per scenario.
@@ -269,7 +269,7 @@ mod headless_impl {
         pub constrained_envelope: bool,
     }
 
-    pub fn parse_args() -> Args {
+    pub(crate) fn parse_args() -> Args {
         let args: Vec<String> = std::env::args().collect();
         let mut emit = None;
         let mut frames = 120u64;
@@ -516,7 +516,7 @@ mod headless_impl {
     ///
     /// Renders a fixed multi-tile scene with overlapping alpha-blended tiles at
     /// target resolution (1920x1080). Returns FPS and the hardware factor.
-    pub async fn calibrate_gpu() -> GpuCalibrationResult {
+    pub(crate) async fn calibrate_gpu() -> GpuCalibrationResult {
         let start = Instant::now();
 
         let config = benchmark_config("calibration");
@@ -639,7 +639,7 @@ mod headless_impl {
     ///
     /// Creates and destroys tiles in rapid succession to measure the create/update/delete
     /// throughput, which is the primary bottleneck for texture-upload-heavy workloads.
-    pub async fn calibrate_upload() -> UploadCalibrationResult {
+    pub(crate) async fn calibrate_upload() -> UploadCalibrationResult {
         let start = Instant::now();
 
         let config = benchmark_config("calibration");
@@ -767,7 +767,7 @@ mod headless_impl {
     /// Run the "steady-state render" scenario.
     ///
     /// Renders a multi-tile scene for `frame_count` frames and collects telemetry.
-    pub async fn run_steady_state_render(frame_count: u64) -> ScenarioResult {
+    pub(crate) async fn run_steady_state_render(frame_count: u64) -> ScenarioResult {
         info!(
             "Running steady-state render scenario ({} frames)",
             frame_count
@@ -895,7 +895,7 @@ mod headless_impl {
     }
 
     /// Run the "high-mutation" scenario: apply bounds mutations every frame.
-    pub async fn run_high_mutation(frame_count: u64) -> ScenarioResult {
+    pub(crate) async fn run_high_mutation(frame_count: u64) -> ScenarioResult {
         info!("Running high-mutation scenario ({} frames)", frame_count);
 
         let config = benchmark_config("benchmark");
@@ -1212,7 +1212,7 @@ mod headless_impl {
     /// then performs its `try_lock` — so the contended frames deterministically
     /// miss. We report the measured total; we never assert it equals a fixed
     /// value (it floats with scheduling, but is guaranteed `> 0`).
-    pub async fn run_scene_lock_contention(frame_count: u64) -> ScenarioResult {
+    pub(crate) async fn run_scene_lock_contention(frame_count: u64) -> ScenarioResult {
         info!(
             "Running scene-lock contention scenario ({} frames, {} mutation tasks)",
             frame_count, CONTENTION_MUTATION_TASKS,
@@ -1413,7 +1413,7 @@ mod headless_impl {
     /// Each scheduled hold still races the real `tokio::sync::Mutex::try_lock`
     /// frame-loop path and rolls misses through `FrameTelemetry` into
     /// `SessionSummary`; the difference is the production-shaped frequency.
-    pub async fn run_scene_lock_paced_contention(frame_count: u64) -> ScenarioResult {
+    pub(crate) async fn run_scene_lock_paced_contention(frame_count: u64) -> ScenarioResult {
         info!(
             "Running paced scene-lock contention scenario ({} frames, {} targeted holds; CI ceiling <= {} per 180 frames)",
             frame_count,
@@ -1564,7 +1564,7 @@ mod headless_impl {
 
     // ── Entry point ───────────────────────────────────────────────────────────
 
-    pub async fn run() {
+    pub(crate) async fn run() {
         use tze_hud_telemetry::AssertionOutcome;
 
         tracing_subscriber::fmt()
