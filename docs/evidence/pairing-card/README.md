@@ -3,6 +3,12 @@
 Source: `273bf18d0e3a8c4a1fd2942f8f477d82051e18d8`, `hud-h51u7.8.3`.
 [Gallery](gallery.html) · [source-bound capture manifest](after.json).
 
+Integration refresh: clean source `34466cb72691806c666b62df3d176836ae59c48d` merges
+main `86e705ba9c3f09382dd54ee1e98e8610fd2b2575`. The [integrated capture manifest](after-integrated.json)
+binds nine fresh renders to the compiled head and clean-tree provenance. Every PNG
+is byte-for-byte identical to its original file here, so those files are retained.
+The original manifest and owner acceptance limits below remain unchanged.
+
 Nine original PNGs show the pairing card, blocked-firewall warning and toast under
 Tonal Glass, Classic and Blueprint. The offline `render-scene --system-card` mode
 uses production scene startup and the actual windowed GPU build/capture seam,
