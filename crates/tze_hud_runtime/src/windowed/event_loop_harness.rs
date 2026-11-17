@@ -451,6 +451,7 @@ impl HeadlessEventLoopHarness {
         let clipboard: Arc<std::sync::Mutex<Vec<String>>> = Arc::default();
         let effects: Arc<std::sync::Mutex<Vec<String>>> = Arc::default();
         let deps = crate::shell::control_panel::ControlPanelDeps {
+            clipboard: Default::default(),
             scene: Arc::clone(&panel_scene),
             pause: crate::shell::control_panel::PauseControl::new(
                 Arc::clone(&state.shared_state),

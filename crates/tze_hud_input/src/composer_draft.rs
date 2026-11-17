@@ -365,7 +365,7 @@ impl ComposerVisualLayout {
 /// - `cursor` and `selection_anchor` are valid byte offsets into `text`
 /// - `cursor <= text.len()` and `selection_anchor <= text.len()`
 ///
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ComposerDraft {
     text: String,
     /// Cursor position in bytes (insert/caret position).

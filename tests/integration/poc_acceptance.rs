@@ -1740,9 +1740,12 @@ async fn poc_panel_connect_prompt_pairs_an_agent() {
     poc.wait_for("the name is typed", |hud| {
         hud.control_panel_row("connect.name").is_some_and(|item| {
             item.control
-                == tze_hud_compositor::PanelControl::Value {
+                == tze_hud_compositor::PanelControl::Field {
                     text: "laptop-2".into(),
-                    mono: true,
+                    caret: Some(tze_hud_compositor::PanelCaret {
+                        cursor: 8,
+                        anchor: 8,
+                    }),
                 }
         })
     })
@@ -1865,7 +1868,7 @@ async fn poc_panel_layout_moves_widgets_and_saves_their_entry() {
 
     poc.wait_for("the gauge's box shows", |hud| {
         hud.control_panel_row(row).is_some_and(|item| {
-            matches!(item.control, PanelControl::Value { ref text, .. } if text == "1.25%, 45.42% · 5×9.17%")
+            matches!(item.control, PanelControl::Field { ref text, .. } if text == "1.25%, 45.42% · 5×9.17%")
         })
     })
     .await;
@@ -2347,7 +2350,7 @@ async fn poc_panel_chords_rebind_live_and_save() {
     poc.hud.panel_press("Enter");
     poc.wait_for("the new chord is in and saved", |hud| {
         hud.control_panel_row(row).is_some_and(|item| {
-            matches!(item.control, PanelControl::Value { ref text, .. } if text == "Ctrl+Alt+F9")
+            matches!(item.control, PanelControl::Field { ref text, .. } if text == "Ctrl+Alt+F9")
         }) && saved().contains("panel_hotkey = \"Ctrl+Alt+F9\"")
     })
     .await;
@@ -2604,7 +2607,7 @@ async fn poc_panel_runtime_rows_apply_save_and_stage_a_restart() {
     poc.wait_for("the port is staged", |hud| {
         hud.control_panel_row("network.grpc_port").is_some_and(|item| {
             item.badge.as_ref().is_some_and(|b| b.text == "Restart to apply")
-                && matches!(item.control, PanelControl::Value { ref text, .. } if text == "50061")
+                && matches!(item.control, PanelControl::Field { ref text, .. } if text == "50061")
         })
     })
     .await;
