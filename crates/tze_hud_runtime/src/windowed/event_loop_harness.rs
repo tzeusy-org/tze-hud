@@ -3587,10 +3587,23 @@ mod tests {
                     native.complete(frame);
                 }
                 assert_eq!(harness.app.state.pending_pointer_buttons.len(), 4);
+                assert!(!harness.tick());
+                assert_eq!(harness.app.state.pending_pointer_buttons.len(), 4);
                 drop(held);
                 let deadline = std::time::Instant::now() + SCENE_WAIT;
-                while !harness.tick() {
-                    assert!(std::time::Instant::now() < deadline);
+                loop {
+                    // Tick completion covers scene/portal work, not delivery of
+                    // every retained edge: a transient lock miss can leave the
+                    // pointer FIFO queued while later settle phases complete.
+                    let settled = harness.tick();
+                    let pending = harness.app.state.pending_pointer_buttons.len();
+                    if settled && pending == 0 {
+                        break;
+                    }
+                    assert!(
+                        std::time::Instant::now() < deadline,
+                        "retained notification delivery stalled: {pending} edges; settled={settled}"
+                    );
                     std::thread::yield_now();
                 }
                 let actions = take_action_ids(&harness);
