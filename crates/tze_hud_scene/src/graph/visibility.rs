@@ -111,34 +111,16 @@ impl SceneGraph {
         !self.overlay.owner_hidden.zones
     }
 
-    /// Visible zone publications in paint order: Background, Content, Chrome,
-    /// then ascending zone name within each layer. Primitive passes retain
-    /// their own boundaries; publications inside each zone keep their order.
-    /// Hidden zones yield no publications.
+    /// Zone publications to draw and hit-test: all of them, or none while the
+    /// owner hides zones.
     pub fn shown_zone_publishes(
         &self,
     ) -> impl Iterator<Item = (&String, &Vec<ZonePublishRecord>)> + '_ {
-        let mut zones: Vec<_> = if self.zones_shown() {
-            self.zone_registry.active_publishes.iter().collect()
-        } else {
-            Vec::new()
-        };
-        zones.sort_unstable_by_key(|(name, _)| {
-            let layer = match self
-                .zone_registry
-                .zones
-                .get(*name)
-                .map(|z| z.layer_attachment)
-            {
-                Some(LayerAttachment::Background) => 0,
-                Some(LayerAttachment::Content) => 1,
-                Some(LayerAttachment::Chrome) => 2,
-                // Orphan publications stay iterable but are skipped by drawing.
-                None => 3,
-            };
-            (layer, *name)
-        });
-        zones.into_iter()
+        let shown = self.zones_shown();
+        self.zone_registry
+            .active_publishes
+            .iter()
+            .filter(move |_| shown)
     }
 
     /// Widget instances are drawn, rasterized and interactive.

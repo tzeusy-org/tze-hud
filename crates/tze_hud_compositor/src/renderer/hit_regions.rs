@@ -347,12 +347,10 @@ fn populate_notification_hit_regions_in(
     // Sort zone names for deterministic tab-order assignment across frames.
     // HashMap iteration order is nondeterministic; sorting ensures keyboard
     // focus cycling is stable when multiple interactive zones are present.
-    let paint_order: HashMap<String, usize> = scene
+    let mut zone_names: Vec<String> = scene
         .shown_zone_publishes()
-        .enumerate()
-        .map(|(rank, (name, _))| (name.clone(), rank))
+        .map(|(name, _)| name.clone())
         .collect();
-    let mut zone_names: Vec<_> = paint_order.keys().cloned().collect();
     zone_names.sort_unstable();
 
     for zone_name in &zone_names {
@@ -480,14 +478,6 @@ fn populate_notification_hit_regions_in(
             }
         }
     }
-    // Pointer queries are vector-first: later-painted zone groups go first.
-    // Stable sorting preserves publication/control precedence inside a zone;
-    // tab_order keeps the independent ascending-name keyboard traversal.
-    // Runtime jump/close controls are appended/inserted by the caller later.
-    scene
-        .overlay
-        .zone_hit_regions
-        .sort_by_key(|region| std::cmp::Reverse(paint_order[&region.zone_name]));
     prune_chrome_states(scene);
     tab_order
 }

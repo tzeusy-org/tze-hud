@@ -1612,7 +1612,7 @@ async fn test_notification_card_border_is_an_sdf_border() {
             } else {
                 ZoneContent::Notification(NotificationPayload {
                     text: name.clone(),
-                    urgency: if index == 7 { 1 } else { 0 },
+                    urgency: if index == 7 { 2 } else { 0 },
                     actions: vec![NotificationAction {
                         label: "Act".into(),
                         callback_id: Some("act".into()),
