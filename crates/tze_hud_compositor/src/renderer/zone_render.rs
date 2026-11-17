@@ -98,7 +98,7 @@ impl Compositor {
         if !scene.zones_shown() {
             return;
         }
-        for (zone_name, publishes) in &scene.zone_registry.active_publishes {
+        for (zone_name, publishes) in scene.shown_zone_publishes() {
             if publishes.is_empty() {
                 continue;
             }
