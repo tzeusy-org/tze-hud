@@ -3551,6 +3551,92 @@ mod tests {
     /// (the geometry epoch) while an unchanged move does not.
     #[test]
     fn action_button_hover_and_press_are_local_and_frame_only_on_change() {
+        // Retaining native history must also preserve the authorization of a
+        // denied application edge queued behind a busy scene, and an exhausted
+        // receipt queue cannot advertise a live hover before it can admit Down.
+        {
+            use crate::windowed::lifecycle::{ChromeAppEdge, ChromeCaptureTestScope};
+            use winit::event::MouseButton;
+            let mut failures = Vec::new();
+            {
+                let mut harness = approve_reject_notification_harness();
+                let approve = harness.notification_action_center("approve").unwrap();
+                let reject = harness.notification_action_center("reject").unwrap();
+                let window = winit::window::WindowId::from(7);
+                let native = ChromeCaptureTestScope::new(window);
+                for down in [true, false] {
+                    let frame = native.begin(down);
+                    native.complete(frame);
+                }
+                drop(ChromeAppEdge::begin(winit::window::WindowId::from(8), true));
+                assert!(harness.tick());
+                let shared = harness.shared_state();
+                let held = shared.blocking_lock();
+                (harness.app.state.cursor_x, harness.app.state.cursor_y) = approve;
+                for down in [true, false] {
+                    harness
+                        .app
+                        .handle_mouse_button(MouseButton::Left, down, window, None);
+                }
+                (harness.app.state.cursor_x, harness.app.state.cursor_y) = reject;
+                for down in [true, false] {
+                    let frame = native.begin(down);
+                    harness
+                        .app
+                        .handle_mouse_button(MouseButton::Left, down, window, None);
+                    native.complete(frame);
+                }
+                assert_eq!(harness.app.state.pending_pointer_buttons.len(), 4);
+                drop(held);
+                let deadline = std::time::Instant::now() + SCENE_WAIT;
+                while !harness.tick() {
+                    assert!(std::time::Instant::now() < deadline);
+                    std::thread::yield_now();
+                }
+                let actions = take_action_ids(&harness);
+                if actions != ["reject"] {
+                    failures.push(format!(
+                        "retained stale pair borrowed fresh authorization: {actions:?}"
+                    ));
+                }
+            }
+            {
+                let mut harness = approve_reject_notification_harness();
+                let approve = harness.notification_action_center("approve").unwrap();
+                let window = winit::window::WindowId::from(7);
+                let native = ChromeCaptureTestScope::new(window);
+                for _ in 0..128 {
+                    for down in [true, false] {
+                        let frame = native.begin(down);
+                        native.complete(frame);
+                    }
+                }
+                drop(ChromeAppEdge::begin(winit::window::WindowId::from(8), true));
+                assert!(harness.tick());
+                assert!(native.healthy());
+                harness.app.state.cursor_window = Some(window);
+                (harness.app.state.cursor_x, harness.app.state.cursor_y) = approve;
+                harness.app.enqueue_pointer_event(PointerEventKind::Move);
+                let feedback = chrome_state(&harness, "approve");
+                let frame = native.begin(true);
+                assert!(frame.is_none(), "a full receipt queue cannot admit Down");
+                harness
+                    .app
+                    .handle_mouse_button(MouseButton::Left, true, window, None);
+                native.complete(frame);
+                assert!(!chrome_state(&harness, "approve").pressed);
+                assert!(take_action_ids(&harness).is_empty());
+                if feedback != Default::default() {
+                    failures.push(format!(
+                        "full receipt queue advertised live feedback: {feedback:?}"
+                    ));
+                }
+            }
+            assert!(
+                failures.is_empty(),
+                "retained-history availability failures: {failures:?}"
+            );
+        }
         // Native callbacks can complete while winit buffers their application
         // events. A recovered press must never lend its receipt to that old pair.
         {
