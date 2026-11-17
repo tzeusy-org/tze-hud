@@ -8,7 +8,6 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use tze_hud_input::{InputProcessor, KeyboardProcessor};
-use tze_hud_telemetry::TelemetryCollector;
 
 use tokio::sync::Mutex as TokioMutex;
 use tze_hud_input::{FocusManager, FocusRequest};
@@ -276,7 +275,6 @@ pub(super) fn make_windowed_keyboard_test_app(
             false,
             Default::default(),
         )),
-        pairing: None,
         control_panel: None,
         pending_input_latency: Arc::new(StdMutex::new(VecDeque::new())),
         frame_ready_rx,
@@ -284,12 +282,10 @@ pub(super) fn make_windowed_keyboard_test_app(
         frame_ready_tx: Some(frame_ready_tx),
         frame_presented_tx: None,
         degradation_notices: None,
-        compositor: None,
         window_surface: None,
         input_processor,
         focus_manager,
         keyboard_processor: KeyboardProcessor::new(),
-        telemetry: TelemetryCollector::new(),
         pipeline: FramePipeline::new(),
         shutdown: ShutdownToken::new(),
         quiescent_failed: Arc::new(std::sync::atomic::AtomicBool::new(false)),

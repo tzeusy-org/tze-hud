@@ -215,7 +215,7 @@ impl TruncationCache {
 
     /// Returns `true` if no entries are cached.
     #[inline]
-    #[allow(dead_code)] // used in tests; companion to len()
+    #[cfg(test)]
     pub(crate) fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
@@ -413,7 +413,7 @@ pub(crate) struct TextRasterizer {
     /// (offset changes but shape inputs do not) this counter must stay flat once
     /// a shaped-buffer cache lands. Incremented immediately before each frame-path
     /// `shape_until_scroll`; read via [`TextRasterizer::shape_call_count`].
-    #[allow(dead_code)] // read only by the scroll-reshape benchmark
+    #[cfg(any(test, feature = "dev-mode"))]
     pub(crate) shape_call_count: u64,
     /// Shaped-buffer reuse cache: owned glyphon `Buffer`s keyed by a
     /// content-and-geometry `ShapeKey` (BLAKE3 of every input that affects the
@@ -780,6 +780,7 @@ impl TextRasterizer {
             resolved_fonts,
             font_warnings,
             truncation_cache: TruncationCache::new(),
+            #[cfg(any(test, feature = "dev-mode"))]
             shape_call_count: 0,
             shape_cache: HashMap::new(),
             overlay_shape_cache: HashMap::new(),
@@ -793,7 +794,7 @@ impl TextRasterizer {
     /// Used by the scroll-reshape benchmark/regression to prove a pure scroll
     /// performs zero re-shapes once the shaped-buffer cache is in place.
     #[inline]
-    #[allow(dead_code)] // used by the scroll-reshape benchmark
+    #[cfg(any(test, feature = "dev-mode"))]
     pub(crate) fn shape_call_count(&self) -> u64 {
         self.shape_call_count
     }
@@ -1749,10 +1750,12 @@ impl TextRasterizer {
         for line in buf.lines.iter_mut() {
             line.set_align(Some(ct_align));
         }
-        // Every per-frame shape is counted so the
-        // scroll benchmark/regression can prove a pure scroll (unchanged shape
-        // inputs, cache hit) performs zero re-shapes.
-        self.shape_call_count += 1;
+        // Tests and dev-mode work observation count every per-frame shape to prove a pure scroll (unchanged
+        // shape inputs, cache hit) performs zero re-shapes.
+        #[cfg(any(test, feature = "dev-mode"))]
+        {
+            self.shape_call_count += 1;
+        }
         buf.shape_until_scroll(&mut self.font_system, false);
         self.note_glyph_misses(&buf);
         buf
