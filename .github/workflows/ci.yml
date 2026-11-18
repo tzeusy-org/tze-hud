@@ -206,14 +206,14 @@ jobs:
       - name: Install Mesa / llvmpipe
         timeout-minutes: 5
         run: |
-          # Remove only the observed Azure HTTP route; keep signed HTTPS fallbacks.
+          # Remove only the observed Azure and us-east-2 EC2 HTTP routes; keep signed HTTPS fallbacks.
           # An unsupported hosted image layout must fail before package acquisition.
           apt_mirror_list=/etc/apt/apt-mirrors.txt
           test -f "$apt_mirror_list"
           test ! -L "$apt_mirror_list"
           grep -Eq '^https://archive[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$apt_mirror_list"
           grep -Eq '^https://security[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$apt_mirror_list"
-          sudo sed -Ei '\|^http://azure[.]archive[.]ubuntu[.]com/ubuntu/?([[:space:]].*)?$|d' "$apt_mirror_list"
+          sudo sed -Ei '\|^http://(azure[.]archive|us-east-2[.]ec2[.]archive)[.]ubuntu[.]com/ubuntu/?([[:space:]].*)?$|d' "$apt_mirror_list"
           sudo apt-get $APT_OPTS update -q --error-on=any
           sudo apt-get $APT_OPTS install -y --no-install-recommends \
             libvulkan1 \
