@@ -1,17 +1,17 @@
 use super::*;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::atomic::Ordering;
 use tze_hud_portal::hub::{PortalHub, PortalKey, PortalStatus};
 use tze_hud_scene::config::hash_psk;
 use tze_hud_scene::graph::PendingActionKind;
 use tze_hud_scene::{
-    PendingAction, SceneId, TestClock,
     types::{
         ContentionPolicy, GeometryPolicy, LeaseState, RenderingPolicy, Rgba, WidgetDefinition,
         WidgetInstance, WidgetParamConstraints, WidgetParamType, WidgetParameterDeclaration,
         WidgetParameterValue, ZoneContent, ZoneRegistry,
     },
+    PendingAction, SceneId, TestClock,
 };
 
 const TEST_PSK: &str = "test-psk-do-not-use-in-production";
@@ -922,13 +922,11 @@ async fn test_hud_publish_zone_ttl_sets_content_expiry_and_is_swept() {
     assert_eq!(scene.drain_expired_zone_publications(), 0);
     clock.advance(1_000);
     assert_eq!(scene.drain_expired_zone_publications(), 1);
-    assert!(
-        scene
-            .zone_registry
-            .active_publishes
-            .get("subtitle")
-            .is_none_or(Vec::is_empty)
-    );
+    assert!(scene
+        .zone_registry
+        .active_publishes
+        .get("subtitle")
+        .is_none_or(Vec::is_empty));
     drop(scene);
     server
         .config
@@ -1315,30 +1313,24 @@ async fn clear_cancels_only_own_pending_delayed_publish() {
     )
     .await;
     assert!(!error, "{value}");
-    assert!(
-        server
-            .scene
-            .lock()
-            .await
-            .zone_registry
-            .active_for_zone("notification-area")
-            .is_empty()
-    );
+    assert!(server
+        .scene
+        .lock()
+        .await
+        .zone_registry
+        .active_for_zone("notification-area")
+        .is_empty());
     clock.advance(5000);
     let mut scene = server.scene.lock().await;
     assert!(scene.apply_due_batches().iter().all(|r| r.applied));
     let notifications = scene.zone_registry.active_for_zone("notification-area");
     assert_eq!(notifications.len(), 2);
-    assert!(
-        notifications
-            .iter()
-            .any(|r| r.publisher_namespace == "a" && r.merge_key.as_deref() == Some("second"))
-    );
-    assert!(
-        notifications
-            .iter()
-            .any(|r| r.publisher_namespace == "b" && r.merge_key.as_deref() == Some("first"))
-    );
+    assert!(notifications
+        .iter()
+        .any(|r| r.publisher_namespace == "a" && r.merge_key.as_deref() == Some("second")));
+    assert!(notifications
+        .iter()
+        .any(|r| r.publisher_namespace == "b" && r.merge_key.as_deref() == Some("first")));
     assert!(scene.zone_registry.active_for_zone("subtitle").iter().any(|r| matches!(&r.content, tze_hud_scene::types::ZoneContent::StreamText(s) if s == "mixed remainder")));
     assert_eq!(scene.next_timed_content_wall_us(), None);
 }
@@ -1377,12 +1369,10 @@ async fn clear_of_last_pending_publish_drops_the_wake_deadline() {
     assert!(scene.scheduled_batches.is_empty());
     assert_eq!(scene.next_timed_content_wall_us(), None);
     assert!(scene.apply_due_batches().is_empty());
-    assert!(
-        scene
-            .zone_registry
-            .active_for_zone("notification-area")
-            .is_empty()
-    );
+    assert!(scene
+        .zone_registry
+        .active_for_zone("notification-area")
+        .is_empty());
 }
 
 /// `hud_hold` reaches a pending publish: the new ttl counts from
@@ -1538,13 +1528,11 @@ async fn notification_ttl_zero_is_held_and_hold_retimes_it() {
     )
     .await;
     let scene = server.scene.lock().await;
-    assert!(
-        scene
-            .zone_registry
-            .active_publishes
-            .get("notification-area")
-            .is_none_or(Vec::is_empty)
-    );
+    assert!(scene
+        .zone_registry
+        .active_publishes
+        .get("notification-area")
+        .is_none_or(Vec::is_empty));
 
     drop(scene);
     for ttl in [1000, 2500] {
@@ -1579,13 +1567,11 @@ async fn clear_removes_own_zone_content() {
         json!({"ok": true})
     );
     let scene = server.scene.lock().await;
-    assert!(
-        scene
-            .zone_registry
-            .active_publishes
-            .get("subtitle")
-            .is_none_or(Vec::is_empty)
-    );
+    assert!(scene
+        .zone_registry
+        .active_publishes
+        .get("subtitle")
+        .is_none_or(Vec::is_empty));
 }
 
 #[tokio::test]
@@ -1620,14 +1606,12 @@ async fn surfaces_report_holdings_compactly() {
         .unwrap();
     assert_eq!(notice["max"], 5);
     assert!(notice.get("one").is_none() && notice.get("busy").is_none());
-    assert!(
-        entries
-            .iter()
-            .find(|e| e["s"] == "zone:status-bar")
-            .unwrap()
-            .get("one")
-            .is_none()
-    );
+    assert!(entries
+        .iter()
+        .find(|e| e["s"] == "zone:status-bar")
+        .unwrap()
+        .get("one")
+        .is_none());
     assert!(entries.iter().all(|e| {
         !e["accepts"]
             .as_str()
@@ -1697,13 +1681,11 @@ async fn mcp_lease_is_reused_across_publishes() {
 #[tokio::test]
 async fn widget_auto_clear_limit_is_reported_to_agents() {
     let (server, clock) = server();
-    assert!(
-        server
-            .scene
-            .lock()
-            .await
-            .set_widget_auto_clear("gauge", Some(30_000))
-    );
+    assert!(server
+        .scene
+        .lock()
+        .await
+        .set_widget_auto_clear("gauge", Some(30_000)));
     let v = call(
         &server,
         "hud_publish",
@@ -2059,13 +2041,11 @@ async fn widget_publish_hold_clear() {
     assert_eq!(v["expires_in_ms"], 5000);
     call(&server, "hud_clear", json!({"surface": "widget:gauge"})).await;
     let scene = server.scene.lock().await;
-    assert!(
-        scene
-            .widget_registry
-            .active_publishes
-            .get("gauge")
-            .is_none_or(Vec::is_empty)
-    );
+    assert!(scene
+        .widget_registry
+        .active_publishes
+        .get("gauge")
+        .is_none_or(Vec::is_empty));
     drop(scene);
     let mut instant = McpConfig::with_psk(psk());
     instant.widget_transition_ms = 0;
@@ -2080,6 +2060,90 @@ async fn widget_publish_hold_clear() {
         server.scene.lock().await.widget_registry.active_publishes["gauge"][0].transition_ms,
         0
     );
+
+    // Full-range Hold TTLs use the same saturated expiry as Publish, for
+    // visible content and content that has not reached presentation yet.
+    for ttl_ms in [5_000, 0, 18_446_744_073_709_552, u64::MAX] {
+        for delayed in [false, true] {
+            call(&server, "hud_clear", json!({"surface":"widget:gauge"})).await;
+            call(
+                &server,
+                "hud_publish",
+                json!({"surface":"widget:gauge", "params":{"level":0.75},
+                    "delay_ms":if delayed { 1_000 } else { 0 }}),
+            )
+            .await;
+            let hold_now = clock.now_us();
+            let result = call(
+                &server,
+                "hud_hold",
+                json!({"surface":"widget:gauge", "ttl_ms":ttl_ms}),
+            )
+            .await;
+            let expiry = match ttl_ms {
+                0 => None,
+                5_000 => Some(hold_now + if delayed { 6_000_000 } else { 5_000_000 }),
+                _ => Some(u64::MAX),
+            };
+            assert_eq!(
+                result.get("expires_in_ms").and_then(Value::as_u64),
+                expiry.map(|at| (at - hold_now) / 1_000),
+                "Hold response reflects effective expiry, ttl={ttl_ms}, delayed={delayed}"
+            );
+            let mut scene = server.scene.lock().await;
+            if delayed {
+                let tze_hud_scene::mutation::SceneMutation::PublishToWidget {
+                    ttl_us,
+                    expires_at_wall_us,
+                    ..
+                } = &scene.scheduled_batches[0].batch.mutations[0]
+                else {
+                    panic!("pending widget publish")
+                };
+                assert_eq!(*expires_at_wall_us, None);
+                assert_eq!(
+                    *ttl_us,
+                    match ttl_ms {
+                        0 => None,
+                        5_000 => Some(5_000_000),
+                        _ => Some(u64::MAX - hold_now),
+                    }
+                );
+                clock.advance(2_000);
+                assert!(scene.apply_due_batches()[0].applied);
+            }
+            let record = &scene.widget_registry.active_for_widget("gauge")[0];
+            assert_eq!(
+                record.expires_at_wall_us,
+                if delayed && ttl_ms == 5_000 {
+                    Some(clock.now_us() + 5_000_000)
+                } else {
+                    expiry
+                }
+            );
+            clock.advance(1);
+            assert_eq!(scene.drain_expired_widget_publications(), 0);
+        }
+    }
+    {
+        let mut scene = server.scene.lock().await;
+        scene.set_widget_auto_clear("gauge", Some(30_000)).unwrap();
+    }
+    call(&server, "hud_clear", json!({"surface":"widget:gauge"})).await;
+    call(
+        &server,
+        "hud_publish",
+        json!({"surface":"widget:gauge", "params":{"level":0.75}}),
+    )
+    .await;
+    clock.advance(1_000);
+    let result = call(
+        &server,
+        "hud_hold",
+        json!({"surface":"widget:gauge", "ttl_ms":18_446_744_073_709_552_u64}),
+    )
+    .await;
+    assert_eq!(result["expires_in_ms"], 29_000);
 }
 
 // ── Input: notification actions ──────────────────────────────────────────────
@@ -2554,12 +2618,10 @@ async fn publish_wait_ends_cleared_when_its_lease_is_revoked_or_expires() {
             } else {
                 scene.revoke_lease(lease).unwrap();
             }
-            assert!(
-                scene
-                    .zone_registry
-                    .active_for_zone("notification-area")
-                    .is_empty()
-            );
+            assert!(scene
+                .zone_registry
+                .active_for_zone("notification-area")
+                .is_empty());
             scene.take_notification_wait_notifiers()
         };
         assert!(
@@ -2789,15 +2851,13 @@ async fn publish_wait_endings_deadline_delay_and_validation() {
         args["delay_ms"] = json!(5000);
         let mut ask = Box::pin(call(&server, "hud_publish", args));
         assert!(ask.as_mut().poll(&mut context).is_pending());
-        assert!(
-            server
-                .scene
-                .lock()
-                .await
-                .zone_registry
-                .active_for_zone("notification-area")
-                .is_empty()
-        );
+        assert!(server
+            .scene
+            .lock()
+            .await
+            .zone_registry
+            .active_for_zone("notification-area")
+            .is_empty());
         clock.advance(5000);
         tokio::time::advance(std::time::Duration::from_millis(5000)).await;
         assert!(server.scene.lock().await.apply_due_batches()[0].applied);
@@ -2889,12 +2949,11 @@ async fn portal_output_too_large_is_content_rejected() {
     .await;
     assert_eq!(e["code"], "CONTENT_REJECTED");
     assert!(!e["hint"].as_str().unwrap().is_empty());
-    assert!(
-        hub.lock()
-            .unwrap()
-            .get(&PortalKey::new(psk_agent(), "main"))
-            .is_none()
-    );
+    assert!(hub
+        .lock()
+        .unwrap()
+        .get(&PortalKey::new(psk_agent(), "main"))
+        .is_none());
 }
 
 #[tokio::test]
@@ -3282,15 +3341,13 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
         let unclaimed = portals.observe_input_wait("probe-a");
         let unclaimed_id = unclaimed.request_id().to_owned();
         drop(unclaimed);
-        assert!(
-            !portals
-                .input_notifiers
-                .wait_probes
-                .lock()
-                .unwrap()
-                .pending
-                .contains_key(&("probe-a".into(), unclaimed_id))
-        );
+        assert!(!portals
+            .input_notifiers
+            .wait_probes
+            .lock()
+            .unwrap()
+            .pending
+            .contains_key(&("probe-a".into(), unclaimed_id)));
     }
 
     let mut waiting = Box::pin(call(&server, "hud_input", json!({"wait_ms": 1500})));
