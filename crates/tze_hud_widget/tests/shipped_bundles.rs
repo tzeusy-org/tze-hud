@@ -668,6 +668,17 @@ fn status_indicator_latest_publisher_wins_and_partial_updates_keep_other_params(
         "unpublished params are retained"
     );
     assert_eq!(scene.widget_registry.active_for_widget(w).len(), 1);
+
+    let record = &scene.widget_registry.active_for_widget(w)[0];
+    assert_eq!(
+        record.params["label"],
+        str_val("B"),
+        "shipped bundle retains omitted model fields in its record"
+    );
+    let tab = scene.widget_registry.instances[w].tab_id;
+    let occupancy = scene.widget_registry.get_occupancy(w, tab).unwrap();
+    assert_eq!(occupancy.effective_params["label"], str_val("B"));
+    assert_eq!(occupancy.effective_params["status"], enum_val("away"));
 }
 
 // ─── BundleError wire codes (one test per code) ───────────────────────────────

@@ -544,10 +544,20 @@ parameters fail before any publication, lease or partial update, including a
 gRPC parameter with an absent value. Errors name the writer, list enum choices
 or the expected type/range, and stay within the 60-token result ceiling.
 Non-model instance values survive every publication policy and clear/expiry;
-only runtime-local hover writes tooltip visibility. MCP urgency and status entries reject wrong
+only runtime-local hover writes tooltip visibility. LatestWins/Stack/MergeByKey
+partial updates retain omitted ordinary model fields in the exact prior
+namespace/key/lease/preclaim-origin record; incoming validated values win.
+Lease-bound origins normalize away, while unleased preclaim origins stay
+separate. No other identity or shared instance value seeds that record. Peer
+clear, TTL, lease and origin cleanup restore its retained values through
+occupancy. Replace's ordinary map and the separate deadline snapshot rules
+are unchanged. MCP urgency and status entries reject wrong
 types, and notification TTL is top-level only.
 
-- `tze_hud_scene` [`widget_audiences_reject_agent_writes_and_survive_publication_lifecycle`](../crates/tze_hud_scene/src/graph/widget_tests.rs)
+- `tze_hud_scene` [`widget_audiences_reject_agent_writes_and_survive_publication_lifecycle`](../crates/tze_hud_scene/src/graph/widget_tests.rs),
+  [`clear_widget_for_publisher_refreshes_current_params_from_remaining_publish`](../crates/tze_hud_scene/src/graph/widget_tests.rs),
+  [`widget_ttl_only_expired_publication_removed_when_mixed`](../crates/tze_hud_scene/src/graph/widget_tests.rs)
+- `tze_hud_widget` [`status_indicator_latest_publisher_wins_and_partial_updates_keep_other_params`](../crates/tze_hud_widget/tests/shipped_bundles.rs)
 - `integration` [`poc_widget_discovery_and_errors_are_self_sufficient`](../tests/integration/poc_acceptance.rs)
 - `tze_hud_scene` [`widget_publish_out_of_range_values_rejected`](../crates/tze_hud_scene/src/graph/widget_tests.rs), [`widget_publish_f32_nan_rejected`](../crates/tze_hud_scene/src/graph/widget_tests.rs)
 - `tze_hud_mcp` [`widget_publish_hold_clear`](../crates/tze_hud_mcp/src/server/tests.rs), [`user_test_zone_fixtures_and_documented_examples_match_production_parser`](../crates/tze_hud_mcp/src/server/tests.rs)

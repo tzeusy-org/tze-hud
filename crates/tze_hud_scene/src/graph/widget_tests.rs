@@ -1386,6 +1386,70 @@ fn widget_ttl_only_expired_publication_removed_when_mixed() {
         remaining[0].publisher_namespace, "agent.permanent",
         "the permanent publication should survive"
     );
+
+    // A temporary peer can cover a partially updated owner. Expiry must
+    // restore that owner's full publication rather than schema defaults.
+    let (mut scene, tab, clock) =
+        scene_with_gauge_and_clock(ContentionPolicy::Stack { max_depth: 4 });
+    scene
+        .publish_to_widget(
+            "gauge",
+            HashMap::from([
+                ("level".into(), WidgetParameterValue::F32(0.3)),
+                ("label".into(), WidgetParameterValue::String("CPU".into())),
+            ]),
+            "agent.a",
+            None,
+            0,
+            None,
+        )
+        .unwrap();
+    scene
+        .publish_to_widget(
+            "gauge",
+            HashMap::from([("level".into(), WidgetParameterValue::F32(0.8))]),
+            "agent.a",
+            None,
+            0,
+            None,
+        )
+        .unwrap();
+    scene
+        .publish_to_widget(
+            "gauge",
+            HashMap::from([
+                ("level".into(), WidgetParameterValue::F32(0.9)),
+                ("label".into(), WidgetParameterValue::String("peer".into())),
+            ]),
+            "agent.short",
+            None,
+            0,
+            Some(1_500_000),
+        )
+        .unwrap();
+    assert_eq!(scene.widget_registry.active_for_widget("gauge").len(), 3);
+    clock.advance(600);
+    assert_eq!(scene.drain_expired_widget_publications(), 1);
+    let remaining = scene.widget_registry.active_for_widget("gauge");
+    assert_eq!(remaining.len(), 2);
+    assert!(remaining.iter().all(|r| r.publisher_namespace == "agent.a"));
+    assert_eq!(
+        remaining.last().unwrap().params["level"],
+        WidgetParameterValue::F32(0.8)
+    );
+    let expected = WidgetParameterValue::String("CPU".into());
+    assert_eq!(
+        scene.widget_registry.instances["gauge"].current_params["label"], expected,
+        "TTL cleanup restores omitted publication values"
+    );
+    assert_eq!(
+        scene
+            .widget_registry
+            .get_occupancy("gauge", tab)
+            .unwrap()
+            .effective_params["label"],
+        expected
+    );
 }
 
 /// WHEN drain_expired_widget_publications removes a publication THEN the
@@ -1527,6 +1591,267 @@ fn clear_widget_for_publisher_refreshes_current_params_from_remaining_publish() 
         }
         other => panic!("expected remaining F32 level after clear, got {other:?}"),
     }
+
+    // Publication-local values must survive every cleanup that restores a
+    // remaining owner. Current instance values alone do not establish this.
+    let mut failures = Vec::new();
+    for (policy, cleanup) in [
+        (ContentionPolicy::LatestWins, "none"),
+        (ContentionPolicy::Replace, "none"),
+        (ContentionPolicy::Stack { max_depth: 4 }, "clear"),
+        (ContentionPolicy::Stack { max_depth: 4 }, "lease"),
+        (ContentionPolicy::Stack { max_depth: 4 }, "origin"),
+        (ContentionPolicy::MergeByKey { max_keys: 4 }, "clear"),
+    ] {
+        let (mut scene, tab, clock) = scene_with_gauge_and_clock(policy);
+        let origin = SceneId::new();
+        let cpu = WidgetParameterValue::String("CPU".into());
+        scene
+            .publish_to_widget_for_origin(
+                "gauge",
+                HashMap::from([
+                    ("level".into(), WidgetParameterValue::F32(0.3)),
+                    ("label".into(), cpu.clone()),
+                ]),
+                "agent.a",
+                Some("cpu".into()),
+                0,
+                None,
+                None,
+                Some(origin),
+            )
+            .unwrap();
+        clock.advance(10);
+        scene
+            .publish_to_widget_for_origin(
+                "gauge",
+                HashMap::from([("level".into(), WidgetParameterValue::F32(0.8))]),
+                "agent.a",
+                Some("cpu".into()),
+                120,
+                Some(7_000_000),
+                None,
+                Some(origin),
+            )
+            .unwrap();
+        let records = scene.widget_registry.active_for_widget("gauge");
+        let expected_count = if matches!(policy, ContentionPolicy::Stack { .. }) {
+            2
+        } else {
+            1
+        };
+        assert_eq!(
+            records.len(),
+            expected_count,
+            "preserve {policy:?} record count"
+        );
+        let newest = records.last().unwrap();
+        assert_eq!(newest.params["level"], WidgetParameterValue::F32(0.8));
+        assert_eq!(newest.merge_key.as_deref(), Some("cpu"));
+        assert_eq!(newest.publication_origin, Some(origin));
+        assert_eq!(newest.published_at_wall_us, 1_010_000);
+        assert_eq!(newest.expires_at_wall_us, Some(7_000_000));
+        assert_eq!(newest.transition_ms, 120);
+        let expected_label = if policy == ContentionPolicy::Replace {
+            None
+        } else {
+            Some(&cpu)
+        };
+        let occupancy = scene.widget_registry.get_occupancy("gauge", tab).unwrap();
+        for (source, params) in [
+            ("record", &newest.params),
+            ("occupancy", &occupancy.effective_params),
+        ] {
+            if params.get("label") != expected_label {
+                failures.push(format!(
+                    "{policy:?}/{cleanup} {source} lost publication label: {params:?}"
+                ));
+            }
+        }
+        // A failed mixed update must not overwrite any retained publication.
+        let before = serde_json::to_value(&scene).unwrap();
+        assert!(
+            scene
+                .publish_to_widget_for_origin(
+                    "gauge",
+                    HashMap::from([
+                        ("level".into(), WidgetParameterValue::F32(f32::NAN)),
+                        (
+                            "label".into(),
+                            WidgetParameterValue::String("invalid".into())
+                        ),
+                    ]),
+                    "agent.a",
+                    Some("cpu".into()),
+                    0,
+                    None,
+                    None,
+                    Some(origin)
+                )
+                .is_err()
+        );
+        assert_eq!(serde_json::to_value(&scene).unwrap(), before);
+        if cleanup == "none" {
+            continue;
+        }
+        let peer_origin = SceneId::new();
+        let peer_lease = SceneId::new();
+        scene
+            .publish_to_widget_for_origin(
+                "gauge",
+                HashMap::from([
+                    ("level".into(), WidgetParameterValue::F32(0.9)),
+                    ("label".into(), WidgetParameterValue::String("peer".into())),
+                ]),
+                "agent.b",
+                Some("peer".into()),
+                0,
+                None,
+                (cleanup == "lease").then_some(peer_lease),
+                Some(peer_origin),
+            )
+            .unwrap();
+        match cleanup {
+            "clear" => scene
+                .clear_widget_for_publisher("gauge", "agent.b")
+                .unwrap(),
+            "lease" => scene.clear_publications_for_lease(peer_lease),
+            "origin" => scene.clear_publications_for_origin(peer_origin),
+            _ => unreachable!(),
+        }
+        assert_eq!(
+            scene.widget_registry.active_for_widget("gauge").len(),
+            expected_count
+        );
+        assert_eq!(
+            scene.widget_registry.instances["gauge"].current_params["level"],
+            WidgetParameterValue::F32(0.8)
+        );
+        if scene.widget_registry.instances["gauge"].current_params["label"] != cpu {
+            failures.push(format!(
+                "{policy:?}/{cleanup} restored defaults instead of CPU"
+            ));
+        }
+    }
+    // Identity is exact, even where MergeByKey itself treats None/empty keys
+    // alike. Lease-bound origins normalize away; preclaim origins do not.
+    for (identity, retain) in [
+        ("same", true),
+        ("namespace", false),
+        ("key", false),
+        ("empty-key", false),
+        ("lease", false),
+        ("origin", false),
+        ("absent-origin", false),
+        ("leased-origin", true),
+        ("owner-audience", false),
+        ("runtime-audience", false),
+    ] {
+        let (mut scene, tab) = scene_with_gauge(ContentionPolicy::LatestWins);
+        let origin = SceneId::new();
+        let lease = SceneId::new();
+        let bound_lease = (identity == "leased-origin").then_some(lease);
+        scene
+            .publish_to_widget_for_origin(
+                "gauge",
+                HashMap::from([
+                    ("level".into(), WidgetParameterValue::F32(0.3)),
+                    ("label".into(), WidgetParameterValue::String("CPU".into())),
+                ]),
+                "agent.a",
+                None,
+                0,
+                None,
+                bound_lease,
+                Some(origin),
+            )
+            .unwrap();
+        let protected = match identity {
+            "owner-audience" => Some(crate::WidgetParamAudience::Owner),
+            "runtime-audience" => Some(crate::WidgetParamAudience::Runtime),
+            _ => None,
+        };
+        if let Some(audience) = protected {
+            scene
+                .widget_registry
+                .definitions
+                .get_mut("gauge")
+                .unwrap()
+                .parameter_schema[1]
+                .audience = audience;
+            scene
+                .set_widget_param_local(
+                    "gauge",
+                    "label",
+                    WidgetParameterValue::String("authoritative".into()),
+                )
+                .unwrap();
+        }
+        let namespace = if identity == "namespace" {
+            "agent.b"
+        } else {
+            "agent.a"
+        };
+        let key = match identity {
+            "key" => Some("new".into()),
+            "empty-key" => Some(String::new()),
+            _ => None,
+        };
+        let next_lease = if identity == "lease" {
+            Some(lease)
+        } else {
+            bound_lease
+        };
+        let next_origin = match identity {
+            "origin" | "leased-origin" => Some(SceneId::new()),
+            "absent-origin" => None,
+            _ => Some(origin),
+        };
+        scene
+            .publish_to_widget_for_origin(
+                "gauge",
+                HashMap::from([("level".into(), WidgetParameterValue::F32(0.8))]),
+                namespace,
+                key,
+                0,
+                None,
+                next_lease,
+                next_origin,
+            )
+            .unwrap();
+        let record = &scene.widget_registry.active_for_widget("gauge")[0];
+        let expected = retain.then(|| WidgetParameterValue::String("CPU".into()));
+        if record.params.get("label") != expected.as_ref() {
+            failures.push(format!(
+                "{identity} inherited outside exact model identity: {:?}",
+                record.params
+            ));
+        }
+        let effective = scene
+            .widget_registry
+            .get_occupancy("gauge", tab)
+            .unwrap()
+            .effective_params;
+        let expected = WidgetParameterValue::String(
+            if protected.is_some() {
+                "authoritative"
+            } else if retain {
+                "CPU"
+            } else {
+                ""
+            }
+            .into(),
+        );
+        if effective["label"] != expected {
+            failures.push(format!(
+                "{identity} occupancy crossed identity/audience: {effective:?}"
+            ));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "publication-local partial failures: {failures:?}"
+    );
 }
 
 /// WHEN clear_widget_for_publisher is called with a different namespace
