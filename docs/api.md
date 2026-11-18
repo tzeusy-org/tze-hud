@@ -338,6 +338,9 @@ the original deadline), and 0 holds until `hud_clear`. A delayed publish
 that has not presented yet counts as held: its new expiry counts from
 presentation. A visible
 notification's fade moves with it; a held one never fades.
+Positive zone/widget Hold TTLs use saturating millisecond conversion and absolute
+expiry arithmetic across the admitted `u64` range; they cannot wrap to a short
+lifetime. The widget owner's auto-clear limit still applies.
 While agents are paused, fresh MCP and gRPC Hold requests return
 `SAFE_MODE_ACTIVE` before changing active or delayed content, expiry or leases.
 A request waiting for the scene lock rechecks pause when it acquires it;
