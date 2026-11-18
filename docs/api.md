@@ -190,6 +190,12 @@ with the same cancellation and idle semantics as a `hud_input` wait.
   `info|warning|error`: info uses the owner fill or `color.primary`, warning
   uses `color.caution`, error uses `color.error`; the gauge colors its ring
   arc and card hairline by severity.
+  For LatestWins, Stack and MergeByKey, omitted model fields in a partial
+  update retain values from the same namespace, exact key, lease and preclaim
+  origin; supplied fields win. The stored publication retains them too, so
+  occupancy and later peer cleanup restore the same values. Other identities
+  do not seed that record from shared instance values. Replace keeps only the
+  latest ordinary model map; the deadline snapshot rules below remain separate.
   Unknown audience values reject the bundle with its name, parameter and
   allowed audiences. Hidden parameter errors name owner-set/runtime-set;
   `fill_color` errors direct agents to severity. Enum errors list allowed values;
