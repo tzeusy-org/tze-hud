@@ -804,6 +804,25 @@ impl SceneGraph {
                         && r.publication_origin == publication_origin.filter(|_| lease_id.is_none())
                 })
             });
+        // Partial updates belong to this publication, not the shared instance.
+        // Keep ordinary model fields in the record so occupancy and cleanup can
+        // restore them. Deadlines retain their separate snapshot rules below.
+        if contention_policy != ContentionPolicy::Replace
+            && let Some(previous) = previous
+        {
+            for decl in &definition.parameter_schema {
+                if decl.audience != crate::WidgetParamAudience::Model
+                    || decl.param_type == WidgetParamType::Deadline
+                {
+                    continue;
+                }
+                if let Some(value) = previous.params.get(&decl.name) {
+                    validated_params
+                        .entry(decl.name.clone())
+                        .or_insert_with(|| value.clone());
+                }
+            }
+        }
         for decl in &definition.parameter_schema {
             if decl.param_type != WidgetParamType::Deadline
                 || decl.audience != crate::WidgetParamAudience::Model
