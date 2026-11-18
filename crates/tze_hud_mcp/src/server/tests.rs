@@ -4125,6 +4125,123 @@ async fn hud_publish_in_safe_mode_returns_safe_mode_active() {
         assert_eq!(after.hold_until_us, before.hold_until_us);
         assert_eq!(after.last_seen_us, before.last_seen_us);
     }
+
+    // Poll the actual MCP request under the scene guard: its early atomic
+    // check has passed, but Hold cannot mutate until the pause commits here.
+    use std::future::Future as _;
+    let waker = std::task::Waker::noop();
+    let mut poll_context = std::task::Context::from_waker(waker);
+    let snapshot = |scene: &SceneGraph| {
+        json!({
+            "scene": scene,
+            "pending": scene.scheduled_batches.iter().map(|scheduled|
+                (scheduled.present_at_wall_us, &scheduled.batch)).collect::<Vec<_>>(),
+        })
+    };
+    let mut failures = Vec::new();
+    for surface in ["zone:notification-area", "widget:gauge"] {
+        let (isolated, clock) = self::server();
+        for delayed in [false, true] {
+            let mut publish = if surface.starts_with("zone:") {
+                json!({"surface":surface,"ttl_ms":5000,
+                    "content":{"body":"Question","actions":[{"label":"Yes","callback_id":"yes"}]}})
+            } else {
+                json!({"surface":surface,"ttl_ms":5000,"params":{"level":0.5}})
+            };
+            if delayed {
+                publish["delay_ms"] = json!(60000);
+            }
+            call(&isolated, "hud_publish", publish).await;
+        }
+        let mut scene = isolated.scene.lock().await;
+        assert_eq!(scene.scheduled_batches.len(), 1);
+        let lease_id = *scene.leases.keys().next().unwrap();
+        let mut holding = Box::pin(call_err(
+            &isolated,
+            "hud_hold",
+            json!({"surface":surface,"ttl_ms":0}),
+        ));
+        assert!(
+            holding.as_mut().poll(&mut poll_context).is_pending(),
+            "Hold reached the busy scene"
+        );
+        // Same admission commit as shell::safe_mode::enter_safe_mode, under
+        // the same scene owner; no new sleep, tracing event or mock Hold path.
+        set_safe_mode(&isolated, true);
+        scene.pause_widget_ttls();
+        scene.suspend_all_leases(clock.now_millis());
+        let before = snapshot(&scene);
+        drop(scene);
+        let refused = holding.await;
+        assert_eq!(refused["code"], "SAFE_MODE_ACTIVE");
+        {
+            let scene = isolated.scene.lock().await;
+            assert_eq!(scene.leases[&lease_id].state, LeaseState::Suspended);
+            if snapshot(&scene) != before {
+                failures.push(format!("queued {surface} Hold mutated after pause"));
+            }
+        }
+        // The lease guard is independently authoritative even when the early
+        // atomic is false: rejection cannot follow an already applied Hold.
+        set_safe_mode(&isolated, false);
+        let before = snapshot(&*isolated.scene.lock().await);
+        let refused = call_err(
+            &isolated,
+            "hud_hold",
+            json!({"surface":surface,"ttl_ms":7000}),
+        )
+        .await;
+        assert_eq!(refused["code"], "SAFE_MODE_ACTIVE");
+        if snapshot(&*isolated.scene.lock().await) != before {
+            failures.push(format!(
+                "suspended {surface} Hold mutated before lease refusal"
+            ));
+        }
+        {
+            let mut scene = isolated.scene.lock().await;
+            scene.resume_all_leases(clock.now_millis());
+            scene.resume_widget_ttls();
+        }
+        for ttl_ms in [3_000, 0] {
+            let held = call(
+                &isolated,
+                "hud_hold",
+                json!({"surface":surface,"ttl_ms":ttl_ms}),
+            )
+            .await;
+            let expected = if ttl_ms == 0 {
+                json!({"ok":true})
+            } else {
+                json!({"ok":true,"expires_in_ms":ttl_ms})
+            };
+            assert_eq!(
+                held, expected,
+                "resumed Hold keeps canonical response bytes"
+            );
+        }
+        let scene = isolated.scene.lock().await;
+        assert_eq!(scene.leases.len(), 1);
+        assert_eq!(scene.leases[&lease_id].state, LeaseState::Active);
+        let expiry = if surface.starts_with("zone:") {
+            scene.zone_registry.active_for_zone("notification-area")[0].expires_at_wall_us
+        } else {
+            scene.widget_registry.active_for_widget("gauge")[0].expires_at_wall_us
+        };
+        assert!(expiry.is_none(), "resumed Hold0 clears active expiry");
+        match &scene.scheduled_batches[0].batch.mutations[0] {
+            tze_hud_scene::mutation::SceneMutation::PublishToZone {
+                expires_at_wall_us, ..
+            }
+            | tze_hud_scene::mutation::SceneMutation::PublishToWidget {
+                expires_at_wall_us, ..
+            } => assert!(
+                expires_at_wall_us.is_none(),
+                "resumed Hold0 clears delayed expiry"
+            ),
+            other => panic!("unexpected pending mutation: {other:?}"),
+        }
+    }
+    assert!(failures.is_empty(), "paused Hold failures: {failures:?}");
 }
 
 #[tokio::test]
