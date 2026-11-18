@@ -323,13 +323,15 @@ async fn test_durable_widget_publish_receives_result() {
         .await
         .ok
     );
-    assert!(scene_ref
-        .lock()
-        .await
-        .widget_registry
-        .active_publishes
-        .get("gauge")
-        .is_none_or(Vec::is_empty));
+    assert!(
+        scene_ref
+            .lock()
+            .await
+            .widget_registry
+            .active_publishes
+            .get("gauge")
+            .is_none_or(Vec::is_empty)
+    );
     // Relative countdown and TTL both begin at actual (late) presentation.
     let delayed = Publish {
         surface: "widget:gauge".into(),

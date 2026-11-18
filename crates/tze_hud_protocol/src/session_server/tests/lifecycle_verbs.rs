@@ -252,12 +252,14 @@ async fn clear_zone_publication() {
         .await
         .ok
     );
-    assert!(shared_scene
-        .lock()
-        .await
-        .zone_registry
-        .active_for_zone("notification-area")
-        .is_empty());
+    assert!(
+        shared_scene
+            .lock()
+            .await
+            .zone_registry
+            .active_for_zone("notification-area")
+            .is_empty()
+    );
 
     server.abort();
 }
