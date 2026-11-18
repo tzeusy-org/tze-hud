@@ -338,6 +338,11 @@ the original deadline), and 0 holds until `hud_clear`. A delayed publish
 that has not presented yet counts as held: its new expiry counts from
 presentation. A visible
 notification's fade moves with it; a held one never fades.
+While agents are paused, fresh MCP and gRPC Hold requests return
+`SAFE_MODE_ACTIVE` before changing active or delayed content, expiry or leases.
+A request waiting for the scene lock rechecks pause when it acquires it;
+resuming restores ordinary Hold behavior. Replaying an already completed gRPC
+sequence still returns its cached result without applying another Hold.
 On a portal, `ttl_ms` keeps it (and its transcript) attached for that long,
 or until `hud_clear` when 0, even with no other calls. Without a hold, a
 portal is degraded after 30 s with no publish, poll, or hold, and reclaimed

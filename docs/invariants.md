@@ -488,7 +488,12 @@ while paused, and refresh to current remaining time on resume.
 Already accepted widget-containing scheduled batches wait atomically through
 pause, without an overdue wake or materializing under a suspended lease. On
 resume their deadline and relative TTL start at actual presentation; new incoming
-updates remain rejected while paused.
+updates remain rejected while paused. Fresh zone/widget Hold is also refused
+before changing active or pending publications, expiries, scene version or
+leases, including a request queued behind pause at the scene lock. A suspended
+MCP lease refuses Hold before mutation even if its early pause flag was false.
+An already completed gRPC sequence replays its cached result without retiming
+content; normal finite and indefinite Hold work again after resume.
 Terminal lease cleanup still removes its queued batches during pause, including
 revocation at the maximum suspension bound; other owners' queued work survives.
 
@@ -497,7 +502,9 @@ revocation at the maximum suspension bound; other owners' queued work survives.
   [`portal_liveness_paused_during_safe_mode`](../crates/tze_hud_runtime/src/windowed/panel_input.rs)
 - `tze_hud_scene` [`test_lease_suspend_from_active`](../crates/tze_hud_scene/src/graph/tests.rs), [`test_lease_resume_from_suspended`](../crates/tze_hud_scene/src/graph/tests.rs)
 - `tze_hud_mcp` [`safe_mode_does_not_regrant_suspended_mcp_lease`](../crates/tze_hud_mcp/src/server/tests.rs),
-  [`resume_restores_mcp_publishing`](../crates/tze_hud_mcp/src/server/tests.rs)
+  [`resume_restores_mcp_publishing`](../crates/tze_hud_mcp/src/server/tests.rs),
+  [`hud_publish_in_safe_mode_returns_safe_mode_active`](../crates/tze_hud_mcp/src/server/tests.rs)
+- `tze_hud_protocol` [`test_safe_mode_rejects_mutations`](../crates/tze_hud_protocol/src/session_server/tests/safe_mode.rs)
 
 ## 6. Degradation changes drawing, never state
 
