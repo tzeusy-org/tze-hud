@@ -4212,7 +4212,15 @@ async fn hud_publish_in_safe_mode_returns_safe_mode_active() {
             let expected = if ttl_ms == 0 {
                 json!({"ok":true})
             } else {
-                json!({"ok":true,"expires_in_ms":ttl_ms})
+                // Widget replies cover the last holding, including the fixed
+                // 60 s presentation delay; zones report the requested TTL.
+                let expires_in_ms = ttl_ms
+                    + if surface.starts_with("widget:") {
+                        60_000
+                    } else {
+                        0
+                    };
+                json!({"ok":true,"expires_in_ms":expires_in_ms})
             };
             assert_eq!(
                 held, expected,
