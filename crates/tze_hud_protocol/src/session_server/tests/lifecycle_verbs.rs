@@ -37,6 +37,81 @@ async fn hold_zone_publication() {
     );
     drop(scene);
     drop(st);
+    for (index, ttl_ms) in [18_446_744_073_709_552, u64::MAX].into_iter().enumerate() {
+        let sequence = 10 + index as u64 * 5;
+        let payload = ClientPayload::Hold(Hold {
+            surface: "zone:subtitle".into(),
+            ttl_ms,
+        });
+        let result = request(&tx, &mut stream, sequence, payload.clone()).await;
+        assert!(result.ok, "large zone Hold: {result:?}");
+        assert_eq!(result.ttl_ms, ttl_ms);
+        assert_eq!(request(&tx, &mut stream, sequence, payload).await, result);
+        let shared_scene = state.lock().await.scene.clone();
+        assert_eq!(
+            shared_scene.lock().await.zone_registry.active_publishes["subtitle"][0]
+                .expires_at_wall_us,
+            Some(u64::MAX)
+        );
+        assert!(
+            request(
+                &tx,
+                &mut stream,
+                sequence + 1,
+                ClientPayload::Clear(Clear {
+                    surface: "zone:subtitle".into(),
+                    ..Default::default()
+                })
+            )
+            .await
+            .ok
+        );
+        let present_at = shared_scene.lock().await.now_wall_us() + 60_000_000;
+        assert!(
+            request(
+                &tx,
+                &mut stream,
+                sequence + 2,
+                ClientPayload::Publish(subtitle_publish("pending", 5_000, present_at, 0))
+            )
+            .await
+            .ok
+        );
+        assert!(
+            request(
+                &tx,
+                &mut stream,
+                sequence + 3,
+                ClientPayload::Hold(Hold {
+                    surface: "zone:subtitle".into(),
+                    ttl_ms,
+                })
+            )
+            .await
+            .ok
+        );
+        let mut scene = shared_scene.lock().await;
+        let tze_hud_scene::mutation::SceneMutation::PublishToZone {
+            expires_at_wall_us, ..
+        } = &scene.scheduled_batches[0].batch.mutations[0]
+        else {
+            panic!("pending subtitle")
+        };
+        assert_eq!(*expires_at_wall_us, Some(u64::MAX));
+        // Restore an active holding for the next boundary without waiting.
+        scene.cancel_scheduled_zone_publishes("subtitle", "zone-hold-agent");
+        drop(scene);
+        assert!(
+            request(
+                &tx,
+                &mut stream,
+                sequence + 4,
+                ClientPayload::Publish(subtitle_publish("active", 5_000, 0, 0))
+            )
+            .await
+            .ok
+        );
+    }
     server.abort();
 }
 

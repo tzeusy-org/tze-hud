@@ -2080,6 +2080,90 @@ async fn widget_publish_hold_clear() {
         server.scene.lock().await.widget_registry.active_publishes["gauge"][0].transition_ms,
         0
     );
+
+    // Full-range Hold TTLs use the same saturated expiry as Publish, for
+    // visible content and content that has not reached presentation yet.
+    for ttl_ms in [5_000, 0, 18_446_744_073_709_552, u64::MAX] {
+        for delayed in [false, true] {
+            call(&server, "hud_clear", json!({"surface":"widget:gauge"})).await;
+            call(
+                &server,
+                "hud_publish",
+                json!({"surface":"widget:gauge", "params":{"level":0.75},
+                    "delay_ms":if delayed { 1_000 } else { 0 }}),
+            )
+            .await;
+            let hold_now = clock.now_us();
+            let result = call(
+                &server,
+                "hud_hold",
+                json!({"surface":"widget:gauge", "ttl_ms":ttl_ms}),
+            )
+            .await;
+            let expiry = match ttl_ms {
+                0 => None,
+                5_000 => Some(hold_now + if delayed { 6_000_000 } else { 5_000_000 }),
+                _ => Some(u64::MAX),
+            };
+            assert_eq!(
+                result.get("expires_in_ms").and_then(Value::as_u64),
+                expiry.map(|at| (at - hold_now) / 1_000),
+                "Hold response reflects effective expiry, ttl={ttl_ms}, delayed={delayed}"
+            );
+            let mut scene = server.scene.lock().await;
+            if delayed {
+                let tze_hud_scene::mutation::SceneMutation::PublishToWidget {
+                    ttl_us,
+                    expires_at_wall_us,
+                    ..
+                } = &scene.scheduled_batches[0].batch.mutations[0]
+                else {
+                    panic!("pending widget publish")
+                };
+                assert_eq!(*expires_at_wall_us, None);
+                assert_eq!(
+                    *ttl_us,
+                    match ttl_ms {
+                        0 => None,
+                        5_000 => Some(5_000_000),
+                        _ => Some(u64::MAX - hold_now),
+                    }
+                );
+                clock.advance(2_000);
+                assert!(scene.apply_due_batches()[0].applied);
+            }
+            let record = &scene.widget_registry.active_for_widget("gauge")[0];
+            assert_eq!(
+                record.expires_at_wall_us,
+                if delayed && ttl_ms == 5_000 {
+                    Some(clock.now_us() + 5_000_000)
+                } else {
+                    expiry
+                }
+            );
+            clock.advance(1);
+            assert_eq!(scene.drain_expired_widget_publications(), 0);
+        }
+    }
+    {
+        let mut scene = server.scene.lock().await;
+        assert!(scene.set_widget_auto_clear("gauge", Some(30_000)));
+    }
+    call(&server, "hud_clear", json!({"surface":"widget:gauge"})).await;
+    call(
+        &server,
+        "hud_publish",
+        json!({"surface":"widget:gauge", "params":{"level":0.75}}),
+    )
+    .await;
+    clock.advance(1_000);
+    let result = call(
+        &server,
+        "hud_hold",
+        json!({"surface":"widget:gauge", "ttl_ms":18_446_744_073_709_552_u64}),
+    )
+    .await;
+    assert_eq!(result["expires_in_ms"], 29_000);
 }
 
 // ── Input: notification actions ──────────────────────────────────────────────

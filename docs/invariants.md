@@ -24,6 +24,14 @@ panel changes only affect later accepted publications, never existing cards.
 `hud_publish` and `hud_surfaces` report that stored lifetime, including delay.
 The setting itself neither polls nor wakes the renderer.
 
+Zone/widget Hold accepts the full unsigned 64-bit millisecond range using
+saturating duration and absolute-expiry arithmetic; positive TTLs cannot wrap to
+an immediate expiry. Zero remains indefinite and widget owner caps still apply.
+The existing MCP [`widget_publish_hold_clear`](../crates/tze_hud_mcp/src/server/tests.rs),
+gRPC [`hold_zone_publication`](../crates/tze_hud_protocol/src/session_server/tests/lifecycle_verbs.rs)
+and [`test_durable_widget_publish_receives_result`](../crates/tze_hud_protocol/src/session_server/tests/widget_publish.rs)
+parents cover active and pending boundary values through the real transports.
+
 A waiting choice card adds no timer or periodic layout work. Choosing a callback action
 retains that exact publication only for its finite local exit, makes all controls
 noninteractive and cannot be prolonged by hold. Clear, expiry, replacement,

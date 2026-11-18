@@ -570,8 +570,11 @@ pub(super) async fn handle_hold(
         {
             safe_mode(seq)
         } else {
-            let expires =
-                (hold.ttl_ms > 0).then(|| scene.now_wall_us().saturating_add(hold.ttl_ms * 1_000));
+            let expires = (hold.ttl_ms > 0).then(|| {
+                scene
+                    .now_wall_us()
+                    .saturating_add(hold.ttl_ms.saturating_mul(1_000))
+            });
             let held_ttl = RequestResult {
                 ttl_ms: hold.ttl_ms,
                 ..ok(seq)

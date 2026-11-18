@@ -1167,7 +1167,8 @@ pub async fn hud_hold(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
     check_allowed(ctx, &surface)?;
     check_not_safe_mode(ctx)?;
     let ns = ctx.agent.agent_id.clone();
-    let expiry = |now: u64| (p.ttl_ms > 0).then(|| now.saturating_add(p.ttl_ms * 1_000));
+    let expiry =
+        |now: u64| (p.ttl_ms > 0).then(|| now.saturating_add(p.ttl_ms.saturating_mul(1_000)));
     let mut result = ok_with_expiry((p.ttl_ms > 0).then_some(p.ttl_ms));
     match surface {
         Surface::Zone(zone) => {
