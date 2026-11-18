@@ -2147,7 +2147,7 @@ async fn widget_publish_hold_clear() {
     }
     {
         let mut scene = server.scene.lock().await;
-        scene.set_widget_auto_clear("gauge", Some(30_000)).unwrap();
+        assert!(scene.set_widget_auto_clear("gauge", Some(30_000)));
     }
     call(&server, "hud_clear", json!({"surface":"widget:gauge"})).await;
     call(
