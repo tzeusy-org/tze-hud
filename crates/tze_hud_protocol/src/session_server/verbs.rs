@@ -561,26 +561,36 @@ pub(super) async fn handle_hold(
     let result = {
         let st = state.lock().await;
         let mut scene = st.scene.lock().await;
-        let expires =
-            (hold.ttl_ms > 0).then(|| scene.now_wall_us().saturating_add(hold.ttl_ms * 1_000));
-        let held_ttl = RequestResult {
-            ttl_ms: hold.ttl_ms,
-            ..ok(seq)
-        };
-        match &surface {
-            Surface::Zone(zone) => {
-                let ttl_us = (hold.ttl_ms > 0).then(|| hold.ttl_ms.saturating_mul(1_000));
-                if scene.hold_zone_publications(zone, &session.namespace, ttl_us) {
-                    held_ttl
-                } else {
-                    not_held(seq, &hold.surface)
+        // Pause commits under this same scene owner. Read admission only after
+        // both awaits, before touching active or scheduled publications.
+        if session.safe_mode_active
+            || st
+                .safe_mode_atomic
+                .load(std::sync::atomic::Ordering::Acquire)
+        {
+            safe_mode(seq)
+        } else {
+            let expires =
+                (hold.ttl_ms > 0).then(|| scene.now_wall_us().saturating_add(hold.ttl_ms * 1_000));
+            let held_ttl = RequestResult {
+                ttl_ms: hold.ttl_ms,
+                ..ok(seq)
+            };
+            match &surface {
+                Surface::Zone(zone) => {
+                    let ttl_us = (hold.ttl_ms > 0).then(|| hold.ttl_ms.saturating_mul(1_000));
+                    if scene.hold_zone_publications(zone, &session.namespace, ttl_us) {
+                        held_ttl
+                    } else {
+                        not_held(seq, &hold.surface)
+                    }
                 }
-            }
-            Surface::Widget(widget) => {
-                if scene.hold_widget_publications(widget, &session.namespace, expires) {
-                    held_ttl
-                } else {
-                    not_held(seq, &hold.surface)
+                Surface::Widget(widget) => {
+                    if scene.hold_widget_publications(widget, &session.namespace, expires) {
+                        held_ttl
+                    } else {
+                        not_held(seq, &hold.surface)
+                    }
                 }
             }
         }

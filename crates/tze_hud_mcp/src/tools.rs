@@ -519,14 +519,26 @@ fn check_fields(surface: &Surface, p: &PublishParams) -> McpResult<()> {
     }
 }
 
+/// Check the current lease without renewing or granting one. Hold must refuse
+/// a suspended lease before changing content, even if the pause atomic is stale.
+fn existing_lease(ctx: &ToolCtx<'_>, scene: &SceneGraph) -> McpResult<Option<SceneId>> {
+    let existing = ctx.state.with(ctx.agent.agent_id.as_str(), |s| s.lease);
+    if existing
+        .and_then(|id| scene.leases.get(&id))
+        .is_some_and(|lease| lease.state == LeaseState::Suspended)
+    {
+        return Err(safe_mode_active());
+    }
+    Ok(existing)
+}
+
 /// The agent's MCP lease: reuse (and renew) it while active, else grant one.
 /// A Suspended lease means safe mode: never grant around it.
 fn ensure_lease(ctx: &ToolCtx<'_>, scene: &mut SceneGraph) -> McpResult<SceneId> {
     let ns = ctx.agent.agent_id.as_str();
-    let existing = ctx.state.with(ns, |s| s.lease);
+    let existing = existing_lease(ctx, scene)?;
     if let Some(id) = existing {
         match scene.leases.get(&id).map(|l| l.state) {
-            Some(LeaseState::Suspended) => return Err(safe_mode_active()),
             Some(LeaseState::Active) if scene.renew_lease(id, MCP_LEASE_TTL_MS).is_ok() => {
                 return Ok(id);
             }
@@ -1160,6 +1172,8 @@ pub async fn hud_hold(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
     match surface {
         Surface::Zone(zone) => {
             let mut scene = ctx.scene.lock().await;
+            check_not_safe_mode(ctx)?;
+            existing_lease(ctx, &scene)?;
             let ttl_us = (p.ttl_ms > 0).then(|| p.ttl_ms.saturating_mul(1_000));
             if !scene.hold_zone_publications(&zone, &ns, ttl_us) {
                 return Err(not_held(&p.surface));
@@ -1168,6 +1182,8 @@ pub async fn hud_hold(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
         }
         Surface::Widget(widget) => {
             let mut scene = ctx.scene.lock().await;
+            check_not_safe_mode(ctx)?;
+            existing_lease(ctx, &scene)?;
             let expires = expiry(now_us(&scene));
             if !scene.hold_widget_publications(&widget, &ns, expires) {
                 return Err(not_held(&p.surface));
