@@ -213,7 +213,7 @@ jobs:
           test ! -L "$apt_mirror_list"
           grep -Eq '^https://archive[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$apt_mirror_list"
           grep -Eq '^https://security[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$apt_mirror_list"
-          sudo sed -Ei '\|^http://(azure[.]archive|us-east-2[.]ec2[.]archive)[.]ubuntu[.]com/ubuntu/?([[:space:]].*)?$|d' "$apt_mirror_list"
+          sudo sed -Ei '\#^http://(azure[.]archive|us-east-2[.]ec2[.]archive)[.]ubuntu[.]com/ubuntu/?([[:space:]].*)?$#d' "$apt_mirror_list"
           sudo apt-get $APT_OPTS update -q --error-on=any
           sudo apt-get $APT_OPTS install -y --no-install-recommends \
             libvulkan1 \
