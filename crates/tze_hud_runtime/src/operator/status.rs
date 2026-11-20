@@ -575,7 +575,7 @@ impl StatusSource {
                 .as_ref()
                 .and_then(|a| a.reload_status())
                 .map_or(Value::Null, |s| json!(s)),
-            // The Windows preferences the tokens follow (hud-ohgc9.12):
+            // The Windows preferences the tokens follow:
             // {text_scale, caret_blink_ms}; null without a config.
             "os_prefs": self
                 .appearance

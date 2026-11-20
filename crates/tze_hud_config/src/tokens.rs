@@ -2373,7 +2373,7 @@ mod tests {
         assert!(is_reserved_runtime_key(OS_REDUCE_MOTION_KEY));
     }
 
-    /// hud-ohgc9.12 R12.1 S5: `[design_tokens]` may set neither Windows key.
+    /// `[design_tokens]` may set neither Windows key.
     #[test]
     fn os_text_and_caret_keys_are_runtime_reserved() {
         use crate::raw::RawDesignTokens;
@@ -2394,7 +2394,7 @@ mod tests {
         }
     }
 
-    /// hud-ohgc9.12 R12.3 S1: at the Windows defaults the layer leaves the
+    /// At the Windows defaults the layer leaves the
     /// map as it was, and every reader is today's.
     #[test]
     fn os_text_and_caret_at_defaults_are_identity() {
@@ -2409,7 +2409,7 @@ mod tests {
         assert_eq!(effective_scale(&tokens), ui_scale(&tokens));
     }
 
-    /// hud-ohgc9.12 R12.1 S1–S3: text size × `ui.scale`, held to 0.5–3.0;
+    /// Text size × `ui.scale`, held to 0.5–3.0;
     /// px per dp is the monitor's scale times that.
     #[test]
     fn effective_scale_is_text_size_times_ui_scale_held_to_range() {

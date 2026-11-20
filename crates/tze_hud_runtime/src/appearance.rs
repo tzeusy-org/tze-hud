@@ -120,7 +120,7 @@ pub struct Appearance {
     /// The latest monitor report not yet applied.
     newest_scales: std::sync::Mutex<Option<DisplayScales>>,
     /// Reads the Windows preferences on each restyle ("Show animations",
-    /// hud-ljhku.13; text size and caret blink, hud-ohgc9.12):
+    /// hud-ljhku.13; text size and caret blink):
     /// `os_prefs::read` in the HUD, a pinned value in harnesses and tests.
     read_os: fn() -> OsPreferences,
 }
@@ -259,8 +259,8 @@ impl Appearance {
     /// secondary monitor.
     fn resolve(&self, table: &DesignTokenMap) -> DesignTokenMap {
         let mut resolved = resolve_config_tokens(table);
-        // The Windows preferences are re-read on each reload (hud-ljhku.13,
-        // hud-ohgc9.12); there is no live OS watch.
+        // The Windows preferences are re-read on each reload (hud-ljhku.13);
+        // there is no live OS watch.
         tze_hud_config::tokens::apply_os_preferences(&mut resolved, table, &(self.read_os)());
         crate::scene_startup::resolve_font_dir(&mut resolved, self.config_parent.as_deref());
         let scales = self.scales();
@@ -830,7 +830,7 @@ mod tests {
         );
     }
 
-    /// hud-ohgc9.12 R12.1 S4, R12.2 S3: a Windows text-size or caret-blink
+    /// A Windows text-size or caret-blink
     /// change applies at the next config reload, even one whose table is
     /// unchanged, and not before; `/admin/status` reports what is in effect.
     #[tokio::test]

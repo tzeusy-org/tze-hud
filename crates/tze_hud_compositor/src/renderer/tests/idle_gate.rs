@@ -186,7 +186,7 @@ async fn caret_blink_wakes_at_toggle_not_every_frame() {
     );
 }
 
-/// hud-ohgc9.12 R12.2 S1/S3: with Windows caret blinking off
+/// With Windows caret blinking off
 /// (`runtime.caret_blink_ms = 0`) a focused composer draws a steady caret and
 /// schedules no caret wake; a token change applies to a composer that already
 /// has focus and keeps its draft.
@@ -222,7 +222,7 @@ async fn steady_caret_draws_with_no_caret_wake() {
     assert_eq!(compositor.next_animation_deadline(), None, "no caret wake");
 }
 
-/// hud-ohgc9.12 R12.2 S2: a 250 ms Windows blink time wakes at the 250 ms
+/// A 250 ms Windows blink time wakes at the 250 ms
 /// toggle; typing restarts the caret solid.
 #[tokio::test]
 async fn windows_blink_time_sets_the_caret_wake() {

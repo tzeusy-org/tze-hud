@@ -9,9 +9,9 @@
 //!   OS watch.
 //! - Text size (Settings › Accessibility › Text size, HKCU
 //!   `Software\Microsoft\Accessibility` `TextScaleFactor`) and the caret
-//!   blink time (`GetCaretBlinkTime`), read with the animation preference
-//!   (hud-ohgc9.12): text size multiplies the owner's `ui.scale`, and a caret
-//!   with blinking off is steady
+//!   blink time (`GetCaretBlinkTime`), read with the animation preference:
+//!   text size multiplies the owner's `ui.scale`, and a caret with blinking
+//!   off is steady
 //!   ([`tze_hud_config::tokens::apply_os_text_and_caret`]). Nothing in the
 //!   config overrides either.
 //!
@@ -217,7 +217,7 @@ mod tests {
         assert!(animations_enabled());
     }
 
-    /// hud-ohgc9.12: 100–225%, other values clamp, unreadable is 100%.
+    /// 100–225%, other values clamp, unreadable is 100%.
     #[test]
     fn raw_text_size_maps_to_a_clamped_factor() {
         assert_eq!(text_scale_from_raw(Some(100)), 1.0);
@@ -229,7 +229,7 @@ mod tests {
         assert_eq!(text_scale_from_raw(None), 1.0);
     }
 
-    /// hud-ohgc9.12: INFINITE is steady (0); a failed read (raw 0 or none)
+    /// INFINITE is steady (0); a failed read (raw 0 or none)
     /// keeps 530 so it never looks like "off"; others clamp to 200–1200.
     #[test]
     fn raw_caret_blink_maps_off_failure_and_clamps() {

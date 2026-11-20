@@ -41,7 +41,7 @@ pub struct SceneStartupResult {
 /// directory.
 ///
 /// `os` holds the Windows preferences the tokens follow ("Show animations",
-/// hud-ljhku.13; text size and caret blink, hud-ohgc9.12): the windowed HUD
+/// hud-ljhku.13; text size and caret blink): the windowed HUD
 /// passes `os_prefs::read()`; headless runs, harnesses and tests pin
 /// [`OsPreferences::default`] so the resolved tokens never depend on the
 /// build host.
@@ -59,7 +59,7 @@ pub fn run_scene_startup(
     let mut global_tokens = resolve_config_tokens(&config_tokens);
     // Theme -> Windows animation preference -> config overrides
     // (hud-ljhku.13), plus the Windows text size and caret blink, which
-    // config cannot override (hud-ohgc9.12).
+    // config cannot override.
     tze_hud_config::tokens::apply_os_preferences(&mut global_tokens, &config_tokens, &os);
     resolve_font_dir(&mut global_tokens, config_parent);
     // Monitor scale is not known yet: the effective zoom alone until the windows
@@ -547,7 +547,7 @@ default_tab = true
         assert!(!scene.widget_registry.reduce_motion);
     }
 
-    /// hud-ohgc9.12 R12.1 S1 / R12.2, pinned rather than read from the host:
+    /// Pinned rather than read from the host:
     /// Windows text size 125% with Zoom 100% zooms widget boxes and every dp
     /// by 1.25, and the caret key records blinking off; at the defaults
     /// neither key is present (R12.3 S1).

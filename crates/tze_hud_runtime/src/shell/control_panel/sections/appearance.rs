@@ -18,7 +18,7 @@ use super::super::row::{BoxFuture, Control, Edit, Row, Section};
 use super::super::runtime::TokenWriter;
 use crate::appearance::Appearance;
 
-/// Where the HUD's size comes from beyond the owner's Zoom (hud-ohgc9.12):
+/// Where the HUD's size comes from beyond the owner's Zoom:
 /// empty at Windows text size 100%, else the text size and the effective
 /// zoom, noting the 300% hold. Ends with a separator when not empty.
 fn windows_text_size_detail(resolved: &DesignTokenMap) -> String {
@@ -794,7 +794,7 @@ mod tests {
         assert_eq!(saved.len(), 21, "{saved:?}");
     }
 
-    /// hud-ohgc9.12 R12.1 S2/S3, R12.3 S1: the Zoom row's value is the
+    /// The Zoom row's value is the
     /// owner's Zoom; the detail names the Windows text size and the
     /// effective zoom only when text size is not 100%, with the 300% hold;
     /// "text size" finds the row; −/+ and Reset change `ui.scale` alone.

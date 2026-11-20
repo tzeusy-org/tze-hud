@@ -772,7 +772,7 @@ fn caret_blink_phase_square_wave() {
         "hidden in fourth half-period"
     );
 
-    // Windows caret blinking off (hud-ohgc9.12): steady in every phase.
+    // Windows caret blinking off: steady in every phase.
     for elapsed in [Duration::ZERO, half, half * 3] {
         assert!(caret_visible_at(elapsed, None), "steady at {elapsed:?}");
     }
@@ -964,7 +964,7 @@ async fn composer_caret_quad_emitted_at_expected_position() {
     );
 }
 
-/// hud-ohgc9.12 R12.2 S1: with Windows caret blinking off the caret quad is
+/// With Windows caret blinking off the caret quad is
 /// drawn even where a blinking caret would be hidden.
 #[tokio::test]
 async fn steady_caret_quad_is_drawn_in_the_hidden_phase() {
