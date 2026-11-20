@@ -1631,11 +1631,20 @@ pub(crate) fn validate_canonical_value(key: &str, value: &str) -> Result<(), Str
 /// - `runtime.px_scale` ([`PX_SCALE_KEY`]): physical px per logical dp.
 /// - `runtime.reduce_motion` ([`OS_REDUCE_MOTION_KEY`]): the Windows
 ///   animation preference is off ([`apply_os_motion_layer`]).
+/// - `runtime.text_scale` ([`TEXT_SCALE_KEY`]) and `runtime.caret_blink_ms`
+///   ([`CARET_BLINK_MS_KEY`]): the Windows text size and caret blink time
+///   ([`apply_os_text_and_caret`]). Unlike the motion layer, nothing in the
+///   config overrides them.
 ///
 /// Every `runtime.px_scale@<zone>` key ([`ZONE_PX_SCALE_PREFIX`]) is
 /// reserved too ([`is_reserved_runtime_key`]).
-pub const RESERVED_RUNTIME_TOKEN_KEYS: &[&str] =
-    &["runtime.fonts_dir", PX_SCALE_KEY, OS_REDUCE_MOTION_KEY];
+pub const RESERVED_RUNTIME_TOKEN_KEYS: &[&str] = &[
+    "runtime.fonts_dir",
+    PX_SCALE_KEY,
+    OS_REDUCE_MOTION_KEY,
+    TEXT_SCALE_KEY,
+    CARET_BLINK_MS_KEY,
+];
 
 /// Whether the runtime, not config, sets `key`.
 pub fn is_reserved_runtime_key(key: &str) -> bool {
@@ -1685,6 +1694,116 @@ pub fn apply_os_motion_layer(
     resolved.insert(OS_REDUCE_MOTION_KEY.to_owned(), "true".to_owned());
 }
 
+// ─── OS text size and caret blink ─────────────────────────────────────────────
+
+/// Runtime-set key: the Windows text size (Settings › Accessibility › Text
+/// size) as a factor, 1–2.25; absent means 1. It multiplies `ui.scale`
+/// ([`effective_scale`]).
+pub const TEXT_SCALE_KEY: &str = "runtime.text_scale";
+
+/// The values [`TEXT_SCALE_KEY`] may take: Windows' 100–225%.
+pub const TEXT_SCALE_RANGE: (f32, f32) = (1.0, 2.25);
+
+/// Runtime-set key: the Windows caret blink half-period in ms, 200–1200, or
+/// `0` when Windows caret blinking is off (a steady caret); absent means
+/// [`DEFAULT_CARET_BLINK_MS`].
+pub const CARET_BLINK_MS_KEY: &str = "runtime.caret_blink_ms";
+
+/// The caret blink half-period off Windows or when the setting cannot be
+/// read: the conventional editor rate.
+pub const DEFAULT_CARET_BLINK_MS: u32 = 530;
+
+/// The blinking half-periods [`CARET_BLINK_MS_KEY`] may take; `0` (steady)
+/// is outside it.
+pub const CARET_BLINK_MS_RANGE: (u32, u32) = (200, 1200);
+
+/// Record the Windows text size and caret blink time in `tokens`. At the
+/// Windows defaults (text size 1, blink [`DEFAULT_CARET_BLINK_MS`]) both
+/// keys are removed, so the map is the same as without this layer. The
+/// runtime reads both at startup and on each config reload; there is no
+/// live OS watch.
+pub fn apply_os_text_and_caret(tokens: &mut DesignTokenMap, text_scale: f32, caret_blink_ms: u32) {
+    if (text_scale - 1.0).abs() > f32::EPSILON {
+        tokens.insert(TEXT_SCALE_KEY.to_owned(), text_scale.to_string());
+    } else {
+        tokens.remove(TEXT_SCALE_KEY);
+    }
+    if caret_blink_ms != DEFAULT_CARET_BLINK_MS {
+        tokens.insert(CARET_BLINK_MS_KEY.to_owned(), caret_blink_ms.to_string());
+    } else {
+        tokens.remove(CARET_BLINK_MS_KEY);
+    }
+}
+
+/// The Windows preferences the HUD follows as token layers, read by the
+/// runtime at startup and on each config reload. The default is what the
+/// HUD uses off Windows or when a setting cannot be read.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct OsPreferences {
+    /// "Show animations" ([`apply_os_motion_layer`]).
+    pub animations_enabled: bool,
+    /// Text size as a factor, 1–2.25 ([`TEXT_SCALE_KEY`]).
+    pub text_scale: f32,
+    /// Caret blink half-period in ms, `0` for steady ([`CARET_BLINK_MS_KEY`]).
+    pub caret_blink_ms: u32,
+}
+
+impl Default for OsPreferences {
+    fn default() -> Self {
+        Self {
+            animations_enabled: true,
+            text_scale: 1.0,
+            caret_blink_ms: DEFAULT_CARET_BLINK_MS,
+        }
+    }
+}
+
+/// Apply every Windows preference layer to `resolved`, a map from
+/// [`crate::themes::resolve_config_tokens`] of `config_tokens`: the motion
+/// layer ([`apply_os_motion_layer`]) and the text size and caret blink
+/// ([`apply_os_text_and_caret`]).
+pub fn apply_os_preferences(
+    resolved: &mut DesignTokenMap,
+    config_tokens: &DesignTokenMap,
+    os: &OsPreferences,
+) {
+    apply_os_motion_layer(resolved, config_tokens, os.animations_enabled);
+    apply_os_text_and_caret(resolved, os.text_scale, os.caret_blink_ms);
+}
+
+/// The map's Windows text size ([`TEXT_SCALE_KEY`]), clamped to
+/// [`TEXT_SCALE_RANGE`]; 1 when unset.
+pub fn text_scale(tokens: &DesignTokenMap) -> f32 {
+    let (lo, hi) = TEXT_SCALE_RANGE;
+    tokens
+        .get(TEXT_SCALE_KEY)
+        .and_then(|v| parse_numeric(v))
+        .map_or(1.0, |n| n.clamp(lo, hi))
+}
+
+/// The map's caret blink half-period in ms ([`CARET_BLINK_MS_KEY`]): `0`
+/// for a steady caret, else clamped to [`CARET_BLINK_MS_RANGE`];
+/// [`DEFAULT_CARET_BLINK_MS`] when unset.
+pub fn caret_blink_ms(tokens: &DesignTokenMap) -> u32 {
+    let (lo, hi) = CARET_BLINK_MS_RANGE;
+    match tokens
+        .get(CARET_BLINK_MS_KEY)
+        .and_then(|v| v.parse::<u32>().ok())
+    {
+        Some(0) => 0,
+        Some(ms) => ms.clamp(lo, hi),
+        None => DEFAULT_CARET_BLINK_MS,
+    }
+}
+
+/// The whole-HUD zoom: Windows text size × `ui.scale`, held to
+/// [`UI_SCALE_RANGE`]. Every logical size and widget box uses it; the
+/// panel's Zoom row edits `ui.scale` alone.
+pub fn effective_scale(tokens: &DesignTokenMap) -> f32 {
+    let (lo, hi) = UI_SCALE_RANGE;
+    (text_scale(tokens) * ui_scale(tokens)).clamp(lo, hi)
+}
+
 /// Whether the OS motion layer is active in `tokens` ([`apply_os_motion_layer`]).
 pub fn os_reduce_motion(tokens: &DesignTokenMap) -> bool {
     tokens
@@ -1703,7 +1822,7 @@ pub const UI_SCALE_KEY: &str = "ui.scale";
 pub const UI_SCALE_RANGE: (f32, f32) = (0.5, 3.0);
 
 /// Physical px per logical dp for the display a token map draws on: the
-/// monitor's scale factor × `ui.scale`. Set by the runtime
+/// monitor's scale factor × [`effective_scale`]. Set by the runtime
 /// ([`set_px_scale`]); absent means 1.
 pub const PX_SCALE_KEY: &str = "runtime.px_scale";
 
@@ -1731,7 +1850,8 @@ pub fn px_scale(tokens: &DesignTokenMap) -> f32 {
 }
 
 /// Record that `tokens` draw on a monitor with Windows scale factor
-/// `monitor_scale`: [`PX_SCALE_KEY`] becomes `monitor_scale × ui.scale`.
+/// `monitor_scale`: [`PX_SCALE_KEY`] becomes `monitor_scale ×`
+/// [`effective_scale`].
 pub fn set_px_scale(tokens: &mut DesignTokenMap, monitor_scale: f64) {
     let px = monitor_px_scale(tokens, monitor_scale);
     tokens.insert(PX_SCALE_KEY.to_owned(), px);
@@ -1744,7 +1864,7 @@ pub fn set_zone_px_scale(tokens: &mut DesignTokenMap, zone: &str, monitor_scale:
     tokens.insert(format!("{ZONE_PX_SCALE_PREFIX}{zone}"), px);
 }
 
-/// `monitor_scale × ui.scale`, spelled for the token map; a bogus monitor
+/// `monitor_scale ×` [`effective_scale`], spelled for the token map; a bogus monitor
 /// scale counts as 1.
 fn monitor_px_scale(tokens: &DesignTokenMap, monitor_scale: f64) -> String {
     let monitor = if monitor_scale.is_finite() && monitor_scale > 0.0 {
@@ -1752,7 +1872,7 @@ fn monitor_px_scale(tokens: &DesignTokenMap, monitor_scale: f64) -> String {
     } else {
         1.0
     };
-    (monitor * ui_scale(tokens)).to_string()
+    (monitor * effective_scale(tokens)).to_string()
 }
 
 /// [`for_zone`] for every zone placed on a secondary monitor at a scale
@@ -1810,8 +1930,10 @@ pub(crate) fn validate_design_tokens(raw: &RawConfig, errors: &mut Vec<ConfigErr
                 field_path: format!("design_tokens.{key}"),
                 expected: "a design token, not a runtime-reserved key".into(),
                 got: key.clone(),
-                hint: if key.starts_with(PX_SCALE_KEY) {
+                hint: if key.starts_with(PX_SCALE_KEY) || key == TEXT_SCALE_KEY {
                     format!("{key:?} is set by the runtime; set \"ui.scale\" to resize the HUD")
+                } else if key == OS_REDUCE_MOTION_KEY || key == CARET_BLINK_MS_KEY {
+                    format!("{key:?} is set by the runtime from the Windows setting")
                 } else {
                     format!(
                         "{key:?} is set by the runtime; put font files in a `fonts` \
@@ -2249,6 +2371,79 @@ mod tests {
     #[test]
     fn os_reduce_motion_key_is_runtime_reserved() {
         assert!(is_reserved_runtime_key(OS_REDUCE_MOTION_KEY));
+    }
+
+    /// hud-ohgc9.12 R12.1 S5: `[design_tokens]` may set neither Windows key.
+    #[test]
+    fn os_text_and_caret_keys_are_runtime_reserved() {
+        use crate::raw::RawDesignTokens;
+        for key in [TEXT_SCALE_KEY, CARET_BLINK_MS_KEY] {
+            assert!(is_reserved_runtime_key(key));
+            let raw = RawConfig {
+                design_tokens: Some(RawDesignTokens(HashMap::from([(
+                    key.to_owned(),
+                    "1".to_owned(),
+                )]))),
+                ..Default::default()
+            };
+            let mut errors = Vec::new();
+            validate_design_tokens(&raw, &mut errors);
+            assert_eq!(errors.len(), 1, "{key}");
+            assert_eq!(errors[0].code, ConfigErrorCode::InvalidTokenKey);
+            assert!(!errors[0].hint.contains("fonts"), "{}", errors[0].hint);
+        }
+    }
+
+    /// hud-ohgc9.12 R12.3 S1: at the Windows defaults the layer leaves the
+    /// map as it was, and every reader is today's.
+    #[test]
+    fn os_text_and_caret_at_defaults_are_identity() {
+        let themed = crate::themes::resolve_config_tokens(&DesignTokenMap::new());
+        let mut tokens = themed.clone();
+        tokens.insert(TEXT_SCALE_KEY.into(), "1.25".into());
+        tokens.insert(CARET_BLINK_MS_KEY.into(), "0".into());
+        apply_os_text_and_caret(&mut tokens, 1.0, DEFAULT_CARET_BLINK_MS);
+        assert_eq!(tokens, themed, "a reload back to defaults clears both");
+        assert_eq!(text_scale(&tokens), 1.0);
+        assert_eq!(caret_blink_ms(&tokens), 530);
+        assert_eq!(effective_scale(&tokens), ui_scale(&tokens));
+    }
+
+    /// hud-ohgc9.12 R12.1 S1–S3: text size × `ui.scale`, held to 0.5–3.0;
+    /// px per dp is the monitor's scale times that.
+    #[test]
+    fn effective_scale_is_text_size_times_ui_scale_held_to_range() {
+        let at = |text: f32, ui: &str| {
+            let mut tokens = DesignTokenMap::from([(UI_SCALE_KEY.to_owned(), ui.to_owned())]);
+            apply_os_text_and_caret(&mut tokens, text, DEFAULT_CARET_BLINK_MS);
+            tokens
+        };
+        assert_eq!(effective_scale(&at(1.25, "1")), 1.25);
+        assert_eq!(effective_scale(&at(1.25, "0.8")), 1.0);
+        assert_eq!(effective_scale(&at(2.25, "2")), 3.0, "held at 300%");
+        assert_eq!(effective_scale(&at(2.25, "0.5")), 1.125, "floor 112.5%");
+        let mut s1 = at(1.25, "1");
+        set_px_scale(&mut s1, 1.5);
+        assert_eq!(px_scale(&s1), 1.875);
+        assert_eq!(
+            token_px(&s1, "type.body", 16.0),
+            30.0,
+            "16 dp body at 30 px"
+        );
+        assert_eq!(ui_scale(&s1), 1.0, "the owner's Zoom is never rewritten");
+    }
+
+    /// Off-range values clamp; a steady caret stays 0.
+    #[test]
+    fn os_text_and_caret_readers_clamp() {
+        let with = |key: &str, v: &str| DesignTokenMap::from([(key.to_owned(), v.to_owned())]);
+        assert_eq!(text_scale(&with(TEXT_SCALE_KEY, "3")), 2.25);
+        assert_eq!(text_scale(&with(TEXT_SCALE_KEY, "0.5")), 1.0);
+        assert_eq!(caret_blink_ms(&with(CARET_BLINK_MS_KEY, "0")), 0);
+        assert_eq!(caret_blink_ms(&with(CARET_BLINK_MS_KEY, "50")), 200);
+        assert_eq!(caret_blink_ms(&with(CARET_BLINK_MS_KEY, "5000")), 1200);
+        assert_eq!(caret_blink_ms(&with(CARET_BLINK_MS_KEY, "250")), 250);
+        assert_eq!(caret_blink_ms(&with(CARET_BLINK_MS_KEY, "x")), 530);
     }
 
     #[test]

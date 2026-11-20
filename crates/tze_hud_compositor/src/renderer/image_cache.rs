@@ -179,14 +179,27 @@ pub type LocalComposerStateHandle = Arc<StdMutex<Option<Option<LocalComposerStat
 /// Mirrors [`LocalComposerStateHandle`] in the opposite direction.
 pub type ComposerVisualLayoutHandle = Arc<StdMutex<Option<tze_hud_input::ComposerVisualLayout>>>;
 
-/// Caret blink half-period: the caret stays solid for this long, then hidden
-/// for this long, repeating.  ~530 ms is the conventional editor blink rate.
+/// Default caret blink half-period: the caret stays solid for this long, then
+/// hidden for this long, repeating.  ~530 ms is the conventional editor blink
+/// rate, used off Windows; on Windows the runtime records the Windows caret
+/// blink time as `runtime.caret_blink_ms` ([`caret_blink_from_tokens`]).
 pub(crate) const CARET_BLINK_HALF_PERIOD: std::time::Duration =
-    std::time::Duration::from_millis(530);
+    std::time::Duration::from_millis(tze_hud_config::tokens::DEFAULT_CARET_BLINK_MS as u64);
+
+/// The caret blink half-period a token map asks for: `None` when Windows
+/// caret blinking is off (a steady caret that never wakes the frame loop).
+pub(crate) fn caret_blink_from_tokens(
+    tokens: &std::collections::HashMap<String, String>,
+) -> Option<std::time::Duration> {
+    match tze_hud_config::tokens::caret_blink_ms(tokens) {
+        0 => None,
+        ms => Some(std::time::Duration::from_millis(u64::from(ms))),
+    }
+}
 
 /// Pure blink-phase logic: given the time elapsed since the caret was last reset
-/// to "solid" (a keystroke / caret move), return whether the caret should be
-/// drawn on the current frame.
+/// to "solid" (a keystroke / caret move) and the blink half-period (`None`:
+/// steady), return whether the caret should be drawn on the current frame.
 ///
 /// Phase 0 (`[0, half)`) is solid → `true`; phase 1 (`[half, 2*half)`) is
 /// hidden → `false`; and so on.  Resetting `elapsed` to zero on edit therefore
@@ -194,8 +207,13 @@ pub(crate) const CARET_BLINK_HALF_PERIOD: std::time::Duration =
 ///
 /// This is frame-level state computed by the runtime from its own clock — the
 /// model never participates in the blink loop.
-pub(crate) fn caret_visible_at(elapsed: std::time::Duration) -> bool {
-    let half = CARET_BLINK_HALF_PERIOD.as_nanos();
+pub(crate) fn caret_visible_at(
+    elapsed: std::time::Duration,
+    half: Option<std::time::Duration>,
+) -> bool {
+    let Some(half) = half.map(|h| h.as_nanos()) else {
+        return true;
+    };
     if half == 0 {
         return true;
     }

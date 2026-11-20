@@ -28,6 +28,12 @@ It compares only compatible successful-main capture artifacts. `--capture-commen
 is a separate, process-free step after artifact upload; missing baseline or fork
 permissions never becomes a false no-change result. Both CI steps are informational.
 
+`--os-prefs` (hud-ohgc9.12, informational) boots an owned HUD twice: at
+Windows text size 100% with the runner's caret blink, then with text size
+125% and caret blinking off (both restored afterwards). It checks
+`/admin/status` `os_prefs`, that a notification card is 1.25x as large in the
+second run, and that `idle_since_ms` keeps growing with the card shown.
+
 The config is copied to a temp dir with a seeded agents.toml beside it holding
 only the SHA-256 of a fresh random PSK, the way pairing stores agents.
 
@@ -1554,6 +1560,111 @@ def seed_config(config: Path, psk: str) -> Path:
     return seeded
 
 
+# hud-ohgc9.12 tier-W: Windows text size and caret blink.
+TEXT_SIZE_KEY = r"Software\Microsoft\Accessibility"
+CARET_BLINK_INFINITE = 0xFFFFFFFF
+
+
+def card_scale(before: dict, after: dict) -> tuple[float, float]:
+    """The (w, h) ratio of two `{x, y, w, h}` notification rects."""
+    return after["w"] / before["w"], after["h"] / before["h"]
+
+
+def scaled_by(ratio: tuple[float, float], factor: float, size: dict, tolerance_px: float = 2) -> bool:
+    """Whether both ratios match `factor` within whole-pixel rounding of `size`."""
+    return all(abs(r - factor) * size[k] <= tolerance_px for r, k in zip(ratio, ("w", "h")))
+
+
+class WindowsPrefs:
+    """Set, and on exit restore, the user's text size and caret blink time."""
+
+    def __init__(self) -> None:
+        import ctypes
+        import winreg
+
+        self.winreg = winreg
+        self.user32 = ctypes.windll.user32
+        self.user32.GetCaretBlinkTime.restype = ctypes.c_uint
+        self.user32.SetCaretBlinkTime.argtypes = [ctypes.c_uint]
+        self.blink = self.user32.GetCaretBlinkTime()
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, TEXT_SIZE_KEY) as key:
+                self.text = winreg.QueryValueEx(key, "TextScaleFactor")[0]
+        except OSError:
+            self.text = None
+
+    def set(self, text_pct: int | None, blink: int) -> None:
+        winreg = self.winreg
+        with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, TEXT_SIZE_KEY, 0, winreg.KEY_SET_VALUE) as key:
+            if text_pct is None:
+                try:
+                    winreg.DeleteValue(key, "TextScaleFactor")
+                except FileNotFoundError:
+                    pass
+            else:
+                winreg.SetValueEx(key, "TextScaleFactor", 0, winreg.REG_DWORD, text_pct)
+        assert self.user32.SetCaretBlinkTime(blink), "SetCaretBlinkTime refused"
+
+    def __enter__(self) -> "WindowsPrefs":
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.set(self.text, self.blink)
+
+
+def os_prefs_run(args: argparse.Namespace, psk: str, config: Path, label: str) -> tuple[dict, dict, int]:
+    """Boot an owned HUD; return its `os_prefs`, a card rect and its idle growth."""
+    log_path = config.parent / f"os-prefs-{label}.log"
+    with log_path.open("wb") as log:
+        proc = subprocess.Popen([str(args.exe), "--config", str(config), "--window-mode", "fullscreen",
+                                 "--mcp-port", str(args.mcp_port)], stdout=log, stderr=subprocess.STDOUT)
+    smoke = Smoke(f"http://127.0.0.1:{args.mcp_port}/", psk)
+    try:
+        wait_for_mcp(smoke, proc, args.startup_timeout)
+        zone = "zone:notification-area"
+        smoke.ok("hud_publish", {"surface": zone, "content": {"title": "Text size", "body": "tier-W"}, "ttl_ms": 60_000})
+
+        def card() -> tuple[bool, dict]:
+            info = json.loads(smoke.get("/admin/status?cpu=0")[1])
+            shown = [n for n in info.get("notifications") or [] if n.get("s") == zone and n.get("state") == "shown"]
+            return bool(shown), {"info": info, "card": shown[0] if shown else None}
+
+        (seen, _) = wait_until(card, what=f"{label} card shown", timeout_s=20)
+        time.sleep(2)
+        first = json.loads(smoke.get("/admin/status?cpu=0")[1])["idle_since_ms"]
+        time.sleep(2.5)
+        second = json.loads(smoke.get("/admin/status?cpu=0")[1])["idle_since_ms"]
+        print(f"os-prefs {label}: os_prefs={seen['info']['os_prefs']} rect={seen['card']['rect']} idle {first}->{second}")
+        return seen["info"]["os_prefs"], seen["card"]["rect"], second - first
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait(timeout=10)
+
+
+def run_os_prefs(args: argparse.Namespace) -> int:
+    """Owned Windows CI only (informational): text size 125% and a steady caret."""
+    assert sys.platform == "win32", "os-prefs needs an owned Windows HUD"
+    psk = secrets.token_hex(32)
+    config = seed_config(args.config, psk)
+    try:
+        with WindowsPrefs() as prefs:
+            prefs.set(None, 530)
+            base, base_rect, _ = os_prefs_run(args, psk, config, "default")
+            assert base == {"text_scale": 1.0, "caret_blink_ms": 530}, f"defaults: {base}"
+            prefs.set(125, CARET_BLINK_INFINITE)
+            prefs_now, rect, idle_growth = os_prefs_run(args, psk, config, "125-steady")
+        assert prefs_now == {"text_scale": 1.25, "caret_blink_ms": 0}, f"os_prefs: {prefs_now}"
+        ratio = card_scale(base_rect, rect)
+        assert scaled_by(ratio, 1.25, base_rect), f"card {base_rect} -> {rect}: {ratio}"
+        assert idle_growth >= 2000, f"idle_since_ms grew {idle_growth} ms over 2.5 s"
+        print("ok  os-prefs: text size 125% scales the card 1.25x; caret off; HUD idle")
+        return 0
+    except AssertionError as err:
+        print(f"FAIL {err}", file=sys.stderr)
+        return 1
+
+
 def load_efficiency_checker():
     path = Path(__file__).with_name("check_idle_efficiency.py")
     spec = importlib.util.spec_from_file_location("check_idle_efficiency", path)
@@ -1655,6 +1766,7 @@ def main(argv=None) -> int:
     ap.add_argument("--diagnostics", type=Path, help="owned boot-smoke original delayed frames and numeric timing evidence")
     ap.add_argument("--capture-comment", type=Path, help="comment on changed captures after successful artifact upload")
     ap.add_argument("--quiescent-with-content", action="store_true", help="run only the held-content idle measurement")
+    ap.add_argument("--os-prefs", action="store_true", help="informational Windows text size and caret blink run")
     ap.add_argument("--quiescent-timeout", type=float, default=150, help="hang guard for the 65 s measurement")
     ap.add_argument("--mcp-port", type=int, default=9090)
     ap.add_argument("--startup-timeout", type=float, default=90)
@@ -1665,17 +1777,19 @@ def main(argv=None) -> int:
             ap.error("--capture-comment cannot launch or attach to a HUD")
         return post_capture_comment(args.capture_comment)
     if args.url:
-        if args.config is not None or args.captures or args.diagnostics or args.quiescent_with_content:
-            ap.error("--url cannot use owned --config, --captures or --quiescent-with-content")
+        if args.config is not None or args.captures or args.diagnostics or args.quiescent_with_content or args.os_prefs:
+            ap.error("--url cannot use owned --config, --captures, --quiescent-with-content or --os-prefs")
         return run_borrowed(args.url, args.settle_s)
     if args.exe is None or args.config is None:
         ap.error("--exe and --config are required for owned smoke/captures")
-    if args.diagnostics is not None and (args.captures is not None or args.quiescent_with_content):
+    if args.diagnostics is not None and (args.captures is not None or args.quiescent_with_content or args.os_prefs):
         ap.error("--diagnostics is only for the owned boot smoke")
     if args.captures is not None:
         return run_captures(args)
     if args.quiescent_with_content:
         return run_quiescent(args)
+    if args.os_prefs:
+        return run_os_prefs(args)
 
     psk = secrets.token_hex(32)
     config = seed_config(args.config, psk)

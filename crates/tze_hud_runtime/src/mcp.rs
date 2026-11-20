@@ -1226,6 +1226,7 @@ mod tests {
             "last_update",
             "last_restart",
             "config_reload",
+            "os_prefs",
         ] {
             assert!(v.get(key).is_some(), "missing {key}: {text}");
         }
@@ -1272,7 +1273,12 @@ mod tests {
         "#,
         )
         .unwrap();
-        let boot = crate::scene_startup::run_scene_startup(&raw, None, &mut graph, true);
+        let boot = crate::scene_startup::run_scene_startup(
+            &raw,
+            None,
+            &mut graph,
+            tze_hud_config::tokens::OsPreferences::default(),
+        );
         let startup = StartupDiagnostics::new(boot.startup_warnings);
         let pending = diagnostics::render(None, None, Some(&startup));
         assert_eq!(pending.0["state"], "unavailable");

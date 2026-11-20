@@ -800,12 +800,15 @@ impl Compositor {
             .filter(|_| !self.drawn_owner_hidden.zones)
             .flat_map(|zone| zone.values())
             .filter_map(|s| s.fade_start_deadline());
+        // A steady caret (Windows caret blinking off) never toggles.
         let caret_toggle = self
             .local_composer
             .as_ref()
             .filter(|_| !self.notification_keyboard_active)
-            .map(|_| {
-                let half = crate::renderer::image_cache::CARET_BLINK_HALF_PERIOD.as_nanos();
+            .and(self.composer_caret_blink)
+            .filter(|half| !half.is_zero())
+            .map(|half| {
+                let half = half.as_nanos();
                 let elapsed = now
                     .saturating_duration_since(self.composer_caret_blink_start)
                     .as_nanos();

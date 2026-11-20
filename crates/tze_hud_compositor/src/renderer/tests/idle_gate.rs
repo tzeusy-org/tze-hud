@@ -186,6 +186,68 @@ async fn caret_blink_wakes_at_toggle_not_every_frame() {
     );
 }
 
+/// hud-ohgc9.12 R12.2 S1/S3: with Windows caret blinking off
+/// (`runtime.caret_blink_ms = 0`) a focused composer draws a steady caret and
+/// schedules no caret wake; a token change applies to a composer that already
+/// has focus and keeps its draft.
+#[tokio::test]
+async fn steady_caret_draws_with_no_caret_wake() {
+    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(320, 200).await);
+    *compositor.local_composer_state.lock().unwrap() = Some(Some(caret_test_draft()));
+    assert!(compositor.drain_local_composer_and_needs_render());
+    assert!(compositor.next_animation_deadline().is_some(), "blinking");
+
+    compositor.set_token_map(HashMap::from([(
+        tze_hud_config::tokens::CARET_BLINK_MS_KEY.to_owned(),
+        "0".to_owned(),
+    )]));
+    assert!(
+        compositor.local_composer.is_some(),
+        "focus and draft survive the token change"
+    );
+    // Whatever phase the blinking caret was in, the steady caret is shown:
+    // at most one frame to draw it, then nothing.
+    compositor.composer_caret_blink_start = std::time::Instant::now()
+        .checked_sub(CARET_BLINK_HALF_PERIOD)
+        .expect("test clock must have enough uptime to rewind one half-period");
+    compositor.drain_local_composer_and_needs_render();
+    assert_eq!(
+        compositor.composer_caret_rendered_phase,
+        Some(true),
+        "drawn"
+    );
+    for _ in 0..100 {
+        assert!(!compositor.drain_local_composer_and_needs_render());
+    }
+    assert_eq!(compositor.next_animation_deadline(), None, "no caret wake");
+}
+
+/// hud-ohgc9.12 R12.2 S2: a 250 ms Windows blink time wakes at the 250 ms
+/// toggle; typing restarts the caret solid.
+#[tokio::test]
+async fn windows_blink_time_sets_the_caret_wake() {
+    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(320, 200).await);
+    compositor.set_token_map(HashMap::from([(
+        tze_hud_config::tokens::CARET_BLINK_MS_KEY.to_owned(),
+        "250".to_owned(),
+    )]));
+    *compositor.local_composer_state.lock().unwrap() = Some(Some(caret_test_draft()));
+    assert!(compositor.drain_local_composer_and_needs_render());
+    let start = compositor.composer_caret_blink_start;
+    let half = std::time::Duration::from_millis(250);
+    assert_eq!(compositor.next_animation_deadline(), Some(start + half));
+    assert_eq!(compositor.composer_caret_rendered_phase, Some(true));
+    compositor.composer_caret_blink_start = std::time::Instant::now()
+        .checked_sub(half)
+        .expect("test clock must have enough uptime to rewind one half-period");
+    assert!(compositor.drain_local_composer_and_needs_render(), "toggle");
+    assert_eq!(compositor.composer_caret_rendered_phase, Some(false));
+    // A keystroke resets the phase: solid again.
+    *compositor.local_composer_state.lock().unwrap() = Some(Some(caret_test_draft()));
+    assert!(compositor.drain_local_composer_and_needs_render());
+    assert_eq!(compositor.composer_caret_rendered_phase, Some(true));
+}
+
 fn countdown_notification_scene() -> SceneGraph {
     countdown_notification_scene_on(SceneGraph::new(1280.0, 720.0))
 }

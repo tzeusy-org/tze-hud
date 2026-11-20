@@ -441,7 +441,12 @@ async fn render_fixture(args: &Args, raw: &RawConfig) -> Result<(CapturedFrame, 
         raw.runtime.as_ref().and_then(|r| r.profile.as_deref()) == Some("overlay");
     let mut scene = SceneGraph::new(args.width as f32, args.height as f32);
     let config_parent = args.config.as_deref().and_then(Path::parent);
-    let startup = run_scene_startup(raw, config_parent, &mut scene, true);
+    let startup = run_scene_startup(
+        raw,
+        config_parent,
+        &mut scene,
+        tze_hud_config::tokens::OsPreferences::default(),
+    );
     let server = server(scene, &startup.global_tokens);
     compositor.set_token_map(startup.global_tokens);
     let renderer = compositor
@@ -520,7 +525,12 @@ async fn render_widget(args: &Args, raw: &RawConfig) -> Result<(CapturedFrame, V
         .as_ref()
         .ok_or_else(|| error("missing bundle"))?;
     let mut scene = SceneGraph::new(args.width as f32, args.height as f32);
-    let startup = run_scene_startup(raw, None, &mut scene, true);
+    let startup = run_scene_startup(
+        raw,
+        None,
+        &mut scene,
+        tze_hud_config::tokens::OsPreferences::default(),
+    );
     let bundle = match load_bundle_dir_with_tokens(path, &startup.global_tokens) {
         BundleScanResult::Ok(bundle) => bundle,
         BundleScanResult::Err(err) => return Err(error(format!("invalid widget bundle: {err}"))),

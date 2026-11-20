@@ -1609,3 +1609,17 @@ def test_capture_png_pixels_baseline_and_changed_only_comment(tmp_path, monkeypa
         ws.capture_fixture(FixtureSmoke(), messages, lambda index: traced.append(("frame", index)))
         assert [args for tool, args in traced if tool == "frame"] == [1]
         assert [args["content"] for tool, args in traced if tool == "hud_publish"] == [messages[0]["content"]]
+
+
+def test_card_scale_matches_text_size_within_pixel_rounding():
+    """hud-ohgc9.12 tier-W: a card at text size 125% is 1.25x, to the pixel."""
+    base = {"x": 10, "y": 10, "w": 320, "h": 88}
+    assert ws.scaled_by(ws.card_scale(base, {"x": 0, "y": 0, "w": 400, "h": 110}), 1.25, base)
+    assert ws.scaled_by(ws.card_scale(base, {"x": 0, "y": 0, "w": 401, "h": 111}), 1.25, base)
+    assert not ws.scaled_by(ws.card_scale(base, {"x": 0, "y": 0, "w": 320, "h": 88}), 1.25, base)
+    assert not ws.scaled_by(ws.card_scale(base, {"x": 0, "y": 0, "w": 400, "h": 88}), 1.25, base)
+
+
+def test_os_prefs_mode_is_owned_only():
+    with pytest.raises(SystemExit):
+        ws.main(["--url", "http://127.0.0.1:9090/", "--os-prefs"])

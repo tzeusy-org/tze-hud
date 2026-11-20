@@ -528,7 +528,12 @@ impl Compositor {
             return;
         }
         let has_selection = cs.selection_anchor != cs.cursor_byte;
-        if !has_selection && !caret_visible_at(self.composer_caret_blink_start.elapsed()) {
+        if !has_selection
+            && !caret_visible_at(
+                self.composer_caret_blink_start.elapsed(),
+                self.composer_caret_blink,
+            )
+        {
             return;
         }
 

@@ -618,9 +618,13 @@ pub struct Compositor {
     /// (background rect + caret rect).  Cleared when the handle delivers
     /// `None` (composer deactivated).
     pub(crate) local_composer: Option<LocalComposerState>,
+    /// Caret blink half-period from the token map (`runtime.caret_blink_ms`,
+    /// the Windows caret blink time): `None` when Windows caret blinking is
+    /// off, so the caret is steady and schedules no wake.
+    pub(crate) composer_caret_blink: Option<std::time::Duration>,
     /// Reference instant for the composer caret blink phase.
     ///
-    /// The caret toggles solid/hidden every [`image_cache::CARET_BLINK_HALF_PERIOD`]
+    /// The caret toggles solid/hidden every `composer_caret_blink`
     /// measured from this instant.  Reset to "now" whenever a new draft state is
     /// applied (keystroke / caret move) so the caret is solid immediately after
     /// typing.  Computed per-frame in `collect_composer_text_item`; the model is
@@ -1030,6 +1034,7 @@ impl Compositor {
             drag_handle_hover_state: Arc::new(StdMutex::new(None)),
             drag_handle_hover: None,
             local_composer: None,
+            composer_caret_blink: Some(image_cache::CARET_BLINK_HALF_PERIOD),
             composer_caret_blink_start: std::time::Instant::now(),
             composer_caret_rendered_phase: None,
             composer_layout: image_cache::ComposerLayout::default(),
@@ -1379,6 +1384,7 @@ impl Compositor {
             drag_handle_hover_state: Arc::new(StdMutex::new(None)),
             drag_handle_hover: None,
             local_composer: None,
+            composer_caret_blink: Some(image_cache::CARET_BLINK_HALF_PERIOD),
             composer_caret_blink_start: std::time::Instant::now(),
             composer_caret_rendered_phase: None,
             composer_layout: image_cache::ComposerLayout::default(),
@@ -1730,6 +1736,9 @@ impl Compositor {
     /// and alert roles use their canonical token defaults.
     pub fn set_token_map(&mut self, map: HashMap<String, String>) {
         self.zone_motion = easing::ZoneMotion::from_token_map(&map);
+        // A focused composer keeps its focus and draft; only the blink
+        // changes (a steady caret from the next frame when blinking is off).
+        self.composer_caret_blink = image_cache::caret_blink_from_tokens(&map);
         // `font.sans` / `font.mono` / `font.serif` (and the runtime-set fonts
         // dir, `fonts::RUNTIME_FONTS_DIR_KEY`) select the
         // font roles; a no-op unless they changed (see `set_font_config`).
@@ -1859,8 +1868,12 @@ impl Compositor {
         // The caret only changes pixels when its phase flips; between toggles an
         // idle focused composer costs nothing (`next_animation_deadline` wakes us
         // at the next toggle).
-        let caret_visible = is_active
-            .then(|| image_cache::caret_visible_at(self.composer_caret_blink_start.elapsed()));
+        let caret_visible = is_active.then(|| {
+            image_cache::caret_visible_at(
+                self.composer_caret_blink_start.elapsed(),
+                self.composer_caret_blink,
+            )
+        });
         let caret_toggled = caret_visible != self.composer_caret_rendered_phase;
         self.composer_caret_rendered_phase = caret_visible;
         // `draft_applied` → pending echo / caret move.

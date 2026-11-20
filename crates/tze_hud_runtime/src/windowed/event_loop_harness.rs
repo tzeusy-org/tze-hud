@@ -319,8 +319,12 @@ impl HeadlessEventLoopHarness {
                     .config_file_path
                     .as_deref()
                     .and_then(|p| std::path::Path::new(p).parent());
-                let startup =
-                    crate::scene_startup::run_scene_startup(raw, config_parent, &mut scene, true);
+                let startup = crate::scene_startup::run_scene_startup(
+                    raw,
+                    config_parent,
+                    &mut scene,
+                    tze_hud_config::tokens::OsPreferences::default(),
+                );
                 for (widget_type, svg_file, svg) in &startup.widget_svg_assets {
                     state
                         .text_fit
@@ -443,8 +447,8 @@ impl HeadlessEventLoopHarness {
             Arc::clone(&panel_scene),
             render_wake.clone(),
             state.wake.main_work_notifier(),
-            // Harnesses never depend on the host's animation setting.
-            || true,
+            // Harnesses never depend on the host's Windows preferences.
+            tze_hud_config::tokens::OsPreferences::default,
         ));
         state.appearance = Some(Arc::clone(&appearance));
         let clipboard: Arc<std::sync::Mutex<Vec<String>>> = Arc::default();
