@@ -1050,7 +1050,7 @@ async fn poc_zone_delay_ms_appears_on_schedule() {
     assert_eq!(poc.shown(SUBTITLE), 0);
 }
 
-/// hud-ljhku.5 R5.1, hud-ohgc9.2 R2.1: publish replies count the characters
+/// hud-ljhku.5 R5.1: publish replies count the characters
 /// the production renderer draws of each cut field, measured with the real
 /// shaper at production tokens; that many characters, republished, are drawn
 /// whole, and a reply where everything fits keeps today's bytes.

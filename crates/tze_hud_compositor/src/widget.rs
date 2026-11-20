@@ -5430,7 +5430,7 @@ mod text_fit_tests {
             panic!("one cut param: {clipped:?}")
         };
         assert_eq!(name, "label");
-        // hud-ohgc9.2 R2.1 S4: the count is the longest prefix that fits,
+        // The count is the longest prefix that fits,
         // found within ceil(log2(len)) + 1 layouts.
         let len = long.chars().count();
         assert!(probes <= (usize::BITS - (len - 1).leading_zeros()) as usize + 1);

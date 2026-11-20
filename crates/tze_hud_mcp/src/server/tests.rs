@@ -4864,7 +4864,7 @@ fn fit_server() -> (McpServer, Arc<MarkerFit>) {
     (server.with_text_fit(fit.clone()), fit)
 }
 
-/// R5.1 S1/S2/S4 (hud-ohgc9.2 R2.1 S1, S3, S5): each cut card field is
+/// R5.1 S1/S2/S4: each cut card field is
 /// reported once with its drawn character count, `actions` with the smallest
 /// cut label's; a card that fits has the same reply bytes as a server with
 /// no measurement at all.
@@ -4925,7 +4925,7 @@ async fn stream_text_and_portal_publishes_never_carry_clipped() {
     assert_eq!(fit.calls.load(Ordering::SeqCst), 0);
 }
 
-/// R5.1 S3 (hud-ohgc9.2 R2.1 S4): a cut widget string param is reported
+/// R5.1 S3: a cut widget string param is reported
 /// with its count; params this call did not set are not re-reported.
 #[tokio::test]
 async fn widget_reply_counts_only_this_calls_cut_params() {
@@ -4946,8 +4946,7 @@ async fn widget_reply_counts_only_this_calls_cut_params() {
     assert!(other.get("clipped").is_none(), "{other}");
 }
 
-/// A question wait's final reply carries the admission-time report too
-/// (hud-ohgc9.2 R2.1 S6).
+/// A question wait's final reply carries the admission-time report too.
 #[tokio::test(start_paused = true)]
 async fn question_wait_reply_keeps_the_clipped_report() {
     let (server, _) = fit_server();

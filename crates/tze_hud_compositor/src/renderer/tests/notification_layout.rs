@@ -708,7 +708,7 @@ async fn test_two_line_notification_title_produces_two_text_items() {
                     );
                     let reported =
                         |field: &str| clipped.iter().find(|(f, _)| *f == field).map(|(_, n)| *n);
-                    // hud-ohgc9.2 R2.1 S1: the count is what this draws.
+                    // The reported count is what this draws.
                     assert_eq!(
                         reported("body"),
                         truncated.then(|| result.drawn_chars(&body)),

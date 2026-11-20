@@ -3658,7 +3658,7 @@ mod tests {
         }
     }
 
-    // ── hud-ohgc9.2: drawn counts behind `clipped` ───────────────────────────
+    // ── Drawn counts behind `clipped` ─────────────────────────────────────────
 
     /// The search finds every threshold within ceil(log2(upper + 1)) probes.
     #[test]

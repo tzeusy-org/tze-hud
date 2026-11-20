@@ -264,7 +264,7 @@ fn family(font: FontFamily) -> Family<'static> {
 
 #[cfg(test)]
 mod tests {
-    //! hud-ohgc9.2 R2.1: drawn counts from the real card shapers.
+    //! Drawn counts (`clipped`) from the real card shapers.
     use super::*;
     use crate::overflow::{PREFIX_PROBES, char_prefix};
     use tze_hud_scene::TextFit;
