@@ -2032,7 +2032,7 @@ mod tests {
         assert!(body["idle_since_ms"].as_u64().is_some());
     }
 
-    /// hud-ohgc9.4 on real portals through the production pointer, key and
+    /// Escape and reading keys on real portals, through the production pointer, key and
     /// frame paths. R4.1: Esc collapses a draft selection, then leaves with the
     /// draft kept (drawn unfocused, its length reported, nothing sent); each
     /// composer keeps its own; a cleared portal drops its draft; refocus
@@ -2693,7 +2693,7 @@ mod tests {
         );
         runtime.events.press_named_key("Enter");
         assert_eq!(launches(&runtime), 3);
-        // hud-ohgc9.4 R4.2 S3: Space on a focused link activates it; OUTPUT
+        // R4.2 S3: Space on a focused link activates it; OUTPUT
         // reading focus does not turn it into a page scroll.
         runtime.events.press_named_key("Tab");
         runtime.events.press_named_key("Tab");
@@ -7115,7 +7115,7 @@ mod tests {
         }
     }
 
-    /// hud-ohgc9.4 R4.1 S7: every Escape while a composer is active stays in
+    /// R4.1 S7: every Escape while a composer is active stays in
     /// the runtime, on a plain composer with no portal behind it: with text, a
     /// selection, an empty draft or a modifier, no Escape key or Cancel command
     /// reaches the tile's agent, and the draft text never changes.
@@ -7597,7 +7597,7 @@ mod tests {
         }
 
         // Card and selection are separate inner layers; Esc never changes the
-        // draft (hud-ohgc9.4 R4.1 S1-S2): the next Esc leaves the editor with
+        // draft (R4.1 S1-S2): the next Esc leaves the editor with
         // its text kept, and refocusing restores text, caret and selection state.
         {
             let mut harness = card_with_editor();

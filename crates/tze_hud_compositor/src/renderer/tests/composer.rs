@@ -193,7 +193,7 @@ async fn local_composer_text_item_uses_hit_region_bounds() {
     );
 }
 
-/// A kept draft (hud-ohgc9.4 Q2) is drawn as text in its own unfocused
+/// A kept draft is drawn as text in its own unfocused
 /// composer, once, with no caret or selection; refocusing that composer draws
 /// only the focused echo, and an unchanged kept set asks for no frame.
 #[tokio::test]

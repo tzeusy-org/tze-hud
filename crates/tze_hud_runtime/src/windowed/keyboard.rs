@@ -2364,7 +2364,7 @@ mod tests {
         keyboard_command, reading_scroll_key, restore_front_requeued_event,
     };
 
-    /// hud-ohgc9.4 R4.2: the OUTPUT reading keys and their page step; any
+    /// R4.2: the OUTPUT reading keys and their page step; any
     /// Ctrl/Alt/Meta chord, and every other key, stays out of the map.
     #[test]
     fn reading_scroll_keys_map_home_end_and_space_pages() {
