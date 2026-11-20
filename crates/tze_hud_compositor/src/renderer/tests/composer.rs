@@ -1268,7 +1268,7 @@ async fn composer_selection_styled_run_uses_raw_byte_offsets() {
             preedit_range: None,
         });
         let item = compositor
-            .collect_composer_text_item(focused(&compositor), tile, &scene, 320.0, 200.0, &tokens)
+            .collect_composer_text_item(focused(compositor), tile, &scene, 320.0, 200.0, &tokens)
             .expect("focused composer with a selection must produce a text item");
         assert_eq!(
             item.styled_runs.len(),
