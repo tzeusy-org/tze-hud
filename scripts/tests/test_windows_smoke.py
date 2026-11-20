@@ -1611,13 +1611,14 @@ def test_capture_png_pixels_baseline_and_changed_only_comment(tmp_path, monkeypa
         assert [args["content"] for tool, args in traced if tool == "hud_publish"] == [messages[0]["content"]]
 
 
-def test_card_scale_matches_text_size_within_pixel_rounding():
-    """hud-ohgc9.12 tier-W: a card at text size 125% is 1.25x, to the pixel."""
-    base = {"x": 10, "y": 10, "w": 320, "h": 88}
-    assert ws.scaled_by(ws.card_scale(base, {"x": 0, "y": 0, "w": 400, "h": 110}), 1.25, base)
-    assert ws.scaled_by(ws.card_scale(base, {"x": 0, "y": 0, "w": 401, "h": 111}), 1.25, base)
-    assert not ws.scaled_by(ws.card_scale(base, {"x": 0, "y": 0, "w": 320, "h": 88}), 1.25, base)
-    assert not ws.scaled_by(ws.card_scale(base, {"x": 0, "y": 0, "w": 400, "h": 88}), 1.25, base)
+def test_card_follows_text_size_within_pixel_rounding():
+    """hud-ohgc9.12 tier-W: at text size 125% a card is 1.25x as tall; its
+    width is the zone's (a display fraction) and keeps its size."""
+    base = {"x": 10, "y": 10, "w": 246, "h": 76}
+    assert ws.card_follows_text_size(base, {"x": 0, "y": 0, "w": 246, "h": 95}, 1.25)
+    assert ws.card_follows_text_size(base, {"x": 0, "y": 0, "w": 247, "h": 96}, 1.25)
+    assert not ws.card_follows_text_size(base, {"x": 0, "y": 0, "w": 246, "h": 76}, 1.25)
+    assert not ws.card_follows_text_size(base, {"x": 0, "y": 0, "w": 308, "h": 95}, 1.25)
 
 
 def test_os_prefs_mode_is_owned_only():

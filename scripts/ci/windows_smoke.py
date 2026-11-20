@@ -32,7 +32,8 @@ permissions never becomes a false no-change result. Both CI steps are informatio
 Windows text size 100% with the runner's caret blink, then with text size
 125% and caret blinking off (both restored afterwards). It checks
 `/admin/status` `os_prefs`, that a notification card is 1.25x as large in the
-second run, and that `idle_since_ms` keeps growing with the card shown.
+second run (its width is the zone's, a display fraction, and keeps its size),
+and that `idle_since_ms` keeps growing with the card shown.
 
 The config is copied to a temp dir with a seeded agents.toml beside it holding
 only the SHA-256 of a fresh random PSK, the way pairing stores agents.
@@ -1565,14 +1566,12 @@ TEXT_SIZE_KEY = r"Software\Microsoft\Accessibility"
 CARET_BLINK_INFINITE = 0xFFFFFFFF
 
 
-def card_scale(before: dict, after: dict) -> tuple[float, float]:
-    """The (w, h) ratio of two `{x, y, w, h}` notification rects."""
-    return after["w"] / before["w"], after["h"] / before["h"]
-
-
-def scaled_by(ratio: tuple[float, float], factor: float, size: dict, tolerance_px: float = 2) -> bool:
-    """Whether both ratios match `factor` within whole-pixel rounding of `size`."""
-    return all(abs(r - factor) * size[k] <= tolerance_px for r, k in zip(ratio, ("w", "h")))
+def card_follows_text_size(before: dict, after: dict, factor: float, tolerance_px: float = 2) -> bool:
+    """Whether a notification card's height scaled by `factor` while its width,
+    the notification zone's (a display fraction), kept its size; both within
+    whole-pixel rounding."""
+    return (abs(after["h"] - before["h"] * factor) <= tolerance_px
+            and abs(after["w"] - before["w"]) <= tolerance_px)
 
 
 class WindowsPrefs:
@@ -1655,10 +1654,9 @@ def run_os_prefs(args: argparse.Namespace) -> int:
             prefs.set(125, CARET_BLINK_INFINITE)
             prefs_now, rect, idle_growth = os_prefs_run(args, psk, config, "125-steady")
         assert prefs_now == {"text_scale": 1.25, "caret_blink_ms": 0}, f"os_prefs: {prefs_now}"
-        ratio = card_scale(base_rect, rect)
-        assert scaled_by(ratio, 1.25, base_rect), f"card {base_rect} -> {rect}: {ratio}"
+        assert card_follows_text_size(base_rect, rect, 1.25), f"card {base_rect} -> {rect}: want h x1.25, w kept"
         assert idle_growth >= 2000, f"idle_since_ms grew {idle_growth} ms over 2.5 s"
-        print("ok  os-prefs: text size 125% scales the card 1.25x; caret off; HUD idle")
+        print("ok  os-prefs: text size 125% makes the card 1.25x as tall; caret off; HUD idle")
         return 0
     except AssertionError as err:
         print(f"FAIL {err}", file=sys.stderr)

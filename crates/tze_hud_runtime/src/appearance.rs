@@ -333,7 +333,12 @@ impl Appearance {
                     (*file != table).then(|| *file = table.clone()).is_some()
                 };
                 if edited {
-                    self.apply(table).await
+                    match self.apply(table).await {
+                        // The table already in effect: still re-read the
+                        // Windows preferences.
+                        Ok(false) => self.refresh_os_preferences().await,
+                        outcome => outcome,
+                    }
                 } else {
                     // The same table: still re-read the Windows preferences.
                     self.refresh_os_preferences().await
@@ -896,6 +901,36 @@ mod tests {
                 .len(),
             0,
             "a size or caret change re-reads no widget bundles"
+        );
+    }
+
+    /// A reload whose table differs from the file's last one but equals the
+    /// one in effect (a panel change that could not be saved) still re-reads
+    /// the Windows preferences.
+    #[tokio::test]
+    async fn a_reload_matching_the_live_table_still_reads_windows_prefs() {
+        use std::sync::atomic::AtomicU32;
+        static TEXT_PCT: AtomicU32 = AtomicU32::new(100);
+        fn read() -> OsPreferences {
+            OsPreferences {
+                text_scale: TEXT_PCT.load(Ordering::Relaxed) as f32 / 100.0,
+                ..OsPreferences::default()
+            }
+        }
+        let appearance = appearance_with(SceneGraph::new(800.0, 600.0), read);
+        let classic = table(&[("theme", "classic")]);
+        // The panel shows it, but the file never got it.
+        assert_eq!(appearance.apply(classic).await, Ok(true));
+        TEXT_PCT.store(125, Ordering::Relaxed);
+        assert_eq!(
+            appearance
+                .reload_from("[design_tokens]\ntheme = \"classic\"\n")
+                .await,
+            Ok(true)
+        );
+        assert_eq!(
+            tze_hud_config::tokens::px_scale(&appearance.live.resolved()),
+            1.25
         );
     }
 
