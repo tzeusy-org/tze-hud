@@ -550,11 +550,15 @@ fn ensure_lease(ctx: &ToolCtx<'_>, scene: &mut SceneGraph) -> McpResult<SceneId>
     Ok(id)
 }
 
-/// Name the cut fields in a publish reply; absent (identical bytes) when
-/// everything fits.
-fn with_clipped<T: serde::Serialize>(mut reply: Value, clipped: &[T]) -> Value {
+/// Report the cut fields in a publish reply as `{name: characters drawn}`;
+/// absent (identical bytes) when everything fits.
+fn with_clipped<K: AsRef<str>>(mut reply: Value, clipped: &[(K, usize)]) -> Value {
     if !clipped.is_empty() {
-        reply["clipped"] = json!(clipped);
+        reply["clipped"] = clipped
+            .iter()
+            .map(|(name, drawn)| (name.as_ref().to_owned(), json!(drawn)))
+            .collect::<serde_json::Map<_, _>>()
+            .into();
     }
     reply
 }
@@ -942,7 +946,7 @@ async fn publish_widget(ctx: &ToolCtx<'_>, widget: &str, p: PublishParams) -> Mc
         .map_err(|e| scene_error(&e))?;
     // Measure the widget as it will draw (current params under this call's),
     // but report only params this call set.
-    let clipped: Vec<String> = ctx
+    let clipped: Vec<(String, usize)> = ctx
         .text_fit
         .map(|fit| {
             let mut drawn = scene
@@ -954,7 +958,7 @@ async fn publish_widget(ctx: &ToolCtx<'_>, widget: &str, p: PublishParams) -> Mc
             drawn.extend(typed.clone());
             fit.widget(&scene, widget, &drawn)
                 .into_iter()
-                .filter(|param| typed.contains_key(param))
+                .filter(|(param, _)| typed.contains_key(param))
                 .collect()
         })
         .unwrap_or_default();

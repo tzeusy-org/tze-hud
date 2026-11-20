@@ -4804,10 +4804,16 @@ async fn status_burst_keeps_a_pending_question_on_screen() {
     assert!(!shown.iter().any(|r| r.merge_key.as_deref() == Some("s0")));
 }
 
-/// Reports text containing "LONG" as cut; counts every measurement.
+/// Reports text containing "LONG" as cut, drawn up to the marker; counts
+/// every measurement.
 #[derive(Debug, Default)]
 struct MarkerFit {
     calls: std::sync::atomic::AtomicUsize,
+}
+
+/// Characters before the "LONG" marker, when `text` carries one.
+fn marker_count(text: &str) -> Option<usize> {
+    text.find("LONG").map(|byte| text[..byte].chars().count())
 }
 
 impl tze_hud_scene::TextFit for MarkerFit {
@@ -4816,19 +4822,21 @@ impl tze_hud_scene::TextFit for MarkerFit {
         _: &SceneGraph,
         _: &str,
         payload: &tze_hud_scene::types::NotificationPayload,
-    ) -> Vec<&'static str> {
+    ) -> Vec<(&'static str, usize)> {
         self.calls.fetch_add(1, Ordering::SeqCst);
-        let mut out = Vec::new();
-        if payload.title.contains("LONG") {
-            out.push("title");
-        }
-        if payload.text.contains("LONG") {
-            out.push("body");
-        }
-        if payload.actions.iter().any(|a| a.label.contains("LONG")) {
-            out.push("actions");
-        }
-        out
+        let actions = payload
+            .actions
+            .iter()
+            .filter_map(|a| marker_count(&a.label))
+            .min();
+        [
+            ("title", marker_count(&payload.title)),
+            ("body", marker_count(&payload.text)),
+            ("actions", actions),
+        ]
+        .into_iter()
+        .filter_map(|(name, count)| count.map(|c| (name, c)))
+        .collect()
     }
 
     fn widget(
@@ -4836,12 +4844,14 @@ impl tze_hud_scene::TextFit for MarkerFit {
         _: &SceneGraph,
         _: &str,
         params: &HashMap<String, WidgetParameterValue>,
-    ) -> Vec<String> {
+    ) -> Vec<(String, usize)> {
         self.calls.fetch_add(1, Ordering::SeqCst);
-        let mut out: Vec<String> = params
+        let mut out: Vec<(String, usize)> = params
             .iter()
-            .filter(|(_, v)| matches!(v, WidgetParameterValue::String(s) if s.contains("LONG")))
-            .map(|(k, _)| k.clone())
+            .filter_map(|(k, v)| match v {
+                WidgetParameterValue::String(s) => marker_count(s).map(|c| (k.clone(), c)),
+                _ => None,
+            })
             .collect();
         out.sort();
         out
@@ -4854,18 +4864,32 @@ fn fit_server() -> (McpServer, Arc<MarkerFit>) {
     (server.with_text_fit(fit.clone()), fit)
 }
 
-/// R5.1 S1/S2/S4: cut card fields are named once; a card that fits has the
-/// same reply bytes as a server with no measurement at all.
+/// R5.1 S1/S2/S4: each cut card field is
+/// reported once with its drawn character count, `actions` with the smallest
+/// cut label's; a card that fits has the same reply bytes as a server with
+/// no measurement at all.
 #[tokio::test]
-async fn notification_reply_names_cut_fields_and_is_unchanged_when_it_fits() {
+async fn notification_reply_counts_cut_fields_and_is_unchanged_when_it_fits() {
     let (server, _) = fit_server();
     let cut = call(
         &server,
         "hud_publish",
-        json!({"surface":"zone:notification-area","content":{"title":"LONG title","body":"LONG body","actions":[{"label":"LONG","callback_id":"x"}]}}),
+        json!({"surface":"zone:notification-area","content":{"title":"Deploy LONG","body":"All good LONG","actions":[
+            {"label":"Retry it LONG","callback_id":"x"},
+            {"label":"Skip LONG","callback_id":"y"},
+            {"label":"Fine","callback_id":"z"}]}}),
     )
     .await;
-    assert_eq!(cut["clipped"], json!(["title", "body", "actions"]), "{cut}");
+    assert_eq!(
+        cut["clipped"],
+        json!({"title": 7, "body": 9, "actions": 5}),
+        "{cut}"
+    );
+    assert!(
+        cut.to_string()
+            .contains(r#""clipped":{"actions":5,"body":9,"title":7}"#),
+        "{cut}"
+    );
 
     let args = json!({"surface":"zone:notification-area","content":{"title":"Build","body":"All tests passed."}});
     let (plain, _) = self::server();
@@ -4901,18 +4925,18 @@ async fn stream_text_and_portal_publishes_never_carry_clipped() {
     assert_eq!(fit.calls.load(Ordering::SeqCst), 0);
 }
 
-/// R5.1 S3: a cut widget string param is named; params this call did not set
-/// are not re-reported.
+/// R5.1 S3: a cut widget string param is reported
+/// with its count; params this call did not set are not re-reported.
 #[tokio::test]
-async fn widget_reply_names_only_this_calls_cut_params() {
+async fn widget_reply_counts_only_this_calls_cut_params() {
     let (server, _) = fit_server();
     let cut = call(
         &server,
         "hud_publish",
-        json!({"surface":"widget:gauge","params":{"label":"LONG label","level":0.5}}),
+        json!({"surface":"widget:gauge","params":{"label":"Gauge label LONG","level":0.5}}),
     )
     .await;
-    assert_eq!(cut["clipped"], json!(["label"]), "{cut}");
+    assert_eq!(cut["clipped"], json!({"label": 12}), "{cut}");
     let other = call(
         &server,
         "hud_publish",
@@ -4927,7 +4951,7 @@ async fn widget_reply_names_only_this_calls_cut_params() {
 async fn question_wait_reply_keeps_the_clipped_report() {
     let (server, _) = fit_server();
     let mut args = question(1000);
-    args["content"]["title"] = json!("LONG question");
+    args["content"]["title"] = json!("Question LONG");
     let reply = call(&server, "hud_publish", args).await;
-    assert_eq!(reply["clipped"], json!(["title"]), "{reply}");
+    assert_eq!(reply["clipped"], json!({"title": 9}), "{reply}");
 }

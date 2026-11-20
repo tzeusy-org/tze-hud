@@ -561,6 +561,9 @@ clear, TTL, lease and origin cleanup restore its retained values through
 occupancy. Replace's ordinary map and the separate deadline snapshot rules
 are unchanged. MCP urgency and status entries reject wrong
 types, and notification TTL is top-level only.
+Successful replies follow the same rule: a publish whose text the renderer
+would cut reports, per cut field, how many characters are drawn, so one
+shortened republish lands; a reply where everything fits keeps its bytes.
 
 - `tze_hud_scene` [`widget_audiences_reject_agent_writes_and_survive_publication_lifecycle`](../crates/tze_hud_scene/src/graph/widget_tests.rs),
   [`clear_widget_for_publisher_refreshes_current_params_from_remaining_publish`](../crates/tze_hud_scene/src/graph/widget_tests.rs),
@@ -570,6 +573,10 @@ types, and notification TTL is top-level only.
 - `tze_hud_scene` [`widget_publish_out_of_range_values_rejected`](../crates/tze_hud_scene/src/graph/widget_tests.rs), [`widget_publish_f32_nan_rejected`](../crates/tze_hud_scene/src/graph/widget_tests.rs)
 - `tze_hud_mcp` [`widget_publish_hold_clear`](../crates/tze_hud_mcp/src/server/tests.rs), [`user_test_zone_fixtures_and_documented_examples_match_production_parser`](../crates/tze_hud_mcp/src/server/tests.rs)
 - `tze_hud_protocol` [`test_durable_widget_publish_receives_result`](../crates/tze_hud_protocol/src/session_server/tests/widget_publish.rs)
+- `clipped` counts: `integration` [`poc_publish_reports_clipped_text_only_when_cut`](../tests/integration/poc_acceptance.rs),
+  `tze_hud_compositor` [`actions_report_the_smallest_cut_label`](../crates/tze_hud_compositor/src/renderer/text_fit.rs),
+  [`clipped_text_params_reports_labels_past_the_canvas`](../crates/tze_hud_compositor/src/widget.rs),
+  `tze_hud_mcp` [`notification_reply_counts_cut_fields_and_is_unchanged_when_it_fits`](../crates/tze_hud_mcp/src/server/tests.rs)
 
 - `tze_hud_protocol` [`mutation_batch_oversized_rejected_with_structured_error`](../crates/tze_hud_protocol/tests/fuzz_protocol_boundary.rs)
 - `tze_hud_mcp` [`test_structured_error_has_hint_field`](../crates/tze_hud_mcp/src/server/tests.rs), [`error_codes_are_unique_and_documented`](../crates/tze_hud_mcp/src/error.rs),
