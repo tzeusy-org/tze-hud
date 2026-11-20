@@ -342,6 +342,8 @@ pub(super) fn make_windowed_keyboard_test_app(
         consumed_command_keydowns: std::collections::HashSet::new(),
         local_composer_state: Arc::new(StdMutex::new(None)),
         composer_preedit: None,
+        kept_composer_drafts_state: Arc::new(StdMutex::new(None)),
+        kept_drafts_drawn: Vec::new(),
         focus_ring_owner_state: Arc::new(StdMutex::new(None)),
         surface_ui: Default::default(),
         resize_grip_hover_state: Arc::new(StdMutex::new(None)),

@@ -42,8 +42,8 @@ impl std::fmt::Debug for SurfaceProbe {
 pub struct UiMirror {
     /// Focused `(tile, node)`; `node` is `None` for a tile-level stop.
     pub focus: Option<(SceneId, Option<SceneId>)>,
-    /// Characters in the focused composer's draft (0 when none is focused).
-    pub draft_chars: usize,
+    /// Characters in each unsent draft by composer node, focused or kept.
+    pub drafts: HashMap<SceneId, usize>,
     /// Actual runtime hover targets, including their configured trigger inset.
     pub hover_targets: HashMap<String, Rect>,
     /// OUTPUT reading observations per portal tile (hud-ljhku.2); absent
@@ -325,7 +325,7 @@ pub fn portals_json(scene: &SceneGraph, ui: &UiMirror, displays: &[Rect]) -> Val
                 },
                 "input": {
                     "at_tail": at_tail(current_layout(scene, tile_id, PortalPartKind::Composer), input_y),
-                    "draft_chars": if focus == "composer" { ui.draft_chars } else { 0 },
+                    "draft_chars": composer_node.and_then(|n| ui.drafts.get(&n)).copied().unwrap_or(0),
                 },
             }),
         ));
@@ -647,7 +647,7 @@ mod tests {
         let displays = [Rect::new(0.0, 0.0, 1920.0, 1080.0)];
         let focused = UiMirror {
             focus: Some((tile_id, Some(composer))),
-            draft_chars: 5,
+            drafts: HashMap::from([(composer, 5)]),
             ..Default::default()
         };
         let v = portals_json(&scene, &focused, &displays);
@@ -664,17 +664,19 @@ mod tests {
         assert_eq!(p["input"]["draft_chars"], 5);
         assert_eq!(p["input"]["at_tail"], Value::Null, "INPUT not measured yet");
 
-        // A tile-level stop is not composer focus, and hides the draft length.
+        // A kept draft reports its length unfocused (a tile stop or no focus);
+        // another composer's draft is not this portal's.
         let tile_stop = UiMirror {
             focus: Some((tile_id, None)),
-            draft_chars: 5,
+            drafts: HashMap::from([(composer, 5), (SceneId::new(), 7)]),
             ..Default::default()
         };
         let v = portals_json(&scene, &tile_stop, &displays);
         assert_eq!(v[0]["focus"], "tile");
-        assert_eq!(v[0]["input"]["draft_chars"], 0);
+        assert_eq!(v[0]["input"]["draft_chars"], 5);
         let v = portals_json(&scene, &UiMirror::default(), &displays);
         assert_eq!(v[0]["focus"], "none");
+        assert_eq!(v[0]["input"]["draft_chars"], 0, "no draft reports 0");
 
         // Observe the actual driver clearing both rendered cues, without a
         // replacement publish or reconstructed Hub deadline in the probe.

@@ -402,7 +402,8 @@ source links when implementation changes the status.
   messages, raw input-history queue/store and their obsolete assertions. Native
   local editing, accepted history and complete-handle routing remain. It keeps
   one keyed unsent draft alongside the active draft; an empty peer preserves
-  the slot and a nonempty peer replaces it. Two mixed GPU parents move into the
+  the slot and a nonempty peer replaces it (`hud-ohgc9.4` later keeps one per
+  composer). Two mixed GPU parents move into the
   existing composer test module, retaining live font/wrap and first-frame
   fill/text/clip assertions; raw-history anchor/divider assertions retire with
   that renderer. All nine integration composer parents remain. Automated
@@ -463,7 +464,13 @@ source links when implementation changes the status.
   denominator (a test constructor in runtime/src/portal.rs): the reading model
   lives in `tze_hud_input` next to scroll and jump-to-latest, and its scene,
   compositor and runtime glue sit with their owners. The same command measured
-  14,512 after that change, within the 15,000 cap.
+  14,512 after that change, within the 15,000 cap. Escape keeping the composer
+  draft (`hud-ohgc9.4`, owner answers Q1/Q2/Q4 = A, binding: no net growth)
+  measured 14,671 before and 14,602 after (−69): deleting draft cancel and the
+  one-slot retention bookkeeping pays for one kept draft per composer and the
+  shared `drafts()` reading; the caretless drawing and OUTPUT reading keys sit
+  with the compositor and windowed keyboard, outside the denominator, so no
+  fallback applied.
 
 - **T8 — diet [Observed].** The [local harness](../justfile) includes
   llvmpipe GPU recipes and Nextest; resource acceptance has a compact

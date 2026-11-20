@@ -2257,21 +2257,19 @@ impl WinitApp {
             }),
             tze_hud_input::FocusOwner::None | tze_hud_input::FocusOwner::ChromeElement(_) => None,
         });
-        let draft_chars = if self.state.input_processor.is_composer_active() {
-            self.state
-                .input_processor
-                .composer_draft_chars()
-                .unwrap_or(0)
-        } else {
-            0
-        };
+        let drafts = self
+            .state
+            .input_processor
+            .composer_drafts()
+            .map(|(node, draft)| (node, draft.text().chars().count()))
+            .collect();
         *self
             .state
             .surface_ui
             .lock()
             .unwrap_or_else(|e| e.into_inner()) = crate::operator::surface_status::UiMirror {
             focus: ring_owner.as_ref().map(|o| (o.tile_id, o.node_id)),
-            draft_chars,
+            drafts,
             reading: self.reading_ui(),
             hover_targets: self
                 .state
@@ -2288,6 +2286,32 @@ impl WinitApp {
         };
         if let Ok(mut slot) = self.state.focus_ring_owner_state.lock() {
             *slot = ring_owner;
+        }
+    }
+
+    /// Send the compositor the kept drafts of unfocused composers when that set
+    /// changes, from the same reading as `draft_chars`; idle sends nothing.
+    pub(super) fn push_kept_composer_drafts(&mut self) {
+        let focused = self.state.input_processor.composer_focused_node();
+        let ip = &self.state.input_processor;
+        let kept = || {
+            ip.composer_drafts()
+                .filter(|(node, _)| Some(*node) != focused)
+        };
+        let drawn = &self.state.kept_drafts_drawn;
+        if kept().count() == drawn.len()
+            && kept()
+                .all(|(node, draft)| drawn.iter().any(|(n, t)| *n == node && t == draft.text()))
+        {
+            return;
+        }
+        let kept: Vec<_> = kept().map(|(n, d)| (n, d.text().to_owned())).collect();
+        self.state.kept_drafts_drawn = kept.clone();
+        if let Ok(mut slot) = self.state.kept_composer_drafts_state.lock() {
+            *slot = Some(kept);
+        }
+        if let Some(window) = &self.state.window {
+            window.request_redraw();
         }
     }
 

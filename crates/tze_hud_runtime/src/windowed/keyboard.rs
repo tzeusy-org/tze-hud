@@ -224,6 +224,30 @@ fn keyboard_page_scroll_delta(raw: &RawKeyDownEvent) -> Option<f32> {
     }
 }
 
+/// Home, End, Space and Shift+Space while OUTPUT holds reading focus.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum ReadingScroll {
+    Top,
+    Tail,
+    Page(f32),
+}
+
+fn reading_scroll_key(raw: &RawKeyDownEvent) -> Option<ReadingScroll> {
+    let m = &raw.modifiers;
+    if m.ctrl || m.alt || m.meta {
+        return None;
+    }
+    let page = tze_hud_input::KEYBOARD_PAGE_SCROLL_PX;
+    match (raw.key_code.as_str(), raw.key.as_str()) {
+        ("Home", _) | (_, "Home") => Some(ReadingScroll::Top),
+        ("End", _) | (_, "End") => Some(ReadingScroll::Tail),
+        ("Space", _) | (_, " " | "Space") => {
+            Some(ReadingScroll::Page(if m.shift { -page } else { page }))
+        }
+        _ => None,
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CommandDispatchOutcome {
     Done,
@@ -800,7 +824,7 @@ impl WinitApp {
         //     following Character event (dispatch_character_event_inner).
         // Gated on `!is_composer_active()` so normal composer editing (where the
         // composer is the focus sink) is untouched — Enter submits, Space types,
-        // Escape cancels there, all handled by the intercept below.
+        // Escape leaves (keeping the draft), all handled by the intercept below.
         if !self.state.input_processor.is_composer_active() {
             match self.portal_key_focus(tab_id) {
                 PortalKeyFocus::Busy => {
@@ -870,41 +894,40 @@ impl WinitApp {
 
         // ── Composer draft intercept ──────────────────────────────
         if self.state.input_processor.is_composer_active() {
-            if is_escape_key(&raw.key, &raw.key_code)
-                && !raw.modifiers.ctrl
-                && !raw.modifiers.alt
-                && !raw.modifiers.meta
-                && let Some((text, cursor, anchor, ..)) =
-                    self.state.input_processor.composer_draft_snapshot()
-            {
-                if cursor != anchor {
-                    self.state
-                        .input_processor
-                        .route_pointer_selection_to_composer(cursor, cursor);
-                    self.push_local_composer_echo(Instant::now());
+            // Every Escape stops here and never changes draft text: a bare one
+            // collapses a selection, else leaves, keeping the draft for refocus.
+            if is_escape_key(&raw.key, &raw.key_code) {
+                let modified = raw.modifiers.ctrl || raw.modifiers.alt || raw.modifiers.meta;
+                let selection_caret = self
+                    .state
+                    .input_processor
+                    .composer_draft_snapshot()
+                    .and_then(|(_, cursor, anchor, ..)| (cursor != anchor).then_some(cursor));
+                if modified || selection_caret.is_some() {
+                    if let Some(cursor) = selection_caret.filter(|_| !modified) {
+                        self.state
+                            .input_processor
+                            .route_pointer_selection_to_composer(cursor, cursor);
+                        self.push_local_composer_echo(Instant::now());
+                    }
                     self.state
                         .notification_keydowns
                         .insert(keyboard_key_identity(&raw.key_code, &raw.key));
                     return;
                 }
-                if text.is_empty() {
-                    let command =
-                        keyboard_command(raw, self.state.focus_manager.current_owner(tab_id))
-                            .expect("bare Escape is a cancel binding");
-                    match self.try_escape_clear_focus(tab_id, &command) {
-                        EscapeClearOutcome::Busy => self
-                            .state
-                            .pending_keyboard_events
-                            .push_back(PendingKeyboardEvent::KeyDown(raw.clone())),
-                        _ => {
-                            self.clear_local_composer_echo();
-                            self.return_focus_after_key(raw);
-                        }
+                let command = keyboard_command(raw, self.state.focus_manager.current_owner(tab_id))
+                    .expect("bare Escape is a cancel binding");
+                match self.try_escape_clear_focus(tab_id, &command) {
+                    EscapeClearOutcome::Busy => self
+                        .state
+                        .pending_keyboard_events
+                        .push_back(PendingKeyboardEvent::KeyDown(raw.clone())),
+                    _ => {
+                        self.clear_local_composer_echo();
+                        self.return_focus_after_key(raw);
                     }
-                    return;
                 }
-                // A nonempty draft is an inner cancellation. The next Esc,
-                // on the empty editor, performs the outer native focus return.
+                return;
             }
             let history_tile_id = match self.composer_target_for_tab(tab_id) {
                 ComposerTargetLookup::Ready(tile_id) => Some(tile_id),
@@ -957,11 +980,8 @@ impl WinitApp {
                 raw.modifiers.ctrl,
                 raw.modifiers.alt,
             );
-            let key_down_is_terminal = matches!(
-                outcome,
-                tze_hud_input::ComposerOutcome::Submitted(_)
-                    | tze_hud_input::ComposerOutcome::Cancelled
-            );
+            let key_down_is_terminal =
+                matches!(outcome, tze_hud_input::ComposerOutcome::Submitted(_));
             if let tze_hud_input::ComposerOutcome::Submitted(text) = outcome
                 && let Some(tile_id) = history_tile_id
             {
@@ -971,11 +991,6 @@ impl WinitApp {
                 self.clear_local_composer_echo();
             }
             if consumed {
-                if is_escape_key(&raw.key, &raw.key_code) {
-                    self.state
-                        .notification_keydowns
-                        .insert(keyboard_key_identity(&raw.key_code, &raw.key));
-                }
                 tracing::debug!(
                     key_code = %str_preview(&raw.key_code),
                     "composer: KeyDown consumed by draft manager"
@@ -1472,10 +1487,28 @@ impl WinitApp {
             }
             _ => None,
         };
+        // OUTPUT reading focus: a selection (it takes it from the caret), a
+        // focused link or Copy stop, or the focused portal tile.
+        let reading_tile = reader.selection.map(|s| s.tile).or(focused).or(
+            match self.state.focus_manager.current_owner(tab_id) {
+                tze_hud_input::FocusOwner::Tile(tile)
+                    if self
+                        .state
+                        .input_processor
+                        .portal_output_layout(*tile)
+                        .is_some() =>
+                {
+                    Some(*tile)
+                }
+                _ => None,
+            },
+        );
+        let scroll = reading_scroll_key(raw).zip(reading_tile);
         let relevant = (copy && reader.selection.is_some())
             || (escape && (reader.selection.is_some() || focused.is_some()))
             || (tab && (focused.is_some() || (entry.is_some() && !m.shift)))
-            || focused.is_some();
+            || focused.is_some()
+            || scroll.is_some();
         if !relevant {
             return Ok(false);
         }
@@ -1500,6 +1533,16 @@ impl WinitApp {
                 }
             } else if let (true, Some(tile)) = (activate, focused) {
                 effect = ip.output_activate(tile, &mut scene, Instant::now());
+                true
+            } else if let Some((scroll, tile)) = scroll {
+                // Unmoved OUTPUT changes nothing, so no frame is drawn.
+                match scroll {
+                    ReadingScroll::Top => ip.scroll_tile_to_top(tile, &mut scene),
+                    ReadingScroll::Tail => ip.reset_tile_scroll_to_tail(tile, &mut scene),
+                    ReadingScroll::Page(dy) => {
+                        ip.process_keyboard_scroll(tile, dy, &mut scene).is_some()
+                    }
+                };
                 true
             } else {
                 // Any other key leaves the reading stop; typing reaches the composer.
@@ -2317,9 +2360,54 @@ mod tests {
     use tze_hud_scene::{MonoUs, SceneId};
 
     use super::{
-        PendingKeyboardEvent, drain_keyboard_queue_bounded, is_bare_tab_chord, keyboard_command,
-        restore_front_requeued_event,
+        PendingKeyboardEvent, ReadingScroll, drain_keyboard_queue_bounded, is_bare_tab_chord,
+        keyboard_command, reading_scroll_key, restore_front_requeued_event,
     };
+
+    /// hud-ohgc9.4 R4.2: the OUTPUT reading keys and their page step; any
+    /// Ctrl/Alt/Meta chord, and every other key, stays out of the map.
+    #[test]
+    fn reading_scroll_keys_map_home_end_and_space_pages() {
+        let page = tze_hud_input::KEYBOARD_PAGE_SCROLL_PX;
+        let none = KeyboardModifiers::NONE;
+        let shift = KeyboardModifiers {
+            shift: true,
+            ..none
+        };
+        let ctrl = KeyboardModifiers { ctrl: true, ..none };
+        let alt = KeyboardModifiers { alt: true, ..none };
+        let meta = KeyboardModifiers { meta: true, ..none };
+        for (key_code, key, modifiers, expected) in [
+            ("Home", "Home", none, Some(ReadingScroll::Top)),
+            ("End", "End", none, Some(ReadingScroll::Tail)),
+            ("Space", " ", none, Some(ReadingScroll::Page(page))),
+            ("Space", " ", shift, Some(ReadingScroll::Page(-page))),
+            (
+                "Unidentified",
+                "Space",
+                none,
+                Some(ReadingScroll::Page(page)),
+            ),
+            ("Home", "Home", ctrl, None),
+            ("End", "End", alt, None),
+            ("Space", " ", meta, None),
+            ("PageDown", "PageDown", none, None),
+            ("KeyA", "a", none, None),
+        ] {
+            let raw = RawKeyDownEvent {
+                key_code: key_code.to_string(),
+                key: key.to_string(),
+                modifiers,
+                repeat: false,
+                timestamp_mono_us: MonoUs(1),
+            };
+            assert_eq!(
+                reading_scroll_key(&raw),
+                expected,
+                "{key_code} {modifiers:?}"
+            );
+        }
+    }
 
     fn command_binding(
         key_code: &str,
@@ -3720,7 +3808,7 @@ mod tests {
         let ready = handle.input_notify("test-agent").unwrap();
         let mut notified = std::pin::pin!(ready.notified());
         assert!(!notified.as_mut().enable());
-        for key in ["Enter", "Space", "Enter", "Escape"] {
+        for key in ["Enter", "Space", "Enter", "Backspace"] {
             app.dispatch_key_down_event_inner(
                 &RawKeyDownEvent {
                     key_code: key.into(),
@@ -3749,14 +3837,10 @@ mod tests {
                 .0,
             ""
         );
-        assert!(matches!(
-            *app.state.local_composer_state.lock().unwrap(),
-            Some(None)
-        ));
         app.submit_composer_reply(SceneId::new(), "not a portal".into());
         assert!(
             !notified.as_mut().enable(),
-            "repeat/whitespace/cancel/nonportal signal no accepted input"
+            "repeat/whitespace/nonportal signal no accepted input"
         );
         let shared = app.state.shared_state.try_lock().unwrap();
         let scene = shared.scene.try_lock().unwrap();
@@ -3887,7 +3971,7 @@ mod tests {
         );
         let mut notified = std::pin::pin!(ready.notified());
         assert!(!notified.as_mut().enable());
-        for key in ["Enter", "Space", "Enter", "Escape"] {
+        for key in ["Enter", "Space", "Enter", "Backspace"] {
             app.dispatch_key_down_event_inner(
                 &RawKeyDownEvent {
                     key_code: key.into(),
@@ -4177,7 +4261,13 @@ mod tests {
             );
             assert_eq!(
                 status[0]["input"]["draft_chars"],
-                app.state.input_processor.composer_draft_chars().unwrap()
+                app.state
+                    .input_processor
+                    .composer_draft_snapshot()
+                    .unwrap()
+                    .0
+                    .chars()
+                    .count()
             );
             assert_eq!(status[0]["output"]["at_tail"], false);
             assert_eq!(scene.tile_scroll_offset_local(tile_id), output_before);

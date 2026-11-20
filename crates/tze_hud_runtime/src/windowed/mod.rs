@@ -570,6 +570,10 @@ struct WindowedRuntimeState {
     /// IME composition in progress for the focused composer (hud-ljhku.13),
     /// forwarded with each echo snapshot; never part of the draft.
     composer_preedit: Option<tze_hud_compositor::ComposerPreedit>,
+    /// Kept drafts of unfocused composers for the compositor to draw, and the
+    /// set last sent there (sent again only when it changes).
+    kept_composer_drafts_state: tze_hud_compositor::KeptComposerDraftsHandle,
+    kept_drafts_drawn: Vec<(tze_hud_scene::SceneId, String)>,
     /// Shared handle carrying the current keyboard-focus owner to the compositor's
     /// chrome-layer ring pass. Written each frame in `about_to_wait`
     /// from the active tab's `FocusManager` owner; the compositor draws the ring
@@ -899,6 +903,7 @@ impl WinitApp {
         // so geometry changes (resize/drag) stay fresh without a focus event.
         self.clear_focus_on_removed_tile();
         self.push_focus_ring_owner();
+        self.push_kept_composer_drafts();
         // Publish the resize-grip hover target: when the pointer sits
         // over the focused portal's bottom-right resize corner, the compositor
         // lights that tile's grip in hover_color. Same per-frame + latest-wins
@@ -1494,6 +1499,8 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         // additional allocations or locks on the hot path.
         self.state.local_composer_state = Arc::clone(&compositor.local_composer_state);
         self.state.focus_ring_owner_state = Arc::clone(&compositor.focus_ring_owner_state);
+        self.state.kept_composer_drafts_state = Arc::clone(&compositor.kept_composer_drafts_state);
+        self.state.kept_drafts_drawn.clear();
         self.state.resize_grip_hover_state = Arc::clone(&compositor.resize_grip_hover_state);
         self.state.tile_close_hover_state = Arc::clone(&compositor.tile_close_hover_state);
         self.state.drag_handle_hover_state = Arc::clone(&compositor.drag_handle_hover_state);
@@ -3332,6 +3339,8 @@ impl WindowedRuntime {
             // compositor.  Separate Arc so it works before compositor is created.
             local_composer_state: Arc::new(StdMutex::new(None)),
             composer_preedit: None,
+            kept_composer_drafts_state: Arc::new(StdMutex::new(None)),
+            kept_drafts_drawn: Vec::new(),
             focus_ring_owner_state: Arc::new(StdMutex::new(None)),
             surface_ui,
             // Placeholder; replaced in resumed() with the compositor's Arc.

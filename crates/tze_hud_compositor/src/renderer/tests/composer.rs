@@ -1,5 +1,14 @@
 use super::*;
 
+/// The focused echo with its primed layout, as the frame draws it.
+fn focused(compositor: &Compositor) -> (&LocalComposerState, image_cache::ComposerLayout) {
+    let cs = compositor
+        .local_composer
+        .as_ref()
+        .expect("focused composer");
+    (cs, compositor.composer_layout)
+}
+
 // ──: composer echo local render tests ───────────────────────────
 
 /// `LocalComposerStateHandle` slot semantics:
@@ -145,7 +154,7 @@ async fn local_composer_text_item_uses_hit_region_bounds() {
     let tokens = resolve_composer_overlay_tokens(&std::collections::HashMap::new());
     let tile = scene.tiles.get(&tile_id).unwrap();
     let item = compositor
-        .collect_composer_text_item(tile, &scene, 320.0, 200.0, &tokens)
+        .collect_composer_text_item(focused(&compositor), tile, &scene, 320.0, 200.0, &tokens)
         .expect("focused composer HitRegion must produce a text item");
 
     // The composer echo is confined to a single input-line strip pinned to the
@@ -182,6 +191,82 @@ async fn local_composer_text_item_uses_hit_region_bounds() {
         item.clip_bounds_height, strip_height,
         "clip height must be one input-line strip, not the full region height"
     );
+}
+
+/// A kept draft (hud-ohgc9.4 Q2) is drawn as text in its own unfocused
+/// composer, once, with no caret or selection; refocusing that composer draws
+/// only the focused echo, and an unchanged kept set asks for no frame.
+#[tokio::test]
+async fn kept_draft_draws_in_its_unfocused_composer_without_caret() {
+    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(320, 200).await);
+    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+    let mut scene = SceneGraph::new(320.0, 200.0);
+    let tab_id = scene.create_tab("test", 0).unwrap();
+    let lease_id = scene.grant_lease("test", 60_000);
+    let tile_id = scene
+        .create_tile(
+            tab_id,
+            "test",
+            lease_id,
+            Rect::new(20.0, 30.0, 200.0, 120.0),
+            1,
+        )
+        .unwrap();
+    let hit_id = SceneId::new();
+    scene
+        .set_tile_root(
+            tile_id,
+            Node {
+                layout: Default::default(),
+                id: hit_id,
+                children: vec![],
+                data: NodeData::HitRegion(HitRegionNode {
+                    bounds: Rect::new(12.0, 16.0, 140.0, 72.0),
+                    interaction_id: "composer".to_owned(),
+                    accepts_focus: true,
+                    accepts_pointer: true,
+                    accepts_composer_input: true,
+                    ..Default::default()
+                }),
+            },
+        )
+        .unwrap();
+    let drafts = |c: &Compositor, scene: &SceneGraph| -> Vec<String> {
+        c.collect_text_items(scene, 320.0, 200.0)
+            .into_iter()
+            .filter(|i| i.text.contains("half a reply"))
+            .map(|i| i.text.to_string())
+            .collect()
+    };
+
+    *compositor.kept_composer_drafts_state.lock().unwrap() =
+        Some(vec![(hit_id, "half a reply".to_owned())]);
+    assert!(compositor.drain_local_composer_and_needs_render());
+    assert!(
+        !compositor.drain_local_composer_and_needs_render(),
+        "an unchanged kept set draws no frame"
+    );
+    assert_eq!(drafts(&compositor, &scene), ["half a reply"]);
+    let (kept, layout) = compositor.drawn_composers().next().unwrap();
+    assert_eq!(kept.cursor_byte, kept.selection_anchor, "no selection");
+    assert!(!layout.wrap, "one unscrolled line");
+    let mut verts = Vec::new();
+    compositor.append_composer_caret_vertices(&scene, &mut verts, 320.0, 200.0);
+    assert!(verts.is_empty(), "a kept draft has no caret");
+
+    // Refocused: the focused echo alone draws this composer.
+    compositor.local_composer = Some(LocalComposerState {
+        text: "half a reply".to_owned(),
+        cursor_byte: 4,
+        selection_anchor: 4,
+        at_capacity: false,
+        node_id: hit_id,
+        placeholder: None,
+        preedit: None,
+        preedit_range: None,
+    });
+    assert_eq!(compositor.drawn_composers().count(), 1);
+    assert_eq!(drafts(&compositor, &scene).len(), 1);
 }
 
 /// an EMPTY composer draft with a placeholder hint renders that hint
@@ -271,7 +356,7 @@ async fn composer_placeholder_renders_only_when_draft_empty() {
     });
     let tile = scene.tiles.get(&tile_id).unwrap();
     let item = compositor
-        .collect_composer_text_item(tile, &scene, 320.0, 200.0, &tokens)
+        .collect_composer_text_item(focused(&compositor), tile, &scene, 320.0, 200.0, &tokens)
         .expect("empty focused composer with a placeholder must still produce a text item");
     assert_eq!(
         item.text.as_ref(),
@@ -300,7 +385,7 @@ async fn composer_placeholder_renders_only_when_draft_empty() {
     });
     let tile = scene.tiles.get(&tile_id).unwrap();
     let typed = compositor
-        .collect_composer_text_item(tile, &scene, 320.0, 200.0, &tokens)
+        .collect_composer_text_item(focused(&compositor), tile, &scene, 320.0, 200.0, &tokens)
         .expect("non-empty composer must produce a text item");
     assert!(
         typed.text.contains("hi"),
@@ -330,7 +415,7 @@ async fn composer_placeholder_renders_only_when_draft_empty() {
     });
     let tile = scene.tiles.get(&tile_id).unwrap();
     let no_hint = compositor
-        .collect_composer_text_item(tile, &scene, 320.0, 200.0, &tokens)
+        .collect_composer_text_item(focused(&compositor), tile, &scene, 320.0, 200.0, &tokens)
         .expect("empty composer without a placeholder must still produce a text item");
     assert_ne!(
         no_hint.text.as_ref(),
@@ -862,7 +947,7 @@ async fn composer_draft_text_never_contains_caret_glyph() {
 
     // Blink "on" phase (fresh compositor → elapsed == 0 → solid).
     let on = compositor
-        .collect_composer_text_item(tile, &scene, 320.0, 200.0, &tokens)
+        .collect_composer_text_item(focused(&compositor), tile, &scene, 320.0, 200.0, &tokens)
         .expect("focused composer must produce a text item");
     assert!(
         !on.text.contains('▌'),
@@ -880,7 +965,7 @@ async fn composer_draft_text_never_contains_caret_glyph() {
         .checked_sub(CARET_BLINK_HALF_PERIOD)
         .expect("test clock must have enough uptime to rewind one half-period");
     let off = compositor
-        .collect_composer_text_item(tile, &scene, 320.0, 200.0, &tokens)
+        .collect_composer_text_item(focused(&compositor), tile, &scene, 320.0, 200.0, &tokens)
         .expect("focused composer must produce a text item");
     assert!(
         !off.text.contains('▌'),
@@ -1093,7 +1178,7 @@ async fn composer_preedit_drawn_underlined_at_caret() {
     let tokens = resolve_composer_overlay_tokens(&compositor.token_map);
     let tile = scene.tiles.get(&tile_id).unwrap();
     let item = compositor
-        .collect_composer_text_item(tile, &scene, 320.0, 200.0, &tokens)
+        .collect_composer_text_item(focused(&compositor), tile, &scene, 320.0, 200.0, &tokens)
         .expect("composer text item");
     assert_eq!(item.text.as_ref(), "abかん", "preedit drawn at the caret");
 
@@ -1148,7 +1233,7 @@ async fn composer_preedit_drawn_underlined_at_caret() {
     // Cancelling the composition clears the drawn preedit and its underline.
     push(&mut compositor, draft(None));
     let item = compositor
-        .collect_composer_text_item(tile, &scene, 320.0, 200.0, &tokens)
+        .collect_composer_text_item(focused(&compositor), tile, &scene, 320.0, 200.0, &tokens)
         .expect("composer text item");
     assert_eq!(item.text.as_ref(), "ab");
     verts.clear();
@@ -1183,7 +1268,7 @@ async fn composer_selection_styled_run_uses_raw_byte_offsets() {
             preedit_range: None,
         });
         let item = compositor
-            .collect_composer_text_item(tile, &scene, 320.0, 200.0, &tokens)
+            .collect_composer_text_item(focused(&compositor), tile, &scene, 320.0, 200.0, &tokens)
             .expect("focused composer with a selection must produce a text item");
         assert_eq!(
             item.styled_runs.len(),
@@ -1225,7 +1310,7 @@ async fn composer_selection_styled_run_uses_raw_byte_offsets() {
         preedit_range: None,
     });
     let item = compositor
-        .collect_composer_text_item(tile, &scene, 320.0, 200.0, &tokens)
+        .collect_composer_text_item(focused(&compositor), tile, &scene, 320.0, 200.0, &tokens)
         .expect("focused composer must produce a text item");
     assert!(
         item.styled_runs.is_empty(),
@@ -1929,7 +2014,7 @@ async fn top_anchored_empty_caret_sits_at_pane_origin_no_teleport() {
     let empty_item = {
         let tile = scene.tiles.get(&tile_id).unwrap();
         compositor
-            .collect_composer_text_item(tile, &scene, 600.0, 400.0, &tokens)
+            .collect_composer_text_item(focused(&compositor), tile, &scene, 600.0, 400.0, &tokens)
             .expect("empty focused composer must still produce a caret text item")
     };
     assert!(
@@ -1958,7 +2043,7 @@ async fn top_anchored_empty_caret_sits_at_pane_origin_no_teleport() {
     let typed_item = {
         let tile = scene.tiles.get(&tile_id).unwrap();
         compositor
-            .collect_composer_text_item(tile, &scene, 600.0, 400.0, &tokens)
+            .collect_composer_text_item(focused(&compositor), tile, &scene, 600.0, 400.0, &tokens)
             .expect("typed composer must produce a text item")
     };
     assert!(

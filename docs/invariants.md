@@ -212,8 +212,8 @@ unanswered callback card. No target is a no-op; safe mode still captures input.
 Its digits 1–4, arrows, Tab/Shift+Tab and Enter/Space cannot retarget stale
 publications or leak text/repeats/releases to an editor. URL digits keep the
 existing per-action two-second limiter and card lifetime. Chord hints reserve
-geometry in both states. Esc removes only the innermost selection, draft or
-nested card/control state before an outer exit. An owned HWND handoff retains
+geometry in both states. Esc removes only the innermost selection or
+nested card/control state before an outer exit; it never removes draft text. An owned HWND handoff retains
 card focus; an external loss cancels it. A running panel yields to an explicit
 answer request only after a question is found, without restoring the origin
 underneath the card.
@@ -318,10 +318,14 @@ key releases; deferred cleanup also settles before a returned Character event.
 covers traversal, activation, hidden controls and focus return.
 
 Portal composer edits stay local; accepted submissions alone atomically enter
-input and native reply history. Repeated empty Enter, whitespace, cancel,
+input and native reply history. Repeated empty Enter, whitespace, Esc,
 unknown tiles and rejected submits add neither accepted input nor readiness.
-Blur retains at most one keyed draft: an empty peer preserves it, a nonempty
-peer replaces it, and removed nodes cannot revive saved text. Focus and the
+Blur and Esc keep each composer's nonempty draft (hud-ohgc9.4): a peer's
+draft never displaces it, the unfocused draft is drawn without a caret and
+reported by length only, and removed nodes cannot revive saved text. No Escape
+key or command reaches an agent while a composer is active
+([`bare_escape_in_composer_never_reaches_agent`](../crates/tze_hud_runtime/src/windowed/event_loop_harness.rs),
+[`portal_escape_keeps_draft_and_reading_keys_scroll_output`](../crates/tze_hud_runtime/src/windowed/event_loop_harness.rs)). Focus and the
 unsent draft survive portal re-renders (sends and streamed output): a tile keeps
 one composer node across root replacements. Regression owners:
 [`manager_draft_persists_across_focus_loss_and_restores`](../crates/tze_hud_input/src/composer_draft.rs),

@@ -51,7 +51,7 @@ use super::token_colors::{
     resolve_section_gap_px, resolve_tile_bg_token, resolve_tile_close_tokens,
     resolve_tile_spacing_tokens, srgb_to_linear, tile_close_button_bounds,
 };
-use super::{Compositor, CompositorDegradationPolicy};
+use super::{Compositor, CompositorDegradationPolicy, LocalComposerState};
 
 fn hit_region_tint(
     region: &HitRegionNode,
@@ -1068,10 +1068,10 @@ impl Compositor {
         Some((bar_w, color))
     }
 
-    /// Emit geometry for the local composer echo overlay.
+    /// Emit geometry for the local composer echo overlay and each kept draft.
     ///
-    /// Called from the tile loop (after the content pass) when
-    /// `self.local_composer` is `Some` and the state's `node_id` belongs to a
+    /// Called from the tile loop (after the content pass) for every drawn
+    /// composer ([`Self::drawn_composers`]) whose `node_id` belongs to a
     /// `HitRegionNode` with `accepts_composer_input = true` inside the given
     /// tile.  If no matching node is found in the tile the call is a no-op.
     ///
@@ -1092,59 +1092,57 @@ impl Compositor {
         sh: f32,
         tokens: &ComposerOverlayTokens,
     ) {
-        let Some(ref cs) = self.local_composer else {
-            return;
-        };
+        for (cs, layout) in self.drawn_composers() {
+            let Some(region) = Self::composer_region_bounds(tile, scene, cs.node_id) else {
+                continue;
+            };
+            // Confine the composer chrome to the input box so it does not paint over
+            // the whole portal. The box grows upward with the wrapped-line
+            // count primed into `composer_layout`; `visible_lines == 1`
+            // keeps the single-line strip. Kept in lockstep with
+            // `collect_composer_text_item`, which anchors the draft to the same box.
+            let line_height_multiplier =
+                crate::markdown::MarkdownTokens::default().line_height_multiplier;
+            let font_size_px = self.scaled_portal_font(tokens.font_size_px, tile.id, scene);
+            let input_box = Self::composer_input_box(
+                region,
+                font_size_px,
+                line_height_multiplier,
+                layout.visible_lines,
+                tokens.anchor,
+                tokens.content_inset_px,
+            );
 
-        let Some(region) = Self::composer_region_bounds(tile, scene, cs.node_id) else {
-            return;
-        };
-        // Confine the composer chrome to the input box so it does not paint over
-        // the whole portal. The box grows upward with the wrapped-line
-        // count primed into `composer_layout`; `visible_lines == 1`
-        // keeps the single-line strip. Kept in lockstep with
-        // `collect_composer_text_item`, which anchors the draft to the same box.
-        let line_height_multiplier =
-            crate::markdown::MarkdownTokens::default().line_height_multiplier;
-        let font_size_px = self.scaled_portal_font(tokens.font_size_px, tile.id, scene);
-        let input_box = Self::composer_input_box(
-            region,
-            font_size_px,
-            line_height_multiplier,
-            self.composer_layout.visible_lines,
-            tokens.anchor,
-            tokens.content_inset_px,
-        );
-
-        // Background fill.
-        let bg_color = [tokens.bg_r, tokens.bg_g, tokens.bg_b, tokens.bg_a];
-        vertices.extend_from_slice(&rect_vertices(
-            input_box.x,
-            input_box.y,
-            input_box.width,
-            input_box.height,
-            sw,
-            sh,
-            bg_color,
-        ));
-
-        // At-capacity left-edge accent (2px wide, full box height).
-        if cs.at_capacity {
-            let accent = [
-                tokens.at_capacity_r,
-                tokens.at_capacity_g,
-                tokens.at_capacity_b,
-                tokens.at_capacity_a,
-            ];
+            // Background fill.
+            let bg_color = [tokens.bg_r, tokens.bg_g, tokens.bg_b, tokens.bg_a];
             vertices.extend_from_slice(&rect_vertices(
                 input_box.x,
                 input_box.y,
-                2.0,
+                input_box.width,
                 input_box.height,
                 sw,
                 sh,
-                accent,
+                bg_color,
             ));
+
+            // At-capacity left-edge accent (2px wide, full box height).
+            if cs.at_capacity {
+                let accent = [
+                    tokens.at_capacity_r,
+                    tokens.at_capacity_g,
+                    tokens.at_capacity_b,
+                    tokens.at_capacity_a,
+                ];
+                vertices.extend_from_slice(&rect_vertices(
+                    input_box.x,
+                    input_box.y,
+                    2.0,
+                    input_box.height,
+                    sw,
+                    sh,
+                    accent,
+                ));
+            }
         }
     }
 
@@ -1483,16 +1481,15 @@ impl Compositor {
     /// interior lines.
     pub(super) fn collect_composer_text_item(
         &self,
+        (cs, layout): (&LocalComposerState, ComposerLayout),
         tile: &Tile,
         scene: &SceneGraph,
         sw: f32,
         sh: f32,
         tokens: &ComposerOverlayTokens,
     ) -> Option<crate::text::TextItem> {
-        let cs = self.local_composer.as_ref()?;
         self.text_rasterizer.as_ref()?;
         let region = Self::composer_region_bounds(tile, scene, cs.node_id)?;
-        let layout = self.composer_layout;
         let font_size_px = self.scaled_portal_font(tokens.font_size_px, tile.id, scene);
         // The full HitRegion spans the whole portal (click-anywhere-to-focus,
         // ); confine the rendered draft to the input box at its bottom

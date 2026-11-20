@@ -988,11 +988,13 @@ impl super::Compositor {
         // Inject a TextItem for the local composer draft + caret glyph on top of
         // the composer-active tile.  The background geometry is handled in
         // render_composer_overlay / render_frame tile loop.
-        if self.local_composer.is_some() {
-            let composer_tokens = resolve_composer_overlay_tokens(&self.token_map);
-            for tile in &Self::sort_tiles_with_drag_boost(self.policy_visible_tiles(scene), scene) {
+        // Kept drafts of unfocused composers draw the same way, without caret.
+        let composer_tokens = resolve_composer_overlay_tokens(&self.token_map);
+        let tiles = Self::sort_tiles_with_drag_boost(self.policy_visible_tiles(scene), scene);
+        for composer in self.drawn_composers() {
+            for tile in &tiles {
                 if let Some(mut text_item) =
-                    self.collect_composer_text_item(tile, scene, sw, sh, &composer_tokens)
+                    self.collect_composer_text_item(composer, tile, scene, sw, sh, &composer_tokens)
                 {
                     // Fold the whole-tile opacity into the composer draft so it
                     // fades with (and vanishes alongside) the tile backdrop

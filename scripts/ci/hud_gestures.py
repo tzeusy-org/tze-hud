@@ -882,7 +882,8 @@ def scenario_badge_opaque(run: Run) -> None:
 
 
 def scenario_composer(run: Run) -> None:
-    """6. Hover, click focus, local echo, exact submit, a second send, typing while output streams."""
+    """6. Hover, click focus, local echo, exact submit, a second send, typing while output streams,
+    and Escape keeping the draft for one exact send after refocus (hud-ohgc9.4)."""
     s = "portal:g-composer"
     open_portal(run, s, "c", count=10, expects_reply=True)
     run.point(f"{s}/composer")
@@ -910,6 +911,19 @@ def scenario_composer(run: Run) -> None:
     run.expect("draft survives streamed output",
                on(s, lambda p: p["focus"] == "composer" and p["input"]["draft_chars"] == 3
                   and (p["output"]["last_visible_line"] or "").startswith("streamed 2")))
+    run.key("Escape")
+    run.expect("one Escape leaves and keeps the draft",
+               on(s, lambda p: p["focus"] == "none" and p["input"]["draft_chars"] == 3))
+    if items := run.inputs():
+        raise ScenarioFailed("Escape sends nothing", {"items": items})
+    run.point(f"{s}/composer")
+    run.click()
+    run.expect("refocus restores the kept draft",
+               on(s, lambda p: p["focus"] == "composer" and p["input"]["draft_chars"] == 3))
+    run.key("Return")
+    items = run.take(1)
+    if [i.get("text") for i in items] != ["abc"]:
+        raise ScenarioFailed("Enter sends the kept text once", {"items": items})
 
 
 def scenario_keyboard(run: Run) -> None:
@@ -1230,6 +1244,17 @@ def scenario_portal_reading(run: Run) -> None:
         text = (WIN.clipboard_text() or "").replace("\r\n", "\n")  # CF_UNICODETEXT is CRLF
         if not ("\nLine four words words words words\n" in text and len(text) == portal_entry(selected, s)["selection_chars"]):
             raise ScenarioFailed("the clipboard holds the three selected lines", {"chars": len(text)})
+    # hud-ohgc9.4 R4.2: the selection holds reading focus, so Home and End scroll
+    # OUTPUT (first and last lines visible) and keep the selection.
+    chars = portal_entry(selected, s)["selection_chars"]
+    run.key("Home")
+    run.expect("Home shows the first OUTPUT line",
+               on(s, lambda p: (p["output"]["first_visible_line"] or "").startswith("alpha")
+                  and p["selection_chars"] == chars))
+    run.key("End")
+    run.expect("End shows the last OUTPUT line",
+               on(s, lambda p: (p["output"]["last_visible_line"] or "").startswith("Line five")
+                  and p["selection_chars"] == chars))
     run.key("Escape")
     run.expect("selection cleared", on(s, lambda p: p["selection_chars"] == 0))
 
