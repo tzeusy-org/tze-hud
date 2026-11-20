@@ -1766,6 +1766,42 @@ mod tests {
     }
 
     impl CaptureRenderHarness {
+        /// A networked runtime over a software compositor at the window size.
+        async fn boot(
+            cfg: super::super::WindowedConfig,
+            clock: Arc<tze_hud_scene::clock::TestClock>,
+        ) -> Self {
+            let size = (cfg.window.width, cfg.window.height);
+            let mut compositor = tze_hud_compositor::Compositor::new_headless(size.0, size.1)
+                .await
+                .expect("software compositor for real frame builds");
+            compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+            let events = HeadlessEventLoopHarness::with_network(cfg, clock)
+                .await
+                .unwrap();
+            let frames = super::super::frame_work::WindowedFrameWork::new(
+                events.app.state.wake.clone(),
+                events.app.state.frame_ready_tx.as_ref().unwrap().clone(),
+            );
+            Self {
+                events,
+                compositor,
+                frames,
+                pending_texture: false,
+                size,
+            }
+        }
+
+        /// Fades run on the wall clock; pace turns like frames until idle.
+        fn settle(&mut self, clock: &tze_hud_scene::clock::TestClock) {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            while self.turn(true) {
+                assert!(std::time::Instant::now() < deadline, "portal never settled");
+                clock.advance(16);
+                std::thread::sleep(std::time::Duration::from_millis(16));
+            }
+        }
+
         fn turn(&mut self, primary_succeeds: bool) -> bool {
             self.turn_with_present(primary_succeeds, true)
         }
@@ -1842,10 +1878,6 @@ mod tests {
         use tze_hud_scene::clock::TestClock;
 
         let _gpu = crate::test_support::lock_headless_runtime().await;
-        let mut compositor = tze_hud_compositor::Compositor::new_headless(640, 480)
-            .await
-            .expect("software compositor for real frame builds");
-        compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
         let clock = Arc::new(TestClock::new(1_000));
         let mut cfg = super::super::WindowedConfig::default();
         cfg.window.width = 640;
@@ -1855,20 +1887,7 @@ mod tests {
             .directory()
             .unwrap()
             .shared();
-        let events = HeadlessEventLoopHarness::with_network(cfg, clock.clone())
-            .await
-            .unwrap();
-        let frames = super::super::frame_work::WindowedFrameWork::new(
-            events.app.state.wake.clone(),
-            events.app.state.frame_ready_tx.as_ref().unwrap().clone(),
-        );
-        let mut runtime = CaptureRenderHarness {
-            events,
-            compositor,
-            frames,
-            pending_texture: false,
-            size: (640, 480),
-        };
+        let mut runtime = CaptureRenderHarness::boot(cfg, clock.clone()).await;
         let portals = runtime
             .events
             .app
@@ -1892,15 +1911,6 @@ mod tests {
                 )
                 .expect("publish accepted");
         };
-        // Fades run on the wall clock; pace turns like frames until idle.
-        let settle = |runtime: &mut CaptureRenderHarness| {
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-            while runtime.turn(true) {
-                assert!(std::time::Instant::now() < deadline, "portal never settled");
-                clock.advance(16);
-                std::thread::sleep(std::time::Duration::from_millis(16));
-            }
-        };
         let probe = crate::operator::surface_status::probe(
             Arc::clone(
                 &runtime
@@ -1918,7 +1928,7 @@ mod tests {
         let portal = || probe.read().portals[0].clone();
 
         publish(40);
-        settle(&mut runtime);
+        runtime.settle(&clock);
         let at_tail = portal();
         assert_eq!(at_tail["s"], "portal:probe");
         assert_eq!(at_tail["output"]["at_tail"], true);
@@ -1962,7 +1972,7 @@ mod tests {
             .events
             .app
             .enqueue_scroll_event(0.0, -400.0, tze_hud_input::WheelStep::Pixels);
-        settle(&mut runtime);
+        runtime.settle(&clock);
         assert!(counters.idle_since_ms() < 1_000, "the scroll presented");
         let scrolled = portal();
         assert_eq!(scrolled["output"]["at_tail"], false);
@@ -1976,7 +1986,7 @@ mod tests {
 
         // New output while scrolled back keeps the reading position.
         publish(45);
-        settle(&mut runtime);
+        runtime.settle(&clock);
         let appended = portal();
         assert_eq!(appended["output"]["first_visible_line"], first);
         assert_eq!(appended["output"]["at_tail"], false);
@@ -2000,7 +2010,7 @@ mod tests {
         let (x, y) = runtime.events.composer_center().expect("composer");
         runtime.events.click(x, y);
         runtime.events.type_text("xyz");
-        settle(&mut runtime);
+        runtime.settle(&clock);
 
         let addr = runtime.events.mcp_addr();
         let status = tokio::spawn(async move {
@@ -2047,28 +2057,11 @@ mod tests {
         use tze_hud_scene::clock::TestClock;
 
         let _gpu = crate::test_support::lock_headless_runtime().await;
-        let mut compositor = tze_hud_compositor::Compositor::new_headless(800, 600)
-            .await
-            .expect("software compositor for real frame builds");
-        compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
         let clock = Arc::new(TestClock::new(1_000));
         let mut cfg = super::super::WindowedConfig::default();
         cfg.window.width = 800;
         cfg.window.height = 600;
-        let events = HeadlessEventLoopHarness::with_network(cfg, clock.clone())
-            .await
-            .unwrap();
-        let frames = super::super::frame_work::WindowedFrameWork::new(
-            events.app.state.wake.clone(),
-            events.app.state.frame_ready_tx.as_ref().unwrap().clone(),
-        );
-        let mut runtime = CaptureRenderHarness {
-            events,
-            compositor,
-            frames,
-            pending_texture: false,
-            size: (800, 600),
-        };
+        let mut runtime = CaptureRenderHarness::boot(cfg, clock.clone()).await;
         let portals = runtime
             .events
             .app
@@ -2088,14 +2081,6 @@ mod tests {
                 portals.clock.now_us(),
             )
             .expect("publish accepted");
-        };
-        let settle = |runtime: &mut CaptureRenderHarness| {
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-            while runtime.turn(true) {
-                assert!(std::time::Instant::now() < deadline, "portal never settled");
-                clock.advance(16);
-                std::thread::sleep(std::time::Duration::from_millis(16));
-            }
         };
         let probe = crate::operator::surface_status::probe(
             Arc::clone(
@@ -2166,7 +2151,7 @@ mod tests {
         };
 
         publish(&a, 40);
-        settle(&mut runtime);
+        runtime.settle(&clock);
         let tile_a = *runtime.events.scene().tiles.keys().next().unwrap();
         let composer_a = runtime.events.scene().overlay.tile_composer_nodes[&tile_a];
         let draft_a = |runtime: &CaptureRenderHarness| {
@@ -2177,7 +2162,7 @@ mod tests {
         let (ax, ay) = centre(&portal("portal:a")["panes"]["composer"]);
         runtime.events.click(ax, ay);
         runtime.events.type_text("half");
-        settle(&mut runtime);
+        runtime.settle(&clock);
         assert_eq!(portal("portal:a")["focus"], "composer");
 
         // S2: a draft selection collapses first; text and focus stay.
@@ -2193,7 +2178,7 @@ mod tests {
         // S1: one more Esc leaves; the draft is kept, drawn and reported, and
         // nothing reaches hud_input.
         runtime.events.press_named_key("Escape");
-        settle(&mut runtime);
+        runtime.settle(&clock);
         assert_eq!(snapshot(&runtime), None, "focus left the composer");
         let left = portal("portal:a");
         assert_eq!(
@@ -2209,19 +2194,19 @@ mod tests {
 
         // S8 (Q4 = A): a second portal's draft never displaces the first.
         publish(&b, 3);
-        settle(&mut runtime);
+        runtime.settle(&clock);
         let (bx, by) = centre(&portal("portal:b")["panes"]["composer"]);
         runtime.events.click(bx, by);
         runtime.events.type_text("bb");
         runtime.events.press_named_key("Escape");
-        settle(&mut runtime);
+        runtime.settle(&clock);
         assert_eq!(portal("portal:a")["input"]["draft_chars"], 4);
         assert_eq!(portal("portal:b")["input"]["draft_chars"], 2);
         assert_eq!(runtime.events.app.state.kept_drafts_drawn.len(), 2);
 
         // S5: a cleared portal takes its kept draft; a later one starts empty.
         portals.hub.lock().unwrap().clear(&b).unwrap();
-        settle(&mut runtime);
+        runtime.settle(&clock);
         let kept: Vec<_> = runtime
             .events
             .app
@@ -2233,10 +2218,10 @@ mod tests {
         assert_eq!(kept, [composer_a]);
         assert_eq!(runtime.events.app.state.kept_drafts_drawn.len(), 1);
         publish(&b, 3);
-        settle(&mut runtime);
+        runtime.settle(&clock);
         assert_eq!(portal("portal:b")["input"]["draft_chars"], 0);
         portals.hub.lock().unwrap().clear(&b).unwrap();
-        settle(&mut runtime);
+        runtime.settle(&clock);
 
         // S1/S6: keyboard refocus restores text and caret (a click places the
         // caret where it lands); Enter sends it exactly once.
@@ -2253,7 +2238,7 @@ mod tests {
             output_before
         );
         runtime.events.press_named_key("Enter");
-        settle(&mut runtime);
+        runtime.settle(&clock);
         assert_eq!(inputs(), ["half"]);
         assert_eq!(inputs(), Vec::<String>::new(), "sent once");
 
@@ -2283,7 +2268,7 @@ mod tests {
             .selection;
         assert!(selection.is_some(), "a word is selected");
         runtime.events.press_named_key("Home");
-        settle(&mut runtime);
+        runtime.settle(&clock);
         let top = portal("portal:a");
         assert!(
             top["output"]["first_visible_line"]
@@ -2309,7 +2294,7 @@ mod tests {
             0.0
         );
         runtime.events.press_named_key("End");
-        settle(&mut runtime);
+        runtime.settle(&clock);
         let tail = portal("portal:a");
         assert!(
             tail["output"]["last_visible_line"]
@@ -2338,13 +2323,13 @@ mod tests {
         let ip = &runtime.events.app.state.input_processor;
         assert!(ip.output_reading.selection.is_none());
         assert_eq!(draft_a(&runtime).as_deref(), Some("safe"));
-        settle(&mut runtime);
+        runtime.settle(&clock);
         assert_eq!(portal("portal:a")["focus"], focus);
 
         // The focused portal tile is reading focus too: Home still scrolls.
         assert_eq!(focus, "tile", "a press on OUTPUT focuses its portal tile");
         runtime.events.press_named_key("Home");
-        settle(&mut runtime);
+        runtime.settle(&clock);
         let first = portal("portal:a")["output"]["first_visible_line"].clone();
         assert!(first.as_str().unwrap().starts_with("Line00"), "{first}");
         assert_eq!(inputs(), Vec::<String>::new());
@@ -2364,28 +2349,11 @@ mod tests {
         use tze_hud_scene::clock::TestClock;
 
         let _gpu = crate::test_support::lock_headless_runtime().await;
-        let mut compositor = tze_hud_compositor::Compositor::new_headless(800, 600)
-            .await
-            .expect("software compositor for real frame builds");
-        compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
         let clock = Arc::new(TestClock::new(1_000));
         let mut cfg = super::super::WindowedConfig::default();
         cfg.window.width = 800;
         cfg.window.height = 600;
-        let events = HeadlessEventLoopHarness::with_network(cfg, clock.clone())
-            .await
-            .unwrap();
-        let frames = super::super::frame_work::WindowedFrameWork::new(
-            events.app.state.wake.clone(),
-            events.app.state.frame_ready_tx.as_ref().unwrap().clone(),
-        );
-        let mut runtime = CaptureRenderHarness {
-            events,
-            compositor,
-            frames,
-            pending_texture: false,
-            size: (800, 600),
-        };
+        let mut runtime = CaptureRenderHarness::boot(cfg, clock.clone()).await;
         let opened = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
         let sink = Arc::clone(&opened);
         runtime.events.app.state.notification_link_opener.worker = Some(Arc::new(move |url| {
@@ -2416,15 +2384,7 @@ mod tests {
                 portals.clock.now_us(),
             )
             .expect("publish accepted");
-        let settle = |runtime: &mut CaptureRenderHarness| {
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-            while runtime.turn(true) {
-                assert!(std::time::Instant::now() < deadline, "portal never settled");
-                clock.advance(16);
-                std::thread::sleep(std::time::Duration::from_millis(16));
-            }
-        };
-        settle(&mut runtime);
+        runtime.settle(&clock);
         let tile = *runtime.events.scene().tiles.keys().next().unwrap();
         let layout = runtime
             .events

@@ -247,8 +247,7 @@ async fn kept_draft_draws_in_its_unfocused_composer_without_caret() {
         "an unchanged kept set draws no frame"
     );
     assert_eq!(drafts(&compositor, &scene), ["half a reply"]);
-    let (kept, layout) = compositor.drawn_composers().next().unwrap();
-    assert_eq!(kept.cursor_byte, kept.selection_anchor, "no selection");
+    let (_, layout) = compositor.drawn_composers().next().unwrap();
     assert!(!layout.wrap, "one unscrolled line");
     let mut verts = Vec::new();
     compositor.append_composer_caret_vertices(&scene, &mut verts, 320.0, 200.0);

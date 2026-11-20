@@ -4995,7 +4995,7 @@ mod tests {
         assert_eq!((text.as_str(), cursor, anchor), ("", 0, 0));
     }
 
-    /// Blur preserves one keyed unsent local draft for matching refocus.
+    /// Blur keeps the unsent draft for that composer's refocus.
     #[test]
     fn composer_focus_lost_on_blur_preserves_keyed_draft() {
         let (mut scene, tab_id, tile_id, composer_id, plain_id) = setup_composer_scene();
@@ -5052,7 +5052,7 @@ mod tests {
             "manager must be deactivated after blurring the composer region"
         );
 
-        // The blur keeps one keyed local draft, including caret/anchor.
+        // The blur keeps this composer's draft, including caret/anchor.
         scene.tiles.get_mut(&tile_id).unwrap().root_node = Some(composer_id);
         processor.process_with_focus(&down_composer, &mut scene, &mut fm, tab_id);
         let (text, cursor, anchor, _, _, _) = processor.composer_draft_snapshot().unwrap();
