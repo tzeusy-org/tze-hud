@@ -2712,12 +2712,15 @@ mod tests {
         {
             worker.join().unwrap();
         }
+        // Each launch runs on its own worker thread, so arrival order varies.
+        let mut opened = opened.lock().unwrap().clone();
+        opened.sort();
         assert_eq!(
-            *opened.lock().unwrap(),
+            opened,
             [
                 "https://alpha.example/a",
-                "https://beta.example/b",
                 "https://alpha.example/a",
+                "https://beta.example/b",
                 "https://gamma.example/c"
             ]
         );
