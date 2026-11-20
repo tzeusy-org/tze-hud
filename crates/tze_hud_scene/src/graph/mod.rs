@@ -248,6 +248,13 @@ impl SceneGraph {
         Arc::clone(&self.clock)
     }
 
+    /// Replace the time source of an already-initialized scene, before any
+    /// time-dependent state exists. The token-footprint calibration freezes
+    /// time this way so expiry bytes in its replies are reproducible.
+    pub fn set_clock(&mut self, clock: Arc<dyn Clock>) {
+        self.clock = clock;
+    }
+
     /// Create an empty scene with injected time for deterministic lease behavior.
     pub fn new_with_clock(width: f32, height: f32, clock: Arc<dyn Clock>) -> Self {
         Self {

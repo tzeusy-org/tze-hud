@@ -105,7 +105,11 @@ def _incompatibility_checks(measurement, baseline):
         reasons.append("baseline is missing budgets")
     elif set(budgets["flows"]) != set(baseline_flows):
         reasons.append("budget flow set does not match baseline flows")
-    for flow_name, required in (("notification_choice", 120), ("notification_choice_wait", 90)):
+    for flow_name, required in (
+        ("notification_choice", 120),
+        ("notification_choice_wait", 90),
+        ("notification_choice_labels", 65),
+    ):
         if flow_name not in measured_flows:
             continue
         ceiling = (

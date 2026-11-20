@@ -182,7 +182,11 @@ class GateTests(unittest.TestCase):
         )
 
         # Keep both complete-choice ceilings independently fixed.
-        for name, ceiling in (("notification_choice", 120), ("notification_choice_wait", 90)):
+        for name, ceiling in (
+            ("notification_choice", 120),
+            ("notification_choice_wait", 90),
+            ("notification_choice_labels", 65),
+        ):
             choice_baseline = fixture()
             approve(choice_baseline, budget=100)
             choice_baseline["flows"][name] = copy.deepcopy(fixture(ceiling)["flows"]["zone_publish"])
@@ -338,6 +342,7 @@ class CandidatePacketTests(unittest.TestCase):
                 "error": 60,
                 "notification_choice": 120,
                 "notification_choice_wait": 90,
+                "notification_choice_labels": 65,
             },
         )
 

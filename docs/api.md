@@ -108,10 +108,17 @@ with the same cancellation and idle semantics as a `hud_input` wait.
 
 - Zone: `content` is a string, or a typed object for structured zones
   (`notification` with optional `title`, `body`, integer `urgency` 0–3
-  (default 1), and optional `actions: [{label, callback_id|url}]`). Each
-  action has exactly one target. MCP requires a non-empty label; a callback string must be
-  non-empty when supplied. Supplying both target members (even empty) or neither rejects with
-  `INVALID_ARGUMENT` and hint `action needs callback_id or url, not both`.
+  (default 1), and optional `actions: [{label, callback_id?|url}]`). Each
+  action has one target. MCP requires a non-empty label; an MCP action with
+  neither member is a callback whose id is its label, byte for byte, and its
+  answer is that label. A callback string must be non-empty when supplied.
+  Supplying both target members (even empty) rejects with `INVALID_ARGUMENT`
+  and hint `action needs callback_id or url, not both`. A label-only action
+  whose label equals another action's callback id on the same card rejects
+  with hint `notification.actions[<i>] label repeats actions[<j>]; add a
+  callback_id`; a label-only `dismiss` rejects with
+  `notification.actions[<i>] label dismiss needs a callback_id`. Two explicit
+  equal ids stay accepted, and a label shared with a URL action is accepted.
   An empty URL gets `action url must be https`; an empty callback retains
   its existing non-empty argument error. gRPC plain-string defaults map empty
   targets to absence: both empty or both non-empty reject; existing gRPC label
@@ -1598,6 +1605,7 @@ distinguishes arguments from responses and partial configuration examples.
 | Zone publish | ~197 | 90 | 39 | ≤ 80 |
 | Four-option notification ask + returned answer + ACK | — | 273 | 114 | ≤ 120 |
 | Four-option notification ask-and-wait (`notification_choice_wait`) | — | 129 | 77 | ≤ 90 |
+| Four label-only options ask-and-wait (`notification_choice_labels`) | — | 117 | 65 | ≤ 65 |
 | Widget publish | ~168 | 73 | 22 | ≤ 80 |
 | Portal: attach+publish+hold, poll, ack, clear | ~575 over 5 round trips | 343 over 4 | 137 over 4 | ≤ 250 |
 | Discover (unheld `production.toml`: 6 zones, 4 widget instances) | n/a | 321 | 245 | ≤ 250 |
@@ -1615,7 +1623,21 @@ discovery exception to the signed byte-identity criterion for PR1602 on
 2026-11-12 (Asia/Singapore); the prior PR1598 approval covers only the previous baseline. All existing
 ceilings, reply defaults, counting rules, tokenizer and flow versions remain.
 
-All eight measurements use canonical flow version 4 and `tiktoken-rs` 0.12.0,
+The `notification_choice_labels` flow (`hud-ohgc9.9`) asks the same
+four-option question with label-only actions, `wait_ms:30000` and
+`ttl_ms:30000`, so the card leaves with the wait; the accepted Skip comes back
+as `"action":"Skip"` in the only call. It measures 65 model-visible tokens
+(234 bytes) and 117 wire, against 77 for the explicit-id `ttl_ms:0` flow. The
+answered reply carries `"expires_in_ms":30000` (22 bytes, the gap to the
+212-byte, 58-token estimate in the signed spec); the calibration freezes the
+scene clock so that expiry is byte-stable, while a live reply carries the
+remaining milliseconds. Advertising `callback_id?` adds 1
+byte and 0 tokens to `tools/list` (2,710 to 2,711 model-visible bytes, 622
+tokens); every other flow keeps identical fingerprints, bytes and counts.
+These bytes and the new 65-token row await owner acceptance at review
+(baseline approval `pending_owner_review`).
+
+All nine measurements use canonical flow version 4 and `tiktoken-rs` 0.12.0,
 `o200k_base`. The discovery-audience change (`hud-ljhku.7`, source `177e1096`)
 changes model-visible `tools/list` from 564 to 590 tokens and default discovery
 from 113 to 126. The five other flows retain identical request/response
