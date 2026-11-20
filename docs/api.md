@@ -522,8 +522,11 @@ agents until one is paired.
   This policy-derived result is cached for five seconds, not a network probe.
   `/admin/status` `idle_since_ms` is the time since the last presented frame
   (since start before the first); a growing value means the HUD has settled.
-  A focused composer's caret blink presents about every 530 ms, so while a
-  composer has focus treat `idle_since_ms >= 300` as settled.
+  A focused composer's caret blinks at the Windows caret blink rate (530 ms off Windows), so while a
+  composer has focus treat `idle_since_ms >= 300` as settled; with Windows caret blinking off the caret is steady and presents nothing.
+  `os_prefs` is `{text_scale, caret_blink_ms}`, the Windows text size and
+  caret blink half-period (`0` = blinking off) the HUD is following
+  ([Windows preferences](#design-tokens-and-themes)); `null` without a config.
   `GET /admin/status?cpu=0` answers at once with `cpu_pct_2s` null instead of
   sampling CPU for 2 s, for harnesses that poll status.
   The additive `holdings` and `warnings` fields contain **admin-only,
@@ -1257,7 +1260,11 @@ text legible whatever an override does. Zoom steps `ui.scale` by 10%
 (−/+, Ctrl+− and Ctrl+= or Ctrl++ anywhere in the panel; Reset returns
 to 100%), resizes zone text and chrome, portals, widgets and the panel, applies live and
 saves; the panel itself stays between 0.75x and 3x so
-it remains readable and on screen.
+it remains readable and on screen. The row's value is always the owner's
+Zoom; when the Windows text size is not 100% its detail adds "Windows text
+size 125% · effective 125%" (text size × Zoom), with "(held at 300%)" when
+that product passes 3.0, and searching "text size" finds it. −/+ and Reset
+change Zoom only.
 
 A row whose value a flag or variable set is read-only and names it ("Set by
 --mcp-port"), because a restart reuses the same arguments and environment.
@@ -1279,9 +1286,8 @@ canonical keys, their descriptions, and their defaults are in
 
 **Sizes are logical (dp).** Every size token (font sizes, spacing,
 radii, strokes, portal and panel chrome, in canonical and
-`portal.*` keys alike) is drawn at the monitor's Windows scale factor ×
-`ui.scale` physical pixels: at 150% a 16 dp body is 24 px, and
-`"ui.scale" = "1.25"` makes it 30 px. `ui.scale` is a `[design_tokens]`
+`portal.*` keys alike) is drawn at the monitor's Windows scale factor × the Windows text size × `ui.scale` physical pixels (text size × `ui.scale` is held within 0.5–3.0): at 150% a 16 dp body is 24 px, and
+`"ui.scale" = "1.25"` (or Windows text size 125%) makes it 30 px. `ui.scale` is a `[design_tokens]`
 value (quoted, like every token) from 0.5 to 3.0, default 1; a value
 outside that range fails config validation with `TokenValueParseError`,
 and a theme that sets it is invalid, because it is the owner's preference
@@ -1291,7 +1297,7 @@ the primary's. A DPI change or a new monitor restyles zones, portals and
 the panel on the next frame. Hairlines (the transcript
 divider) round to whole pixels, at least one. Opacity, weights, ratios
 and timing do not scale. Zone boxes are fractions of the display and
-keep their size. A widget box is drawn at `ui.scale` times its configured
+keep their size. A widget box is drawn at the Windows text size × `ui.scale` times its configured
 size, grown about its centre and kept on the display (an edge-anchored
 widget keeps its edge); its SVG is rasterized at that size. The layout
 (the Layout card and `geometry`) stays at 100%. A monitor's own scale
@@ -1362,14 +1368,30 @@ widget publishes on both planes snap their transition to 0. The control
 panel's Advanced tokens rows show "Windows animations off" as the source of
 the zeroed motion values. No model-visible payload changes. Off Windows, and when the setting cannot be read, animations stay on.
 
+**Windows preferences.** With "Show animations", the runtime reads the
+Windows text size (Settings › Accessibility › Text size, HKCU
+`Software\Microsoft\Accessibility` `TextScaleFactor`, 100–225%) and the caret
+blink time (`GetCaretBlinkTime`) at startup and on each config reload,
+including a reload whose `[design_tokens]` are unchanged; there is no live OS
+watch. The text size scales the whole HUD as a factor under `ui.scale` (see
+sizes above), so at 225% the HUD cannot go below 112.5%. The blink time is
+the composer caret's half-period, clamped to 200–1200 ms; with Windows caret
+blinking off the caret is steady and schedules no frame. They are recorded as
+the reserved keys `runtime.text_scale` and `runtime.caret_blink_ms` (`0` =
+steady), which `[design_tokens]` rejects; unlike the motion layer, nothing in
+the config overrides either: Zoom is the only offset for size, and the caret
+has no HUD setting. Off Windows, or when unreadable, the text size is 100% and
+the blink 530 ms, and the token map is exactly as without them.
+`/admin/status` `os_prefs` reports both. No model-visible payload changes.
+
 **Live changes.** Editing `[design_tokens]` in the running HUD's config file
 (or using the control panel's Appearance and Advanced tokens cards) restyles
 it without a restart: zones, widgets (their SVGs re-resolve), portals and
 the panel take the new tokens on the next frame. The HUD watches the
 config's folder (no polling) and applies an edit 250 ms after the last
 write (at most 2 s after the first). A file whose table is unchanged since
-the HUD last read or saved it does nothing, so a panel change that could
-not be saved survives an unrelated edit. A
+the HUD last read or saved it only re-reads the Windows preferences, so a
+panel change that could not be saved survives an unrelated edit. A
 table that startup would refuse (an unknown theme, a reserved or malformed
 key) or a file that is not valid TOML keeps the current tokens and is
 reported in `/admin/status` `config_reload`. Still read once at startup: the MCP widget

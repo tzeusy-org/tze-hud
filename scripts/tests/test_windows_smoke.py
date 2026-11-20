@@ -1609,3 +1609,18 @@ def test_capture_png_pixels_baseline_and_changed_only_comment(tmp_path, monkeypa
         ws.capture_fixture(FixtureSmoke(), messages, lambda index: traced.append(("frame", index)))
         assert [args for tool, args in traced if tool == "frame"] == [1]
         assert [args["content"] for tool, args in traced if tool == "hud_publish"] == [messages[0]["content"]]
+
+
+def test_card_follows_text_size_within_pixel_rounding():
+    """hud-ohgc9.12 tier-W: at text size 125% a card is 1.25x as tall; its
+    width is the zone's (a display fraction) and keeps its size."""
+    base = {"x": 10, "y": 10, "w": 246, "h": 76}
+    assert ws.card_follows_text_size(base, {"x": 0, "y": 0, "w": 246, "h": 95}, 1.25)
+    assert ws.card_follows_text_size(base, {"x": 0, "y": 0, "w": 247, "h": 96}, 1.25)
+    assert not ws.card_follows_text_size(base, {"x": 0, "y": 0, "w": 246, "h": 76}, 1.25)
+    assert not ws.card_follows_text_size(base, {"x": 0, "y": 0, "w": 308, "h": 95}, 1.25)
+
+
+def test_os_prefs_mode_is_owned_only():
+    with pytest.raises(SystemExit):
+        ws.main(["--url", "http://127.0.0.1:9090/", "--os-prefs"])

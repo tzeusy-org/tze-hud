@@ -740,28 +740,42 @@ fn caret_blink_phase_square_wave() {
 
     // Phase 0 (solid) — including exactly at reset.
     assert!(
-        caret_visible_at(Duration::ZERO),
+        caret_visible_at(Duration::ZERO, Some(half)),
         "solid immediately after reset"
     );
-    assert!(caret_visible_at(half / 2), "solid mid first half-period");
     assert!(
-        caret_visible_at(half - Duration::from_millis(1)),
+        caret_visible_at(half / 2, Some(half)),
+        "solid mid first half-period"
+    );
+    assert!(
+        caret_visible_at(half - Duration::from_millis(1), Some(half)),
         "solid just before first toggle"
     );
 
     // Phase 1 (hidden).
-    assert!(!caret_visible_at(half), "hidden at first toggle boundary");
     assert!(
-        !caret_visible_at(half + half / 2),
+        !caret_visible_at(half, Some(half)),
+        "hidden at first toggle boundary"
+    );
+    assert!(
+        !caret_visible_at(half + half / 2, Some(half)),
         "hidden mid second half-period"
     );
 
     // Phase 2 (solid again) — wave repeats.
     assert!(
-        caret_visible_at(half * 2),
+        caret_visible_at(half * 2, Some(half)),
         "solid again after one full period"
     );
-    assert!(!caret_visible_at(half * 3), "hidden in fourth half-period");
+    assert!(
+        !caret_visible_at(half * 3, Some(half)),
+        "hidden in fourth half-period"
+    );
+
+    // Windows caret blinking off: steady in every phase.
+    for elapsed in [Duration::ZERO, half, half * 3] {
+        assert!(caret_visible_at(elapsed, None), "steady at {elapsed:?}");
+    }
 }
 
 /// Build a minimal scene (one tile, one composer HitRegion) matching the
@@ -948,6 +962,44 @@ async fn composer_caret_quad_emitted_at_expected_position() {
         (max_y_ndc - expected_top).abs() < 1e-3,
         "caret quad top edge NDC mismatch: got {max_y_ndc}, want {expected_top} (pixel y {expected_y})"
     );
+}
+
+/// With Windows caret blinking off the caret quad is
+/// drawn even where a blinking caret would be hidden.
+#[tokio::test]
+async fn steady_caret_quad_is_drawn_in_the_hidden_phase() {
+    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(320, 200).await);
+    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+    let (scene, _tile_id, hit_id) = composer_caret_test_scene();
+    compositor.local_composer = Some(LocalComposerState {
+        text: String::new(),
+        cursor_byte: 0,
+        selection_anchor: 0,
+        at_capacity: false,
+        node_id: hit_id,
+        placeholder: None,
+        preedit: None,
+        preedit_range: None,
+    });
+    compositor.prime_composer_scroll_offset(&scene);
+    let hidden_phase = || {
+        std::time::Instant::now()
+            .checked_sub(CARET_BLINK_HALF_PERIOD + CARET_BLINK_HALF_PERIOD / 2)
+            .expect("test clock must have enough uptime")
+    };
+    let quad_vertices = |compositor: &Compositor| {
+        let mut verts: Vec<crate::pipeline::RectVertex> = Vec::new();
+        compositor.append_composer_caret_vertices(&scene, &mut verts, 320.0, 200.0);
+        verts.len()
+    };
+    compositor.composer_caret_blink_start = hidden_phase();
+    assert_eq!(quad_vertices(&compositor), 0, "blinking: hidden");
+    compositor.set_token_map(std::collections::HashMap::from([(
+        tze_hud_config::tokens::CARET_BLINK_MS_KEY.to_owned(),
+        "0".to_owned(),
+    )]));
+    compositor.composer_caret_blink_start = hidden_phase();
+    assert_eq!(quad_vertices(&compositor), 6, "steady: drawn");
 }
 
 /// hud-ljhku.13: splicing a preedit for drawing clamps offsets to char

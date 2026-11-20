@@ -2748,7 +2748,7 @@ impl WindowedRuntime {
                     raw,
                     config_parent_buf.as_deref(),
                     &mut scene,
-                    crate::os_prefs::animations_enabled(),
+                    crate::os_prefs::read(),
                 );
                 // Stash SVG assets for compositor registration after init_widget_renderer.
                 pending_widget_svgs = startup_result.widget_svg_assets;
@@ -2822,7 +2822,7 @@ impl WindowedRuntime {
             Arc::clone(&shared_scene),
             render_wake.clone(),
             wake.main_work_notifier(),
-            crate::os_prefs::animations_enabled,
+            crate::os_prefs::read,
         ));
         let cfg_agents_empty = cfg.agents.load().is_empty();
         let agent_store = Arc::new(crate::agent_store::AgentStore::open(

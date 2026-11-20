@@ -245,7 +245,12 @@ impl HeadlessRuntime {
                         })?;
                     // Headless runs are CI/test: pin animations on rather than read
                     // the build host's Windows preference (hud-ljhku.13).
-                    let mut startup_result = run_scene_startup(&raw, None, &mut scene, true);
+                    let mut startup_result = run_scene_startup(
+                        &raw,
+                        None,
+                        &mut scene,
+                        tze_hud_config::tokens::OsPreferences::default(),
+                    );
                     // Register widget SVG assets with the headless widget renderer,
                     // mirroring the windowed runtime so bundled SVG-based widgets render correctly.
                     process_pending_widget_svgs(

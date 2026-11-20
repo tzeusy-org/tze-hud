@@ -10,13 +10,34 @@ use tze_hud_config::themes::{
 };
 use tze_hud_config::tokens::{
     CANONICAL_TOKENS, DesignTokenMap, OS_MOTION_ZEROED_KEYS, UI_SCALE_KEY, UI_SCALE_RANGE,
-    os_reduce_motion, ui_scale,
+    effective_scale, os_reduce_motion, text_scale, ui_scale,
 };
 use tze_hud_config::{ConfigWriteError, TokenUpdate};
 
 use super::super::row::{BoxFuture, Control, Edit, Row, Section};
 use super::super::runtime::TokenWriter;
 use crate::appearance::Appearance;
+
+/// Where the HUD's size comes from beyond the owner's Zoom:
+/// empty at Windows text size 100%, else the text size and the effective
+/// zoom, noting the 300% hold. Ends with a separator when not empty.
+fn windows_text_size_detail(resolved: &DesignTokenMap) -> String {
+    let text = text_scale(resolved);
+    if (text - 1.0).abs() <= f32::EPSILON {
+        return String::new();
+    }
+    let effective = effective_scale(resolved);
+    let held = if text * ui_scale(resolved) > UI_SCALE_RANGE.1 + f32::EPSILON {
+        format!(" (held at {:.0}%)", UI_SCALE_RANGE.1 * 100.0)
+    } else {
+        String::new()
+    };
+    format!(
+        "Windows text size {:.0}% · effective {:.0}%{held} · ",
+        text * 100.0,
+        effective * 100.0
+    )
+}
 
 /// The token the Subtitle backdrop toggle sets (0 or absent: no backdrop).
 const SUBTITLE_BACKDROP_KEY: &str = "opacity.subtitle.backdrop";
@@ -290,11 +311,20 @@ impl Section for AppearanceSection {
                     },
                 )
                 .detail(format!(
-                    "Applies now · {} · on top of Windows display scaling (widgets: zoom only)",
+                    "{}Applies now · {} · on top of Windows display scaling (widgets: zoom only)",
+                    windows_text_size_detail(&resolved),
                     self.tokens.saved_detail()
                 ))
                 .keywords(&[
-                    "zoom", "scale", "size", "bigger", "smaller", "dpi", "ui.scale",
+                    "zoom",
+                    "scale",
+                    "size",
+                    "bigger",
+                    "smaller",
+                    "dpi",
+                    "ui.scale",
+                    "text",
+                    "accessibility",
                 ])
                 .resettable((ui_scale(&table) - 1.0).abs() > f32::EPSILON),
             ];
@@ -568,18 +598,19 @@ mod tests {
     use crate::appearance::LiveTokens;
     use std::sync::Mutex;
     use tze_hud_config::themes::resolve_config_tokens;
+    use tze_hud_config::tokens::OsPreferences;
     use tze_hud_scene::graph::SceneGraph;
     use tze_hud_scene::render_wake::RenderWakeNotifier;
 
     type Saved = Arc<Mutex<Vec<String>>>;
 
     fn sections(saves: Option<Result<(), String>>) -> (AppearanceSection, TokensSection, Saved) {
-        sections_with(saves, || true)
+        sections_with(saves, OsPreferences::default)
     }
 
     fn sections_with(
         saves: Option<Result<(), String>>,
-        animations_enabled: fn() -> bool,
+        read_os: fn() -> OsPreferences,
     ) -> (AppearanceSection, TokensSection, Saved) {
         let table = DesignTokenMap::new();
         let appearance = Arc::new(Appearance::new(
@@ -592,7 +623,7 @@ mod tests {
             Arc::new(tokio::sync::Mutex::new(SceneGraph::new(800.0, 600.0))),
             None,
             Vec::new(),
-            animations_enabled,
+            read_os,
         ));
         let saved: Saved = Arc::default();
         let save = saves.map(|outcome| {
@@ -618,7 +649,10 @@ mod tests {
     /// explicit override still reads as an override.
     #[tokio::test]
     async fn motion_rows_name_windows_animations_off_as_their_source() {
-        let (_, tokens, _) = sections_with(Some(Ok(())), || false);
+        let (_, tokens, _) = sections_with(Some(Ok(())), || OsPreferences {
+            animations_enabled: false,
+            ..OsPreferences::default()
+        });
         let edited: DesignTokenMap = [("theme", "classic"), ("motion.exit.ms", "90")]
             .iter()
             .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
@@ -758,6 +792,88 @@ mod tests {
         assert_eq!(saved.last().unwrap(), r#"[("ui.scale", Remove)]"#);
         // 110% to 300% is 20 saves, then Reset's: none once clamped.
         assert_eq!(saved.len(), 21, "{saved:?}");
+    }
+
+    /// The Zoom row's value is the
+    /// owner's Zoom; the detail names the Windows text size and the
+    /// effective zoom only when text size is not 100%, with the 300% hold;
+    /// "text size" finds the row; −/+ and Reset change `ui.scale` alone.
+    #[tokio::test]
+    async fn zoom_row_names_windows_text_size_and_the_effective_zoom() {
+        let detail = |rows: &[Row]| row(rows, "appearance.zoom").detail.clone().unwrap();
+        let (defaults, _, _) = sections(Some(Ok(())));
+        let rows = defaults.rows().await;
+        assert!(
+            detail(&rows).starts_with("Applies now"),
+            "{}",
+            detail(&rows)
+        );
+        assert!(!detail(&rows).contains("Windows text size"));
+
+        let (appearance, _, saved) = sections_with(Some(Ok(())), || OsPreferences {
+            text_scale: 1.25,
+            ..OsPreferences::default()
+        });
+        // Startup resolved without the reader; the first restyle reads it.
+        for _ in 0..2 {
+            appearance
+                .apply("appearance.zoom", Edit::Step(-1))
+                .await
+                .unwrap();
+        }
+        let rows = appearance.rows().await;
+        assert_eq!(
+            row(&rows, "appearance.zoom").control,
+            Control::Stepper { text: "80%".into() }
+        );
+        assert!(
+            detail(&rows).starts_with("Windows text size 125% · effective 100% · Applies now"),
+            "{}",
+            detail(&rows)
+        );
+        let resolved = appearance.tokens.appearance.live.resolved();
+        assert_eq!(tze_hud_config::tokens::px_scale(&resolved), 1.0);
+        assert!(
+            crate::shell::control_panel::search::score(
+                "text size",
+                &crate::shell::control_panel::search::Haystack::of(
+                    row(&rows, "appearance.zoom"),
+                    "Appearance"
+                ),
+            )
+            .is_some()
+        );
+        assert_eq!(
+            saved.lock().unwrap().last().unwrap(),
+            r#"[("ui.scale", Set("0.8"))]"#
+        );
+
+        let (held, _, _) = sections_with(Some(Ok(())), || OsPreferences {
+            text_scale: 2.25,
+            ..OsPreferences::default()
+        });
+        for _ in 0..10 {
+            held.apply("appearance.zoom", Edit::Step(1)).await.unwrap();
+        }
+        let rows = held.rows().await;
+        assert_eq!(
+            row(&rows, "appearance.zoom").control,
+            Control::Stepper {
+                text: "200%".into()
+            }
+        );
+        assert!(
+            detail(&rows).starts_with("Windows text size 225% · effective 300% (held at 300%) · "),
+            "{}",
+            detail(&rows)
+        );
+        held.apply("appearance.zoom", Edit::Reset).await.unwrap();
+        assert!(!held.tokens.table().contains_key("ui.scale"));
+        assert_eq!(
+            tze_hud_config::tokens::effective_scale(&held.tokens.appearance.live.resolved()),
+            2.25,
+            "Reset returns Zoom to 100%, not the text size"
+        );
     }
 
     /// A previewed theme restyles live without saving; leaving restores the

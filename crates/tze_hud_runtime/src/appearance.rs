@@ -21,7 +21,7 @@ use std::sync::{Arc, RwLock};
 use tokio::sync::Mutex;
 use tze_hud_config::policy_builder::build_effective_policy;
 use tze_hud_config::themes::{check_design_tokens, resolve_config_tokens};
-use tze_hud_config::tokens::DesignTokenMap;
+use tze_hud_config::tokens::{DesignTokenMap, OsPreferences};
 use tze_hud_scene::graph::SceneGraph;
 use tze_hud_scene::render_wake::RenderWakeNotifier;
 use tze_hud_scene::types::ZoneRegistry;
@@ -119,10 +119,10 @@ pub struct Appearance {
     scales: std::sync::Mutex<DisplayScales>,
     /// The latest monitor report not yet applied.
     newest_scales: std::sync::Mutex<Option<DisplayScales>>,
-    /// Reads the Windows "Show animations" preference on each restyle
-    /// (hud-ljhku.13): `os_prefs::animations_enabled` in the HUD, a pinned
-    /// value in harnesses and tests.
-    animations_enabled: fn() -> bool,
+    /// Reads the Windows preferences on each restyle ("Show animations",
+    /// hud-ljhku.13; text size and caret blink):
+    /// `os_prefs::read` in the HUD, a pinned value in harnesses and tests.
+    read_os: fn() -> OsPreferences,
 }
 
 /// The Windows scale factor of each monitor the HUD draws on: the primary's
@@ -157,10 +157,10 @@ impl Appearance {
         scene: Arc<Mutex<SceneGraph>>,
         config_parent: Option<PathBuf>,
         bundle_roots: Vec<PathBuf>,
-        animations_enabled: fn() -> bool,
+        read_os: fn() -> OsPreferences,
     ) -> Self {
         Self {
-            animations_enabled,
+            read_os,
             file_table: std::sync::Mutex::new(live.table()),
             live,
             scene,
@@ -184,7 +184,7 @@ impl Appearance {
         scene: Arc<Mutex<SceneGraph>>,
         compositor_wake: RenderWakeNotifier,
         main_wake: RenderWakeNotifier,
-        animations_enabled: fn() -> bool,
+        read_os: fn() -> OsPreferences,
     ) -> Self {
         let table = raw
             .and_then(|r| r.design_tokens.as_ref())
@@ -199,7 +199,7 @@ impl Appearance {
             scene,
             config_parent,
             bundle_roots,
-            animations_enabled,
+            read_os,
         )
     }
 
@@ -259,13 +259,9 @@ impl Appearance {
     /// secondary monitor.
     fn resolve(&self, table: &DesignTokenMap) -> DesignTokenMap {
         let mut resolved = resolve_config_tokens(table);
-        // The Windows animation preference is re-read on each reload
-        // (hud-ljhku.13); there is no live OS watch.
-        tze_hud_config::tokens::apply_os_motion_layer(
-            &mut resolved,
-            table,
-            (self.animations_enabled)(),
-        );
+        // The Windows preferences are re-read on each reload (hud-ljhku.13);
+        // there is no live OS watch.
+        tze_hud_config::tokens::apply_os_preferences(&mut resolved, table, &(self.read_os)());
         crate::scene_startup::resolve_font_dir(&mut resolved, self.config_parent.as_deref());
         let scales = self.scales();
         tze_hud_config::tokens::set_px_scale(&mut resolved, scales.primary);
@@ -304,8 +300,9 @@ impl Appearance {
         {
             let mut scene = self.scene.lock().await;
             restyle_zones(&mut scene.zone_registry, &resolved);
-            // Widget boxes are display fractions: zoom alone resizes them.
-            scene.widget_registry.zoom = tze_hud_config::tokens::ui_scale(&resolved);
+            // Widget boxes are display fractions: zoom (Windows text size ×
+            // `ui.scale`) alone resizes them.
+            scene.widget_registry.zoom = tze_hud_config::tokens::effective_scale(&resolved);
             scene.widget_registry.reduce_motion =
                 tze_hud_config::tokens::os_reduce_motion(&resolved);
             for (widget_type, file, bytes) in svgs {
@@ -336,9 +333,15 @@ impl Appearance {
                     (*file != table).then(|| *file = table.clone()).is_some()
                 };
                 if edited {
-                    self.apply(table).await
+                    match self.apply(table).await {
+                        // The table already in effect: still re-read the
+                        // Windows preferences.
+                        Ok(false) => self.refresh_os_preferences().await,
+                        outcome => outcome,
+                    }
                 } else {
-                    Ok(false)
+                    // The same table: still re-read the Windows preferences.
+                    self.refresh_os_preferences().await
                 }
             }
             Err(e) => Err(format!("The config file is not valid TOML: {e}")),
@@ -365,6 +368,27 @@ impl Appearance {
         // count rise also sees its effect.
         self.reloads.fetch_add(1, Ordering::AcqRel);
         outcome
+    }
+
+    /// Re-read the Windows preferences under the tokens in effect, restyling
+    /// only when one changed. Returns whether anything changed.
+    async fn refresh_os_preferences(&self) -> Result<bool, String> {
+        let _one_at_a_time = self.applying.lock().await;
+        let table = self.live.table();
+        if self.resolve(&table) == *self.live.resolved() {
+            return Ok(false);
+        }
+        tracing::info!("appearance: Windows preferences changed");
+        self.restyle(table).await
+    }
+
+    /// The Windows preferences in effect, for `/admin/status` `os_prefs`.
+    pub(crate) fn os_prefs_json(&self) -> serde_json::Value {
+        let resolved = self.live.resolved();
+        serde_json::json!({
+            "text_scale": tze_hud_config::tokens::text_scale(&resolved),
+            "caret_blink_ms": tze_hud_config::tokens::caret_blink_ms(&resolved),
+        })
     }
 
     /// The panel saved `updates` to the config file.
@@ -432,11 +456,16 @@ pub(crate) fn restyle_zones(registry: &mut ZoneRegistry, tokens: &DesignTokenMap
     }
 }
 
-/// `tokens` without the runtime's px-per-dp keys.
+/// `tokens` without the runtime's px-per-dp keys, the Windows text size
+/// that feeds them and the caret blink: keys no widget SVG reads.
 fn without_scales(tokens: &DesignTokenMap) -> DesignTokenMap {
     tokens
         .iter()
-        .filter(|(k, _)| !k.starts_with(tze_hud_config::tokens::PX_SCALE_KEY))
+        .filter(|(k, _)| {
+            !k.starts_with(tze_hud_config::tokens::PX_SCALE_KEY)
+                && *k != tze_hud_config::tokens::TEXT_SCALE_KEY
+                && *k != tze_hud_config::tokens::CARET_BLINK_MS_KEY
+        })
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect()
 }
@@ -537,8 +566,15 @@ mod tests {
     use super::*;
 
     fn appearance(scene: SceneGraph) -> Appearance {
+        appearance_with(scene, OsPreferences::default)
+    }
+
+    /// As the HUD starts: the live map is what scene startup resolved.
+    fn appearance_with(scene: SceneGraph, read_os: fn() -> OsPreferences) -> Appearance {
         let table = DesignTokenMap::new();
-        let resolved = resolve_config_tokens(&table);
+        let mut resolved = resolve_config_tokens(&table);
+        tze_hud_config::tokens::apply_os_preferences(&mut resolved, &table, &read_os());
+        tze_hud_config::tokens::set_px_scale(&mut resolved, 1.0);
         Appearance::new(
             Arc::new(LiveTokens::new(
                 table,
@@ -549,7 +585,7 @@ mod tests {
             Arc::new(Mutex::new(scene)),
             None,
             Vec::new(),
-            || true,
+            read_os,
         )
     }
 
@@ -579,7 +615,10 @@ mod tests {
             Arc::new(Mutex::new(SceneGraph::new(800.0, 600.0))),
             None,
             Vec::new(),
-            || false,
+            || OsPreferences {
+                animations_enabled: false,
+                ..OsPreferences::default()
+            },
         );
         let edited = table(&[("theme", "blueprint"), ("motion.exit.ms", "90")]);
         assert_eq!(appearance.apply(edited).await, Ok(true));
@@ -793,6 +832,105 @@ mod tests {
         assert_eq!(
             tze_hud_config::tokens::px_scale(&appearance.live.resolved()),
             2.0
+        );
+    }
+
+    /// A Windows text-size or caret-blink
+    /// change applies at the next config reload, even one whose table is
+    /// unchanged, and not before; `/admin/status` reports what is in effect.
+    #[tokio::test]
+    async fn windows_text_size_and_caret_apply_at_the_next_reload() {
+        use std::sync::atomic::AtomicU32;
+        static TEXT_PCT: AtomicU32 = AtomicU32::new(100);
+        static CARET_MS: AtomicU32 = AtomicU32::new(530);
+        fn read() -> OsPreferences {
+            OsPreferences {
+                text_scale: TEXT_PCT.load(Ordering::Relaxed) as f32 / 100.0,
+                caret_blink_ms: CARET_MS.load(Ordering::Relaxed),
+                ..OsPreferences::default()
+            }
+        }
+        let mut scene = SceneGraph::new(800.0, 600.0);
+        scene.zone_registry = ZoneRegistry::with_defaults();
+        let appearance = appearance_with(scene, read);
+        restyle_zones(
+            &mut appearance.scene.lock().await.zone_registry,
+            &appearance.live.resolved(),
+        );
+        assert_eq!(appearance.reload_from("").await, Ok(false));
+        let font = |a: &Appearance| {
+            a.scene.try_lock().expect("idle").zone_registry.zones["notification-area"]
+                .rendering_policy
+                .font_size_px
+                .expect("font")
+        };
+        let notes = font(&appearance);
+        assert_eq!(
+            appearance.os_prefs_json(),
+            serde_json::json!({"text_scale": 1.0, "caret_blink_ms": 530})
+        );
+
+        TEXT_PCT.store(125, Ordering::Relaxed);
+        CARET_MS.store(0, Ordering::Relaxed);
+        let resolved = appearance.live.resolved();
+        assert_eq!(
+            tze_hud_config::tokens::px_scale(&resolved),
+            1.0,
+            "not before"
+        );
+        assert_eq!(tze_hud_config::tokens::caret_blink_ms(&resolved), 530);
+        drop(resolved);
+
+        assert_eq!(appearance.reload_from("").await, Ok(true), "same table");
+        let resolved = appearance.live.resolved();
+        assert_eq!(tze_hud_config::tokens::px_scale(&resolved), 1.25);
+        assert_eq!(tze_hud_config::tokens::caret_blink_ms(&resolved), 0);
+        assert_eq!(font(&appearance), notes * 1.25);
+        assert_eq!(appearance.scene.lock().await.widget_registry.zoom, 1.25);
+        assert_eq!(
+            appearance.os_prefs_json(),
+            serde_json::json!({"text_scale": 1.25, "caret_blink_ms": 0})
+        );
+        assert_eq!(appearance.reload_from("").await, Ok(false), "settled");
+        assert_eq!(
+            appearance
+                .scene
+                .lock()
+                .await
+                .drain_pending_widget_svg_assets()
+                .len(),
+            0,
+            "a size or caret change re-reads no widget bundles"
+        );
+    }
+
+    /// A reload whose table differs from the file's last one but equals the
+    /// one in effect (a panel change that could not be saved) still re-reads
+    /// the Windows preferences.
+    #[tokio::test]
+    async fn a_reload_matching_the_live_table_still_reads_windows_prefs() {
+        use std::sync::atomic::AtomicU32;
+        static TEXT_PCT: AtomicU32 = AtomicU32::new(100);
+        fn read() -> OsPreferences {
+            OsPreferences {
+                text_scale: TEXT_PCT.load(Ordering::Relaxed) as f32 / 100.0,
+                ..OsPreferences::default()
+            }
+        }
+        let appearance = appearance_with(SceneGraph::new(800.0, 600.0), read);
+        let classic = table(&[("theme", "classic")]);
+        // The panel shows it, but the file never got it.
+        assert_eq!(appearance.apply(classic).await, Ok(true));
+        TEXT_PCT.store(125, Ordering::Relaxed);
+        assert_eq!(
+            appearance
+                .reload_from("[design_tokens]\ntheme = \"classic\"\n")
+                .await,
+            Ok(true)
+        );
+        assert_eq!(
+            tze_hud_config::tokens::px_scale(&appearance.live.resolved()),
+            1.25
         );
     }
 

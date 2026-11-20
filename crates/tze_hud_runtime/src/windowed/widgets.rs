@@ -468,7 +468,7 @@ impl WinitApp {
                 .zip(self.state.primary_monitor.as_ref())
                 .map(|(monitor, primary)| monitor.scene_rect(primary));
             let px_scale = monitor.map(|m| {
-                m.scale as f32 * tze_hud_config::tokens::ui_scale(&self.state.global_tokens)
+                m.scale as f32 * tze_hud_config::tokens::effective_scale(&self.state.global_tokens)
             });
             scene.overlay.drag_handle_context_menu = Some(DragHandleContextMenuState {
                 element_id,
