@@ -400,6 +400,49 @@ mod tests {
         assert!(again.is_empty(), "{n}: {again:?}");
     }
 
+    /// Republishing every label at the reported `actions` count fits, also
+    /// when a link action's mark decides whether the buttons sit side by side.
+    #[test]
+    fn link_labels_at_the_reported_count_fit() {
+        let (fit, scene) = measurer_and_scene();
+        let payload = |first: &str, second: &str| NotificationPayload {
+            text: "Deploy?".into(),
+            actions: vec![
+                NotificationAction {
+                    label: first.into(),
+                    callback_id: Some("go".into()),
+                    url: None,
+                },
+                NotificationAction {
+                    label: second.into(),
+                    callback_id: None,
+                    url: Some("https://example.com/".into()),
+                },
+            ],
+            ..Default::default()
+        };
+        // A line break forces stacked buttons and stops the count at k; the
+        // shortened labels may then sit side by side, where the link's mark
+        // narrows its button.
+        // Sweeping k walks each link prefix across the side-by-side limit.
+        for link in [
+            "Documentation and the full deployment guide",
+            "WWW MMM WWW MMM WWW MMM WWW MMM WWW",
+        ] {
+            for k in 1..=30 {
+                let first = format!("{}\nmore", "i".repeat(k));
+                let clipped = fit.notification(&scene, ZONE, &payload(&first, link));
+                let n = reported(&clipped, "actions").expect("line break cuts");
+                let again = fit.notification(
+                    &scene,
+                    ZONE,
+                    &payload(char_prefix(&first, n), char_prefix(link, n)),
+                );
+                assert!(again.is_empty(), "{link} k={k} n={n}: {again:?}");
+            }
+        }
+    }
+
     /// Text that fits reports nothing.
     #[test]
     fn a_card_that_fits_reports_nothing() {

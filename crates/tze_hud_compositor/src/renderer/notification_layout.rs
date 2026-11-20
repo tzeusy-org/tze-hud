@@ -243,6 +243,8 @@ impl NotificationLayoutCache {
             .fold(0.0_f32, f32::max)
             + inputs.padding;
         let mut measured = 0;
+        // A link label already carries its mark (`notification_action_label`),
+        // so this matches `label_width`, which subtracts the mark instead.
         let stacked = inputs.labels.iter().any(|label| {
             if label.contains('\n') {
                 return true;
