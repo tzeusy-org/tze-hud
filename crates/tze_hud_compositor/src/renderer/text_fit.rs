@@ -360,6 +360,7 @@ mod tests {
         };
         let (a, b) = (alone(long).unwrap(), alone(longer).unwrap());
         assert!(a > 0 && b > 0);
+        assert_eq!(n, a.min(b), "smallest: {n} vs {a}/{b}");
         let shortened: Vec<&str> = labels.iter().map(|l| char_prefix(l, n)).collect();
         let again = fit.notification(&scene, ZONE, &card("", "Deploy?", &shortened));
         assert!(again.is_empty(), "{n}: {again:?}");
