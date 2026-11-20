@@ -706,13 +706,16 @@ async fn test_two_line_notification_title_produces_two_text_items() {
                         "notification-area",
                         published,
                     );
+                    let reported =
+                        |field: &str| clipped.iter().find(|(f, _)| *f == field).map(|(_, n)| *n);
+                    // hud-ohgc9.2 R2.1 S1: the count is what this draws.
                     assert_eq!(
-                        clipped.contains(&"body"),
-                        truncated,
+                        reported("body"),
+                        truncated.then(|| result.drawn_chars(&body)),
                         "fit agrees with drawing: {scale}/{width}/{count}/{clipped:?}"
                     );
                     assert_eq!(
-                        clipped.contains(&"title"),
+                        reported("title").is_some(),
                         title.starts_with('確'),
                         "fit agrees with drawing: {scale}/{width}/{count}/{clipped:?}"
                     );
@@ -742,6 +745,10 @@ async fn test_two_line_notification_title_produces_two_text_items() {
                             .unwrap()
                             .clone();
                         assert_eq!(result.was_truncated, title.starts_with('確'));
+                        assert_eq!(
+                            reported("title"),
+                            result.was_truncated.then(|| result.drawn_chars(&title))
+                        );
                         assert!(
                             rasterizer.measure_single_line(
                                 &result.text,

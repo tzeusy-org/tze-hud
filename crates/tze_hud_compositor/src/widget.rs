@@ -2448,59 +2448,94 @@ fn composed_widget_cache_key(
 }
 
 /// String params whose bound text would run past the widget canvas,
-/// laid out by the same usvg text engine and widget font set that draw it.
-/// Only horizontal overflow counts: string params are single-line labels.
-/// Sorted by name.
+/// laid out by the same usvg text engine and widget font set that draw it,
+/// each with the number of its characters that fit (the smallest across
+/// layers). Only horizontal overflow counts: string params are single-line
+/// labels. A cut value's count is its longest fitting prefix, found in at
+/// most `ceil(log2(len))` extra layouts. Sorted by name.
 pub(crate) fn clipped_text_params(
     svg_layers: &[(&str, &[WidgetBinding])],
     param_constraints: &HashMap<String, (f32, f32)>,
     params: &HashMap<String, WidgetParameterValue>,
-) -> Vec<String> {
-    /// Antialiasing slack: a glyph ending on the edge is not cut.
-    const EDGE_SLACK: f32 = 0.5;
-    let mut clipped = std::collections::BTreeSet::new();
+) -> Vec<(String, usize)> {
+    let mut clipped = std::collections::BTreeMap::<String, usize>::new();
     for (svg, bindings) in svg_layers {
-        let measured: Vec<&WidgetBinding> = bindings
+        let measured: Vec<(&WidgetBinding, &str)> = bindings
             .iter()
-            .filter(|b| {
-                b.target_attribute == "text-content"
-                    && matches!(params.get(&b.param),
-                        Some(WidgetParameterValue::String(s)) if !s.is_empty())
+            .filter(|b| b.target_attribute == "text-content")
+            .filter_map(|b| match params.get(&b.param) {
+                Some(WidgetParameterValue::String(s)) if !s.is_empty() => Some((b, s.as_str())),
+                _ => None,
             })
             .collect();
         if measured.is_empty() {
             continue;
         }
-        let mut bound = (*svg).to_owned();
-        for binding in *bindings {
-            if let Some(value) = resolve_binding_value(binding, params, param_constraints) {
-                let value = if binding.target_attribute == "text-content" {
-                    escape_text(&value)
-                } else {
-                    value
-                };
-                bound = apply_svg_attribute(
-                    &bound,
-                    &binding.target_element,
-                    &binding.target_attribute,
-                    &value,
-                );
-            }
-        }
-        let Ok(tree) = resvg::usvg::Tree::from_str(&bound, &widget_usvg_options()) else {
+        let Some(tree) = bound_widget_tree(svg, bindings, param_constraints, params) else {
             continue;
         };
-        let width = tree.size().width();
-        for binding in measured {
-            if let Some(resvg::usvg::Node::Text(text)) = tree.node_by_id(&binding.target_element) {
-                let bbox = text.abs_bounding_box();
-                if bbox.left() < -EDGE_SLACK || bbox.right() > width + EDGE_SLACK {
-                    clipped.insert(binding.param.clone());
-                }
+        for (binding, value) in measured {
+            if !text_past_canvas(&tree, &binding.target_element) {
+                continue;
             }
+            // The whole value is cut; search the prefixes below it.
+            let upper = value.chars().count() - 1;
+            let mut probe = params.clone();
+            let count = crate::overflow::longest_fitting_prefix(upper, |n| {
+                probe.insert(
+                    binding.param.clone(),
+                    WidgetParameterValue::String(crate::overflow::char_prefix(value, n).into()),
+                );
+                bound_widget_tree(svg, bindings, param_constraints, &probe)
+                    .is_some_and(|tree| !text_past_canvas(&tree, &binding.target_element))
+            });
+            clipped
+                .entry(binding.param.clone())
+                .and_modify(|c| *c = (*c).min(count))
+                .or_insert(count);
         }
     }
     clipped.into_iter().collect()
+}
+
+/// One widget SVG layer with `params` bound, laid out by usvg.
+fn bound_widget_tree(
+    svg: &str,
+    bindings: &[WidgetBinding],
+    param_constraints: &HashMap<String, (f32, f32)>,
+    params: &HashMap<String, WidgetParameterValue>,
+) -> Option<resvg::usvg::Tree> {
+    let mut bound = svg.to_owned();
+    for binding in bindings {
+        if let Some(value) = resolve_binding_value(binding, params, param_constraints) {
+            let value = if binding.target_attribute == "text-content" {
+                escape_text(&value)
+            } else {
+                value
+            };
+            bound = apply_svg_attribute(
+                &bound,
+                &binding.target_element,
+                &binding.target_attribute,
+                &value,
+            );
+        }
+    }
+    resvg::usvg::Tree::from_str(&bound, &widget_usvg_options()).ok()
+}
+
+/// Whether text element `element` runs past the canvas edges.
+fn text_past_canvas(tree: &resvg::usvg::Tree, element: &str) -> bool {
+    /// Antialiasing slack: a glyph ending on the edge is not cut.
+    const EDGE_SLACK: f32 = 0.5;
+    let width = tree.size().width();
+    match tree.node_by_id(element) {
+        Some(resvg::usvg::Node::Text(text)) => {
+            let bbox = text.abs_bounding_box();
+            bbox.left() < -EDGE_SLACK || bbox.right() > width + EDGE_SLACK
+        }
+        _ => false,
+    }
 }
 
 fn rasterize_single_svg_layer(
@@ -5387,9 +5422,33 @@ mod text_fit_tests {
             ),
             ("value".to_string(), string("ok")),
         ]);
+        let long = "A label far too long for this card";
+        crate::overflow::PREFIX_PROBES.with(|p| p.set(0));
+        let clipped = clipped_text_params(&layers, &HashMap::new(), &params);
+        let probes = crate::overflow::PREFIX_PROBES.with(std::cell::Cell::get);
+        let [(name, n)] = clipped.as_slice() else {
+            panic!("one cut param: {clipped:?}")
+        };
+        assert_eq!(name, "label");
+        // hud-ohgc9.2 R2.1 S4: the count is the longest prefix that fits,
+        // found within ceil(log2(len)) + 1 layouts.
+        let len = long.chars().count();
+        assert!(probes <= (usize::BITS - (len - 1).leading_zeros()) as usize + 1);
+        assert!(*n > 0 && *n < len, "{n}");
+        let prefix = |n: usize| {
+            HashMap::from([
+                (
+                    "label".to_string(),
+                    string(crate::overflow::char_prefix(long, n)),
+                ),
+                ("value".to_string(), string("ok")),
+            ])
+        };
+        assert!(clipped_text_params(&layers, &HashMap::new(), &prefix(*n)).is_empty());
         assert_eq!(
-            clipped_text_params(&layers, &HashMap::new(), &params),
-            ["label"]
+            clipped_text_params(&layers, &HashMap::new(), &prefix(n + 1)),
+            [("label".to_string(), *n)],
+            "one more character is cut, and reports the same count"
         );
         let fits = HashMap::from([
             ("label".to_string(), string("Short")),

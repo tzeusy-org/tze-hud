@@ -1050,31 +1050,60 @@ async fn poc_zone_delay_ms_appears_on_schedule() {
     assert_eq!(poc.shown(SUBTITLE), 0);
 }
 
-/// hud-ljhku.5 R5.1: publish replies name text the production renderer
-/// would cut, measured with the real shaper at production tokens, and keep
-/// today's bytes when everything fits.
+/// hud-ljhku.5 R5.1, hud-ohgc9.2 R2.1: publish replies count the characters
+/// the production renderer draws of each cut field, measured with the real
+/// shaper at production tokens; that many characters, republished, are drawn
+/// whole, and a reply where everything fits keeps today's bytes.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn poc_publish_reports_clipped_text_only_when_cut() {
+    /// The single count in `clipped`, under `name`, below `len`.
+    fn count(reply: &Value, name: &str, len: usize) -> usize {
+        let clipped = reply["clipped"].as_object().expect("clipped object");
+        assert_eq!(clipped.len(), 1, "{reply}");
+        let n = clipped[name].as_u64().expect("count") as usize;
+        assert!(n > 0 && n < len, "{reply}");
+        n
+    }
+    fn prefix(text: &str, n: usize) -> String {
+        text.chars().take(n).collect()
+    }
     let mut poc = Poc::boot().await;
     let long = "The nightly migration finished but three shards reported \
         checksum drift that needs a manual look before tomorrow's deploy window";
     let body = poc
         .call(
             "hud_publish",
-            json!({"surface":NOTIFICATION,"content":{"title":"Migration","body":long}}),
+            json!({"surface":NOTIFICATION,"key":"migration","content":{"title":"Migration","body":long}}),
         )
         .await;
-    assert_eq!(body.body["clipped"], json!(["body"]), "{}", body.body);
+    let n = count(&body.body, "body", long.chars().count());
+    let again = poc
+        .call(
+            "hud_publish",
+            json!({"surface":NOTIFICATION,"key":"migration","content":{"title":"Migration","body":prefix(long, n)}}),
+        )
+        .await;
+    assert!(again.body.get("clipped").is_none(), "{n}: {}", again.body);
 
+    let go = "Deploy the release to every production region and every staging region right now, then page on-call";
     let label = poc
         .call(
             "hud_publish",
             json!({"surface":NOTIFICATION,"content":{"body":"Deploy?","actions":[
-                {"label":"Deploy the release to every production region and every staging region right now, then page on-call","callback_id":"go"},
+                {"label":go,"callback_id":"go"},
                 {"label":"Hold","callback_id":"hold"}]}}),
         )
         .await;
-    assert_eq!(label.body["clipped"], json!(["actions"]), "{}", label.body);
+    let n = count(&label.body, "actions", go.chars().count());
+    let again = poc
+        .call(
+            "hud_publish",
+            json!({"surface":NOTIFICATION,"content":{"body":"Deploy?","actions":[
+                {"label":prefix(go, n),"callback_id":"go"},
+                {"label":"Hold","callback_id":"hold"}]}}),
+        )
+        .await;
+    assert!(again.body.get("clipped").is_none(), "{n}: {}", again.body);
 
     let fits = poc
         .call(
@@ -1096,7 +1125,14 @@ async fn poc_publish_reports_clipped_text_only_when_cut() {
             json!({"surface":"widget:main-status","params":{"status":"online","label":"API","reason":reason}}),
         )
         .await;
-    assert_eq!(widget.body["clipped"], json!(["reason"]), "{}", widget.body);
+    let n = count(&widget.body, "reason", 150);
+    let again = poc
+        .call(
+            "hud_publish",
+            json!({"surface":"widget:main-status","params":{"reason":prefix(&reason, n)}}),
+        )
+        .await;
+    assert!(again.body.get("clipped").is_none(), "{n}: {}", again.body);
     let short = poc
         .call(
             "hud_publish",

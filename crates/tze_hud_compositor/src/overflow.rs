@@ -101,6 +101,54 @@ pub struct TruncationResult {
     pub(crate) was_truncated: bool,
 }
 
+impl TruncationResult {
+    /// Characters (Unicode scalar values) of `original` this result draws,
+    /// not counting the ellipsis: the length of their common prefix. Every
+    /// head-anchored result is a prefix of `original` (trailing whitespace
+    /// trimmed) plus [`ELLIPSIS`]; the comparison keeps the count a prefix
+    /// count even if that ever changes.
+    pub(crate) fn drawn_chars(&self, original: &str) -> usize {
+        let drawn = self.text.strip_suffix(ELLIPSIS).unwrap_or(&self.text);
+        drawn
+            .chars()
+            .zip(original.chars())
+            .take_while(|(a, b)| a == b)
+            .count()
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Layouts [`longest_fitting_prefix`] measured on this thread.
+    pub(crate) static PREFIX_PROBES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// The largest `n` in `0..=upper` for which `fits(n)` holds, assuming
+/// `fits(0)` holds and fit is monotone in `n`. Binary search: at most
+/// `ceil(log2(upper + 1))` calls, so a cut field of `len` characters
+/// (`upper < len`) costs at most `ceil(log2(len)) + 1` layouts.
+pub(crate) fn longest_fitting_prefix(upper: usize, mut fits: impl FnMut(usize) -> bool) -> usize {
+    let (mut lo, mut hi) = (0, upper);
+    while lo < hi {
+        let mid = lo + (hi - lo).div_ceil(2);
+        #[cfg(test)]
+        PREFIX_PROBES.with(|p| p.set(p.get() + 1));
+        if fits(mid) {
+            lo = mid;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    lo
+}
+
+/// The first `n` characters of `text`.
+pub(crate) fn char_prefix(text: &str, n: usize) -> &str {
+    text.char_indices()
+        .nth(n)
+        .map_or(text, |(byte, _)| &text[..byte])
+}
+
 /// Viewport anchoring mode for transcript overflow.
 ///
 /// Controls which lines are shown when the full text has more layout runs than
@@ -3608,5 +3656,75 @@ mod tests {
             );
             assert_eq!(win_tail.was_truncated, full_tail.was_truncated);
         }
+    }
+
+    // ── hud-ohgc9.2: drawn counts behind `clipped` ───────────────────────────
+
+    /// The search finds every threshold within ceil(log2(upper + 1)) probes.
+    #[test]
+    fn longest_fitting_prefix_finds_the_threshold_within_the_bound() {
+        for upper in 0..=130usize {
+            let bound = (usize::BITS - upper.leading_zeros()) as usize; // ceil(log2(upper+1))
+            for threshold in 0..=upper {
+                let mut probes = 0;
+                let n = longest_fitting_prefix(upper, |n| {
+                    probes += 1;
+                    n <= threshold
+                });
+                assert_eq!(n, threshold, "upper {upper}");
+                assert!(probes <= bound, "upper {upper}: {probes} > {bound}");
+            }
+        }
+    }
+
+    #[test]
+    fn char_prefix_counts_scalar_values() {
+        assert_eq!(char_prefix("café 👩‍💻", 4), "café");
+        assert_eq!(char_prefix("ab", 5), "ab");
+        assert_eq!(char_prefix("ab", 0), "");
+    }
+
+    /// The drawn count of a cut line (single or wrapped), republished as that
+    /// many characters, is drawn whole.
+    #[test]
+    fn drawn_chars_prefix_republishes_uncut() {
+        let mut fs = make_font_system();
+        let cases = [
+            (
+                "The quick brown fox jumps over the lazy dog again and again",
+                120.0,
+                20.0,
+            ),
+            (
+                "待機 café 👩‍💻 — 待機 café 👩‍💻 — 待機 café 👩‍💻 — 待機",
+                90.0,
+                20.0,
+            ),
+            (
+                "one two three four five six seven eight nine ten eleven twelve",
+                140.0,
+                44.0,
+            ),
+            ("Line one\nline two\nline three\nline four", 200.0, 44.0),
+        ];
+        for (text, width, height) in cases {
+            let cut = truncate_for_ellipsis(text, base_attrs(), width, height, 16.0, 22.0, &mut fs);
+            assert!(cut.was_truncated, "{text}");
+            let n = cut.drawn_chars(text);
+            assert!(n < text.chars().count(), "{text}");
+            assert_eq!(
+                cut.text,
+                format!("{}{ELLIPSIS}", char_prefix(text, n).trim_end())
+            );
+            let again = char_prefix(text, n);
+            let whole =
+                truncate_for_ellipsis(again, base_attrs(), width, height, 16.0, 22.0, &mut fs);
+            assert!(
+                !whole.was_truncated,
+                "{text}: first {n} chars {again:?} cut again"
+            );
+        }
+        let fits = truncate_for_ellipsis("Hi", base_attrs(), 200.0, 20.0, 16.0, 22.0, &mut fs);
+        assert_eq!(fits.drawn_chars("Hi"), 2);
     }
 }

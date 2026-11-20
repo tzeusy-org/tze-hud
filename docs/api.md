@@ -312,14 +312,22 @@ with the same cancellation and idle semantics as a `hud_input` wait.
   runtime-reclaimed portal) and `pending_input` (queued replies). First attach,
   live update, and attach after explicit clear report false. The response
   describes the completed publish; it does not echo content.
-- `clipped` names text the renderer would cut, measured at admission with the
-  drawing shaper, current design tokens and display geometry. Notifications
+- `clipped` reports text the renderer would cut, measured at admission with
+  the drawing shaper, current design tokens and display geometry, as an
+  object from field name to the number of characters (Unicode scalar values)
+  of the sent string that are drawn, not counting the ellipsis:
+  `{"clipped":{"body":58},"expires_in_ms":60000,"ok":true}`. Notifications
   report any of `"title"`, `"body"` and `"actions"` (a label wider than its
-  button); widgets report the string parameters set in this call whose drawn
-  text overflows the widget. The field is omitted when everything fits, so
-  replies are unchanged byte for byte, and never appears for stream-text zones
-  or portals. It also rides on wait replies (`action`, `gone`, deadline). React
-  by shortening, or by moving detail behind a link action.
+  button; the count is the smallest among the cut labels, and stops before a
+  label's first line break); widgets report the string parameters set in this
+  call whose drawn text overflows the widget. The first N characters of what
+  was sent always fit; a rewrite of N characters usually fits, but glyph
+  widths differ, so it may report again. The field is omitted when everything
+  fits, so replies are unchanged byte for byte, and never appears for
+  stream-text zones or portals. It also rides on wait replies (`action`,
+  `gone`, deadline). React by shortening to the count, or by moving detail
+  behind a link action. A HUD built before this shape returns a list of the
+  cut field names instead.
 
 For example, publish a notification whose button arrives at `hud_input` as
 `{"action":"approve","s":"zone:notification-area",...}`:
@@ -1630,7 +1638,9 @@ only. The canonical gate still requires two byte-identical final-source
 measurements. Reply defaults `reattached`, `pending_input` and `remaining` stay
 byte-identical, including the unchanged full portal flow. The outcome receipts
 (`hud-ljhku.5`: `clipped` and displaced items) are omitted on every
-canonical flow, so the baseline bytes are unchanged.
+canonical flow, so the baseline bytes are unchanged. Reporting `clipped` as
+drawn counts (`hud-ohgc9.2`) adds about one token per cut field to a clipped
+reply only; no canonical flow is clipped, so their bytes stay unchanged too.
 
 The `notification_choice` flow publishes Ship/Hold/Skip/Open, activates Skip through
 `SceneGraph::activate_notification` (the shared pointer/keyboard producer), polls
