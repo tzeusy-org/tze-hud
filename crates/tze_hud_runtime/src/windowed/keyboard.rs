@@ -224,7 +224,7 @@ fn keyboard_page_scroll_delta(raw: &RawKeyDownEvent) -> Option<f32> {
     }
 }
 
-/// Home, End, Space and Shift+Space while OUTPUT holds reading focus.
+/// Home, End, Space/Shift+Space and PageDown/PageUp while OUTPUT holds reading focus.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum ReadingScroll {
     Top,
@@ -244,7 +244,7 @@ fn reading_scroll_key(raw: &RawKeyDownEvent) -> Option<ReadingScroll> {
         ("Space", _) | (_, " " | "Space") => {
             Some(ReadingScroll::Page(if m.shift { -page } else { page }))
         }
-        _ => None,
+        _ => keyboard_page_scroll_delta(raw).map(ReadingScroll::Page),
     }
 }
 
@@ -1489,21 +1489,23 @@ impl WinitApp {
         };
         // OUTPUT reading focus: a selection (it takes it from the caret), a
         // focused link or Copy stop, or the focused portal tile.
-        let reading_tile = reader.selection.map(|s| s.tile).or(focused).or(
-            match self.state.focus_manager.current_owner(tab_id) {
-                tze_hud_input::FocusOwner::Tile(tile)
-                    if self
-                        .state
-                        .input_processor
-                        .portal_output_layout(*tile)
-                        .is_some() =>
-                {
-                    Some(*tile)
-                }
-                _ => None,
-            },
-        );
-        let scroll = reading_scroll_key(raw).zip(reading_tile);
+        let held = reader.selection.map(|s| s.tile).or(focused);
+        let reading_tile = held.or(match self.state.focus_manager.current_owner(tab_id) {
+            tze_hud_input::FocusOwner::Tile(tile)
+                if self
+                    .state
+                    .input_processor
+                    .portal_output_layout(*tile)
+                    .is_some() =>
+            {
+                Some(*tile)
+            }
+            _ => None,
+        });
+        // At tile focus PageUp/PageDown keep their command path, same step.
+        let scroll = reading_scroll_key(raw)
+            .zip(reading_tile)
+            .filter(|_| held.is_some() || keyboard_page_scroll_delta(raw).is_none());
         let relevant = (copy && reader.selection.is_some())
             || (escape && (reader.selection.is_some() || focused.is_some()))
             || (tab && (focused.is_some() || (entry.is_some() && !m.shift)))
@@ -2367,7 +2369,7 @@ mod tests {
     /// R4.2: the OUTPUT reading keys and their page step; any
     /// Ctrl/Alt/Meta chord, and every other key, stays out of the map.
     #[test]
-    fn reading_scroll_keys_map_home_end_and_space_pages() {
+    fn reading_scroll_keys_map_home_end_and_page_keys() {
         let page = tze_hud_input::KEYBOARD_PAGE_SCROLL_PX;
         let none = KeyboardModifiers::NONE;
         let shift = KeyboardModifiers {
@@ -2391,7 +2393,14 @@ mod tests {
             ("Home", "Home", ctrl, None),
             ("End", "End", alt, None),
             ("Space", " ", meta, None),
-            ("PageDown", "PageDown", none, None),
+            (
+                "PageDown",
+                "PageDown",
+                none,
+                Some(ReadingScroll::Page(page)),
+            ),
+            ("PageUp", "PageUp", shift, Some(ReadingScroll::Page(-page))),
+            ("PageDown", "PageDown", ctrl, None),
             ("KeyA", "a", none, None),
         ] {
             let raw = RawKeyDownEvent {

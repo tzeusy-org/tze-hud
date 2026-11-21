@@ -292,11 +292,11 @@ with the same cancellation and idle semantics as a `hud_input` wait.
   portal tile is focused. An OUTPUT selection takes reading focus from the
   caret, so Home and End scroll OUTPUT until the selection is cleared. With
   reading focus, Home scrolls OUTPUT to its first retained line, End to the
-  tail (as jump-to-latest does), and Space and Shift+Space page down and up by
-  the PageDown/PageUp step; Space on a focused link or Copy stop still
-  activates it, and a key that moves nothing draws no frame. PageUp/PageDown
-  page OUTPUT when the portal tile is focused. With the caret in the composer
-  these remain text keys. None of this reaches the agent: no
+  tail (as jump-to-latest does), and PageDown/Space and PageUp/Shift+Space
+  page down and up by one keyboard page. Space on a focused link or Copy stop
+  still activates it, paging keeps the focused stop or selection, and a key
+  that moves nothing draws no frame. With the caret in the composer these
+  remain text keys. None of this reaches the agent: no
   `hud_input` item, no MCP or gRPC change.
 - Omitted zone `ttl_ms` uses 60000, except a notification with actions uses
   the owner's live `[runtime] answer_window_ms` (default 60000). An explicit
