@@ -18,6 +18,8 @@ import time
 import uuid
 from unittest import mock
 
+import inspect
+
 import pytest
 
 ROOT = Path(__file__).resolve().parents[4]
@@ -109,6 +111,15 @@ def test_poll_prints_ndjson_and_acks_on_next_call(capsys):
     assert [c[1]["name"] for c in calls] == ["hud_input", "hud_input"]
     assert calls[1][1]["arguments"] == {"ack": ["i1"]}
     assert json.loads(capsys.readouterr().out.strip()) == item
+
+
+def test_poll_accepts_the_55_second_wait_within_its_http_timeout():
+    server = FakeServer([tool_response({"items": [], "remaining": 0})])
+    with mock.patch.object(client, "rpc", server), pytest.raises(SystemExit):
+        client.main(["poll", "--wait-ms", "55000"])
+    assert server.calls[0][1]["arguments"]["wait_ms"] == 55000
+    timeout = inspect.signature(client.rpc).parameters["timeout"].default
+    assert timeout > 55  # A full wait plus its reply fits one HTTP request.
 
 
 def test_poll_with_ack_stops_at_first_reply(capsys):
