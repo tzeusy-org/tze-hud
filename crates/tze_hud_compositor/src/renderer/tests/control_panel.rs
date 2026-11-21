@@ -360,6 +360,7 @@ async fn capture_leaves_the_closed_notice_out() {
         kind: crate::renderer::SystemCardKind::Pairing,
         title: "Pair an agent".into(),
         lines: vec!["482913".into()],
+        host: None,
     };
     assert!(compositor.set_closed_notice(None));
     compositor.set_system_card(Some(card));

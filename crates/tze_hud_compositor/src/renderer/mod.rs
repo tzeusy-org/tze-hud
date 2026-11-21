@@ -229,6 +229,7 @@ pub struct Compositor {
     safe_mode_overlay: bool,
     /// Runtime system card / toast (see [`Compositor::set_system_card`]).
     system_card: Option<SystemCardModel>,
+    system_card_layout: Option<((u32, u32), system_card::SystemCardLayout)>,
     /// Runtime control panel (see [`Compositor::set_control_panel`]); while
     /// open it replaces the system card in the final chrome pass.
     control_panel: Option<ControlPanelModel>,
@@ -978,6 +979,7 @@ impl Compositor {
             overlay_mode: false,
             safe_mode_overlay: false,
             system_card: None,
+            system_card_layout: None,
             control_panel: None,
             control_panel_layout: None,
             control_panel_layout_generation: 0,
@@ -1330,6 +1332,7 @@ impl Compositor {
             overlay_mode: false,
             safe_mode_overlay: false,
             system_card: None,
+            system_card_layout: None,
             control_panel: None,
             control_panel_layout: None,
             control_panel_layout_generation: 0,
@@ -1792,6 +1795,7 @@ impl Compositor {
         self.token_map = map;
         // The panel is token-styled: re-lay it out on the next frame.
         self.control_panel_layout = None;
+        self.system_card_layout = None;
         // Token-substitution failures in ensure_icon_texture are tied to the
         // token map state, not to the SVG file on disk.  Clearing the negative
         // cache here lets icons that previously failed due to a missing token

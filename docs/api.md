@@ -508,7 +508,15 @@ agents until one is paired.
   [Human chords and the control panel](#human-chords-and-the-control-panel))
   show it in a copyable setup prompt instead. A late successfully bound MCP
   address refreshes an already displayed, still-valid startup/`--pair` card,
-  preserving its code and original expiration. Failed binds, interface removal
+  preserving its code and original expiration. The owner-only card and update
+  toasts use semantic surface/type/outline tokens and rounded SDF geometry.
+  The code uses the monospace display role with tracked three-digit groups
+  (the underlying six-digit value is unchanged), with pairing URL and optional local
+  host metadata below it; an actual blocked firewall verdict adds caution text.
+  The complete message fits within the display, including at increased UI scale.
+  The standalone card has no input controls: regeneration and closing remain in
+  the existing Connect card. System-card content never enters the scene graph
+  or MCP discovery/publication surfaces. Failed binds, interface removal
   and gRPC-only changes do not refresh that card. The agent trades it for a key:
 
   ```

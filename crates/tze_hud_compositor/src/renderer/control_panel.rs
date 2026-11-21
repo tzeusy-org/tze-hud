@@ -2161,10 +2161,10 @@ impl Compositor {
     }
 
     /// Flat quads of the final chrome pass: the panel scrim while the panel is
-    /// open, else the system card backdrop.
+    /// open. System cards use rounded shapes below.
     pub(super) fn final_chrome_vertices(&mut self, sw: f32, sh: f32) -> Vec<RectVertex> {
         if self.control_panel.is_none() {
-            return self.system_card_vertices(sw, sh);
+            return Vec::new();
         }
         let rects = match self.ensure_control_panel_layout(sw, sh) {
             Some(layout) => layout.flat.clone(),
@@ -2177,7 +2177,7 @@ impl Compositor {
     }
 
     /// Rounded shapes of the final chrome pass, in `gpu_color` form: the
-    /// panel's while it is open, else its notice pill (if any). The count is
+    /// panel's while it is open, else its notice pill and system card. The count is
     /// how many leading shapes are the notice's, which the admin capture
     /// leaves out.
     pub(super) fn final_chrome_rounded_rects(
@@ -2188,8 +2188,9 @@ impl Compositor {
         let (shapes, notice) = match self.ensure_control_panel_layout(sw, sh) {
             Some(layout) => (layout.shapes.clone(), 0),
             None => {
-                let shapes = self.closed_notice_draw(sw, sh).0;
+                let mut shapes = self.closed_notice_draw(sw, sh).0;
                 let notice = shapes.len();
+                shapes.extend(self.system_card_shapes(sw, sh));
                 (shapes, notice)
             }
         };

@@ -481,20 +481,22 @@ async fn test_focus_ring_suppressed_on_non_active_tab() {
     );
 }
 
-/// the runtime system card emits backdrop quads and text items
+/// The runtime system card emits rounded shapes and text items
 /// only while set; re-setting an identical card requests no repaint.
 #[tokio::test]
 async fn system_card_emits_draw_cmds_only_while_set() {
     use crate::renderer::{SystemCardKind, SystemCardModel};
     let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(1_000, 500).await);
+    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
     let card = SystemCardModel {
         kind: SystemCardKind::Pairing,
         title: "Pair an agent".into(),
         lines: vec!["482913".into()],
+        host: None,
     };
     let display_card = card.clone();
 
-    assert!(compositor.system_card_vertices(800.0, 600.0).is_empty());
+    assert!(compositor.system_card_shapes(800.0, 600.0).is_empty());
     assert!(
         !compositor.set_system_card(None),
         "no-op clear is not a change"
@@ -505,20 +507,22 @@ async fn system_card_emits_draw_cmds_only_while_set() {
         "identical card must not force a repaint"
     );
     assert_eq!(
-        compositor.system_card_vertices(800.0, 600.0).len(),
-        12,
-        "backdrop + accent quads"
+        compositor.system_card_shapes(800.0, 600.0).len(),
+        2,
+        "rounded backdrop and code well"
     );
     let texts = compositor.system_card_text_items(800.0, 600.0);
-    assert_eq!(texts.len(), 2, "title + code line");
-    assert_eq!(&*texts[1].text, "482913");
+    assert_eq!(texts.len(), 8, "title, explanation and six grouped digits");
+    assert_eq!(
+        texts[2..].iter().map(|t| &*t.text).collect::<String>(),
+        "482913"
+    );
 
     assert!(compositor.set_system_card(None));
-    assert!(compositor.system_card_vertices(800.0, 600.0).is_empty());
+    assert!(compositor.system_card_shapes(800.0, 600.0).is_empty());
     assert!(compositor.system_card_text_items(800.0, 600.0).is_empty());
 
     // Render text without a card, then sample its backdrop away from glyphs.
-    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
     let first_root_id = SceneId::new();
     let mut scene = scene_with_node(Node {
         id: first_root_id,
@@ -537,15 +541,15 @@ async fn system_card_emits_draw_cmds_only_while_set() {
         }),
     });
     let first_tile_id = *scene.tiles.keys().next().expect("text tile");
-    let backdrop = crate::renderer::system_card::system_card_layout(
-        &compositor.token_map,
-        &display_card,
-        1_000.0,
-        500.0,
-    )
-    .rects[0];
-    let sample_x = (backdrop.x + backdrop.w - 8.0).floor() as usize;
-    let sample_y = (backdrop.y + backdrop.h - 8.0).floor() as usize;
+    compositor.set_system_card(Some(display_card.clone()));
+    let backdrop = compositor
+        .ensure_system_card_layout(1_000.0, 500.0)
+        .unwrap()
+        .shapes[0]
+        .rect;
+    compositor.set_system_card(None);
+    let sample_x = (backdrop.x + backdrop.w - 28.0).floor() as usize;
+    let sample_y = (backdrop.y + backdrop.h - 12.0).floor() as usize;
     assert!(sample_x >= 100 && sample_y >= 100);
     assert!(sample_x + 3 < 1_000 && sample_y + 3 < 500);
     let card_pixels = |pixels: &[u8]| {

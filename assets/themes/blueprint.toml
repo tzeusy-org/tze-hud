@@ -156,8 +156,6 @@
 "color.text.accent"                   = "#4C90F0"   # primary
 "color.border.default"                = "#404854"   # outline.variant
 "portal.divider.color"                = "#404854"   # outline.variant
-"system_card.background"              = "#2F343CF5" # surface.container.high @ 0.96
-"system_card.accent.color"            = "#4C90F0"   # primary
 "typography.body.size"                = "14"
 "typography.body.weight"              = "400"
 "spacing.padding.medium"              = "8"
@@ -287,6 +285,18 @@
 "size.status.icon" = "14"
 "size.status.divider" = "14"
 "size.status.entry_max" = "240"
+
+# Owner-only pairing card and toast; shared geometry, semantic theme surfaces/type.
+"size.system_card.width" = "440"
+"space.system_card.padding" = "28"
+"space.system_card.group_gap" = "20"
+"space.system_card.row_gap" = "6"
+"size.system_card.metadata_key" = "72"
+"opacity.system_card" = "0.96"
+"type.system_card.metadata.size" = "13"
+"type.system_card.metadata.line_height" = "20"
+"type.system_card.metadata.weight" = "400"
+"type.code.display.tracking_em" = "0.06"
 
 # Hover-only runtime move affordance
 "size.drag.handle_width" = "32"

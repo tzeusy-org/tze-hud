@@ -24,6 +24,7 @@ pub(crate) struct SystemCard {
     pub kind: SystemCardKind,
     pub title: String,
     pub lines: Vec<String>,
+    pub host: Option<String>,
     pub expires_at_wall_us: Option<u64>,
 }
 
@@ -34,6 +35,7 @@ impl SystemCard {
             kind: SystemCardKind::Toast,
             title: title.into(),
             lines: Vec::new(),
+            host: None,
             expires_at_wall_us: Some(now_wall_us.saturating_add(TOAST_TTL_US)),
         }
     }
@@ -43,6 +45,7 @@ impl SystemCard {
             kind: self.kind,
             title: self.title.clone(),
             lines: self.lines.clone(),
+            host: self.host.clone(),
         }
     }
 }
@@ -169,6 +172,7 @@ mod tests {
             kind: SystemCardKind::Pairing,
             title: "Pair an agent".into(),
             lines: vec![CODE.into(), "http://100.64.0.1:9090/pair".into()],
+            host: Some("hud-example".into()),
             expires_at_wall_us: None,
         }
     }
@@ -189,6 +193,10 @@ mod tests {
     async fn system_card_absent_from_snapshot_surfaces_and_publish() {
         let (handle, _) = counting_handle();
         handle.set(pairing_card());
+        assert_eq!(
+            handle.frame_state(0).model.unwrap().host.as_deref(),
+            Some("hud-example")
+        );
 
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         scene.zone_registry = ZoneRegistry::with_defaults();
@@ -196,6 +204,7 @@ mod tests {
         let snapshot_json = scene.take_snapshot(1, 1).to_json().unwrap();
         assert!(!snapshot_json.contains(CODE));
         assert!(!snapshot_json.contains("Pair an agent"));
+        assert!(!snapshot_json.contains("hud-example"));
 
         let server = McpServer::new(scene).with_config(McpConfig::with_psk("test-key"));
         let ctx = CallerContext::with_bearer("test-key");
@@ -218,7 +227,9 @@ mod tests {
             .await;
         for out in [&surfaces, &published] {
             assert!(
-                !out.contains(CODE) && !out.contains("Pair an agent"),
+                !out.contains(CODE)
+                    && !out.contains("Pair an agent")
+                    && !out.contains("hud-example"),
                 "{out}"
             );
         }
