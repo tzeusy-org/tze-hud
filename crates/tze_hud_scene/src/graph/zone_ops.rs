@@ -1220,6 +1220,70 @@ impl SceneGraph {
             })
     }
 
+    /// Whether `region` is a destructive action, taken only by a completed
+    /// hold.
+    pub fn notification_needs_hold(&self, region: &ZoneHitRegion) -> bool {
+        self.notification_action(region)
+            .is_some_and(NotificationAction::is_destructive)
+    }
+
+    /// Start holding `region` (a destructive action) with the pointer
+    /// (`key` = `None`) or a key. A new press replaces any hold or drain.
+    pub fn begin_notification_hold(&mut self, region: ZoneHitRegion, key: Option<String>) {
+        self.overlay.notification_hold_drain = None;
+        self.overlay.notification_hold = Some(super::NotificationHold {
+            region,
+            key,
+            started_mono_us: self.now_monotonic_us(),
+        });
+        self.bump_geometry_epoch();
+    }
+
+    /// End the hold, if any, without activating it: its fill drains from
+    /// where it reached over `drain_ms` (0: at once). Returns whether a hold
+    /// ended.
+    pub fn cancel_notification_hold(&mut self, hold_ms: u32, drain_ms: u32) -> bool {
+        let Some(hold) = self.overlay.notification_hold.take() else {
+            return false;
+        };
+        let now = self.now_monotonic_us();
+        let progress = hold_progress(hold.started_mono_us, now, hold_ms);
+        self.overlay.notification_hold_drain =
+            (drain_ms > 0 && progress > 0.0).then_some(super::NotificationHoldDrain {
+                interaction_id: hold.region.interaction_id,
+                progress,
+                released_mono_us: now,
+            });
+        self.bump_geometry_epoch();
+        true
+    }
+
+    /// The hold that has lasted `hold_ms`, removed so it completes once.
+    /// The caller activates its region ([`Self::activate_notification`]),
+    /// which refuses a control that was replaced, cleared or expired.
+    pub fn take_completed_notification_hold(
+        &mut self,
+        hold_ms: u32,
+    ) -> Option<super::NotificationHold> {
+        let hold = self.overlay.notification_hold.as_ref()?;
+        let due = hold
+            .started_mono_us
+            .saturating_add(u64::from(hold_ms) * 1_000);
+        if self.now_monotonic_us() < due {
+            return None;
+        }
+        self.bump_geometry_epoch();
+        self.overlay.notification_hold.take()
+    }
+
+    /// Scene monotonic time at which the current hold completes.
+    pub fn notification_hold_due_mono_us(&self, hold_ms: u32) -> Option<u64> {
+        self.overlay.notification_hold.as_ref().map(|hold| {
+            hold.started_mono_us
+                .saturating_add(u64::from(hold_ms) * 1_000)
+        })
+    }
+
     /// Activate one exact, visible and unexpired notification control. Pointer
     /// releases and keyboard activation both enter here. The FIFO remains the
     /// authoritative answer; its readiness callback must run after unlocking.
@@ -1412,6 +1476,17 @@ impl SceneGraph {
             .is_some_and(|id| !valid.contains(id))
         {
             self.focus_notification(None);
+        }
+        // A held control that was replaced, cleared, expired or hidden ends
+        // its hold with no callback.
+        if self
+            .overlay
+            .notification_hold
+            .as_ref()
+            .is_some_and(|hold| !valid.contains(&hold.region.interaction_id))
+        {
+            self.overlay.notification_hold = None;
+            self.bump_geometry_epoch();
         }
     }
 
@@ -1820,4 +1895,12 @@ pub(super) fn effective_expiry(
         (Some(a), Some(b)) => Some(a.min(b)),
         (a, b) => a.or(b),
     }
+}
+
+/// Fill fraction of a hold started at `started` after `hold_ms`, at `now`.
+pub fn hold_progress(started: u64, now: u64, hold_ms: u32) -> f32 {
+    if hold_ms == 0 {
+        return 1.0;
+    }
+    (now.saturating_sub(started) as f32 / (hold_ms as f32 * 1_000.0)).clamp(0.0, 1.0)
 }

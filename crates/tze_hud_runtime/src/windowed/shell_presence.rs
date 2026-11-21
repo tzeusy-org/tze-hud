@@ -290,6 +290,7 @@ mod tests {
             label: "Answer".into(),
             callback_id: Some("answer".into()),
             url: None,
+            role: None,
         };
         for actions in [
             vec![callback.clone(), callback.clone()],
@@ -298,6 +299,7 @@ mod tests {
                 label: "Open link".into(),
                 callback_id: None,
                 url: Some("https://example.com".into()),
+                role: None,
             }],
         ] {
             scene

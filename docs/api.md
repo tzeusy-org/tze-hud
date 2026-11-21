@@ -111,7 +111,7 @@ with the same cancellation and idle semantics as a `hud_input` wait.
 
 - Zone: `content` is a string, or a typed object for structured zones
   (`notification` with optional `title`, `body`, integer `urgency` 0–3
-  (default 1), and optional `actions: [{label, callback_id?|url}]`). Each
+  (default 1), and optional `actions: [{label, callback_id?|url, role?}]`). Each
   action has one target. MCP requires a non-empty label; an MCP action with
   neither member is a callback whose id is its label, byte for byte, and its
   answer is that label. A callback string must be non-empty when supplied.
@@ -122,6 +122,17 @@ with the same cancellation and idle semantics as a `hud_input` wait.
   callback_id`; a label-only `dismiss` rejects with
   `notification.actions[<i>] label dismiss needs a callback_id`. Two explicit
   equal ids stay accepted, and a label shared with a URL action is accepted.
+  `role` is optional and MCP-only: `"destructive"` marks an irreversible
+  callback answer (explicit or label-only). Any other value rejects with
+  `notification.actions[<i>].role must be destructive`; on a `url` action,
+  `notification.actions[<i>].role needs a callback action`. A role is meaning,
+  not styling: the theme draws a destructive action's label and outline in
+  `color.error` (on caution and error cards the label keeps that tone's text
+  color and the outline is the cue), never filled at rest. The **primary**
+  action is the first action that is not destructive: it is the filled button
+  and the answer chord's initial focus, so put the answer you recommend first.
+  It is never taken automatically. A card whose actions are all destructive
+  has no primary. gRPC actions carry no role.
   An empty URL gets `action url must be https`; an empty callback retains
   its existing non-empty argument error. gRPC plain-string defaults map empty
   targets to absence: both empty or both non-empty reject; existing gRPC label
@@ -157,7 +168,17 @@ with the same cancellation and idle semantics as a `hud_input` wait.
   Notification TTL belongs at the publish's top-level `ttl_ms`; an inner
   `content.ttl_ms` is rejected with a hint to move it.
   Activating a callback action queues its unchanged `hud_input` callback once and
-  immediately disables all controls on that exact publication. Runtime identity
+  immediately disables all controls on that exact publication. A destructive
+  action activates only after a press (pointer, Enter/Space, or its chord
+  digit) is held for `notification.action.hold.ms` (default 600, integer
+  0–3000; 0 turns the hold off): a `color.error.container` fill sweeps across
+  the button (shown at once when Windows animations are off) and the action
+  fires once when the hold completes, without waiting for release; an armed
+  `wait_ms` returns it then. Releasing early, the pointer leaving the button,
+  capture loss, key-up, Esc or another key, HUD keyboard-focus loss or safe
+  mode ends the hold with no callback and the fill drains over
+  `motion.state.ms`; hide-all, or the card being replaced, cleared or
+  expiring, ends it with no callback and no drain. Key repeat is ignored. Frames are drawn only during a hold or its drain. Runtime identity
   keeps same-tick publications and replacements independent without changing
   their wall-clock timestamps or TTLs. The chosen button keeps its pressed fill during the finite `motion.exit.ms` fade
   (`motion.exit.easing`); zero exit duration removes it instantly. Explicit
@@ -1051,8 +1072,12 @@ in its composer.
 The answer chord targets the newest visible unanswered card with callback
 actions. With no such card it changes nothing. It transfers input from an open
 running settings panel to the card; it does nothing in safe mode. Tab/Shift+Tab
-and arrows move among that card's actions; Enter/Space activates the focused
-action. Digits 1–4 activate the corresponding action, with token-styled digit
+and arrows move among that card's actions, starting on the primary action (the
+first that is not destructive, else the first); Enter/Space activates the
+focused action, so chord then Enter takes the primary (a `url` primary opens
+its link and ends the visit, without answering). Digits 1–4 activate the
+corresponding action; a destructive action's Enter, Space or digit must be
+held for `notification.action.hold.ms`, with token-styled digit
 hints only during this chord visit and no change to button or label geometry.
 A digit beyond the action count does nothing. Callback answers return focus;
 a URL digit uses the same two-second per-action limit, leaves the card visible,
@@ -1489,7 +1514,7 @@ color overrides still take precedence.
 | Gauge ring | `gauge.{width,height,edge.*,ring.*,caption.y,hover.delay_ms}`, `type.gauge.readout.size` (centred percent; family and weight follow `type.readout`) |
 | Progress card | `progress.{width,height,edge.*,content.x,text.y,label.width,track.*,readout.*,hover.delay_ms}`, `type.label.m`, `type.readout.family` |
 | Status pill | `status.{width,height,pill.*,edge.*,marker.*,name.x,text.*,separator.*,reason.*,tooltip.*,hover.*}`, `type.body.m`, `type.label.m` |
-| Choice actions | `notification.action.link_mark` |
+| Choice actions | `notification.action.link_mark`, `notification.action.hold.ms` (destructive hold, integer ms 0–3000, default 600; 0 = no hold) |
 | Motion | `motion.{enter,exit,state}.ms`, `motion.{enter,exit}.easing` (`linear`, `standard`, `decelerate`, `accelerate`) |
 | Shape | `shape.{xs,s,m,l,xl,full}` (corner radius) |
 | Spacing | `space.{xs,s,m,l,xl,xxl}` (4 px grid) |
@@ -1657,7 +1682,7 @@ distinguishes arguments from responses and partial configuration examples.
 
 | Measure | Before T5 (wire) | Wire | Model-visible | Budget (model-visible) |
 |---|---|---|---|---|
-| `tools/list` | 4,418 | 659 | 622 | ≤ 900 |
+| `tools/list` | 4,418 | 664 | 627 | ≤ 900 |
 | Discover (default scene) | ~430 (`list_zones`) | 194 | 126 | ≤ 150 |
 | Zone publish | ~197 | 90 | 39 | ≤ 80 |
 | Four-option notification ask + returned answer + ACK | — | 273 | 114 | ≤ 120 |
@@ -1701,6 +1726,11 @@ model-visible bytes and 622 tokens, a new fingerprint. Every other flow,
 including `notification_choice_wait` (which still sends `wait_ms:30000`),
 keeps identical bytes. The owner **accepted** the new `tools/list` baseline
 for PR1673 on 2026-11-21.
+
+Advertising `role?:destructive` on notification actions (`hud-ohgc9.6`) adds
+18 bytes and 5 tokens to `tools/list` (2,711 to 2,729 model-visible bytes, 622
+to 627 tokens; wire 659 to 664); every other flow keeps identical
+fingerprints, bytes and counts. This baseline is **pending owner review**.
 
 All nine measurements use canonical flow version 4 and `tiktoken-rs` 0.12.0,
 `o200k_base`. The discovery-audience change (`hud-ljhku.7`, source `177e1096`)

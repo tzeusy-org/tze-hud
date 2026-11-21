@@ -1523,6 +1523,8 @@ impl Drop for HeadlessEventLoopHarness {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    mod hold;
     use tze_hud_input::{KeyboardModifiers, RawCharacterEvent, RawKeyDownEvent, RawKeyUpEvent};
     use tze_hud_protocol::proto::input_envelope::Event as ProtoInputEvent;
     use tze_hud_protocol::proto::{CommandAction, CommandSource};
@@ -3394,6 +3396,7 @@ mod tests {
                                     label: "Open".into(),
                                     callback_id: None,
                                     url: Some("https://example.com/frame".into()),
+                                    role: None,
                                 }],
                                 ..Default::default()
                             },
@@ -3766,6 +3769,7 @@ mod tests {
                 label: label.to_string(),
                 callback_id: Some(id.to_string()),
                 url: None,
+                role: None,
             };
             scene
                 .publish_to_zone(
@@ -5036,11 +5040,13 @@ mod tests {
                     label: "Docs".into(),
                     callback_id: None,
                     url: Some(urls[0].into()),
+                    role: None,
                 };
                 payload.actions[1] = NotificationAction {
                     label: "More".into(),
                     callback_id: None,
                     url: Some(urls[1].into()),
+                    role: None,
                 };
                 payload.actions[2].callback_id = Some("approve".into());
                 payload.actions[3].callback_id = Some("approve".into());
@@ -6007,6 +6013,7 @@ mod tests {
                             label: "Ship".to_string(),
                             callback_id: Some("ship".to_string()),
                             url: None,
+                            role: None,
                         }],
                     }),
                     "notif-agent",
@@ -6088,6 +6095,7 @@ mod tests {
                             label: "Keep".into(),
                             callback_id: Some("keep".into()),
                             url: None,
+                            role: None,
                         }],
                     }),
                     "control-agent",

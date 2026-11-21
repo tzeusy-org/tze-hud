@@ -110,6 +110,13 @@ pub struct RuntimeOverlayState {
     /// focus never enables digit shortcuts or their visual hints.
     #[serde(skip, default)]
     pub notification_answer: Option<SceneId>,
+    /// The destructive action being held, if any ([`NotificationHold`]).
+    /// Local only: the agent sees nothing until the hold completes.
+    #[serde(skip, default)]
+    pub notification_hold: Option<NotificationHold>,
+    /// A hold released early, draining its fill over `motion.state.ms`.
+    #[serde(skip, default)]
+    pub notification_hold_drain: Option<NotificationHoldDrain>,
     /// Set of element_ids that are currently being actively dragged.
     ///
     /// Written by the input processor on DragActivated and cleared on
@@ -333,6 +340,27 @@ pub struct RuntimeOverlayState {
 }
 
 use super::SceneGraph;
+
+/// A press on a destructive notification action that has not yet been held
+/// for `notification.action.hold.ms`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NotificationHold {
+    /// The exact control pressed; completion activates only this one.
+    pub region: ZoneHitRegion,
+    /// The held key's identity, or `None` for a pointer press.
+    pub key: Option<String>,
+    /// Scene monotonic time of the press.
+    pub started_mono_us: u64,
+}
+
+/// An early-released hold whose fill drains back to rest.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NotificationHoldDrain {
+    pub interaction_id: String,
+    /// Fill fraction (0..=1) when the hold ended.
+    pub progress: f32,
+    pub released_mono_us: u64,
+}
 
 impl SceneGraph {
     /// Queue a runtime-registered widget SVG asset for compositor registration.

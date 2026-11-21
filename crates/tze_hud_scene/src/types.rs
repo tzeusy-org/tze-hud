@@ -1967,19 +1967,31 @@ pub struct ZonePublishToken {
 
 // ─── Zone content ────────────────────────────────────────────────────────────
 
+/// What an action means; the theme decides how it looks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ActionRole {
+    /// Irreversible: drawn in the error tone and taken only by a press held
+    /// for `notification.action.hold.ms`. Callback actions only.
+    Destructive,
+}
+
 /// One notification button: a publisher callback or an owner-opened HTTPS link.
 /// The runtime resolves its target by live publication and zero-based index.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NotificationAction {
     pub label: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub callback_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<ActionRole>,
 }
 
 pub const ACTION_TARGET_HINT: &str = "action needs callback_id or url, not both";
 pub const ACTION_URL_HINT: &str = "action url must be https";
+pub const ACTION_ROLE_HINT: &str = "action role needs a callback action";
 
 impl NotificationAction {
     /// Preserve transport presence for exclusivity; only the parser's serialized
@@ -1987,9 +1999,15 @@ impl NotificationAction {
     pub fn validate(&self) -> Result<(), String> {
         match (&self.callback_id, &self.url) {
             (Some(callback), None) if !callback.is_empty() => Ok(()),
+            (None, Some(_)) if self.role.is_some() => Err(ACTION_ROLE_HINT.into()),
             (None, Some(_)) => self.encoded_url().map(|_| ()),
             _ => Err(ACTION_TARGET_HINT.into()),
         }
+    }
+
+    /// Taken only by a completed hold.
+    pub fn is_destructive(&self) -> bool {
+        self.role == Some(ActionRole::Destructive)
     }
 
     pub fn encoded_url(&self) -> Result<String, String> {
@@ -2046,6 +2064,13 @@ impl NotificationPayload {
     /// planes reject it with `INVALID_ARGUMENT`.
     pub fn is_blank(&self) -> bool {
         self.title.trim().is_empty() && self.text.trim().is_empty()
+    }
+
+    /// The primary action: the first that is not destructive. It is the
+    /// filled button and the answer chord's initial focus; it is never taken
+    /// automatically. `None` when every action is destructive (or none).
+    pub fn primary_action(&self) -> Option<usize> {
+        self.actions.iter().position(|a| !a.is_destructive())
     }
 
     /// Validate notification content before either publish plane admits or
@@ -3401,6 +3426,41 @@ impl Default for ZoneRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn primary_action_is_the_first_that_is_not_destructive() {
+        let action = |destructive: bool| NotificationAction {
+            label: "x".into(),
+            callback_id: Some("x".into()),
+            role: destructive.then_some(ActionRole::Destructive),
+            ..Default::default()
+        };
+        let card = |roles: &[bool]| NotificationPayload {
+            text: "t".into(),
+            actions: roles.iter().map(|d| action(*d)).collect(),
+            ..Default::default()
+        };
+        assert_eq!(card(&[false, false]).primary_action(), Some(0));
+        assert_eq!(card(&[true, false]).primary_action(), Some(1));
+        assert_eq!(card(&[true, true]).primary_action(), None);
+        assert_eq!(card(&[]).primary_action(), None);
+        // A role on a link is refused; a role-less action serializes as before.
+        let link = NotificationAction {
+            label: "Docs".into(),
+            url: Some("https://example.com/".into()),
+            role: Some(ActionRole::Destructive),
+            ..Default::default()
+        };
+        assert_eq!(link.validate(), Err(ACTION_ROLE_HINT.into()));
+        assert_eq!(
+            serde_json::to_string(&action(false)).unwrap(),
+            r#"{"label":"x","callback_id":"x"}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&action(true)).unwrap(),
+            r#"{"label":"x","callback_id":"x","role":"destructive"}"#
+        );
+    }
     use std::mem::size_of;
 
     // ── Portal surface structural validation ──────────────────────────

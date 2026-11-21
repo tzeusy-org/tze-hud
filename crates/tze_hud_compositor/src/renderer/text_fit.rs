@@ -295,6 +295,7 @@ mod tests {
                     label: (*label).into(),
                     callback_id: Some(format!("a{i}")),
                     url: None,
+                    role: None,
                 })
                 .collect(),
             ..Default::default()
@@ -412,11 +413,13 @@ mod tests {
                     label: first.into(),
                     callback_id: Some("go".into()),
                     url: None,
+                    role: None,
                 },
                 NotificationAction {
                     label: second.into(),
                     callback_id: None,
                     url: Some("https://example.com/".into()),
+                    role: None,
                 },
             ],
             ..Default::default()

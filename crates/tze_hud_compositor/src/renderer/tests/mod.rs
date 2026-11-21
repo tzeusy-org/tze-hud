@@ -162,6 +162,7 @@ async fn make_compositor_and_surface(w: u32, h: u32) -> Option<(Compositor, Head
     }
 }
 
+mod action_roles;
 mod alert_banner;
 mod composer;
 mod control_panel;

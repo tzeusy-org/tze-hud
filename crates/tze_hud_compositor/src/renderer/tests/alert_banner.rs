@@ -358,6 +358,7 @@ async fn test_alert_banner_is_an_inset_card_matching_its_hit_regions() {
                             label: label.into(),
                             callback_id: Some(label.into()),
                             url: None,
+                            role: None,
                         })
                         .collect(),
                     ..Default::default()
