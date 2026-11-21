@@ -1587,12 +1587,16 @@ fn parse_hold_ms(value: &str) -> Option<u32> {
 }
 
 /// The destructive-action hold in ms ([`NOTIFICATION_ACTION_HOLD_MS_KEY`]);
-/// the canonical 600 when unset or invalid.
+/// the canonical default when unset or invalid.
 pub fn notification_action_hold_ms(tokens: &DesignTokenMap) -> u32 {
     tokens
         .get(NOTIFICATION_ACTION_HOLD_MS_KEY)
         .and_then(|v| parse_hold_ms(v))
-        .unwrap_or(600)
+        .unwrap_or_else(|| {
+            canonical_token(NOTIFICATION_ACTION_HOLD_MS_KEY)
+                .and_then(|token| parse_hold_ms(token.default_value))
+                .expect("canonical hold duration must be valid")
+        })
 }
 
 /// Easing curve names accepted by `motion.*.easing` tokens.
@@ -2296,6 +2300,24 @@ mod tests {
             assert_eq!(errors.len(), 1, "{bad}");
             assert_eq!(errors[0].code, ConfigErrorCode::TokenValueParseError);
         }
+        for good in ["0", "600", "3000"] {
+            assert!(check(&[(NOTIFICATION_ACTION_HOLD_MS_KEY, good)]).is_empty());
+            let tokens = DesignTokenMap::from([(
+                NOTIFICATION_ACTION_HOLD_MS_KEY.to_owned(),
+                good.to_owned(),
+            )]);
+            assert_eq!(
+                notification_action_hold_ms(&tokens).to_string(),
+                good,
+                "hold {good}"
+            );
+        }
+        for bad in ["-1", "3001", "0.5", "long"] {
+            let errors = check(&[(NOTIFICATION_ACTION_HOLD_MS_KEY, bad)]);
+            assert_eq!(errors.len(), 1, "{bad}");
+            assert_eq!(errors[0].code, ConfigErrorCode::TokenValueParseError);
+        }
+        assert_eq!(notification_action_hold_ms(&DesignTokenMap::new()), 600);
         for key in [PX_SCALE_KEY, "runtime.px_scale@subtitle"] {
             let errors = check(&[(key, "2")]);
             assert_eq!(errors[0].code, ConfigErrorCode::InvalidTokenKey);

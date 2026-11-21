@@ -15,6 +15,8 @@ pub(super) struct AnswerKeyboardState {
     pub requested: Arc<AtomicBool>,
     pub focus: Option<AnswerFocus>,
     pub return_key: Option<String>,
+    /// The key holding a destructive action; its release ends the hold.
+    pub hold_key: Option<String>,
 }
 
 #[derive(Clone, Copy)]
@@ -27,6 +29,8 @@ pub(super) struct AnswerKeyOutcome {
     pub activation: Option<tze_hud_scene::graph::NotificationActivation>,
     pub exit: bool,
     pub return_focus: bool,
+    /// A destructive action began a hold under this key.
+    pub hold_key: Option<String>,
 }
 
 /// A chord pins one publication for its entire keyboard interaction. Even
@@ -42,6 +46,7 @@ pub(super) fn route_answer_key(
         activation: None,
         exit: false,
         return_focus: false,
+        hold_key: None,
     };
     let modified = raw.modifiers.ctrl || raw.modifiers.alt || raw.modifiers.meta;
     if modified || raw.repeat {
@@ -106,6 +111,12 @@ pub(super) fn route_answer_key(
         None
     };
     let Some(target) = target else { return outcome };
+    if super::notification_hold::needs_hold(scene, target, tokens) {
+        let key = keyboard_key_identity(&raw.key_code, &raw.key);
+        scene.begin_notification_hold(target.clone(), Some(key.clone()));
+        outcome.hold_key = Some(key);
+        return outcome;
+    }
     let duration = super::lifecycle::notification_exit_ms(scene, &target.zone_name, tokens);
     // A refused same-link repeat still finishes the owner's keyboard visit;
     // the existing per-publication/per-action limiter remains authoritative.
@@ -209,6 +220,17 @@ impl WinitApp {
             let Some(newest) = newest else {
                 return Ok(false);
             };
+            // Initial focus is the primary action (the first that is not
+            // destructive), or the first action when all are destructive.
+            let primary = scene
+                .zone_registry
+                .active_for_zone(&newest.zone_name)
+                .iter()
+                .find(|record| record.publication_id == newest.publication_id)
+                .and_then(|record| match &record.content {
+                    ZoneContent::Notification(payload) => payload.primary_action(),
+                    _ => None,
+                });
             let first = scene
                 .overlay
                 .zone_hit_regions
@@ -218,8 +240,8 @@ impl WinitApp {
                         && matches!(region.kind, ZoneInteractionKind::Action { .. })
                 })
                 .min_by_key(|region| match region.kind {
-                    ZoneInteractionKind::Action { index } => index,
-                    _ => usize::MAX,
+                    ZoneInteractionKind::Action { index } => (Some(index) != primary, index),
+                    _ => (true, usize::MAX),
                 })
                 .expect("eligible callback has a rendered action")
                 .clone();

@@ -1167,3 +1167,82 @@ async fn hidden_notification_sets_no_fade_deadline() {
     build(&mut compositor, &mut scene);
     assert!(compositor.next_animation_deadline_at(now).is_some());
 }
+
+/// A destructive card waiting for an answer costs what any card does: its
+/// only wake is the fade start. Frames run only while a hold sweeps or an
+/// early release drains, and stop the moment either lands.
+#[tokio::test]
+async fn idle_destructive_card_renders_only_during_hold_or_drain() {
+    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(320, 200).await);
+    let clock = std::sync::Arc::new(tze_hud_scene::clock::TestClock::new(1_000));
+    let mut scene =
+        countdown_notification_scene_on(SceneGraph::new_with_clock(1280.0, 720.0, clock.clone()));
+    if let ZoneContent::Notification(payload) = &mut scene
+        .zone_registry
+        .active_publishes
+        .get_mut("notification-area")
+        .unwrap()[0]
+        .content
+    {
+        payload.actions = vec![NotificationAction {
+            label: "Delete".into(),
+            callback_id: Some("delete".into()),
+            url: None,
+            role: Some(tze_hud_scene::types::ActionRole::Destructive),
+        }];
+    }
+    compositor.populate_zone_hit_regions(&mut scene, 1280.0, 720.0);
+    compositor.update_publication_animations(&scene);
+    let fade_start = {
+        let s = compositor.pub_animation_states["notification-area"]
+            .values()
+            .next()
+            .unwrap();
+        s.first_seen + std::time::Duration::from_millis(s.ttl_ms.unwrap())
+    };
+    let idle = |compositor: &Compositor, scene: &SceneGraph| {
+        !compositor.has_inflight_animation(scene)
+            && compositor.next_animation_deadline() == Some(fade_start)
+    };
+    assert!(
+        idle(&compositor, &scene),
+        "waiting adds no frames or timers"
+    );
+    clock.advance(5_000);
+    assert!(idle(&compositor, &scene));
+
+    let region = scene
+        .overlay
+        .zone_hit_regions
+        .iter()
+        .find(|r| matches!(r.kind, ZoneInteractionKind::Action { index: 0 }))
+        .unwrap()
+        .clone();
+    let epoch = scene.geometry_epoch;
+    scene.begin_notification_hold(region.clone(), None);
+    assert_ne!(scene.geometry_epoch, epoch, "the press renders");
+    for _ in 0..5 {
+        assert!(
+            compositor.has_inflight_animation(&scene),
+            "the sweep frames"
+        );
+        clock.advance(100);
+    }
+    clock.advance(100);
+    assert!(
+        idle(&compositor, &scene),
+        "a full sweep waits for completion"
+    );
+    assert!(scene.take_completed_notification_hold(600).is_some());
+    assert!(idle(&compositor, &scene));
+
+    scene.begin_notification_hold(region, None);
+    clock.advance(300);
+    assert!(scene.cancel_notification_hold(600, 100));
+    assert!(
+        compositor.has_inflight_animation(&scene),
+        "the drain frames"
+    );
+    clock.advance(100);
+    assert!(idle(&compositor, &scene), "a landed drain idles");
+}

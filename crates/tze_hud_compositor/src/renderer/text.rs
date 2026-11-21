@@ -517,9 +517,16 @@ impl super::Compositor {
                                     ))
                                     .enumerate()
                                 {
-                                    let label_color = tone_color(
-                                        style.action_label_color(index, payload.urgency),
-                                    );
+                                    let held = self
+                                        .notification_hold_fill(
+                                            scene,
+                                            &super::hit_regions::notification_action_interaction_id(
+                                                zone_name, record, index,
+                                            ),
+                                        )
+                                        .is_some();
+                                    let label_color =
+                                        tone_color(style.action_label_color(payload, index, held));
                                     let available =
                                         (b.width - action_layout.padding * 2.0).max(1.0);
                                     let hint_width = action_layout.hint_width.min(available);

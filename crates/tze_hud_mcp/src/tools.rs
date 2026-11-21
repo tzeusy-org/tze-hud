@@ -27,7 +27,7 @@ use tze_hud_scene::{
     mutation::{MutationBatch, SceneMutation},
     render_wake::RenderWakeNotifier,
     types::{
-        LeaseState, NotificationAction, NotificationPayload, Rgba, StatusBarPayload,
+        ActionRole, LeaseState, NotificationAction, NotificationPayload, Rgba, StatusBarPayload,
         WidgetParamType, WidgetParameterValue, ZoneContent, ZoneMediaType, ZonePublishToken,
     },
 };
@@ -1656,10 +1656,23 @@ fn parse_zone_content(content: &Value) -> Result<ZoneContent, McpError> {
                                     return Err(invalid(format!(
                                         "notification.actions[{index}] label dismiss needs a callback_id")));
                                 }
+                                let role = match o.get("role") {
+                                    None => None,
+                                    Some(value) if value.as_str() == Some("destructive") => {
+                                        if url.is_some() {
+                                            return Err(invalid(format!(
+                                                "notification.actions[{index}].role needs a callback action")));
+                                        }
+                                        Some(ActionRole::Destructive)
+                                    }
+                                    Some(_) => return Err(invalid(format!(
+                                        "notification.actions[{index}].role must be destructive"))),
+                                };
                                 let action = NotificationAction {
                                     callback_id: if defaulted { Some(label.clone()) } else { callback_id },
                                     label,
-                                    url, role: None,
+                                    url,
+                                    role,
                                 };
                                 // Preserve the existing MCP non-empty callback rule,
                                 // after exclusivity so both supplied members never alias.

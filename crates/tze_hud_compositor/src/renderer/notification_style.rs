@@ -25,8 +25,9 @@
 use std::collections::HashMap;
 
 use tze_hud_config::tokens::{CANONICAL_TOKENS, px_scale};
-use tze_hud_scene::types::{ChromeLocalState, RenderingPolicy, Rgba};
+use tze_hud_scene::types::{ChromeLocalState, NotificationPayload, RenderingPolicy, Rgba};
 
+use super::control_panel::{MIN_TEXT_CONTRAST, contrast};
 use super::token_colors::parse_hex_color;
 
 /// The × glyph, drawn as text so its diagonals are antialiased.
@@ -93,6 +94,9 @@ pub(super) struct NotificationTone {
     pub(super) body: Rgba,
     /// The severity mark's tint (alert banners); `None` draws no mark.
     pub(super) mark: Option<Rgba>,
+    /// A destructive action's label: `color.error` on a neutral tone where
+    /// it holds text contrast on the fill, else the tone's own text role.
+    destructive: Rgba,
 }
 
 /// One text line role (title, body or action label).
@@ -283,6 +287,9 @@ pub(super) struct NotificationStyle {
     primary: Rgba,
     primary_container: Rgba,
     on_primary_container: Rgba,
+    error: Rgba,
+    error_container: Rgba,
+    on_error_container: Rgba,
     focus: Rgba,
     tones: [NotificationTone; 4],
 }
@@ -334,13 +341,19 @@ impl NotificationStyle {
             .backdrop_opacity
             .unwrap_or_else(|| number(tokens, roles.opacity))
             .clamp(0.0, 1.0);
+        let error = color(tokens, "color.error");
         let tones = std::array::from_fn(|i| {
             let mut fill = color(tokens, roles.fills[i]);
+            let title = color(tokens, roles.titles[i]);
+            let opaque = Rgba { a: 1.0, ..fill };
             fill.a *= opacity;
             NotificationTone {
                 fill,
                 outline: color(tokens, roles.outlines[i]),
-                title: color(tokens, roles.titles[i]),
+                title,
+                destructive: Some(error)
+                    .filter(|e| i <= 1 && contrast(*e, opaque) >= MIN_TEXT_CONTRAST)
+                    .unwrap_or(title),
                 body: color(tokens, roles.bodies[i]),
                 mark: roles
                     .marks
@@ -391,6 +404,9 @@ impl NotificationStyle {
             primary: color(tokens, "color.primary"),
             primary_container: color(tokens, "color.primary.container"),
             on_primary_container: color(tokens, "color.on_primary.container"),
+            error,
+            error_container: color(tokens, "color.error.container"),
+            on_error_container: color(tokens, "color.on_error.container"),
             focus: color(tokens, "color.primary"),
             tones,
         }
@@ -457,23 +473,49 @@ impl NotificationStyle {
         }
     }
 
-    /// Idle fill of action `index`: the first is the filled primary action.
-    pub(super) fn action_fill(&self, index: usize) -> Option<Rgba> {
-        (index == 0).then_some(self.primary_container)
+    /// Idle fill of action `index`: only the primary action (the first that
+    /// is not destructive) is filled.
+    pub(super) fn action_fill(&self, payload: &NotificationPayload, index: usize) -> Option<Rgba> {
+        (payload.primary_action() == Some(index)).then_some(self.primary_container)
     }
 
-    /// Label colour of action `index` on a card of `urgency`: the filled
-    /// primary action's on-container role; the transparent ones
-    /// `color.primary` on a neutral card, else the tone's own text role
-    /// (primary blue does not hold contrast on caution/error containers).
-    pub(super) fn action_label_color(&self, index: usize, urgency: u32) -> Rgba {
-        if index == 0 {
+    /// Label colour of action `index`: the filled primary action's
+    /// on-container role; a destructive one its tone's destructive label;
+    /// the other transparent ones `color.primary` on a neutral card, else the
+    /// tone's own text role (primary blue does not hold contrast on
+    /// caution/error containers). Over a hold fill, `color.on_error.container`.
+    pub(super) fn action_label_color(
+        &self,
+        payload: &NotificationPayload,
+        index: usize,
+        held: bool,
+    ) -> Rgba {
+        let tone = self.tone(payload.urgency);
+        if held {
+            self.on_error_container
+        } else if payload.primary_action() == Some(index) {
             self.on_primary_container
-        } else if urgency <= 1 {
+        } else if payload
+            .actions
+            .get(index)
+            .is_some_and(|a| a.is_destructive())
+        {
+            tone.destructive
+        } else if payload.urgency <= 1 {
             self.primary
         } else {
-            self.tone(urgency).title
+            tone.title
         }
+    }
+
+    /// A destructive action's hairline outline: `color.error` on every tone.
+    pub(super) fn destructive_outline(&self) -> Rgba {
+        self.error
+    }
+
+    /// The fill that sweeps across a held destructive action.
+    pub(super) fn hold_fill(&self) -> Rgba {
+        self.error_container
     }
 
     /// Focus ring colour of a control.
