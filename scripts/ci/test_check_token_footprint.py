@@ -185,7 +185,7 @@ class GateTests(unittest.TestCase):
         for name, ceiling in (
             ("notification_choice", 120),
             ("notification_choice_wait", 90),
-            ("notification_choice_labels", 65),
+            ("notification_choice_labels", 85),
         ):
             choice_baseline = fixture()
             approve(choice_baseline, budget=100)
@@ -342,7 +342,7 @@ class CandidatePacketTests(unittest.TestCase):
                 "error": 60,
                 "notification_choice": 120,
                 "notification_choice_wait": 90,
-                "notification_choice_labels": 65,
+                "notification_choice_labels": 85,
             },
         )
 

@@ -108,7 +108,7 @@ def _incompatibility_checks(measurement, baseline):
     for flow_name, required in (
         ("notification_choice", 120),
         ("notification_choice_wait", 90),
-        ("notification_choice_labels", 65),
+        ("notification_choice_labels", 85),
     ):
         if flow_name not in measured_flows:
             continue

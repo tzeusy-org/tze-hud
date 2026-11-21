@@ -1605,7 +1605,7 @@ distinguishes arguments from responses and partial configuration examples.
 | Zone publish | ~197 | 90 | 39 | ≤ 80 |
 | Four-option notification ask + returned answer + ACK | — | 273 | 114 | ≤ 120 |
 | Four-option notification ask-and-wait (`notification_choice_wait`) | — | 129 | 77 | ≤ 90 |
-| Four label-only options ask-and-wait (`notification_choice_labels`) | — | 117 | 65 | ≤ 65 |
+| Four label-only options ask-and-wait (`notification_choice_labels`) | — | 117 | 65 | ≤ 85 |
 | Widget publish | ~168 | 73 | 22 | ≤ 80 |
 | Portal: attach+publish+hold, poll, ack, clear | ~575 over 5 round trips | 343 over 4 | 137 over 4 | ≤ 250 |
 | Discover (unheld `production.toml`: 6 zones, 4 widget instances) | n/a | 321 | 245 | ≤ 250 |
@@ -1634,8 +1634,9 @@ scene clock so that expiry is byte-stable, while a live reply carries the
 remaining milliseconds. Advertising `callback_id?` adds 1
 byte and 0 tokens to `tools/list` (2,710 to 2,711 model-visible bytes, 622
 tokens); every other flow keeps identical fingerprints, bytes and counts.
-These bytes and the new 65-token row await owner acceptance at review
-(baseline approval `pending_owner_review`).
+The owner **accepted** these bytes and the new row for PR1670 on
+2026-11-21, with an 85-token ceiling (about 30% headroom over the 65
+measured).
 
 All nine measurements use canonical flow version 4 and `tiktoken-rs` 0.12.0,
 `o200k_base`. The discovery-audience change (`hud-ljhku.7`, source `177e1096`)

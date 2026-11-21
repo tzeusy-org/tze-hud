@@ -424,13 +424,13 @@
       "error": 60,
       "notification_choice": 120,
       "notification_choice_wait": 90,
-      "notification_choice_labels": 65
+      "notification_choice_labels": 85
     }
   },
   "approval": {
-    "status": "pending_owner_review",
-    "decision_reference": "hud-ohgc9.9 owner-signed spec (2026-11-20, option A): AC4 requires owner acceptance of these bytes and the new notification_choice_labels row at PR review. Until then this baseline is pending; the prior approval (hud-ljhku.3/.9) is kept under previous_approval.",
-    "basis": "Source-bound calibration on 09ad0029 plus this change: new notification_choice_labels measures 65 model-visible tokens (234 bytes) in one call, 117 wire tokens (397 bytes), with four label-only options, wait_ms 30000 and ttl_ms 30000; the answered reply carries expires_in_ms 30000 because the calibration scene clock is frozen. tools/list rises by 1 byte (2710->2711 model-visible, 2812->2813 wire) and 0 tokens (622 model-visible, 659 wire) for `callback_id?`. Every other flow keeps byte-identical fingerprints and metrics: discover126, zone39, widget22, error45, complete choice114, choice wait77, portal137. New flow ceiling65; existing ceilings, tokenizer, flow version4 and accounting unchanged. Two byte-identical current-source measurements. No Windows acceptance is inferred."
+    "status": "owner_approved",
+    "decision_reference": "hud-ohgc9.9 AC4: the owner explicitly accepted the one-call notification_choice_labels flow (65 model-visible / 117 wire tokens, 234 / 397 bytes) and the tools/list 2710->2711 model-visible byte change (622 tokens unchanged) for PR1670 on 2026-11-21, and set the new row ceiling to 85 (about 30% headroom) instead of 65. The prior approval (hud-ljhku.3/.9) is kept under previous_approval.",
+    "basis": "Source-bound calibration on 09ad0029 plus this change: new notification_choice_labels measures 65 model-visible tokens (234 bytes) in one call, 117 wire tokens (397 bytes), with four label-only options, wait_ms 30000 and ttl_ms 30000; the answered reply carries expires_in_ms 30000 because the calibration scene clock is frozen. tools/list rises by 1 byte (2710->2711 model-visible, 2812->2813 wire) and 0 tokens (622 model-visible, 659 wire) for `callback_id?`. Every other flow keeps byte-identical fingerprints and metrics: discover126, zone39, widget22, error45, complete choice114, choice wait77, portal137. New flow ceiling85 (owner-set headroom); existing ceilings, tokenizer, flow version4 and accounting unchanged. Two byte-identical current-source measurements. No Windows acceptance is inferred."
   },
   "previous_approval": {
     "status": "owner_approved",
