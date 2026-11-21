@@ -5,6 +5,11 @@ Initialize has a 3s absolute startup deadline; established messages retain 60s.
 Each owns one of four child slots until reaped. Cancellation is local best effort: a POST
 already accepted remotely is never replayed or rolled back. Native macOS and
 Windows client lifetime primitives are unsupported; the Windows HUD is unchanged.
+
+The runtime ignores `notifications/*`; this adapter consumes
+`notifications/initialized` locally and does not forward it, so the runtime
+must not require it. A session is ready once that notice follows a successful
+initialize, and no HUD request can undo that.
 """
 
 from __future__ import annotations
@@ -142,7 +147,6 @@ class Adapter:
         self.endpoint = endpoint
         self.selector = selectors.DefaultSelector()
         self.tasks = []
-        self.waiting = []
         self.input = bytearray()
         self.output = bytearray()
         self.output_progress = None
@@ -151,7 +155,6 @@ class Adapter:
         self.initializing = False
         self.protocol = None
         self.initialized = False
-        self.initialized_pending = False
         self.output_registered = False
         self.wake_read, self.wake_write = os.pipe2(os.O_NONBLOCK | os.O_CLOEXEC)
         self.old_wakeup = signal.set_wakeup_fd(self.wake_write, warn_on_full_buffer=False)
@@ -206,8 +209,6 @@ class Adapter:
                 task.cancelled = True
                 task.abort_phase, task.abort_deadline = "term", now + TERM_SECONDS
                 self.signal_task(task, signal.SIGTERM)
-                if task.request["method"] == "notifications/initialized":
-                    self.initialized_pending = False
                 if task.process.stdin is not None:
                     self.unregister(task.process.stdin)
                     task.process.stdin.close()
@@ -227,32 +228,31 @@ class Adapter:
             if not has_id and isinstance(params, dict):
                 wanted = params.get("requestId")
                 if valid_id(wanted):
-                    self.waiting = [(r, d) for r, d in self.waiting if r.get("id") != wanted or r.get("method") == "initialize"]
                     self.abort([t for t in self.tasks if "id" in t.request and t.request["id"] == wanted
                                 and t.request["method"] != "initialize" and not t.result_seen])
             return
-        if has_id and (any("id" in t.request and t.request["id"] == request_id for t in self.tasks)
-                       or any("id" in r and r["id"] == request_id for r, _ in self.waiting)):
+        if method == "notifications/initialized" and not has_id:
+            # Consumed locally (the runtime ignores it): readiness never
+            # depends on a HUD round trip. Premature or repeated: ignored.
+            if self.protocol is not None:
+                self.initialized = True
+            return
+        if has_id and any("id" in t.request and t.request["id"] == request_id for t in self.tasks):
             self.queue(failure(request_id, "Request ID is already pending"))
             return
         seconds = INITIALIZE_SECONDS if method == "initialize" else REQUEST_SECONDS
         deadline = deadline if deadline is not None else time.monotonic() + seconds
-        if len(self.tasks) + len(self.waiting) >= MAX_WORKERS or time.monotonic() >= deadline:
+        if len(self.tasks) >= MAX_WORKERS or time.monotonic() >= deadline:
             if has_id:
                 self.queue(failure(request_id, "HUD request deadline or capacity exceeded"))
             return
-        if self.initialized_pending and method not in ("initialize", "notifications/initialized"):
-            self.waiting.append((request, deadline))
-            return
         if method == "initialize":
             permitted = not self.initializing and self.protocol is None and has_id
-        elif method == "notifications/initialized":
-            permitted = self.protocol is not None and not self.initialized and not has_id
         else:
             permitted = self.initialized
         if not permitted:
             if has_id:
-                self.queue(failure(request_id, "HUD connection not ready or at capacity"))
+                self.queue(failure(request_id, "HUD session not ready; reconnect the tze-hud MCP server"))
             return
         try:
             payload = json.dumps({"request": request, "endpoint": self.endpoint, "protocol": self.protocol},
@@ -282,8 +282,6 @@ class Adapter:
         self.selector.register(pidfd, selectors.EVENT_READ, ("exit", task))
         if method == "initialize":
             self.initializing = True
-        elif method == "notifications/initialized":
-            self.initialized_pending = True
 
     def input_ready(self):
         data = os.read(sys.stdin.fileno(), CHUNK)
@@ -340,10 +338,6 @@ class Adapter:
             revision = result.get("protocolVersion") if isinstance(result, dict) else None
             if isinstance(revision, str) and re_protocol(revision):
                 self.protocol = revision
-        elif method == "notifications/initialized":
-            self.initialized_pending = False
-            if response is None and task.process.returncode == 0:
-                self.initialized = True
         if "id" in task.request:
             self.queue(response if isinstance(response, dict) else failure(task.request["id"]))
 
@@ -395,18 +389,12 @@ class Adapter:
                 if self.stop:
                     self.abort(self.tasks)
                     self.output.clear()
-                    self.waiting.clear()
                 if not self.reap():
                     break
                 if self.stop and not self.tasks:
                     break
-                if self.waiting and not self.initialized_pending:
-                    waiting, self.waiting = self.waiting, []
-                    for request, deadline in waiting:
-                        self.admit(request, deadline)
                 self.frames()
                 deadlines = [t.abort_deadline or t.deadline for t in self.tasks]
-                deadlines.extend(d for _, d in self.waiting)
                 if self.output and not self.stop:
                     deadlines.append(self.output_progress + OUTPUT_STALL_SECONDS)
                 wait = max(0.0, min(deadlines) - time.monotonic()) if deadlines else None

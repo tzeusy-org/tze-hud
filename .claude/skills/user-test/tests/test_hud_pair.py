@@ -18,6 +18,7 @@ import pytest
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 CODE = "482913"
+NOT_READY = "HUD session not ready; reconnect the tze-hud MCP server"
 
 
 class FakeHud(BaseHTTPRequestHandler):
@@ -926,6 +927,58 @@ def test_load_psk_refuses_a_group_or_world_readable_file(hud, monkeypatch):
     assert FakeHud.last_psk not in adapter.stderr
 
 
+def test_adapter_is_ready_on_the_initialized_notice_without_a_hud_request(hud):
+    """The notice is consumed locally: a HUD that fails or stalls it cannot
+    wedge the session, and requests after it go straight to the HUD."""
+    host, home = hud
+    pair(host, home)
+    # Any notice that did reach the fake HUD would hang (id None is its key).
+    FakeHud.modes[None] = "hold"
+    with AdapterProcess(home) as adapter:
+        adapter.ready()  # tools after the notice answer at once
+        adapter.send("tools/list", "listed")
+        assert len(adapter.receive()["result"]["tools"]) == 5
+        adapter.send("tools/call", "called", {"name": "hud_input", "arguments": {"wait_ms": 0}})
+        assert adapter.receive()["id"] == "called"
+        # A repeated notice changes nothing.
+        adapter.send("notifications/initialized")
+        adapter.send("ping", "after-repeat")
+        assert adapter.receive() == {"jsonrpc": "2.0", "id": "after-repeat", "result": {}}
+    assert not any(r["body"].get("method", "").startswith("notifications/") for r in FakeHud.requests)
+
+    # Before initialize succeeded the notice is ignored, and requests are
+    # refused without a worker or HUD request.
+    previous = len(FakeHud.requests)
+    with AdapterProcess(home) as adapter:
+        adapter.send("notifications/initialized")
+        adapter.send("tools/list", "early")
+        assert adapter.receive() == {"jsonrpc": "2.0", "id": "early",
+                                     "error": {"code": -32603, "message": NOT_READY}}
+        assert not owned_children(adapter.process.pid)
+        adapter.send("initialize", 1, {"protocolVersion": "2025-06-18", "capabilities": {},
+                                       "clientInfo": {"name": "fixture", "version": "1"}})
+        assert adapter.receive()["result"]["protocolVersion"] == "2025-06-18"
+        adapter.send("tools/list", "before-notice")
+        assert adapter.receive()["error"]["message"] == NOT_READY
+    assert [r["body"]["method"] for r in FakeHud.requests[previous:]] == ["initialize"]
+
+    # A fifth concurrent request still gets the capacity refusal.
+    FakeHud.release = threading.Event()
+    for n in range(4):
+        FakeHud.modes[f"held-{n}"] = "hold"
+    with AdapterProcess(home) as adapter:
+        adapter.ready()
+        for n in range(4):
+            adapter.send("tools/list", f"held-{n}")
+        for n in range(4):
+            wait_request(f"held-{n}")
+        adapter.send("tools/list", "fifth")
+        assert adapter.receive() == {"jsonrpc": "2.0", "id": "fifth",
+                                     "error": {"code": -32603, "message": "HUD request deadline or capacity exceeded"}}
+        FakeHud.release.set()
+        assert sorted(adapter.receive()["id"] for _ in range(4)) == [f"held-{n}" for n in range(4)]
+
+
 def test_mcp_headers_needs_a_bare_host(hud, monkeypatch):
     # Controlled proc observations; no real PID reuse or permission changes.
     parent, gone, sibling = 9_000_001, 9_000_002, 9_000_003
@@ -983,7 +1036,7 @@ def test_mcp_headers_needs_a_bare_host(hud, monkeypatch):
     assert bad.returncode == 1 and "bare host" in bad.stderr and not bad.stdout
 
     # Execute the production admission/reaping clock, without waiting out 60s
-    # or giving established hud_input (including queued work) the startup cap.
+    # or giving established hud_input the startup cap.
     import runpy
     from types import SimpleNamespace
     from unittest.mock import Mock
@@ -991,8 +1044,8 @@ def test_mcp_headers_needs_a_bare_host(hud, monkeypatch):
     module = runpy.run_path(str(SCRIPTS / "hud_mcp_stdio.py"), run_name="deadline_fixture")
     assert module["INITIALIZE_SECONDS"] == 3.0 and module["REQUEST_SECONDS"] == 60.0
     client = module["Adapter"].__new__(module["Adapter"])
-    client.__dict__.update(endpoint={}, selector=Mock(), tasks=[], waiting=[], output=bytearray(),
-                           output_registered=False, initialized_pending=False, initialized=True,
+    client.__dict__.update(endpoint={}, selector=Mock(), tasks=[], output=bytearray(),
+                           output_registered=False, initialized=True,
                            protocol="2025-06-18", initializing=False, stop=False, fatal=False)
     process = SimpleNamespace(pid=99, stdin=Mock(), stdout=Mock(), poll=lambda: None)
     clock = [100.0]
@@ -1016,22 +1069,6 @@ def test_mcp_headers_needs_a_bare_host(hud, monkeypatch):
         expired = json.loads(client.output)
         assert expired["id"] == "clock-input" and "deadline exceeded" in expired["error"]["message"]
         send_signal.assert_called_once_with(99, signal.SIGTERM)
-
-        client.tasks.clear()
-        client.output.clear()
-        client.initialized_pending = True
-        clock[0] = 200.0
-        client.admit({**request, "id": "queued-input"})
-        assert not client.tasks and client.waiting[0][1] == 260.0
-        queued, deadline = client.waiting.pop()
-        client.initialized_pending = False
-        clock[0] = 259.999
-        client.admit(queued, deadline)
-        assert client.tasks[0].deadline == 260.0
-        assert client.reap() and not client.tasks[0].cancelled and not client.output
-        clock[0] = 260.0
-        assert client.reap() and client.tasks[0].cancelled
-        assert json.loads(client.output)["id"] == "queued-input"
 
         client.tasks.clear()
         client.output.clear()
@@ -1093,7 +1130,7 @@ def test_mcp_headers_needs_a_bare_host(hud, monkeypatch):
                 refused = adapter.receive()
                 assert refused["id"] == request_id and refused["error"]["message"] == "HUD initialize auth failed"
                 adapter.send("ping", "after-" + request_id)
-                assert "not ready" in adapter.receive()["error"]["message"]
+                assert adapter.receive()["error"]["message"] == NOT_READY
         assert sum(r["body"].get("id") == request_id for r in FakeHud.requests) == 1
         assert FakeHud.last_psk not in adapter.stderr
 
@@ -1141,7 +1178,7 @@ def test_mcp_headers_needs_a_bare_host(hud, monkeypatch):
         assert message == "HUD initialize response/read failed" or ("deadline" in message and "phase unavailable" in message)
         assert 2.7 <= elapsed < 5.5
         adapter.send("ping", "after-held-init")
-        assert "not ready" in adapter.receive()["error"]["message"]
+        assert adapter.receive()["error"]["message"] == NOT_READY
         assert adapter.stop() == 0
         assert held and all(not Path(f"/proc/{pid}").exists() for pid in held)
     assert sum(r["body"].get("id") == "initialize-held" for r in FakeHud.requests) == 1

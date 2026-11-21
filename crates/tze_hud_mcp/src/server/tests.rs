@@ -190,6 +190,19 @@ async fn initialize_handshake_and_tools_list() {
     assert_eq!(list["result"]["tools"].as_array().unwrap().len(), 5);
 }
 
+/// The paired stdio adapter consumes `notifications/initialized` and never
+/// forwards it, so the runtime must answer without it.
+#[tokio::test]
+async fn tools_answer_without_the_initialized_notification() {
+    let (server, _) = server();
+    let init = rpc(&server, &ctx(), "initialize", json!({})).await;
+    assert!(init["result"].is_object(), "{init}");
+    let list = rpc(&server, &ctx(), "tools/list", json!({})).await;
+    assert_eq!(list["result"]["tools"].as_array().unwrap().len(), 5);
+    let ping = rpc(&server, &ctx(), "ping", json!({})).await;
+    assert_eq!(ping["result"], json!({}));
+}
+
 #[tokio::test]
 async fn bare_tool_methods_are_gone() {
     let (server, _) = server();
