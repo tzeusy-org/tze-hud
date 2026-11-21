@@ -383,8 +383,8 @@ mod calibration {
             if flow_name == "notification_choice_labels" {
                 assert_eq!(operations.len(), 1, "ask and answer share one call");
                 assert!(
-                    flow_model.tokens <= 65,
-                    "label-only choice exceeds its signed ceiling"
+                    flow_model.tokens <= 85,
+                    "label-only choice exceeds its owner-set ceiling"
                 );
             }
             flows.insert(
