@@ -110,7 +110,8 @@ pub type DragHandleHoverHandle = Arc<StdMutex<Option<SceneId>>>;
 use image_cache::ImageTextureEntry;
 use image_cache::apply_composer_slot;
 pub use image_cache::{
-    ComposerPreedit, ComposerVisualLayoutHandle, LocalComposerState, LocalComposerStateHandle,
+    ComposerPreedit, ComposerVisualLayoutHandle, KeptComposerDraftsHandle, LocalComposerState,
+    LocalComposerStateHandle,
 };
 use text::*;
 use token_colors::*;
@@ -622,6 +623,11 @@ pub struct Compositor {
     /// the Windows caret blink time): `None` when Windows caret blinking is
     /// off, so the caret is steady and schedules no wake.
     pub(crate) composer_caret_blink: Option<std::time::Duration>,
+    /// Kept drafts of unfocused composers, delivered through
+    /// `kept_composer_drafts_state`.
+    pub kept_composer_drafts_state: KeptComposerDraftsHandle,
+    /// The drained kept drafts, drawn without caret or selection.
+    pub(crate) kept_composers: Vec<LocalComposerState>,
     /// Reference instant for the composer caret blink phase.
     ///
     /// The caret toggles solid/hidden every `composer_caret_blink`
@@ -1035,6 +1041,8 @@ impl Compositor {
             drag_handle_hover: None,
             local_composer: None,
             composer_caret_blink: Some(image_cache::CARET_BLINK_HALF_PERIOD),
+            kept_composer_drafts_state: Arc::new(StdMutex::new(None)),
+            kept_composers: Vec::new(),
             composer_caret_blink_start: std::time::Instant::now(),
             composer_caret_rendered_phase: None,
             composer_layout: image_cache::ComposerLayout::default(),
@@ -1385,6 +1393,8 @@ impl Compositor {
             drag_handle_hover: None,
             local_composer: None,
             composer_caret_blink: Some(image_cache::CARET_BLINK_HALF_PERIOD),
+            kept_composer_drafts_state: Arc::new(StdMutex::new(None)),
+            kept_composers: Vec::new(),
             composer_caret_blink_start: std::time::Instant::now(),
             composer_caret_rendered_phase: None,
             composer_layout: image_cache::ComposerLayout::default(),
@@ -1804,6 +1814,7 @@ impl Compositor {
     ///
     /// Returns `true` when a new draft (keystroke / caret move) was applied.
     pub(crate) fn drain_local_composer_state(&mut self) -> bool {
+        self.drain_kept_composer_drafts();
         let new_draft = apply_composer_slot(&self.local_composer_state, &mut self.local_composer);
         if new_draft {
             // Reset the blink phase so the caret is solid right after typing or
@@ -1828,6 +1839,49 @@ impl Compositor {
             self.drag_handle_hover = *slot;
         }
         new_draft
+    }
+
+    /// Apply a pending kept-draft set; returns whether one was delivered.
+    pub(crate) fn drain_kept_composer_drafts(&mut self) -> bool {
+        let Some(kept) = self
+            .kept_composer_drafts_state
+            .lock()
+            .ok()
+            .and_then(|mut slot| slot.take())
+        else {
+            return false;
+        };
+        self.kept_composers = kept
+            .into_iter()
+            .map(|(node_id, text)| LocalComposerState {
+                text,
+                cursor_byte: 0,
+                selection_anchor: 0,
+                at_capacity: false,
+                node_id,
+                placeholder: None,
+                preedit: None,
+                preedit_range: None,
+            })
+            .collect();
+        true
+    }
+
+    /// The composers drawn this frame with their layouts: the focused echo,
+    /// then each kept draft as one unscrolled line.
+    pub(crate) fn drawn_composers(
+        &self,
+    ) -> impl Iterator<Item = (&LocalComposerState, image_cache::ComposerLayout)> {
+        let focused = self.local_composer.as_ref();
+        let kept = self
+            .kept_composers
+            .iter()
+            .filter(move |kept| focused.is_none_or(|cs| cs.node_id != kept.node_id))
+            .map(|kept| (kept, image_cache::ComposerLayout::default()));
+        focused
+            .map(|cs| (cs, self.composer_layout))
+            .into_iter()
+            .chain(kept)
     }
 
     /// Drain the local composer echo slot and report whether the idle render
@@ -1858,6 +1912,7 @@ impl Compositor {
     ///
     /// [`caret_visible_at`]: image_cache::caret_visible_at
     pub fn drain_local_composer_and_needs_render(&mut self) -> bool {
+        let kept_changed = self.drain_kept_composer_drafts();
         let was_active = self.local_composer.is_some() && !self.notification_keyboard_active;
         let previous_focus_ring_owner = self.focus_ring_owner;
         let previous_resize_grip_hover = self.resize_grip_hover;
@@ -1880,6 +1935,7 @@ impl Compositor {
         // `was_active != is_active` → activation, and the deactivation frame that
         //                clears the overlay drawn last frame.
         draft_applied
+            || kept_changed
             || was_active != is_active
             || caret_toggled
             || previous_tile_close_hover != self.tile_close_hover

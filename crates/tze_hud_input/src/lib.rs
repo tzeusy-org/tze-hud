@@ -931,6 +931,13 @@ impl InputProcessor {
         changed
     }
 
+    /// Scroll a tile's viewport to its first line (Home on OUTPUT), leaving
+    /// the tail. Returns whether the offset moved.
+    pub fn scroll_tile_to_top(&mut self, tile_id: SceneId, scene: &mut SceneGraph) -> bool {
+        self.process_keyboard_scroll(tile_id, -f32::MAX, scene)
+            .is_some()
+    }
+
     /// Notify a tile that leading (head) content has been removed.
     ///
     /// Called when the transcript head is trimmed — either by the 64 KiB
@@ -1225,7 +1232,7 @@ impl InputProcessor {
     /// region is focused.
     ///
     /// The consumed flag prevents editing keys from reaching the agent.
-    /// Terminal outcomes return exact submitted text or local cancellation.
+    /// A submit returns the exact text; Escape is left to the runtime.
     pub fn route_key_down_to_composer(
         &mut self,
         key_code: &str,
@@ -1383,10 +1390,10 @@ impl InputProcessor {
         ))
     }
 
-    /// Characters in the focused composer's draft, without copying it.
-    pub fn composer_draft_chars(&self) -> Option<usize> {
-        self.composer_draft_manager.focused_node()?;
-        Some(self.composer_draft_manager.draft()?.text().chars().count())
+    /// Every unsent draft by composer node, focused or kept unfocused. One
+    /// reading serves the admin `draft_chars` and the drawn kept drafts.
+    pub fn composer_drafts(&self) -> impl Iterator<Item = (SceneId, &ComposerDraft)> {
+        self.composer_draft_manager.drafts()
     }
 
     /// Process a pointer event against the scene graph.
@@ -4988,7 +4995,7 @@ mod tests {
         assert_eq!((text.as_str(), cursor, anchor), ("", 0, 0));
     }
 
-    /// Blur preserves one keyed unsent local draft for matching refocus.
+    /// Blur keeps the unsent draft for that composer's refocus.
     #[test]
     fn composer_focus_lost_on_blur_preserves_keyed_draft() {
         let (mut scene, tab_id, tile_id, composer_id, plain_id) = setup_composer_scene();
@@ -5045,7 +5052,7 @@ mod tests {
             "manager must be deactivated after blurring the composer region"
         );
 
-        // The blur keeps one keyed local draft, including caret/anchor.
+        // The blur keeps this composer's draft, including caret/anchor.
         scene.tiles.get_mut(&tile_id).unwrap().root_node = Some(composer_id);
         processor.process_with_focus(&down_composer, &mut scene, &mut fm, tab_id);
         let (text, cursor, anchor, _, _, _) = processor.composer_draft_snapshot().unwrap();

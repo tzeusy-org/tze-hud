@@ -184,6 +184,8 @@ impl WindowedRuntimeState {
             consumed_command_keydowns: HashSet::new(),
             local_composer_state: Arc::new(StdMutex::new(None)),
             composer_preedit: None,
+            kept_composer_drafts_state: Arc::new(StdMutex::new(None)),
+            kept_drafts_drawn: Vec::new(),
             focus_ring_owner_state: Arc::new(StdMutex::new(None)),
             surface_ui: Default::default(),
             resize_grip_hover_state: Arc::new(StdMutex::new(None)),
@@ -958,6 +960,8 @@ impl HeadlessEventLoopHarness {
         compositor.set_token_map(self.app.state.global_tokens.clone());
         compositor.local_composer_state = Arc::clone(&self.app.state.local_composer_state);
         compositor.focus_ring_owner_state = Arc::clone(&self.app.state.focus_ring_owner_state);
+        compositor.kept_composer_drafts_state =
+            Arc::clone(&self.app.state.kept_composer_drafts_state);
         compositor.resize_grip_hover_state = Arc::clone(&self.app.state.resize_grip_hover_state);
         compositor.tile_close_hover_state = Arc::clone(&self.app.state.tile_close_hover_state);
         compositor.drag_handle_hover_state = Arc::clone(&self.app.state.drag_handle_hover_state);
@@ -1762,6 +1766,42 @@ mod tests {
     }
 
     impl CaptureRenderHarness {
+        /// A networked runtime over a software compositor at the window size.
+        async fn boot(
+            cfg: super::super::WindowedConfig,
+            clock: Arc<tze_hud_scene::clock::TestClock>,
+        ) -> Self {
+            let size = (cfg.window.width, cfg.window.height);
+            let mut compositor = tze_hud_compositor::Compositor::new_headless(size.0, size.1)
+                .await
+                .expect("software compositor for real frame builds");
+            compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+            let events = HeadlessEventLoopHarness::with_network(cfg, clock)
+                .await
+                .unwrap();
+            let frames = super::super::frame_work::WindowedFrameWork::new(
+                events.app.state.wake.clone(),
+                events.app.state.frame_ready_tx.as_ref().unwrap().clone(),
+            );
+            Self {
+                events,
+                compositor,
+                frames,
+                pending_texture: false,
+                size,
+            }
+        }
+
+        /// Fades run on the wall clock; pace turns like frames until idle.
+        fn settle(&mut self, clock: &tze_hud_scene::clock::TestClock) {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            while self.turn(true) {
+                assert!(std::time::Instant::now() < deadline, "portal never settled");
+                clock.advance(16);
+                std::thread::sleep(std::time::Duration::from_millis(16));
+            }
+        }
+
         fn turn(&mut self, primary_succeeds: bool) -> bool {
             self.turn_with_present(primary_succeeds, true)
         }
@@ -1838,10 +1878,6 @@ mod tests {
         use tze_hud_scene::clock::TestClock;
 
         let _gpu = crate::test_support::lock_headless_runtime().await;
-        let mut compositor = tze_hud_compositor::Compositor::new_headless(640, 480)
-            .await
-            .expect("software compositor for real frame builds");
-        compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
         let clock = Arc::new(TestClock::new(1_000));
         let mut cfg = super::super::WindowedConfig::default();
         cfg.window.width = 640;
@@ -1851,20 +1887,7 @@ mod tests {
             .directory()
             .unwrap()
             .shared();
-        let events = HeadlessEventLoopHarness::with_network(cfg, clock.clone())
-            .await
-            .unwrap();
-        let frames = super::super::frame_work::WindowedFrameWork::new(
-            events.app.state.wake.clone(),
-            events.app.state.frame_ready_tx.as_ref().unwrap().clone(),
-        );
-        let mut runtime = CaptureRenderHarness {
-            events,
-            compositor,
-            frames,
-            pending_texture: false,
-            size: (640, 480),
-        };
+        let mut runtime = CaptureRenderHarness::boot(cfg, clock.clone()).await;
         let portals = runtime
             .events
             .app
@@ -1888,15 +1911,6 @@ mod tests {
                 )
                 .expect("publish accepted");
         };
-        // Fades run on the wall clock; pace turns like frames until idle.
-        let settle = |runtime: &mut CaptureRenderHarness| {
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-            while runtime.turn(true) {
-                assert!(std::time::Instant::now() < deadline, "portal never settled");
-                clock.advance(16);
-                std::thread::sleep(std::time::Duration::from_millis(16));
-            }
-        };
         let probe = crate::operator::surface_status::probe(
             Arc::clone(
                 &runtime
@@ -1914,7 +1928,7 @@ mod tests {
         let portal = || probe.read().portals[0].clone();
 
         publish(40);
-        settle(&mut runtime);
+        runtime.settle(&clock);
         let at_tail = portal();
         assert_eq!(at_tail["s"], "portal:probe");
         assert_eq!(at_tail["output"]["at_tail"], true);
@@ -1958,7 +1972,7 @@ mod tests {
             .events
             .app
             .enqueue_scroll_event(0.0, -400.0, tze_hud_input::WheelStep::Pixels);
-        settle(&mut runtime);
+        runtime.settle(&clock);
         assert!(counters.idle_since_ms() < 1_000, "the scroll presented");
         let scrolled = portal();
         assert_eq!(scrolled["output"]["at_tail"], false);
@@ -1972,7 +1986,7 @@ mod tests {
 
         // New output while scrolled back keeps the reading position.
         publish(45);
-        settle(&mut runtime);
+        runtime.settle(&clock);
         let appended = portal();
         assert_eq!(appended["output"]["first_visible_line"], first);
         assert_eq!(appended["output"]["at_tail"], false);
@@ -1996,7 +2010,7 @@ mod tests {
         let (x, y) = runtime.events.composer_center().expect("composer");
         runtime.events.click(x, y);
         runtime.events.type_text("xyz");
-        settle(&mut runtime);
+        runtime.settle(&clock);
 
         let addr = runtime.events.mcp_addr();
         let status = tokio::spawn(async move {
@@ -2028,6 +2042,299 @@ mod tests {
         assert!(body["idle_since_ms"].as_u64().is_some());
     }
 
+    /// Escape and reading keys on real portals, through the production pointer, key and
+    /// frame paths. R4.1: Esc collapses a draft selection, then leaves with the
+    /// draft kept (drawn unfocused, its length reported, nothing sent); each
+    /// composer keeps its own; a cleared portal drops its draft; refocus
+    /// restores the caret and Enter sends the kept text once; safe mode keeps
+    /// it. R4.2: with OUTPUT reading focus Home/End/Space/Shift+Space scroll
+    /// OUTPUT, an unmoved key changes nothing, and the caret keeps them as
+    /// text keys.
+    #[tokio::test]
+    async fn portal_escape_keeps_draft_and_reading_keys_scroll_output() {
+        use serde_json::Value;
+        use tze_hud_portal::hub::{PortalKey, Publish};
+        use tze_hud_scene::clock::TestClock;
+
+        let _gpu = crate::test_support::lock_headless_runtime().await;
+        let clock = Arc::new(TestClock::new(1_000));
+        let mut cfg = super::super::WindowedConfig::default();
+        cfg.window.width = 800;
+        cfg.window.height = 600;
+        let mut runtime = CaptureRenderHarness::boot(cfg, clock.clone()).await;
+        let portals = runtime
+            .events
+            .app
+            .state
+            .portal_projection_driver
+            .portal_handle();
+        let (a, b) = (PortalKey::new("ops", "a"), PortalKey::new("ops", "b"));
+        let publish = |key: &PortalKey, lines: usize| {
+            let text: Vec<String> = (0..lines).map(|i| format!("Line{i:02} output")).collect();
+            let mut hub = portals.hub.lock().unwrap();
+            hub.publish(
+                key,
+                Publish {
+                    text: Some(text.join("\n")),
+                    ..Default::default()
+                },
+                portals.clock.now_us(),
+            )
+            .expect("publish accepted");
+        };
+        let probe = crate::operator::surface_status::probe(
+            Arc::clone(
+                &runtime
+                    .events
+                    .app
+                    .state
+                    .shared_state
+                    .try_lock()
+                    .unwrap()
+                    .scene,
+            ),
+            Arc::clone(&runtime.events.app.state.surface_ui),
+            Arc::clone(&runtime.events.app.state.notification_link_opener.launches),
+        );
+        let portal = |s: &str| {
+            let all = probe.read().portals;
+            all.as_array()
+                .unwrap()
+                .iter()
+                .find(|p| p["s"] == s)
+                .cloned()
+                .unwrap_or_else(|| panic!("{s} in {all}"))
+        };
+        let centre = |r: &Value| {
+            let f = |k: &str| r[k].as_f64().unwrap() as f32;
+            (f("x") + f("w") / 2.0, f("y") + f("h") / 2.0)
+        };
+        let snapshot = |runtime: &CaptureRenderHarness| {
+            let snap = runtime
+                .events
+                .app
+                .state
+                .input_processor
+                .composer_draft_snapshot();
+            snap.map(|(text, cursor, anchor, ..)| (text, cursor, anchor))
+        };
+        let key = |runtime: &mut CaptureRenderHarness, key: &str, shift: bool| {
+            let modifiers = KeyboardModifiers {
+                shift,
+                ..KeyboardModifiers::NONE
+            };
+            let ts = MonoUs(super::super::nanoseconds_since_start() / 1_000);
+            let (key_code, key) = (key.to_string(), key.to_string());
+            runtime
+                .events
+                .app
+                .dispatch_key_down_event(&RawKeyDownEvent {
+                    key_code: key_code.clone(),
+                    key: key.clone(),
+                    modifiers,
+                    repeat: false,
+                    timestamp_mono_us: ts,
+                });
+            runtime.events.app.dispatch_key_up_event(&RawKeyUpEvent {
+                key_code,
+                key,
+                modifiers,
+                timestamp_mono_us: ts,
+            });
+        };
+        let inputs = || {
+            let mut hub = portals.hub.lock().unwrap();
+            let batch = hub.poll_input("ops", &[], None, portals.clock.now_us());
+            let ids: Vec<String> = batch.items.iter().map(|i| i.id.clone()).collect();
+            hub.poll_input("ops", &ids, None, portals.clock.now_us());
+            batch.items.into_iter().map(|i| i.text).collect::<Vec<_>>()
+        };
+
+        publish(&a, 40);
+        runtime.settle(&clock);
+        let tile_a = *runtime.events.scene().tiles.keys().next().unwrap();
+        let composer_a = runtime.events.scene().overlay.tile_composer_nodes[&tile_a];
+        let draft_a = |runtime: &CaptureRenderHarness| {
+            let ip = &runtime.events.app.state.input_processor;
+            let mut drafts = ip.composer_drafts();
+            drafts.find_map(|(n, d)| (n == composer_a).then(|| d.text().to_owned()))
+        };
+        let (ax, ay) = centre(&portal("portal:a")["panes"]["composer"]);
+        runtime.events.click(ax, ay);
+        runtime.events.type_text("half");
+        runtime.settle(&clock);
+        assert_eq!(portal("portal:a")["focus"], "composer");
+
+        // S2: a draft selection collapses first; text and focus stay.
+        runtime
+            .events
+            .app
+            .state
+            .input_processor
+            .route_pointer_selection_to_composer(1, 3);
+        runtime.events.press_named_key("Escape");
+        assert_eq!(snapshot(&runtime), Some(("half".into(), 3, 3)));
+
+        // S1: one more Esc leaves; the draft is kept, drawn and reported, and
+        // nothing reaches hud_input.
+        runtime.events.press_named_key("Escape");
+        runtime.settle(&clock);
+        assert_eq!(snapshot(&runtime), None, "focus left the composer");
+        let left = portal("portal:a");
+        assert_eq!(
+            (&left["focus"], &left["input"]["draft_chars"]),
+            (&"none".into(), &4.into())
+        );
+        assert_eq!(
+            runtime.events.app.state.kept_drafts_drawn,
+            [(composer_a, "half".to_string())],
+            "Q2: the kept draft is sent to the compositor to draw"
+        );
+        assert_eq!(inputs(), Vec::<String>::new());
+
+        // S8 (Q4 = A): a second portal's draft never displaces the first.
+        publish(&b, 3);
+        runtime.settle(&clock);
+        let (bx, by) = centre(&portal("portal:b")["panes"]["composer"]);
+        runtime.events.click(bx, by);
+        runtime.events.type_text("bb");
+        runtime.events.press_named_key("Escape");
+        runtime.settle(&clock);
+        assert_eq!(portal("portal:a")["input"]["draft_chars"], 4);
+        assert_eq!(portal("portal:b")["input"]["draft_chars"], 2);
+        assert_eq!(runtime.events.app.state.kept_drafts_drawn.len(), 2);
+
+        // S5: a cleared portal takes its kept draft; a later one starts empty.
+        portals.hub.lock().unwrap().clear(&b).unwrap();
+        runtime.settle(&clock);
+        let kept: Vec<_> = runtime
+            .events
+            .app
+            .state
+            .input_processor
+            .composer_drafts()
+            .map(|(node, _)| node)
+            .collect();
+        assert_eq!(kept, [composer_a]);
+        assert_eq!(runtime.events.app.state.kept_drafts_drawn.len(), 1);
+        publish(&b, 3);
+        runtime.settle(&clock);
+        assert_eq!(portal("portal:b")["input"]["draft_chars"], 0);
+        portals.hub.lock().unwrap().clear(&b).unwrap();
+        runtime.settle(&clock);
+
+        // S1/S6: keyboard refocus restores text and caret (a click places the
+        // caret where it lands); Enter sends it exactly once.
+        runtime.events.press_named_key("Tab");
+        assert_eq!(snapshot(&runtime), Some(("half".into(), 3, 3)));
+        // R4.2 S4: with the caret in the composer, Home/End are caret keys.
+        let output_before = runtime.events.scene().tile_scroll_offset_local(tile_a);
+        runtime.events.press_named_key("Home");
+        assert_eq!(snapshot(&runtime), Some(("half".into(), 0, 0)));
+        runtime.events.press_named_key("End");
+        assert_eq!(snapshot(&runtime), Some(("half".into(), 4, 4)));
+        assert_eq!(
+            runtime.events.scene().tile_scroll_offset_local(tile_a),
+            output_before
+        );
+        runtime.events.press_named_key("Enter");
+        runtime.settle(&clock);
+        assert_eq!(inputs(), ["half"]);
+        assert_eq!(inputs(), Vec::<String>::new(), "sent once");
+
+        // S4: under safe mode Esc leaves nothing changed; the draft is kept.
+        runtime.events.type_text("safe");
+        let safe = Arc::clone(&runtime.events.app.state.safe_mode_atomic);
+        safe.store(true, std::sync::atomic::Ordering::Release);
+        runtime.events.press_named_key("Escape");
+        safe.store(false, std::sync::atomic::Ordering::Release);
+        assert_eq!(snapshot(&runtime).map(|s| s.0), Some("safe".into()));
+
+        // R4.2 S1: double-click an OUTPUT word; the selection takes reading
+        // focus from the caret, so Home and End scroll OUTPUT.
+        let output = portal("portal:a")["panes"]["output"].clone();
+        let (ox, oy) = (
+            output["x"].as_f64().unwrap() as f32 + 24.0,
+            centre(&output).1,
+        );
+        runtime.events.click(ox, oy);
+        runtime.events.click(ox, oy);
+        let selection = runtime
+            .events
+            .app
+            .state
+            .input_processor
+            .output_reading
+            .selection;
+        assert!(selection.is_some(), "a word is selected");
+        runtime.events.press_named_key("Home");
+        runtime.settle(&clock);
+        let top = portal("portal:a");
+        assert!(
+            top["output"]["first_visible_line"]
+                .as_str()
+                .unwrap()
+                .starts_with("Line00")
+        );
+        assert_eq!(top["output"]["at_tail"], false);
+        // S5: an unmoved key changes nothing, so nothing is drawn.
+        let version = runtime.events.scene().version;
+        runtime.events.press_named_key("Home");
+        assert_eq!(runtime.events.scene().version, version);
+        assert!(!runtime.turn(true), "Home at the top draws no frame");
+        // S2: Space and Shift+Space page exactly like PageDown/PageUp.
+        key(&mut runtime, "Space", false);
+        assert_eq!(
+            runtime.events.scene().tile_scroll_offset_local(tile_a).1,
+            tze_hud_input::KEYBOARD_PAGE_SCROLL_PX
+        );
+        key(&mut runtime, "Space", true);
+        assert_eq!(
+            runtime.events.scene().tile_scroll_offset_local(tile_a).1,
+            0.0
+        );
+        runtime.events.press_named_key("End");
+        runtime.settle(&clock);
+        let tail = portal("portal:a");
+        assert!(
+            tail["output"]["last_visible_line"]
+                .as_str()
+                .unwrap()
+                .starts_with("Line39")
+        );
+        assert_eq!(tail["output"]["at_tail"], true, "End is jump-to-latest");
+        assert_eq!(
+            runtime
+                .events
+                .app
+                .state
+                .input_processor
+                .output_reading
+                .selection,
+            selection,
+            "scrolling keeps the selection"
+        );
+        assert_eq!(draft_a(&runtime).as_deref(), Some("safe"), "no key typed");
+
+        // R4.1 S3: Esc clears the OUTPUT selection first; the kept draft and
+        // the keyboard focus stay as they were.
+        let focus = portal("portal:a")["focus"].clone();
+        runtime.events.press_named_key("Escape");
+        let ip = &runtime.events.app.state.input_processor;
+        assert!(ip.output_reading.selection.is_none());
+        assert_eq!(draft_a(&runtime).as_deref(), Some("safe"));
+        runtime.settle(&clock);
+        assert_eq!(portal("portal:a")["focus"], focus);
+
+        // The focused portal tile is reading focus too: Home still scrolls.
+        assert_eq!(focus, "tile", "a press on OUTPUT focuses its portal tile");
+        runtime.events.press_named_key("Home");
+        runtime.settle(&clock);
+        let first = portal("portal:a")["output"]["first_visible_line"].clone();
+        assert!(first.as_str().unwrap().starts_with("Line00"), "{first}");
+        assert_eq!(inputs(), Vec::<String>::new());
+    }
+
     /// Portal reading (hud-ljhku.2) through the production pointer and key
     /// paths over a really shaped OUTPUT: links open through the link worker
     /// on release (rate limited, never on a drag or second click), drags and
@@ -2042,28 +2349,11 @@ mod tests {
         use tze_hud_scene::clock::TestClock;
 
         let _gpu = crate::test_support::lock_headless_runtime().await;
-        let mut compositor = tze_hud_compositor::Compositor::new_headless(800, 600)
-            .await
-            .expect("software compositor for real frame builds");
-        compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
         let clock = Arc::new(TestClock::new(1_000));
         let mut cfg = super::super::WindowedConfig::default();
         cfg.window.width = 800;
         cfg.window.height = 600;
-        let events = HeadlessEventLoopHarness::with_network(cfg, clock.clone())
-            .await
-            .unwrap();
-        let frames = super::super::frame_work::WindowedFrameWork::new(
-            events.app.state.wake.clone(),
-            events.app.state.frame_ready_tx.as_ref().unwrap().clone(),
-        );
-        let mut runtime = CaptureRenderHarness {
-            events,
-            compositor,
-            frames,
-            pending_texture: false,
-            size: (800, 600),
-        };
+        let mut runtime = CaptureRenderHarness::boot(cfg, clock.clone()).await;
         let opened = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
         let sink = Arc::clone(&opened);
         runtime.events.app.state.notification_link_opener.worker = Some(Arc::new(move |url| {
@@ -2094,15 +2384,7 @@ mod tests {
                 portals.clock.now_us(),
             )
             .expect("publish accepted");
-        let settle = |runtime: &mut CaptureRenderHarness| {
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-            while runtime.turn(true) {
-                assert!(std::time::Instant::now() < deadline, "portal never settled");
-                clock.advance(16);
-                std::thread::sleep(std::time::Duration::from_millis(16));
-            }
-        };
-        settle(&mut runtime);
+        runtime.settle(&clock);
         let tile = *runtime.events.scene().tiles.keys().next().unwrap();
         let layout = runtime
             .events
@@ -2371,6 +2653,17 @@ mod tests {
         );
         runtime.events.press_named_key("Enter");
         assert_eq!(launches(&runtime), 3);
+        // R4.2 S3: Space on a focused link activates it; OUTPUT
+        // reading focus does not turn it into a page scroll.
+        runtime.events.press_named_key("Tab");
+        runtime.events.press_named_key("Tab");
+        let offset = runtime.events.scene().tile_scroll_offset_local(tile);
+        runtime.events.press_named_key("Space");
+        assert_eq!(launches(&runtime), 4, "Space opened gamma");
+        assert_eq!(
+            runtime.events.scene().tile_scroll_offset_local(tile),
+            offset
+        );
 
         // A stale OUTPUT selection never takes a composer Ctrl+C:
         // a primary press outside OUTPUT clears it, browser-style.
@@ -2419,12 +2712,16 @@ mod tests {
         {
             worker.join().unwrap();
         }
+        // Each launch runs on its own worker thread, so arrival order varies.
+        let mut opened = opened.lock().unwrap().clone();
+        opened.sort();
         assert_eq!(
-            *opened.lock().unwrap(),
+            opened,
             [
                 "https://alpha.example/a",
+                "https://alpha.example/a",
                 "https://beta.example/b",
-                "https://alpha.example/a"
+                "https://gamma.example/c"
             ]
         );
         let hub = portals.hub.lock().unwrap();
@@ -6781,6 +7078,81 @@ mod tests {
         }
     }
 
+    /// R4.1 S7: every Escape while a composer is active stays in
+    /// the runtime, on a plain composer with no portal behind it: with text, a
+    /// selection, an empty draft or a modifier, no Escape key or Cancel command
+    /// reaches the tile's agent, and the draft text never changes.
+    #[test]
+    fn bare_escape_in_composer_never_reaches_agent() {
+        let none = KeyboardModifiers::NONE;
+        let shift = KeyboardModifiers {
+            shift: true,
+            ..none
+        };
+        let ctrl = KeyboardModifiers { ctrl: true, ..none };
+        let alt = KeyboardModifiers { alt: true, ..none };
+        for (draft, select, modifiers) in [
+            ("typed", false, none),
+            ("typed", true, none),
+            ("", false, none),
+            ("typed", false, shift),
+            ("typed", false, ctrl),
+            ("typed", false, alt),
+        ] {
+            let mut harness = HeadlessEventLoopHarness::new();
+            harness.focus_composer();
+            let tx = tze_hud_protocol::session_server::InputEventSender::new(16);
+            let mut rx = tx.subscribe_all();
+            harness.app.state.input_event_tx = Some(tx);
+            if !draft.is_empty() {
+                harness.enqueue(character(draft, 100));
+            }
+            harness.drain();
+            if select {
+                harness
+                    .app
+                    .state
+                    .input_processor
+                    .route_pointer_selection_to_composer(0, 2);
+            }
+            for mut event in [
+                key_down("Escape", "Escape", 200),
+                key_up("Escape", "Escape", 300),
+            ] {
+                match &mut event {
+                    PendingKeyboardEvent::KeyDown(raw) => raw.modifiers = modifiers,
+                    PendingKeyboardEvent::KeyUp(raw) => raw.modifiers = modifiers,
+                    _ => unreachable!(),
+                }
+                harness.enqueue(event);
+            }
+            harness.drain();
+            let case = format!("{draft:?} select={select} {modifiers:?}");
+            // Leaving reports an ordinary FocusLost; no key or command leaks.
+            let leaked: Vec<_> = received_events(&mut rx)
+                .into_iter()
+                .filter(|(_, e)| !matches!(e, ProtoInputEvent::FocusLost(_)))
+                .collect();
+            assert_eq!(leaked, [], "{case}: no Escape reaches the agent");
+            let texts: Vec<_> = harness
+                .app
+                .state
+                .input_processor
+                .composer_drafts()
+                .map(|(_, d)| d.text().to_owned())
+                .filter(|t| !t.is_empty())
+                .collect();
+            let expected: &[&str] = if draft.is_empty() { &[] } else { &[draft] };
+            assert_eq!(texts, expected, "{case}: the text is unchanged");
+            let modified = modifiers.ctrl || modifiers.alt;
+            assert_eq!(
+                harness.app.state.input_processor.is_composer_active(),
+                select || modified,
+                "{case}: a bare Esc without a selection leaves"
+            );
+        }
+    }
+
     #[test]
     fn notification_keyboard_cycle_activation_and_return_preserve_portal_editor() {
         fn press(harness: &mut HeadlessEventLoopHarness, code: &str, key: &str, reverse: bool) {
@@ -7187,8 +7559,9 @@ mod tests {
             assert!(harness.app.state.answer_keyboard.focus.is_none());
         }
 
-        // Card, selection and draft cancellation are separate inner layers.
-        // A sent reply also keeps the editor; only an empty outer Esc leaves it.
+        // Card and selection are separate inner layers; Esc never changes the
+        // draft (R4.1 S1-S2): the next Esc leaves the editor with
+        // its text kept, and refocusing restores text, caret and selection state.
         {
             let mut harness = card_with_editor();
             harness.enqueue(character("draft", 100));
@@ -7201,35 +7574,57 @@ mod tests {
                 .app
                 .state
                 .input_processor
-                .route_pointer_selection_to_composer(0, 5);
+                .route_pointer_selection_to_composer(1, 3);
             press(&mut harness, "Escape", "Escape", false);
-            assert!(
-                harness
-                    .app
-                    .state
-                    .input_processor
-                    .composer_selected_text()
-                    .is_none()
-            );
-            assert_eq!(harness.composer_draft().as_deref(), Some("draft"));
-            press(&mut harness, "Escape", "Escape", false);
-            assert!(harness.app.state.input_processor.is_composer_active());
-            assert_eq!(harness.composer_draft().as_deref(), Some(""));
-            harness.enqueue(character("reply", 200));
-            harness.drain();
-            press(&mut harness, "Enter", "Enter", false);
-            assert!(harness.app.state.input_processor.is_composer_active());
-            assert_eq!(harness.composer_draft().as_deref(), Some(""));
+            let (text, cursor, anchor, ..) = harness
+                .app
+                .state
+                .input_processor
+                .composer_draft_snapshot()
+                .unwrap();
+            assert_eq!((text.as_str(), cursor, anchor), ("draft", 3, 3));
             harness.enqueue(key_down("Escape", "Escape", 300));
             harness.drain();
             assert!(!harness.app.state.input_processor.is_composer_active());
             assert_eq!(
                 harness.app.state.answer_keyboard.return_key.as_deref(),
-                Some("Escape")
+                Some("Escape"),
+                "one Esc leaves a nonempty editor"
             );
             harness.enqueue(key_up("Escape", "Escape", 301));
             harness.drain();
             assert!(harness.app.state.answer_keyboard.return_key.is_none());
+            let composer = harness
+                .app
+                .state
+                .input_processor
+                .composer_drafts()
+                .map(|(node, draft)| {
+                    assert_eq!(draft.text(), "draft", "the kept draft");
+                    node
+                })
+                .next()
+                .unwrap();
+            let tab = harness.scene().active_tab.unwrap();
+            let tile = *harness.scene().tiles.keys().next().unwrap();
+            {
+                let mut scene = harness.scene();
+                let state = &mut harness.app.state;
+                state.input_processor.recover_composer_focus(
+                    &mut state.focus_manager,
+                    &mut scene,
+                    tab,
+                    tile,
+                    composer,
+                );
+            }
+            let (text, cursor, anchor, ..) = harness
+                .app
+                .state
+                .input_processor
+                .composer_draft_snapshot()
+                .unwrap();
+            assert_eq!((text.as_str(), cursor, anchor), ("draft", 3, 3));
         }
 
         // A digit URL uses the same per-action 2s limiter, keeps the card, and

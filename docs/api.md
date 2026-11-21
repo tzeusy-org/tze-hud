@@ -286,7 +286,17 @@ with the same cancellation and idle semantics as a `hud_input` wait.
   shows a Copy button that copies the block. Tab from a focused composer moves
   through visible links and Copy buttons (Enter/Space activates, Shift+Tab off
   the first returns to the composer); the focused stop survives new output
-  while its text and target remain. None of this reaches the agent: no
+  while its text and target remain. OUTPUT reading focus (hud-ohgc9.4) means
+  the HUD holds the keyboard for a portal, the caret is not in its composer,
+  and an OUTPUT selection exists, a link or Copy stop is focused, or the
+  portal tile is focused. An OUTPUT selection takes reading focus from the
+  caret, so Home and End scroll OUTPUT until the selection is cleared. With
+  reading focus, Home scrolls OUTPUT to its first retained line, End to the
+  tail (as jump-to-latest does), and Space and Shift+Space page down and up by
+  the PageDown/PageUp step; Space on a focused link or Copy stop still
+  activates it, and a key that moves nothing draws no frame. PageUp/PageDown
+  page OUTPUT when the portal tile is focused. With the caret in the composer
+  these remain text keys. None of this reaches the agent: no
   `hud_input` item, no MCP or gRPC change.
 - Omitted zone `ttl_ms` uses 60000, except a notification with actions uses
   the owner's live `[runtime] answer_window_ms` (default 60000). An explicit
@@ -609,8 +619,8 @@ agents until one is paired.
   cursor marker; `at_tail`
   is the follow-tail state new output obeys) and `input` `{at_tail,
   draft_chars}`; the visible lines and `input.at_tail` are `null` while their
-  document is being measured. Only the focused
-  composer's draft length is reported, never its text. It is computed per
+  document is being measured. The composer's draft length is reported,
+  whether it is focused or kept unfocused, never its text. It is computed per
   request; an idle HUD does no extra work.
   `notifications` and `widgets` share that single bounded scene acquisition:
   both are `null` before the windowed runtime starts or after 100 ms of scene
@@ -1021,8 +1031,11 @@ and finishes the keyboard visit. A replaced or expired card cannot redirect a
 held key to a different card or the composer.
 
 Esc unwinds one layer at a time: it leaves nested card/control focus, clears an
-OUTPUT selection or link/Copy focus, collapses a composer selection, or cancels its draft before the empty editor's outer
-Esc leaves the HUD. In settings it cancels an edit/section or clears search
+OUTPUT selection or link/Copy focus, or collapses a composer selection before
+the outer Esc leaves the HUD. Esc never changes a composer draft: the text is
+kept and returns when that composer is focused again. Each composer keeps its
+own unsent draft, shown as text without a caret while unfocused, until it is
+sent or its portal is cleared, reclaimed or dismissed. In settings it cancels an edit/section or clears search
 before closing. An answer-chord visit entered from another app uses Esc to
 leave without answering. Key repeats, text and matching releases from a card
 activation stay local; native focus returns after the activation key releases.

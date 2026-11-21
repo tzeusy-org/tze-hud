@@ -170,6 +170,14 @@ impl LocalComposerState {
 /// frame at the top of the render loop.
 pub type LocalComposerStateHandle = Arc<StdMutex<Option<Option<LocalComposerState>>>>;
 
+/// Unsent drafts of unfocused composers, `(composer node, text)`, drawn as
+/// text without a caret in their own composer boxes.
+///
+/// Same take-on-drain semantics as [`LocalComposerStateHandle`]: `None` keeps
+/// the current set, `Some(list)` replaces it. The runtime writes only when the
+/// kept set changes, so an idle HUD writes nothing.
+pub type KeptComposerDraftsHandle = Arc<StdMutex<Option<Vec<(SceneId, String)>>>>;
+
 /// Reverse channel for soft-wrap vertical caret movement: the
 /// compositor thread publishes the active composer's wrapped-line layout here
 /// each frame; the input thread reads it before dispatching ArrowUp/ArrowDown.

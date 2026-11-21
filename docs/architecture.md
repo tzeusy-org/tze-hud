@@ -254,9 +254,10 @@ The driver applies them through checked scene calls; it no longer builds or
 decodes protobuf render batches. The hub owns cue-expiry repaints and retained
 unread counts. Composer drafts, selections and carets remain in the runtime
 input manager; only submissions enter the hub. The manager keeps an active draft
-and one keyed retained draft. Nonempty blur replaces the retained slot; an empty
-peer leaves it intact. Matching refocus restores text/caret/selection under the
-current suspension and placeholder configuration. Removed nodes lose their saved
+and one kept draft per unfocused composer node; Esc and blur keep a nonempty
+draft, and `drafts()` is the one reading behind admin `draft_chars` and the
+compositor's caretless kept-draft text. Matching refocus restores
+text/caret/selection under the current suspension and placeholder configuration. Removed nodes lose their saved
 state. The input layer returns direct `ComposerOutcome` results, with consumed-key
 status separate and local capacity/suspension detail retained in `EditOutcome`.
 Native `PortalView.input_history` is rendered through projection markdown and
