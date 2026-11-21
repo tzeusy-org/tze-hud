@@ -39,7 +39,8 @@ def fake_rpc_factory(calls):
                 result = {"content": [{"type": "text", "text": json.dumps(text)}], "isError": True}
                 return None, json.dumps({"method": method, "params": params}), "{}", {"result": result}
             if params["name"] == "hud_publish" and "wait_ms" in params["arguments"]:
-                text = {"ok": True, "action": "c"}
+                options = params["arguments"]["content"]["actions"]
+                text = {"ok": True, "action": options[2].get("callback_id", options[2]["label"])}
             result = {"content": [{"type": "text", "text": json.dumps(text)}]}
         return None, json.dumps({"method": method, "params": params}), "{}", {"result": result}
 
@@ -89,15 +90,20 @@ class CanonicalFlowTests(unittest.TestCase):
                 ("notification_choice", "2_answer"),
                 ("notification_choice", "3_ack"),
                 ("notification_choice_wait", "1_ask_answer"),
+                ("notification_choice_labels", "1_ask_answer"),
             ],
         )
         # Synthetic framing fixture only; real token evidence comes from the
         # runtime-backed calibration, never this mocked response.
-        marker, raw = output.getvalue().split("\n", 1)
-        self.assertEqual(marker, "notification-choice-wait-start")
+        wait_marker, labels_marker, raw = output.getvalue().split("\n", 2)
+        self.assertEqual(wait_marker, "notification-choice-wait-start")
+        self.assertEqual(labels_marker, "notification-choice-labels-start")
+        labelled = calls[-1][1]["arguments"]
+        self.assertEqual(labelled["ttl_ms"], labelled["wait_ms"])
+        self.assertTrue(all(set(a) == {"label"} for a in labelled["content"]["actions"]))
         candidate = json.loads(raw)["notification_action_limit_error"]
         self.assertEqual(candidate["flow"], "notification_action_limit_error")
-        self.assertEqual(len(calls[-2][1]["arguments"]["content"]["actions"]), 5)
+        self.assertEqual(len(calls[-3][1]["arguments"]["content"]["actions"]), 5)
 
     def test_portal_ack_uses_the_polled_id(self):
         calls = []

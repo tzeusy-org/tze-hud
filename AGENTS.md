@@ -98,7 +98,11 @@ status entry, notification stream or portal.
   blocker, meaningful completion, or an actual owner choice. Use a concise
   question with explicit action labels, such as Yes / No / Later, within the
   running build's supported action limit. Give callback ids a unique session
-  and question identity. Publish only when ready to consume the answer.
+  and question identity. A label-only action (its answer is its label) is fine
+  only with a session-unique `key` (it comes back on the item), or with an
+  armed `wait_ms` whose `ttl_ms` is at most the wait (the card leaves when the
+  wait ends); otherwise keep unique callback ids. Publish only when ready to
+  consume the answer.
 - **Replies:** use a session-named portal when a short typed answer or compact
   ongoing exchange is useful and its presentation is accepted. The current
   default portal is owner-rejected (2026-11-04): drag makes it transparent

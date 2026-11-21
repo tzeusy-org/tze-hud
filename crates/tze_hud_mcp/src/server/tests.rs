@@ -538,7 +538,6 @@ async fn bad_arguments_are_invalid_argument_tool_errors() {
     let boundary = format!("{prefix}{}", "a".repeat(2048 - prefix.len()));
     let unicode_boundary = format!("{prefix}{}", "é".repeat((2048 - prefix.len()) / 2));
     let mut rejected = vec![
-        (json!({"label":"Open"}), target_hint),
         (
             json!({"label":"Open","callback_id":"","url":"https://example.com/"}),
             target_hint,
@@ -2436,6 +2435,11 @@ async fn action_presses_are_delivered_until_acked() {
 /// The shared pointer/keyboard producer, with the compositor's exact live card
 /// identity. Tests inject hit geometry rather than inventing input queue items.
 async fn activate_card(server: &McpServer, id: SceneId, dismiss: bool) {
+    activate(server, id, (!dismiss).then_some(0)).await;
+}
+
+/// Press action `index` of card `id` (`None` presses the ×).
+async fn activate(server: &McpServer, id: SceneId, index: Option<usize>) {
     use tze_hud_scene::types::{Rect, ZoneHitRegion, ZoneInteractionKind};
     let (activation, wakes) = {
         let mut scene = server.scene.lock().await;
@@ -2452,12 +2456,11 @@ async fn activate_card(server: &McpServer, id: SceneId, dismiss: bool) {
             published_at_wall_us: record.published_at_wall_us,
             publisher_namespace: record.publisher_namespace,
             bounds: Rect::new(0.0, 0.0, 100.0, 30.0),
-            kind: if dismiss {
-                ZoneInteractionKind::Dismiss
-            } else {
-                ZoneInteractionKind::Action { index: 0 }
+            kind: match index {
+                None => ZoneInteractionKind::Dismiss,
+                Some(index) => ZoneInteractionKind::Action { index },
             },
-            interaction_id: format!("test:{id}:{dismiss}"),
+            interaction_id: format!("test:{id}:{index:?}"),
             tab_order: 0,
         };
         scene.overlay.zone_hit_regions.push(region.clone());
@@ -2472,6 +2475,167 @@ async fn activate_card(server: &McpServer, id: SceneId, dismiss: bool) {
     match activation {
         tze_hud_scene::graph::NotificationActivation::Callback(wake) => wake.notify(),
         _ => panic!("callback fixture"),
+    }
+}
+
+/// A label-only action is a callback named by its label: an armed wait
+/// returns the label, a late press reaches hud_input as the label with the
+/// card's key, and explicit ids and links keep working on the same card.
+#[tokio::test(start_paused = true)]
+async fn label_only_actions_answer_with_their_label() {
+    use std::{
+        future::Future,
+        task::{Context, Poll, Waker},
+    };
+    let mut context = Context::from_waker(Waker::noop());
+
+    // An armed wait returns the pressed label.
+    {
+        let (server, _) = self::server();
+        let mut ask = Box::pin(call(
+            &server,
+            "hud_publish",
+            json!({"surface":"zone:notification-area","wait_ms":30000,"ttl_ms":30000,
+                "content":{"body":"Ship?","actions":[{"label":"Ship"},{"label":"Hold"}]}}),
+        ));
+        assert!(ask.as_mut().poll(&mut context).is_pending());
+        let id = latest_card(&server).await;
+        {
+            let scene = server.scene.lock().await;
+            let record = &scene.zone_registry.active_for_zone("notification-area")[0];
+            let ZoneContent::Notification(card) = &record.content else {
+                panic!("notification card")
+            };
+            let ids: Vec<_> = card
+                .actions
+                .iter()
+                .map(|a| a.callback_id.as_deref())
+                .collect();
+            assert_eq!(
+                ids,
+                [Some("Ship"), Some("Hold")],
+                "the scene stores ordinary callbacks"
+            );
+        }
+        activate(&server, id, Some(0)).await;
+        let Poll::Ready(answer) = ask.as_mut().poll(&mut context) else {
+            panic!("pressed label answers the wait");
+        };
+        assert_eq!(answer["action"], "Ship", "{answer}");
+    }
+
+    // A press after the wait ended reaches hud_input with the label and key.
+    {
+        let (server, clock) = self::server();
+        let mut ask = Box::pin(call(
+            &server,
+            "hud_publish",
+            json!({"surface":"zone:notification-area","key":"deploy-7","wait_ms":1000,"ttl_ms":60000,
+                "content":{"body":"Ship?","actions":[{"label":"Ship"},{"label":"Hold"}]}}),
+        ));
+        assert!(ask.as_mut().poll(&mut context).is_pending());
+        tokio::time::advance(std::time::Duration::from_millis(1000)).await;
+        clock.advance(1000);
+        let Poll::Ready(reply) = ask.as_mut().poll(&mut context) else {
+            panic!("wait reaches its deadline");
+        };
+        assert!(reply.get("action").is_none(), "{reply}");
+        activate(&server, latest_card(&server).await, Some(1)).await;
+        let late = call(&server, "hud_input", json!({})).await;
+        assert_eq!(late["items"][0]["action"], "Hold", "{late}");
+        assert_eq!(late["items"][0]["key"], "deploy-7", "{late}");
+    }
+
+    // Mixed card: explicit id, label-only and link actions coexist.
+    {
+        let (server, _) = self::server();
+        let actions = json!([
+            {"label":"Ship","callback_id":"ship-7"},
+            {"label":"Hold"},
+            {"label":"Docs","url":"https://example.com/"}
+        ]);
+        for (index, expected) in [(0, "ship-7"), (1, "Hold")] {
+            call(
+                &server,
+                "hud_publish",
+                json!({"surface":"zone:notification-area","content":{"body":"Ship?","actions":actions}}),
+            )
+            .await;
+            activate(&server, latest_card(&server).await, Some(index)).await;
+            let input = call(&server, "hud_input", json!({})).await;
+            assert_eq!(input["items"][0]["action"], expected, "{input}");
+            call(
+                &server,
+                "hud_input",
+                json!({"ack":[input["items"][0]["id"]]}),
+            )
+            .await;
+        }
+    }
+}
+
+/// Label-only refusals reject the whole publish before admission or
+/// scheduling; the shapes they leave alone stay accepted.
+#[tokio::test]
+async fn label_only_duplicates_and_dismiss_are_refused() {
+    let (server, _) = self::server();
+    let state = |scene: &SceneGraph| {
+        (
+            scene
+                .zone_registry
+                .active_for_zone("notification-area")
+                .len(),
+            scene.scheduled_batches.len(),
+            scene.pending_actions.len(),
+        )
+    };
+    let rejected = [
+        (
+            json!([{"label":"Ship"},{"label":"Ship"}]),
+            "notification.actions[1] label repeats actions[0]; add a callback_id",
+        ),
+        (
+            json!([{"label":"Ship","callback_id":"Hold"},{"label":"Hold"}]),
+            "notification.actions[1] label repeats actions[0]; add a callback_id",
+        ),
+        (
+            json!([{"label":"Hold"},{"label":"Wait","callback_id":"Hold"}]),
+            "notification.actions[0] label repeats actions[1]; add a callback_id",
+        ),
+        (
+            json!([{"label":"Ship"},{"label":"dismiss"}]),
+            "notification.actions[1] label dismiss needs a callback_id",
+        ),
+    ];
+    for delay_ms in [0, 1000] {
+        for (actions, hint) in &rejected {
+            let before = state(&*server.scene.lock().await);
+            let err = call_err(
+                &server,
+                "hud_publish",
+                json!({"surface":"zone:notification-area","delay_ms":delay_ms,
+                    "content":{"body":"Choose","actions":actions}}),
+            )
+            .await;
+            assert_eq!(err["code"], "INVALID_ARGUMENT", "{actions}");
+            assert_eq!(err["hint"], *hint, "{actions}");
+            // Every BPE token is at least one byte; a third of the bytes is a
+            // generous bound for this ASCII JSON.
+            assert!(err.to_string().len() / 3 <= 60, "{err}");
+            assert_eq!(state(&*server.scene.lock().await), before, "{actions}");
+        }
+    }
+    for actions in [
+        json!([{"label":"dismiss","callback_id":"dismiss"}]),
+        json!([{"label":"Docs"},{"label":"Docs","url":"https://example.com/"}]),
+        json!([{"label":"A","callback_id":"x"},{"label":"B","callback_id":"x"}]),
+    ] {
+        call(
+            &server,
+            "hud_publish",
+            json!({"surface":"zone:notification-area","content":{"body":"Choose","actions":actions}}),
+        )
+        .await;
     }
 }
 

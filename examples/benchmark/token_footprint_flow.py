@@ -164,6 +164,17 @@ def main():
     )
     if waited.get("action") != "c":
         raise RuntimeError(f"one-call choice did not return its accepted answer: {waited}")
+    # Label-only options: each answer is its label. ttl_ms equals the wait so
+    # the card leaves with it; the fixture's scene clock is frozen, so the
+    # returned expiry bytes are deterministic.
+    print("notification-choice-labels-start", flush=True)
+    labelled = tool(
+        "notification_choice_labels", "1_ask_answer", "hud_publish",
+        {"surface": "zone:notification-area", "wait_ms": 30000, "ttl_ms": 30000, "content": {
+            "body": "Next?", "actions": [{"label": label} for label in ["Ship", "Hold", "Skip", "Open"]]}},
+    )
+    if labelled.get("action") != "Skip":
+        raise RuntimeError(f"label-only choice did not return its label: {labelled}")
     json.dump(
         {"transactions": transactions, "notification_action_limit_error": limit_error},
         sys.stdout,

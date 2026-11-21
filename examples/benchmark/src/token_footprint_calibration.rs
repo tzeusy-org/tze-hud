@@ -109,6 +109,11 @@ mod calibration {
     async fn prepare_scene(runtime: &HeadlessRuntime) {
         let state = runtime.shared_state().lock().await;
         let mut scene = state.scene.lock().await;
+        // Freeze time at startup's now: a reply's `expires_in_ms` is then
+        // exactly its TTL, so flows reporting expiry after a wait measure
+        // byte-identically.
+        let now = scene.clock().now_us();
+        scene.set_clock(std::sync::Arc::new(tze_hud_scene::TestClock::from_us(now)));
         scene.zone_registry = tze_hud_scene::types::ZoneRegistry::with_defaults();
         let tab_id = scene
             .create_tab("Token Calibration", 0)
@@ -209,19 +214,24 @@ mod calibration {
             let output = child.wait_with_output().expect("reap failed flow driver");
             panic!("{error}: {}", String::from_utf8_lossy(&output.stderr));
         }
-        // The driver reaches this fixture-only barrier after the old poll/ACK
-        // and error flow are complete. Re-arm scene work only for the new ask.
-        let marker = b"notification-choice-wait-start\n";
-        let mut actual = vec![0; marker.len()];
-        child
-            .stdout
-            .as_mut()
-            .expect("piped driver stdout")
-            .read_exact(&mut actual)
-            .expect("read second choice barrier");
-        assert_eq!(actual, marker, "driver second choice barrier");
-        *producer.phase.lock().expect("calibration phase") = PortalPhase::ChoiceAllowed;
-        producer.changed.notify_one();
+        // The driver reaches each fixture-only barrier after the previous
+        // flow is complete (old poll/ACK and error flow, then the one-call
+        // ask). Re-arm scene work only for the next ask.
+        for marker in [
+            &b"notification-choice-wait-start\n"[..],
+            &b"notification-choice-labels-start\n"[..],
+        ] {
+            let mut actual = vec![0; marker.len()];
+            child
+                .stdout
+                .as_mut()
+                .expect("piped driver stdout")
+                .read_exact(&mut actual)
+                .expect("read choice barrier");
+            assert_eq!(actual, marker, "driver choice barrier");
+            *producer.phase.lock().expect("calibration phase") = PortalPhase::ChoiceAllowed;
+            producer.changed.notify_one();
+        }
         let output = child
             .wait_with_output()
             .expect("wait for Python flow driver");
@@ -368,6 +378,13 @@ mod calibration {
                 assert!(
                     flow_model.tokens <= 90,
                     "one-call choice exceeds its signed ceiling"
+                );
+            }
+            if flow_name == "notification_choice_labels" {
+                assert_eq!(operations.len(), 1, "ask and answer share one call");
+                assert!(
+                    flow_model.tokens <= 85,
+                    "label-only choice exceeds its owner-set ceiling"
                 );
             }
             flows.insert(
@@ -586,10 +603,11 @@ mod calibration {
                                 return false;
                             }
                             match &record.content {
-                                ZoneContent::Notification(notification) => notification
-                                    .actions
-                                    .iter()
-                                    .any(|action| action.callback_id.as_deref() == Some("c")),
+                                ZoneContent::Notification(notification) => {
+                                    notification.actions.iter().any(|action| {
+                                        matches!(action.callback_id.as_deref(), Some("c" | "Skip"))
+                                    })
+                                }
                                 _ => false,
                             }
                         });

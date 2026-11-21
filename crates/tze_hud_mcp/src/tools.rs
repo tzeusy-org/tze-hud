@@ -563,6 +563,27 @@ fn with_clipped<K: AsRef<str>>(mut reply: Value, clipped: &[(K, usize)]) -> Valu
     reply
 }
 
+/// A label-only action's defaulted callback id must not repeat another
+/// action's callback id on the same card; two explicit ids may match.
+fn label_only_ids_are_unique(
+    actions: Vec<(NotificationAction, bool)>,
+) -> Result<Vec<NotificationAction>, McpError> {
+    for (i, (action, defaulted)) in actions.iter().enumerate() {
+        for (j, (earlier, earlier_defaulted)) in actions[..i].iter().enumerate() {
+            if (*defaulted || *earlier_defaulted)
+                && earlier.callback_id.is_some()
+                && earlier.callback_id == action.callback_id
+            {
+                let (repeat, first) = if *defaulted { (i, j) } else { (j, i) };
+                return Err(invalid(format!(
+                    "notification.actions[{repeat}] label repeats actions[{first}]; add a callback_id"
+                )));
+            }
+        }
+    }
+    Ok(actions.into_iter().map(|(action, _)| action).collect())
+}
+
 fn ok_with_expiry(expires_in_ms: Option<u64>) -> Value {
     match expires_in_ms {
         Some(ms) => json!({ "ok": true, "expires_in_ms": ms }),
@@ -1627,10 +1648,18 @@ fn parse_zone_content(content: &Value) -> Result<ZoneContent, McpError> {
                                             "notification.actions[{index}].{name} must be a string"))))
                                         .transpose()
                                 };
+                                let (callback_id, url) = (target("callback_id")?, target("url")?);
+                                // An action with no target is a callback named by
+                                // its label, byte for byte; its answer is the label.
+                                let defaulted = callback_id.is_none() && url.is_none();
+                                if defaulted && label == "dismiss" {
+                                    return Err(invalid(format!(
+                                        "notification.actions[{index}] label dismiss needs a callback_id")));
+                                }
                                 let action = NotificationAction {
+                                    callback_id: if defaulted { Some(label.clone()) } else { callback_id },
                                     label,
-                                    callback_id: target("callback_id")?,
-                                    url: target("url")?,
+                                    url,
                                 };
                                 // Preserve the existing MCP non-empty callback rule,
                                 // after exclusivity so both supplied members never alias.
@@ -1638,9 +1667,10 @@ fn parse_zone_content(content: &Value) -> Result<ZoneContent, McpError> {
                                     return Err(invalid(format!(
                                         "notification.actions[{index}].callback_id must be a non-empty string")));
                                 }
-                                Ok(action)
+                                Ok((action, defaulted))
                             })
-                            .collect::<Result<Vec<_>, McpError>>()?,
+                            .collect::<Result<Vec<_>, McpError>>()
+                            .and_then(label_only_ids_are_unique)?,
                         Some(_) => {
                             return Err(invalid(
                                 "notification.actions must be an array".to_string(),

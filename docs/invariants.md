@@ -123,7 +123,10 @@ none. Existing end-to-end coverage:
 A notification action has exactly one callback or HTTPS URL target, validated
 by the shared payload contract on both planes before mutation/scheduling. MCP
 member presence and gRPC empty-string defaults retain their documented
-difference; valid absent-URL callback payloads remain compatible. Invalid
+difference: an MCP action with no target is a callback named by its label
+(refused when that repeats another callback id on the card, or is
+`dismiss`), while gRPC still rejects both targets empty; valid absent-URL
+callback payloads remain compatible. Invalid
 combinations use `action needs callback_id or url, not both`; URLs require a
 parsed HTTPS host and at most 2048 supplied UTF-8 bytes, otherwise
 `action url must be https`. All four mixed actions share one admission cap.
