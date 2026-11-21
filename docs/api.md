@@ -37,7 +37,10 @@ attaches afresh and reports `reattached: true`.
 
 Standard MCP over JSON-RPC 2.0 (HTTP POST): `initialize`,
 `notifications/initialized` (no response), `tools/list`, and `tools/call`.
-`ping` answers `{}`. There are no other methods. A result is one text content block of compact
+`ping` answers `{}`. There are no other methods. The runtime ignores
+`notifications/*`; the paired stdio adapter consumes
+`notifications/initialized` locally and does not forward it, so the runtime
+must not require it. A result is one text content block of compact
 JSON. Agents never send geometry, styling, or z-order. Times are
 milliseconds, named `*_ms`, everywhere.
 
