@@ -1524,6 +1524,8 @@ impl Drop for HeadlessEventLoopHarness {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    mod hold;
     use tze_hud_input::{KeyboardModifiers, RawCharacterEvent, RawKeyDownEvent, RawKeyUpEvent};
     use tze_hud_protocol::proto::input_envelope::Event as ProtoInputEvent;
     use tze_hud_protocol::proto::{CommandAction, CommandSource};

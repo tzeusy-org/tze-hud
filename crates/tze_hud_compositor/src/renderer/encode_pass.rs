@@ -516,23 +516,51 @@ impl super::Compositor {
                         }
                         // Action buttons: at exactly the bounds
                         // `populate_notification_hit_regions` registers; labels
-                        // are drawn by `collect_text_items`.
-                        for (index, (_action, b)) in payload
+                        // are drawn by `collect_text_items`. A destructive one
+                        // adds a `color.error` hairline, and while held a
+                        // hold fill sweeping in from the left.
+                        for (index, (action, b)) in payload
                             .actions
                             .iter()
                             .zip(action_layout.bounds(slot.x, slot.y, slot.width, slot.height))
                             .enumerate()
                         {
-                            let state = chrome_state(notification_action_interaction_id(
-                                zone_name, record, index,
-                            ));
+                            let id = notification_action_interaction_id(zone_name, record, index);
+                            let state = chrome_state(id.clone());
+                            if action.is_destructive() {
+                                let mut outline = style.destructive_outline();
+                                outline.a *= opacity;
+                                let radius = style
+                                    .control_radius
+                                    .min(b.width * 0.5)
+                                    .min(b.height * 0.5)
+                                    .max(0.0);
+                                out.push(self.border_only_cmd(b, radius, style.hairline, outline));
+                            }
                             out.extend(self.card_control_cmd(
                                 b,
                                 state,
-                                style.control_fill(state, style.action_fill(index)),
+                                style.control_fill(state, style.action_fill(payload, index)),
                                 &style,
                                 opacity,
                             ));
+                            if let Some(fill) = self.notification_hold_fill(scene, &id)
+                                && let Some(mut sweep) = self.card_control_cmd(
+                                    b,
+                                    state,
+                                    Some(style.hold_fill()),
+                                    &style,
+                                    opacity,
+                                )
+                            {
+                                sweep.clip = Some(RoundedRectClip {
+                                    x: b.x,
+                                    y: b.y,
+                                    width: b.width * fill,
+                                    height: b.height,
+                                });
+                                out.push(sweep);
+                            }
                         }
                     }
                 }

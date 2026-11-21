@@ -1249,7 +1249,7 @@ impl SceneGraph {
         let now = self.now_monotonic_us();
         let progress = hold_progress(hold.started_mono_us, now, hold_ms);
         self.overlay.notification_hold_drain =
-            (drain_ms > 0 && progress > 0.0).then(|| super::NotificationHoldDrain {
+            (drain_ms > 0 && progress > 0.0).then_some(super::NotificationHoldDrain {
                 interaction_id: hold.region.interaction_id,
                 progress,
                 released_mono_us: now,

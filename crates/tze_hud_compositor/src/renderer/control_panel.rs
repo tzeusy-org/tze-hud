@@ -358,13 +358,13 @@ struct PanelStyle {
 /// scale, kept readable and on screen.
 const SCALE_RANGE: (f32, f32) = (0.75, 3.0);
 /// WCAG AA for body text; a pair below it falls back to the defaults.
-const MIN_TEXT_CONTRAST: f32 = 4.5;
+pub(super) const MIN_TEXT_CONTRAST: f32 = 4.5;
 
 fn luminance(c: Rgba) -> f32 {
     0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b
 }
 
-fn contrast(a: Rgba, b: Rgba) -> f32 {
+pub(super) fn contrast(a: Rgba, b: Rgba) -> f32 {
     let (la, lb) = (luminance(a), luminance(b));
     (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
 }

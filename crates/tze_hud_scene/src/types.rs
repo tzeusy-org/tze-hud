@@ -3426,6 +3426,41 @@ impl Default for ZoneRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn primary_action_is_the_first_that_is_not_destructive() {
+        let action = |destructive: bool| NotificationAction {
+            label: "x".into(),
+            callback_id: Some("x".into()),
+            role: destructive.then_some(ActionRole::Destructive),
+            ..Default::default()
+        };
+        let card = |roles: &[bool]| NotificationPayload {
+            text: "t".into(),
+            actions: roles.iter().map(|d| action(*d)).collect(),
+            ..Default::default()
+        };
+        assert_eq!(card(&[false, false]).primary_action(), Some(0));
+        assert_eq!(card(&[true, false]).primary_action(), Some(1));
+        assert_eq!(card(&[true, true]).primary_action(), None);
+        assert_eq!(card(&[]).primary_action(), None);
+        // A role on a link is refused; a role-less action serializes as before.
+        let link = NotificationAction {
+            label: "Docs".into(),
+            url: Some("https://example.com/".into()),
+            role: Some(ActionRole::Destructive),
+            ..Default::default()
+        };
+        assert_eq!(link.validate(), Err(ACTION_ROLE_HINT.into()));
+        assert_eq!(
+            serde_json::to_string(&action(false)).unwrap(),
+            r#"{"label":"x","callback_id":"x"}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&action(true)).unwrap(),
+            r#"{"label":"x","callback_id":"x","role":"destructive"}"#
+        );
+    }
     use std::mem::size_of;
 
     // ── Portal surface structural validation ──────────────────────────

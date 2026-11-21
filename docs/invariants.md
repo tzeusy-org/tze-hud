@@ -255,6 +255,18 @@ cancellation into an action. Existing local owner coverage:
 [`action_button_hover_and_press_are_local_and_frame_only_on_change`](../crates/tze_hud_runtime/src/windowed/event_loop_harness.rs).
 Windows held-press/release acceptance remains separate.
 
+A destructive notification action (MCP `role:"destructive"`) is never taken by
+one click, Enter, Space or digit: it fires once only when a press is held for
+`notification.action.hold.ms`, and nothing takes any answer automatically. The
+hold is local feedback; agents see nothing until it completes. Release, leave,
+capture or keyboard-focus loss, another key, hide-all, safe mode, and clear,
+expiry or replacement end it with no callback, and a held key cannot act on
+another card. The first non-destructive action is the primary (filled; the
+answer chord's initial focus). Runtime coverage:
+[`pointer_hold_fires_once_at_the_token_duration`](../crates/tze_hud_runtime/src/windowed/event_loop_harness/tests/hold.rs)
+and its siblings; the owner's Windows feel check of the hold length remains
+separate.
+
 Existing zone grips move the zone slot for the runtime session. The effective
 scene policy feeds every draw, text, layout-cache and hit consumer. Moves/reset
 change only geometry readiness, with unchanged values remaining idle; no Zone

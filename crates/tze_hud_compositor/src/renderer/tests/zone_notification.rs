@@ -526,6 +526,9 @@ async fn notification_actions_layout_matches_hit_regions() {
         let descriptor =
             compositor.notification_action_layout("notification-area", record, policy, 552.0);
         let publication_id = record.publication_id;
+        let ZoneContent::Notification(payload) = record.content.clone() else {
+            unreachable!()
+        };
         assert_eq!(descriptor.stacked, stacked);
         let shapes = compositor.notification_layouts.borrow().shapes;
         let regions = scene.overlay.zone_hit_regions.clone();
@@ -566,7 +569,7 @@ async fn notification_actions_layout_matches_hit_regions() {
                 .get(&region.interaction_id)
                 .copied()
                 .unwrap_or_default();
-            let fill = style.control_fill(state, style.action_fill(index));
+            let fill = style.control_fill(state, style.action_fill(&payload, index));
             let drawn: Vec<_> = commands
                 .iter()
                 .filter(|c| {

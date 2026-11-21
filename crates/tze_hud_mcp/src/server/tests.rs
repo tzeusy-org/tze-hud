@@ -2731,6 +2731,78 @@ async fn waits_cover_the_55_second_answer_window() {
     }
 }
 
+#[tokio::test]
+async fn action_role_is_destructive_on_callback_actions_only() {
+    use tze_hud_scene::{ActionRole, NotificationAction};
+    let (server, _) = self::server();
+    for (actions, hint) in [
+        (
+            json!([{"label":"Ship"},{"label":"Drop","role":"primary"}]),
+            "notification.actions[1].role must be destructive",
+        ),
+        (
+            json!([{"label":"Drop","role":true}]),
+            "notification.actions[0].role must be destructive",
+        ),
+        (
+            json!([{"label":"Docs","url":"https://example.com/","role":"destructive"}]),
+            "notification.actions[0].role needs a callback action",
+        ),
+    ] {
+        let err = call_err(
+            &server,
+            "hud_publish",
+            json!({"surface":"zone:notification-area","content":{"body":"Choose","actions":actions}}),
+        )
+        .await;
+        assert_eq!(err["code"], "INVALID_ARGUMENT", "{actions}");
+        assert_eq!(err["hint"], hint, "{actions}");
+        assert!(err.to_string().len() / 3 <= 60, "{err}");
+        assert!(
+            server
+                .scene
+                .lock()
+                .await
+                .zone_registry
+                .active_for_zone("notification-area")
+                .is_empty(),
+            "{actions}"
+        );
+    }
+    // Explicit and label-only actions both carry the role; the primary is
+    // the first action that is not destructive.
+    call(
+        &server,
+        "hud_publish",
+        json!({"surface":"zone:notification-area","content":{"body":"Delete branch?","actions":[
+            {"label":"Delete","callback_id":"delete","role":"destructive"},
+            {"label":"Drop","role":"destructive"},
+            {"label":"Keep"}]}}),
+    )
+    .await;
+    let scene = server.scene.lock().await;
+    let ZoneContent::Notification(payload) =
+        &scene.zone_registry.active_for_zone("notification-area")[0].content
+    else {
+        unreachable!()
+    };
+    let action = |label: &str, callback: &str, role| NotificationAction {
+        label: label.into(),
+        callback_id: Some(callback.into()),
+        url: None,
+        role,
+    };
+    assert_eq!(
+        payload.actions,
+        [
+            action("Delete", "delete", Some(ActionRole::Destructive)),
+            action("Drop", "Drop", Some(ActionRole::Destructive)),
+            action("Keep", "Keep", None),
+        ]
+    );
+    assert_eq!(payload.primary_action(), Some(2));
+}
+
 fn question(wait_ms: u64) -> Value {
     json!({"surface":"zone:notification-area","key":"question","ttl_ms":60000,"wait_ms":wait_ms,
         "content":{"title":"Ship?","actions":[{"label":"Ship","callback_id":"ship"}]}})

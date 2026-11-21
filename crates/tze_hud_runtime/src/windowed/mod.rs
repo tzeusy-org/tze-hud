@@ -195,6 +195,7 @@ mod keyboard;
 mod lifecycle;
 mod monitor_identity;
 mod network;
+mod notification_hold;
 mod panel_input;
 mod portal;
 #[cfg(any(target_os = "windows", test))]
@@ -933,6 +934,7 @@ impl WinitApp {
         // Retry pointer input that found the scene lock busy.
         let retained_pointer_changed = self.drain_retained_pointer_input();
         let link_feedback_changed = self.settle_link_feedback(Instant::now());
+        let hold_changed = self.settle_notification_hold();
         self.recover_chrome_capture();
         // Render the portals.
         // Must run AFTER composer flush so draft state is settled before portal
@@ -947,7 +949,8 @@ impl WinitApp {
             || settled_drag
             || chrome_scene_changed
             || retained_pointer_changed
-            || link_feedback_changed;
+            || link_feedback_changed
+            || hold_changed;
         if self.state.input_processor.chrome_feedback_cancel_pending || pruned_drag.is_deferred() {
             // Chrome cleanup can consume its pending flag before the separate
             // drag-feedback borrow. Preserve either unfinished phase through the
@@ -1151,6 +1154,16 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                 {
                     deadlines.push(deadline);
                 }
+            }
+            // A destructive hold fires on time even when no frame is drawn
+            // (reduced motion, or a sweep already full).
+            let (hold_ms, _) = notification_hold::hold_timing(&self.state.global_tokens);
+            if let Some(due) = scene.notification_hold_due_mono_us(hold_ms) {
+                let remaining_us = due.saturating_sub(scene.now_monotonic_us());
+                deadlines.push(Deadline::new(
+                    now + std::time::Duration::from_micros(remaining_us),
+                    crate::idle_efficiency::RuntimeWakeupSource::AnimationDeadline,
+                ));
             }
             if let Some(menu) = &scene.overlay.drag_handle_context_menu {
                 const AUTO_DISMISS_NS: u64 = 3_000_000_000;
