@@ -296,8 +296,9 @@ with the same cancellation and idle semantics as a `hud_input` wait.
   page down and up by one keyboard page. Space on a focused link or Copy stop
   still activates it, paging keeps the focused stop or selection, and a key
   that moves nothing draws no frame. With the caret in the composer these
-  remain text keys. None of this reaches the agent: no
-  `hud_input` item, no MCP or gRPC change.
+  remain text keys. With only the portal tile focused, PageUp/PageDown also
+  still deliver the tile's existing ScrollUp/ScrollDown command; otherwise
+  none of this reaches the agent: no `hud_input` item, no MCP or gRPC change.
 - Omitted zone `ttl_ms` uses 60000, except a notification with actions uses
   the owner's live `[runtime] answer_window_ms` (default 60000). An explicit
   `ttl_ms` always wins, including 0 (held until cleared); the owner window is
