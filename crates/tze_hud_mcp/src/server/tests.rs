@@ -2639,6 +2639,85 @@ async fn label_only_duplicates_and_dismiss_are_refused() {
     }
 }
 
+/// One wait covers most of the default answer window: an answer at 40 s
+/// returns in the publish call, a portal reply at 45 s returns from
+/// hud_input, and hud_input clamps longer waits to 55 s.
+#[tokio::test(start_paused = true)]
+async fn waits_cover_the_55_second_answer_window() {
+    use std::{
+        future::Future,
+        task::{Context, Poll, Waker},
+    };
+    let mut context = Context::from_waker(Waker::noop());
+    let advance = |clock: &tze_hud_scene::TestClock, ms: u64| {
+        clock.advance(ms);
+        tokio::time::advance(std::time::Duration::from_millis(ms))
+    };
+
+    // An answer 40 s into a 55 s wait is consumed by the publish reply.
+    for cancel in [false, true] {
+        let (server, clock) = self::server();
+        let mut ask = Box::pin(call(&server, "hud_publish", question(55000)));
+        assert!(ask.as_mut().poll(&mut context).is_pending());
+        advance(&clock, 40000).await;
+        assert!(ask.as_mut().poll(&mut context).is_pending());
+        activate_card(&server, latest_card(&server).await, false).await;
+        if cancel {
+            // A client that gave up keeps the accepted answer in hud_input.
+            drop(ask);
+            let queued = call(&server, "hud_input", json!({})).await;
+            assert_eq!(queued["items"][0]["action"], "ship", "{queued}");
+            continue;
+        }
+        let Poll::Ready(answer) = ask.as_mut().poll(&mut context) else {
+            panic!("answer at 40 s completes the wait");
+        };
+        assert_eq!(
+            answer,
+            json!({"action":"ship","expires_in_ms":20000,"ok":true})
+        );
+        assert_eq!(
+            call(&server, "hud_input", json!({})).await,
+            json!({"items":[],"remaining":0})
+        );
+    }
+
+    // hud_input waits up to 55 s: a portal reply at 45 s returns then.
+    {
+        let (server, clock) = self::server();
+        let (server, _) = hub_portal(server);
+        call(&server, "hud_publish", json!({"surface":"portal:other"})).await;
+        let mut input = Box::pin(call(&server, "hud_input", json!({"wait_ms":55000})));
+        assert!(input.as_mut().poll(&mut context).is_pending());
+        advance(&clock, 45000).await;
+        assert!(input.as_mut().poll(&mut context).is_pending());
+        server
+            .portals
+            .as_ref()
+            .unwrap()
+            .submit_reply(&PortalKey::new(psk_agent(), "other"), "late".into(), 0)
+            .unwrap();
+        let Poll::Ready(reply) = input.as_mut().poll(&mut context) else {
+            panic!("portal reply at 45 s wakes hud_input");
+        };
+        assert_eq!(reply["items"][0]["text"], "late", "{reply}");
+    }
+
+    // Longer hud_input waits clamp to 55 s.
+    {
+        let (server, clock) = self::server();
+        let mut input = Box::pin(call(&server, "hud_input", json!({"wait_ms":300000})));
+        assert!(input.as_mut().poll(&mut context).is_pending());
+        advance(&clock, 54999).await;
+        assert!(input.as_mut().poll(&mut context).is_pending());
+        advance(&clock, 1).await;
+        let Poll::Ready(reply) = input.as_mut().poll(&mut context) else {
+            panic!("hud_input clamps to 55 s");
+        };
+        assert_eq!(reply, json!({"items":[],"remaining":0}));
+    }
+}
+
 fn question(wait_ms: u64) -> Value {
     json!({"surface":"zone:notification-area","key":"question","ttl_ms":60000,"wait_ms":wait_ms,
         "content":{"title":"Ship?","actions":[{"label":"Ship","callback_id":"ship"}]}})
@@ -3061,17 +3140,24 @@ async fn publish_wait_endings_deadline_delay_and_validation() {
         );
     }
 
-    // Delay counts from call; values above 30s clamp without a wall-clock wait.
+    // Delay counts from call; values above 55s clamp without a wall-clock wait.
     for delayed in [false, true] {
         let (server, clock) = self::server();
-        let mut args = question(90000);
+        let mut args = question(300000);
         if delayed {
             args["delay_ms"] = json!(40000);
         }
         let mut ask = Box::pin(call(&server, "hud_publish", args));
         assert!(ask.as_mut().poll(&mut context).is_pending());
-        tokio::time::advance(std::time::Duration::from_millis(29999)).await;
-        clock.advance(29999);
+        if delayed {
+            tokio::time::advance(std::time::Duration::from_millis(40000)).await;
+            clock.advance(40000);
+            assert!(server.scene.lock().await.apply_due_batches()[0].applied);
+            assert!(ask.as_mut().poll(&mut context).is_pending());
+        }
+        let rest = if delayed { 14999 } else { 54999 };
+        tokio::time::advance(std::time::Duration::from_millis(rest)).await;
+        clock.advance(rest);
         assert!(ask.as_mut().poll(&mut context).is_pending());
         tokio::time::advance(std::time::Duration::from_millis(1)).await;
         clock.advance(1);
@@ -3080,12 +3166,8 @@ async fn publish_wait_endings_deadline_delay_and_validation() {
         };
         assert_eq!(
             reply,
-            json!({"ok":true,"expires_in_ms":if delayed {70000} else {30000}})
+            json!({"ok":true,"expires_in_ms":if delayed {45000} else {5000}})
         );
-        if delayed {
-            clock.advance(10000);
-            assert!(server.scene.lock().await.apply_due_batches()[0].applied);
-        }
         activate_card(&server, latest_card(&server).await, false).await;
         let late = call(&server, "hud_input", json!({})).await;
         assert_eq!(late["items"][0]["action"], "ship");

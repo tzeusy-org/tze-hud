@@ -41,7 +41,7 @@ pub const MAX_DELAY_MS: u64 = 300_000;
 /// lifetime is the per-publication expiry.
 pub const MCP_LEASE_TTL_MS: u64 = 24 * 60 * 60 * 1000;
 /// Longest `wait_ms` long-poll for `hud_input`.
-pub const MAX_WAIT_MS: u64 = 30_000;
+pub const MAX_WAIT_MS: u64 = 55_000;
 
 /// Build a tool error: a stable code plus a hint for the model.
 pub fn tool_err(code: &'static str, hint: impl Into<String>) -> McpError {

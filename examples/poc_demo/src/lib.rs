@@ -42,6 +42,13 @@ pub struct Target {
     pub human_wait: Duration,
 }
 
+/// The server's `wait_ms` cap on hud_publish and hud_input; longer waits clamp.
+const MAX_WAIT_MS: u64 = 55_000;
+
+fn clamped_wait_ms(wait_ms: u64) -> u64 {
+    wait_ms.min(MAX_WAIT_MS)
+}
+
 /// MCP over HTTP: one tool call per connection, tokens counted per call.
 pub struct Mcp<'a>(pub &'a Target);
 
@@ -51,7 +58,7 @@ impl Mcp<'_> {
     /// at most 100 ms; every attempt's request and response are counted.
     pub async fn call(&self, tool: &str, arguments: Value) -> Result<Value> {
         let input_deadline = tokio::time::Instant::now()
-            + Duration::from_millis(arguments["wait_ms"].as_u64().unwrap_or(0).min(30_000));
+            + Duration::from_millis(clamped_wait_ms(arguments["wait_ms"].as_u64().unwrap_or(0)));
         let input_response_deadline = input_deadline + Duration::from_millis(100);
         let mut arguments = arguments;
         let mut recovery_deadline: Option<tokio::time::Instant> = None;
@@ -219,7 +226,7 @@ pub async fn zones(target: &Target) -> Result<()> {
     let polled = mcp
         .call(
             "hud_input",
-            json!({"wait_ms": target.human_wait.as_millis().min(30_000)}),
+            json!({"wait_ms": clamped_wait_ms(target.human_wait.as_millis() as u64)}),
         )
         .await?;
     let items = polled["items"].as_array().cloned().unwrap_or_default();
@@ -277,7 +284,14 @@ pub fn psk_from_file_text(text: &str) -> Result<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::psk_from_file_text;
+    use super::{clamped_wait_ms, psk_from_file_text};
+
+    #[test]
+    fn waits_clamp_to_the_server_cap() {
+        assert_eq!(clamped_wait_ms(0), 0);
+        assert_eq!(clamped_wait_ms(55_000), 55_000);
+        assert_eq!(clamped_wait_ms(300_000), 55_000);
+    }
 
     #[test]
     fn credential_files_hold_a_bare_psk_or_a_pair_reply() {

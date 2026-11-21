@@ -81,7 +81,7 @@ and `hud_clear` have `idempotentHint:true`; publish/input make neither claim.
 **`hud_publish`** `{surface*, content | params, ttl_ms?, delay_ms?, key?, wait_ms?, status?, expects_reply?, display_name?}`
 
 For a one-shot notification with actions, add `wait_ms` (default 0, clamped to
-30000). The card is admitted and rendering wakes before the call waits; the
+55000). The card is admitted and rendering wakes before the call waits; the
 absolute wait includes admission and `delay_ms`. An answer returns in this call
 as `action:"<callback_id>"`; a human × adds `action:"dismiss",kind:"dismiss"`.
 It is consumed only after the reply is encoded and needs no ACK. A cancelled
@@ -431,7 +431,7 @@ The gRPC `Hold` and `Clear` behave the same on zones. An internal scene
   `max_items` limits the result and `remaining` reports the retained backlog;
   zero returns the backlog without consuming it. Notification FIFO items precede
   portal replies in their existing chronological order.
-- `wait_ms` defaults to 0 and caps at 30000. The caller's armed readiness wait
+- `wait_ms` defaults to 0 and caps at 55000. The caller's armed readiness wait
   wakes on committed input and uses one absolute deadline with a final queue
   check. It neither polls every 150 ms nor changes the stdio adapter's 60 s cap.
   A finite active poll protects only its agent from idle degradation, including
@@ -1672,6 +1672,13 @@ tokens); every other flow keeps identical fingerprints, bytes and counts.
 The owner **accepted** these bytes and the new row for PR1670 on
 2026-11-21, with an 85-token ceiling (about 30% headroom over the 65
 measured).
+
+Raising the `wait_ms` cap to 55000 (`hud-ohgc9.14`) changes the two
+`maximum` values in `tools/list` from 30000 to 55000: the same 2,711
+model-visible bytes and 622 tokens, a new fingerprint. Every other flow,
+including `notification_choice_wait` (which still sends `wait_ms:30000`),
+keeps identical bytes; the new `tools/list` bytes await owner acceptance
+(baseline approval `pending_owner_review`).
 
 All nine measurements use canonical flow version 4 and `tiktoken-rs` 0.12.0,
 `o200k_base`. The discovery-audience change (`hud-ljhku.7`, source `177e1096`)

@@ -56,8 +56,8 @@ def call_tool(
         },
         method="POST",
     )
-    # hud_input and question publishes can wait 30 s; leave a response allowance beyond that wait.
-    with urllib.request.urlopen(req, timeout=40) as resp:
+    # hud_input and question publishes can wait 55 s; leave a response allowance beyond that wait.
+    with urllib.request.urlopen(req, timeout=65) as resp:
         envelope = json.loads(resp.read().decode("utf-8"))
     if "error" in envelope:
         return {"error": envelope["error"]}
@@ -177,7 +177,7 @@ def main(argv: list[str] | None = None) -> int:
   --zone notification-area --clear --key session:tests
   --surface widget:main-progress --params '{"progress":0.5}' --ttl-ms 10000
   --surface widget:main-progress --hold --ttl-ms 10000
-  --input --wait-ms 30000
+  --input --wait-ms 55000
   --input --ack <handled-id>   (repeat --ack for more ids; never auto-ACK)
   --messages-file batch.json
 
@@ -243,7 +243,7 @@ all receipts before retrying. No uncertain POST is automatically replayed.
         help="Handled input id to ACK with --input; repeatable",
     )
     parser.add_argument(
-        "--wait-ms", type=int, help="Input or question-publish wait in milliseconds, 0..30000"
+        "--wait-ms", type=int, help="Input or question-publish wait in milliseconds, 0..55000"
     )
     parser.add_argument("--max-items", type=int, help="Input result limit (positive)")
     args = parser.parse_args(argv)
@@ -276,8 +276,8 @@ all receipts before retrying. No uncertain POST is automatically replayed.
         parser.error("--ack and --max-items require --input")
     if args.wait_ms is not None and not (args.input or inline):
         parser.error("--wait-ms requires --input or a question publish")
-    if args.wait_ms is not None and not 0 <= args.wait_ms <= 30000:
-        parser.error("--wait-ms must be 0..30000")
+    if args.wait_ms is not None and not 0 <= args.wait_ms <= 55000:
+        parser.error("--wait-ms must be 0..55000")
     if args.max_items is not None and args.max_items < 1:
         parser.error("--max-items must be positive")
     if surface and (

@@ -23,7 +23,7 @@ def wire(monkeypatch):
     replies = []
 
     def urlopen(request, timeout):
-        assert timeout > 30  # The supported input wait must fit the HTTP timeout.
+        assert timeout > 55  # The supported 55 s wait must fit the HTTP timeout.
         assert request.get_header("Authorization") == "Bearer fixture-key"
         body = json.loads(request.data)
         assert body["jsonrpc"] == "2.0"
@@ -96,14 +96,14 @@ def wire(monkeypatch):
             {"surface": "widget:allocated", "ttl_ms": 10000},
         ),
         (
-            ["--zone", "notification-area", "--content", '{"body":"Ship?","actions":[{"label":"Yes","callback_id":"yes"}]}', "--wait-ms", "30000"],
+            ["--zone", "notification-area", "--content", '{"body":"Ship?","actions":[{"label":"Yes","callback_id":"yes"}]}', "--wait-ms", "55000"],
             "hud_publish",
-            {"surface":"zone:notification-area", "content":{"body":"Ship?","actions":[{"label":"Yes","callback_id":"yes"}]}, "wait_ms":30000},
+            {"surface":"zone:notification-area", "content":{"body":"Ship?","actions":[{"label":"Yes","callback_id":"yes"}]}, "wait_ms":55000},
         ),
         (
-            ["--input", "--wait-ms", "30000", "--max-items", "20"],
+            ["--input", "--wait-ms", "55000", "--max-items", "20"],
             "hud_input",
-            {"wait_ms": 30000, "max_items": 20},
+            {"wait_ms": 55000, "max_items": 20},
         ),
         (
             ["--input", "--ack", "handled-1", "--ack", "handled-2"],
@@ -187,7 +187,7 @@ def test_invalid_later_batch_item_prevents_all_network_work(wire, tmp_path):
         ["--zone", "subtitle", "--clear", "--ttl-ms", "100"],
         ["--zone", "subtitle", "--hold"],
         ["--zone", "subtitle", "--hold", "--ttl-ms", "100", "--key", "ignored"],
-        ["--input", "--wait-ms", "30001"],
+        ["--input", "--wait-ms", "55001"],
         ["--input", "--max-items", "0"],
         ["--list-surfaces", "--ack", "unowned"],
         ["--surface", "widget:allocated", "--clear", "--key", "unsupported"],
