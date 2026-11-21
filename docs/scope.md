@@ -662,10 +662,34 @@ asset API download, a repository-pinned SHA256 check before extraction, and an
 exact version check before adding its temporary bin directory to `GITHUB_PATH`.
 The existing read-only GitHub token supplies public-asset access.
 
-- **Fast.** A merge-group run's required checks finish within 6 minutes of the
-  run starting. Suites that cannot fit run in the weekly lanes
-  (`perf-budget.yml`, `perf-assert.yml`) or in `windows.yml`, never in the
-  required set. [Observed 2026-10-14] p50 4.1 min, max 5.2 min.
+- **Fast.** The per-run target is still 360 seconds for all required checks,
+  including hosted-runner wait. Judge timing over the last 20 chronological
+  natural first-attempt `main` merge-group runs of `ci.yml`: nearest-rank p95
+  must be ≤360 seconds. Measure each run from `run_started_at` to the last
+  required-check completion; sort its wall times and take rank 19 of 20.
+  Select runs by creation time (run ID breaks ties), without filtering for
+  success or speed, replacing a failed run, or substituting a rerun.
+  Report the cohort's run IDs, count, p95 and maximum. Failed, cancelled or
+  incomplete runs, missing required jobs or timestamps, and fewer than 20
+  observations prevent a passing cohort verdict; report them explicitly.
+  Every required check must still pass on its first attempt. Suites that
+  cannot fit run in the weekly lanes (`perf-budget.yml`, `perf-assert.yml`)
+  or in `windows.yml`, never in the required set. Twenty observations give
+  5% empirical tail resolution; this choice is not a measured calibration.
+  [Observed 2026-10-14] p50 4.1 min, max 5.2 min.
+  [Observed 2026-11-17, hud-4k3b2] Four investigated first attempts took
+  [460 s](https://github.com/tzeusy-org/tze-hud/actions/runs/41523755581),
+  [630 s](https://github.com/tzeusy-org/tze-hud/actions/runs/41579684395),
+  [411 s](https://github.com/tzeusy-org/tze-hud/actions/runs/41584648704) and
+  [403 s](https://github.com/tzeusy-org/tze-hud/actions/runs/42604228419)
+  through required-check completion (the last aggregate state was updated at 404 s).
+  Independent jobs were created immediately, but waited before hosted
+  execution; no repository dependency, concurrency delay or execution overrun
+  was demonstrated. Provider internals and account-wide historical occupancy
+  remain unknown. A later natural first attempt took
+  [222 s](https://github.com/tzeusy-org/tze-hud/actions/runs/43938195319).
+  These five selected cases are not a p95 cohort or proof of a durable fix;
+  the original 460-second miss remains a miss of the per-run target.
 - **Not queued.** Wall time is run time plus the wait for a hosted runner, and
   every job, PR push, merge-group build and main push draws on one shared
   pool. Required checks are three jobs (`static checks`, `cargo clippy`,
