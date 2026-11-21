@@ -2047,7 +2047,7 @@ mod tests {
     /// draft kept (drawn unfocused, its length reported, nothing sent); each
     /// composer keeps its own; a cleared portal drops its draft; refocus
     /// restores the caret and Enter sends the kept text once; safe mode keeps
-    /// it. R4.2: with OUTPUT reading focus Home/End/Space/Shift+Space scroll
+    /// it. R4.2: with OUTPUT reading focus Home/End/Space/PageUp/PageDown scroll
     /// OUTPUT, an unmoved key changes nothing, and the caret keeps them as
     /// text keys.
     #[tokio::test]
@@ -2289,6 +2289,17 @@ mod tests {
             tze_hud_input::KEYBOARD_PAGE_SCROLL_PX
         );
         key(&mut runtime, "Space", true);
+        assert_eq!(
+            runtime.events.scene().tile_scroll_offset_local(tile_a).1,
+            0.0
+        );
+        // PageDown/PageUp page OUTPUT the same way under a selection.
+        runtime.events.press_named_key("PageDown");
+        assert_eq!(
+            runtime.events.scene().tile_scroll_offset_local(tile_a).1,
+            tze_hud_input::KEYBOARD_PAGE_SCROLL_PX
+        );
+        runtime.events.press_named_key("PageUp");
         assert_eq!(
             runtime.events.scene().tile_scroll_offset_local(tile_a).1,
             0.0
@@ -2664,6 +2675,22 @@ mod tests {
             runtime.events.scene().tile_scroll_offset_local(tile),
             offset
         );
+        // PageDown/PageUp page OUTPUT and keep the focused link.
+        for page in ["PageDown", "PageUp"] {
+            runtime.events.press_named_key(page);
+            assert_eq!(
+                runtime
+                    .events
+                    .app
+                    .state
+                    .input_processor
+                    .output_reading
+                    .focus,
+                Some((tile, ReadingStop::Link(2))),
+                "{page} keeps reading focus"
+            );
+        }
+        assert_eq!(launches(&runtime), 4, "paging opens nothing");
 
         // A stale OUTPUT selection never takes a composer Ctrl+C:
         // a primary press outside OUTPUT clears it, browser-style.
