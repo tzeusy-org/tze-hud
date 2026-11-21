@@ -479,6 +479,13 @@ struct WindowedRuntimeState {
     /// `resumed()`. After that call the field is no longer needed but is kept
     /// for potential hot-reload use.
     global_tokens: std::collections::HashMap<String, String>,
+    /// `portal.window.resize_affordance_px` resolved from `global_tokens`,
+    /// so the per-turn cursor pass need not resolve every portal token.
+    /// Cleared whenever `global_tokens` is replaced.
+    resize_affordance_px: std::cell::Cell<Option<f32>>,
+    /// The window last given a non-arrow cursor shape: the pointer's
+    /// window, which may be a secondary display's overlay.
+    cursor_shape_window: Option<WindowId>,
     /// Live design tokens: the control panel and config edits
     /// change them; `global_tokens`, the portal driver and the compositor
     /// follow on their next turn. `None` in tests that build no scene.
@@ -862,6 +869,7 @@ impl WinitApp {
             return;
         };
         self.state.global_tokens = (*map).clone();
+        self.state.resize_affordance_px.set(None);
         self.state
             .portal_projection_driver
             .apply_token_map(self.state.global_tokens.clone());
@@ -3325,6 +3333,8 @@ impl WindowedRuntime {
             answer_keyboard,
             primary_drag_gesture: None,
             global_tokens: startup_compositor_tokens,
+            resize_affordance_px: Default::default(),
+            cursor_shape_window: None,
             appearance: Some(appearance),
             tokens_seen: 0,
             capture_seen: 0,

@@ -168,6 +168,8 @@ impl WindowedRuntimeState {
             answer_keyboard: Default::default(),
             primary_drag_gesture: None,
             global_tokens: HashMap::new(),
+            resize_affordance_px: Default::default(),
+            cursor_shape_window: None,
             appearance: None,
             tokens_seen: 0,
             capture_seen: 0,
@@ -527,6 +529,7 @@ impl HeadlessEventLoopHarness {
         let driver = crate::portal::PortalDriver::new(portals);
         state.portal_projection_driver = driver;
         state.global_tokens = global_tokens;
+        state.resize_affordance_px.set(None);
         state.runtime_context = runtime_context;
         state.config = cfg;
         Ok(HeadlessEventLoopHarness {

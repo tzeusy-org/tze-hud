@@ -324,6 +324,8 @@ pub(super) fn make_windowed_keyboard_test_app(
         context_menu_dismiss_pending: false,
         primary_drag_gesture: None,
         global_tokens: std::collections::HashMap::new(),
+        resize_affordance_px: Default::default(),
+        cursor_shape_window: None,
         appearance: None,
         tokens_seen: 0,
         capture_seen: 0,

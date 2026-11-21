@@ -2,7 +2,7 @@ use tze_hud_compositor::{Compositor, CompositorSurface};
 use tze_hud_input::{PortalCursor, PortalRect, ResizeEdge, hit_affordance, portal_hover_cursor};
 use tze_hud_scene::SceneId;
 use tze_hud_scene::graph::SceneGraph;
-use winit::window::CursorIcon;
+use winit::window::{CursorIcon, WindowId};
 
 use super::WinitApp;
 use super::wake::{self, CursorEntrySignature, CursorEntryTurn};
@@ -493,8 +493,7 @@ impl WinitApp {
     /// focus, or no focus.
     pub(super) fn resize_grip_hover_target(&self) -> Option<SceneId> {
         let (focused_tile, rect) = self.focused_portal_tile_rect()?;
-        let affordance_px = tze_hud_config::resolve_portal_tokens(&self.state.global_tokens)
-            .window_resize_affordance_px;
+        let affordance_px = self.resize_affordance_px();
         matches!(
             hit_affordance(
                 self.state.cursor_x,
@@ -530,8 +529,7 @@ impl WinitApp {
         let focused_portal = self.focused_portal_rect();
         let x = self.state.cursor_x;
         let y = self.state.cursor_y;
-        let affordance_px = tze_hud_config::resolve_portal_tokens(&self.state.global_tokens)
-            .window_resize_affordance_px;
+        let affordance_px = self.resize_affordance_px();
         let over_drag_handle = self
             .state
             .pipeline
@@ -586,8 +584,7 @@ impl WinitApp {
             .values()
             .any(|s| s.phase == tze_hud_input::DragPhase::Activated);
 
-        let portal_part = tze_hud_config::resolve_portal_tokens(&self.state.global_tokens);
-        let affordance_px = portal_part.window_resize_affordance_px;
+        let affordance_px = self.resize_affordance_px();
 
         let mut desired = portal_hover_cursor(
             x,
@@ -626,12 +623,75 @@ impl WinitApp {
         {
             desired = reading;
         }
-        if let Some(next) = self.state.cursor_tracker.update(desired) {
-            if let Some(window) = &self.state.window {
-                window.set_cursor(portal_cursor_to_winit(next));
+        let shown = self.state.cursor_tracker.current();
+        let changed = self.state.cursor_tracker.update(desired).is_some();
+        let target = self
+            .state
+            .cursor_window
+            .or_else(|| self.state.window.as_ref().map(|w| w.id()));
+        for (id, cursor) in cursor_shape_calls(
+            shown,
+            desired,
+            changed,
+            self.state.cursor_shape_window,
+            target,
+        ) {
+            if let Some(window) = self.hud_window(id) {
+                window.set_cursor(portal_cursor_to_winit(cursor));
             }
         }
+        self.state.cursor_shape_window = target;
     }
+
+    /// The HUD window `id`: the primary or a secondary display's overlay.
+    fn hud_window(&self, id: WindowId) -> Option<&winit::window::Window> {
+        let primary = self.state.window.as_deref().filter(|w| w.id() == id);
+        primary.or_else(|| {
+            self.state
+                .secondaries
+                .iter()
+                .find(|s| s.window.id() == id)
+                .map(|s| &*s.window)
+        })
+    }
+
+    /// `portal.window.resize_affordance_px`, resolved once per token change.
+    fn resize_affordance_px(&self) -> f32 {
+        if let Some(px) = self.state.resize_affordance_px.get() {
+            return px;
+        }
+        let px = tze_hud_config::resolve_portal_tokens(&self.state.global_tokens)
+            .window_resize_affordance_px;
+        self.state.resize_affordance_px.set(Some(px));
+        px
+    }
+}
+
+/// The OS cursor calls that show `desired` on the pointer's window `target`.
+/// Only that window shows a shape: the window that showed one before
+/// returns to the arrow when the pointer leaves it, so a hand cannot linger
+/// on another display. An unchanged shape on the same window needs no call.
+fn cursor_shape_calls(
+    shown: PortalCursor,
+    desired: PortalCursor,
+    changed: bool,
+    shown_on: Option<WindowId>,
+    target: Option<WindowId>,
+) -> Vec<(WindowId, PortalCursor)> {
+    let mut calls = Vec::new();
+    if shown_on == target {
+        if let Some(id) = target.filter(|_| changed) {
+            calls.push((id, desired));
+        }
+        return calls;
+    }
+    if let Some(old) = shown_on.filter(|_| shown != PortalCursor::Default) {
+        calls.push((old, PortalCursor::Default));
+    }
+    if let Some(id) = target.filter(|_| desired != PortalCursor::Default) {
+        calls.push((id, desired));
+    }
+    calls
 }
 
 #[cfg(test)]
@@ -1754,6 +1814,54 @@ mod tests {
         app.state.effective_mode = WindowMode::Fullscreen;
         app.state.overlay_capturing = false;
         assert_eq!(app.applied_cursor_name(), Some("hand"));
+    }
+
+    /// A control on a secondary display shows the hand on that display's
+    /// window, not the primary's; leaving it returns that window to the arrow.
+    #[test]
+    fn pressable_cursor_lands_on_the_pointers_display_window() {
+        use super::super::test_support::make_windowed_keyboard_test_app;
+        use tze_hud_input::{FocusManager, InputProcessor};
+        use tze_hud_scene::types::ZoneInteractionKind as Kind;
+        // A second 1920-wide display to the right of the primary.
+        let (primary, secondary) = (WindowId::from(1), WindowId::from(2));
+        let mut scene = SceneGraph::new(3840.0, 1080.0);
+        scene.overlay.zone_hit_regions.push(control(
+            Kind::Action { index: 0 },
+            Rect::new(2000.0, 100.0, 80.0, 24.0),
+            SceneId::new(),
+        ));
+        let (mut app, _rx) =
+            make_windowed_keyboard_test_app(scene, FocusManager::new(), InputProcessor::new());
+        app.state.cursor_window = Some(secondary);
+        assert_eq!(cursor_at(&mut app, 2020.0, 110.0), PortalCursor::Pointer);
+        assert_eq!(app.state.cursor_shape_window, Some(secondary));
+        app.state.cursor_window = Some(primary);
+        assert_eq!(cursor_at(&mut app, 100.0, 110.0), PortalCursor::Default);
+        assert_eq!(app.state.cursor_shape_window, Some(primary));
+    }
+
+    /// Only the pointer's window shows a shape: crossing displays resets the
+    /// old window, and an unchanged shape on the same window costs no call.
+    #[test]
+    fn cursor_shape_moves_with_the_pointers_window() {
+        use PortalCursor::{Default as Arrow, Pointer as Hand};
+        let (a, b) = (Some(WindowId::from(1)), Some(WindowId::from(2)));
+        let (ida, idb) = (a.unwrap(), b.unwrap());
+        assert_eq!(cursor_shape_calls(Arrow, Hand, true, a, a), [(ida, Hand)]);
+        assert!(cursor_shape_calls(Hand, Hand, false, a, a).is_empty());
+        assert_eq!(
+            cursor_shape_calls(Hand, Hand, false, a, b),
+            [(ida, Arrow), (idb, Hand)],
+            "no stale hand on the display the pointer left"
+        );
+        assert_eq!(cursor_shape_calls(Hand, Arrow, true, a, b), [(ida, Arrow)]);
+        assert_eq!(cursor_shape_calls(Arrow, Hand, true, a, b), [(idb, Hand)]);
+        assert!(cursor_shape_calls(Arrow, Arrow, false, a, b).is_empty());
+        assert_eq!(
+            cursor_shape_calls(Arrow, Hand, true, None, a),
+            [(ida, Hand)]
+        );
     }
 
     /// R3.1 S3-S5: answering a card or safe mode turns its controls back to

@@ -1022,7 +1022,9 @@ press there does nothing. Precedence, highest first: an active resize or
 drag, a resize grip or edge, a pressable control, a drag handle (open hand;
 a portal × in the header band shows the hand), OUTPUT or composer text
 (I-beam), the arrow. The shape follows controls that appear or leave under a
-resting pointer by the next frame, without pointer motion.
+resting pointer by the next frame, without pointer motion. The shape is
+applied to the overlay window under the pointer, so it also shows on a
+secondary display; the window the pointer left returns to the arrow.
 
 Overlay clicks on card buttons, badges and scroll panes act without taking
 Windows keyboard focus. Clicking a text editor (a portal composer or panel
