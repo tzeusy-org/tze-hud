@@ -479,6 +479,13 @@ struct WindowedRuntimeState {
     /// `resumed()`. After that call the field is no longer needed but is kept
     /// for potential hot-reload use.
     global_tokens: std::collections::HashMap<String, String>,
+    /// `portal.window.resize_affordance_px` resolved from `global_tokens`,
+    /// so the per-turn cursor pass need not resolve every portal token.
+    /// Cleared whenever `global_tokens` is replaced.
+    resize_affordance_px: std::cell::Cell<Option<f32>>,
+    /// The window last given a non-arrow cursor shape: the pointer's
+    /// window, which may be a secondary display's overlay.
+    cursor_shape_window: Option<WindowId>,
     /// Live design tokens: the control panel and config edits
     /// change them; `global_tokens`, the portal driver and the compositor
     /// follow on their next turn. `None` in tests that build no scene.
@@ -527,6 +534,8 @@ struct WindowedRuntimeState {
     /// Cursor the last pointer event resolved over portal text, links, copy
     /// buttons or the composer; `None` leaves the affordance cursor (hud-ljhku.2).
     reading_cursor: Option<tze_hud_input::PortalCursor>,
+    /// Last-frame bounds of the HUD controls a primary press would act on.
+    pressable_regions: Vec<HitRegion>,
     /// Per-portal resize state machines keyed by tile `SceneId`.
     ///
     /// Holds `PortalResizeState` for every portal tile that has been focused
@@ -860,6 +869,7 @@ impl WinitApp {
             return;
         };
         self.state.global_tokens = (*map).clone();
+        self.state.resize_affordance_px.set(None);
         self.state
             .portal_projection_driver
             .apply_token_map(self.state.global_tokens.clone());
@@ -1039,6 +1049,8 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         self.synthesize_left_release_if_physically_up();
         self.refresh_widget_hover_tracking();
         self.update_overlay_cursor_hittest();
+        // The cursor follows controls that appear or leave under a resting pointer.
+        self.update_portal_cursor_icon();
         let portal_drain = self.settle_scene_work();
         let settled_scene_changed = portal_drain.scene_changed();
 
@@ -3321,6 +3333,8 @@ impl WindowedRuntime {
             answer_keyboard,
             primary_drag_gesture: None,
             global_tokens: startup_compositor_tokens,
+            resize_affordance_px: Default::default(),
+            cursor_shape_window: None,
             appearance: Some(appearance),
             tokens_seen: 0,
             capture_seen: 0,
@@ -3329,6 +3343,7 @@ impl WindowedRuntime {
             input_event_tx,
             composer_pointer_drag_anchor: None,
             reading_cursor: None,
+            pressable_regions: Vec::new(),
             portal_resize_states: std::collections::HashMap::new(),
             consumed_portal_resize_keydowns: std::collections::HashSet::new(),
             consumed_shell_shortcut_keydowns: std::collections::HashSet::new(),

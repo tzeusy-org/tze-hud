@@ -275,6 +275,17 @@ Regression owners (existing parents extended, Tests: +0 ~6 -0):
 - Compositor [`drag_handle_regions_cover_visible_tile_and_zone_but_not_widget`](../crates/tze_hud_compositor/src/renderer/tests/hit_drag.rs): actual monitor-assignment/scale producer matrix, including connected-secondary controls without a grip.
 - Compositor [`zone_hit_regions_and_slot_pitch_scale_with_px_scale`](../crates/tze_hud_compositor/src/renderer/tests/hit_drag.rs): moved controls, shared human reset and no-op reset at existing scales.
 
+The pointer is a hand exactly where a primary press would act on a HUD control,
+read from the last frame's control rects (answered cards and card controls in
+safe mode keep the arrow); it outranks the drag handle's open hand and follows
+controls that appear or leave under a resting pointer on the next turn, with no
+polling. `/admin/status` `cursor` reports the applied shape, `null` while a
+click-through overlay leaves the pointer to the app beneath. Owners: runtime
+[`pressable_control_beats_drag_handle_cursor`](../crates/tze_hud_runtime/src/windowed/hittest.rs),
+`pressable_cursor_follows_refusal_geometry_and_active_drag`,
+`pressable_regions_follow_what_a_press_would_do` and
+`admin_cursor_is_null_while_the_app_beneath_owns_the_pointer`.
+
 Grip feedback uses `zone_slot_layout.iter_visible` to enclose the occupied
 notification slots, not the reserved capacity. It changes neither zone geometry
 nor layout admission. The single-item Reset menu publishes one frame-resolved

@@ -23,6 +23,9 @@ pub struct SurfaceSnapshot {
     pub notifications: Value,
     pub widgets: Value,
     pub link_launches: u64,
+    /// The pointer shape the runtime last applied, or `None` while the app
+    /// beneath the overlay owns the pointer.
+    pub cursor: Option<&'static str>,
 }
 
 impl SurfaceProbe {
@@ -49,6 +52,8 @@ pub struct UiMirror {
     /// OUTPUT reading observations per portal tile (hud-ljhku.2); absent
     /// tiles report `arrow`, no hint and no selection.
     pub reading: HashMap<SceneId, ReadingUi>,
+    /// [`SurfaceSnapshot::cursor`].
+    pub cursor: Option<&'static str>,
 }
 
 /// Admin-only OUTPUT reading state of one portal: no text crosses here.
@@ -64,6 +69,22 @@ pub struct ReadingUi {
 
 /// The main thread's [`UiMirror`], written each settle.
 pub type UiHandle = Arc<StdMutex<UiMirror>>;
+
+/// The admin name of a cursor shape.
+pub fn cursor_name(cursor: tze_hud_input::PortalCursor) -> &'static str {
+    use tze_hud_input::PortalCursor as C;
+    match cursor {
+        C::Default => "arrow",
+        C::Pointer => "hand",
+        C::Text => "ibeam",
+        C::Grab => "grab",
+        C::Grabbing => "grabbing",
+        C::EwResize => "ew-resize",
+        C::NsResize => "ns-resize",
+        C::NeswResize => "nesw-resize",
+        C::NwseResize => "nwse-resize",
+    }
+}
 
 /// The status probe for one runtime: reads `scene` (only the scene lock, as
 /// the compositor does, waiting up to 100 ms) and the main thread's `ui`.
@@ -83,11 +104,13 @@ pub fn probe(
                     notifications: notifications_json(&scene, &displays),
                     widgets: widgets_json(&scene, &ui, &displays),
                     link_launches: link_launches.load(Ordering::Relaxed),
+                    cursor: ui.cursor,
                 };
             }
             if std::time::Instant::now() >= deadline {
                 return SurfaceSnapshot {
                     link_launches: link_launches.load(Ordering::Relaxed),
+                    cursor: ui.lock().unwrap_or_else(|e| e.into_inner()).cursor,
                     ..Default::default()
                 };
             }
@@ -637,6 +660,51 @@ mod tests {
             unavailable.link_launches, 7,
             "scene contention must not reset the monotonic counter"
         );
+    }
+
+    /// R11.1: every applied shape has its admin name; the probe reports the
+    /// main thread's value even under scene contention, and `null` before the
+    /// windowed runtime writes one.
+    #[test]
+    fn reports_the_applied_cursor_by_name() {
+        use tze_hud_input::PortalCursor as C;
+        let names: Vec<_> = [
+            C::Default,
+            C::Pointer,
+            C::Text,
+            C::Grab,
+            C::Grabbing,
+            C::EwResize,
+            C::NsResize,
+            C::NeswResize,
+            C::NwseResize,
+        ]
+        .into_iter()
+        .map(cursor_name)
+        .collect();
+        assert_eq!(
+            names,
+            [
+                "arrow",
+                "hand",
+                "ibeam",
+                "grab",
+                "grabbing",
+                "ew-resize",
+                "ns-resize",
+                "nesw-resize",
+                "nwse-resize"
+            ]
+        );
+        assert_eq!(SurfaceSnapshot::default().cursor, None, "before start");
+        let scene = Arc::new(tokio::sync::Mutex::new(SceneGraph::new(800.0, 600.0)));
+        let ui = Arc::new(StdMutex::new(UiMirror::default()));
+        let observation = probe(scene.clone(), ui.clone(), Arc::new(AtomicU64::new(0)));
+        assert_eq!(observation.read().cursor, None);
+        ui.lock().unwrap().cursor = Some("hand");
+        assert_eq!(observation.read().cursor, Some("hand"));
+        let _held = scene.try_lock().unwrap();
+        assert_eq!(observation.read().cursor, Some("hand"), "scene contention");
     }
 
     #[test]

@@ -655,7 +655,13 @@ class CardHelperTests(unittest.TestCase):
                     elif chord == "Return":
                         self.assertEqual(status["notifications"][0]["focus"], 1)
                         answer(lambda key: key + "-second")
+                def move(x, y):  # the HUD shows the hand over card controls only
+                    rects = [r for c in status["notifications"]
+                             for r in [c["close"], *(a["rect"] for a in c["actions"])]]
+                    hand = any(r["x"] <= x < r["x"] + r["w"] and r["y"] <= y < r["y"] + r["h"] for r in rects)
+                    status["cursor"] = "hand" if hand else "arrow"
                 run.inj.click.side_effect, run.inj.key.side_effect = click, key
+                run.inj.move_abs.side_effect = move
                 with mock.patch.object(g, "open_portal"):
                     scenario(run)
                 publish = run.smoke.call.call_args_list[0]

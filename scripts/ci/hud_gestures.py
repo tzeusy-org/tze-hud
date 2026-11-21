@@ -560,6 +560,12 @@ class Run:
         self.step(f"point {target} {x},{y}")
         return x, y
 
+    def expect_cursor(self, target: str, hand: bool) -> None:
+        """Rest the pointer on a target; /admin/status `cursor` is the hand exactly when a press acts."""
+        self.point(target)
+        self.expect(f"{'hand' if hand else 'no hand'} over {target}",
+                    lambda st: (st.get("cursor") == "hand") == hand)
+
     def click(self, target: str | None = None) -> None:
         if target:
             self.point(target)
@@ -829,6 +835,7 @@ def scenario_unread(run: Run) -> None:
     run.publish(s, content="\n" + lines("u", LINES, 5))
     run.expect("unread counted and badged",
                on(s, lambda p: p["output"]["unread"] > 0 and p["panes"]["unread_badge"] is not None))
+    run.expect_cursor(f"{s}/unread_badge", hand=True)
     run.wheel(f"{s}/output", -60)
     run.expect("tail clears unread",
                on(s, lambda p: p["output"]["at_tail"] and p["output"]["unread"] == 0
@@ -975,7 +982,13 @@ def scenario_card_click(run: Run) -> None:
     """R14.2 S1: a real action click returns one callback and the card exits."""
     key = "gesture-card-click"
     open_card(run, key)
-    run.click(f"zone:notification-area/{key}/0")
+    card = f"zone:notification-area/{key}"
+    run.expect_cursor(f"{card}/close", hand=True)
+    run.expect_cursor(f"{card}/0", hand=True)
+    rect = notification_entry(run.status(), key, "zone:notification-area")["rect"]
+    run.glide(int(rect["x"]) + 6, int(rect["y"]) + 6)  # the card's text corner presses nothing
+    run.expect("no hand over card text", lambda st: st.get("cursor") != "hand")
+    run.click(f"{card}/0")
     take_card_answer(run, key, f"{key}-first")
 
 
@@ -1460,6 +1473,7 @@ def scenario_dismiss(run: Run) -> None:
     open_portal(run, s, "old", count=5, expects_reply=True)
     run.point(f"{s}/header")
     run.expect("the actual close hit region is exposed", on(s, lambda p: p["panes"]["close"] is not None))
+    run.expect_cursor(f"{s}/close", hand=True)  # beats the header band's open hand
     run.click(f"{s}/close")
     run.expect("the pointer close removes the portal",
                lambda st: isinstance(st.get("portals"), list) and portal_entry(st, s) is None)
