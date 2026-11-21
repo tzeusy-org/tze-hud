@@ -123,7 +123,8 @@ jobs:
       # Non-tags cover the runtime library; tags retain the remote fixtures.
       # Fresh per-step storage isolates headless element/widget persistence.
       - name: Runtime unit tests and app parser (selected profile)
-        # Full release links two test binaries with fat LTO from a cold cache.
+        # Full release links two test binaries with fat LTO; a cold run took
+        # 9.6 min (dispatch rehearsal, 2026-11-22), so 25 leaves headroom.
         timeout-minutes: ${{ env.HUD_BUILD_PROFILE == 'release' && 25 || 8 }}
         shell: pwsh
         run: |
