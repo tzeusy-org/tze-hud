@@ -452,6 +452,7 @@ fn notification_action_fields_accessible() {
         label: "Confirm".to_string(),
         callback_id: Some("confirm-action".to_string()),
         url: None,
+        role: None,
     };
 
     assert_eq!(action.label, "Confirm");
@@ -472,11 +473,13 @@ fn notification_payload_with_actions_serializes() {
                 label: "Yes".to_string(),
                 callback_id: Some("yes".to_string()),
                 url: None,
+                role: None,
             },
             NotificationAction {
                 label: "No".to_string(),
                 callback_id: Some("no".to_string()),
                 url: None,
+                role: None,
             },
         ],
     };

@@ -1659,7 +1659,7 @@ fn parse_zone_content(content: &Value) -> Result<ZoneContent, McpError> {
                                 let action = NotificationAction {
                                     callback_id: if defaulted { Some(label.clone()) } else { callback_id },
                                     label,
-                                    url,
+                                    url, role: None,
                                 };
                                 // Preserve the existing MCP non-empty callback rule,
                                 // after exclusivity so both supplied members never alias.
