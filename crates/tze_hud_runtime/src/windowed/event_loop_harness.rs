@@ -161,6 +161,7 @@ impl WindowedRuntimeState {
             press_window: None,
             zone_press: None,
             notification_link_opener: Default::default(),
+            link_feedback: None,
             context_menu_press: None,
             context_menu_open: false,
             context_menu_dismiss_pending: false,
@@ -2668,6 +2669,43 @@ mod tests {
         );
         runtime.events.press_named_key("Enter");
         assert_eq!(launches(&runtime), 3);
+        // R3.2 S3: the focused link's hint pill shows what the press did in
+        // place of its host; the admin hint stays the host, never the URL.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let decor = loop {
+            runtime.settle(&clock);
+            let decor = runtime.events.scene().overlay.portal_reading[&tile].clone();
+            if decor.hint_feedback == Some(tze_hud_scene::LinkFeedbackState::Opened) {
+                break decor;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "pill never showed Opened"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        };
+        assert_eq!(decor.hint.unwrap().0, "alpha.example");
+        assert_eq!(
+            runtime.events.scene().overlay.link_feedback,
+            Some((
+                tze_hud_scene::LinkFeedbackTarget::PortalLink {
+                    tile,
+                    href: "https://alpha.example/a".into()
+                },
+                tze_hud_scene::LinkFeedbackState::Opened
+            ))
+        );
+        assert_eq!(
+            runtime
+                .events
+                .app
+                .state
+                .surface_ui
+                .lock()
+                .unwrap()
+                .link_feedback,
+            Some("opened")
+        );
         // R4.2 S3: Space on a focused link activates it; OUTPUT
         // reading focus does not turn it into a page scroll.
         runtime.events.press_named_key("Tab");
@@ -5003,6 +5041,243 @@ mod tests {
             receipts.install(window).is_none(),
             "recovery cannot bypass the installation bound"
         );
+    }
+
+    /// Sends a held link worker its result: `Ok` opens, `Err` fails.
+    type LinkVerdict = std::sync::mpsc::Sender<Result<(), String>>;
+
+    /// A card harness whose first two actions are links, with a link worker
+    /// that waits for the test's verdict.
+    fn link_card_harness(
+        clock: Arc<tze_hud_scene::TestClock>,
+    ) -> (HeadlessEventLoopHarness, LinkVerdict, [(f32, f32); 2]) {
+        use tze_hud_scene::{NotificationAction, ZoneContent};
+        let mut harness = approve_reject_notification_harness_on(clock);
+        let urls = ["https://example.com/one", "https://example.com/two"];
+        {
+            let mut scene = harness.scene();
+            let ZoneContent::Notification(payload) = &mut scene
+                .zone_registry
+                .active_publishes
+                .get_mut("notification-area")
+                .unwrap()[0]
+                .content
+            else {
+                unreachable!()
+            };
+            for (i, url) in urls.iter().enumerate() {
+                payload.actions[i] = NotificationAction {
+                    label: format!("Link {i}"),
+                    callback_id: None,
+                    url: Some((*url).into()),
+                };
+            }
+        }
+        assert!(harness.tick());
+        let (verdict, verdicts) = std::sync::mpsc::channel::<Result<(), String>>();
+        let verdicts = std::sync::Mutex::new(verdicts);
+        harness.app.state.notification_link_opener.worker = Some(Arc::new(move |_url| {
+            verdicts
+                .lock()
+                .unwrap()
+                .recv()
+                .unwrap_or(Err("test ended".into()))
+        }));
+        let points = urls.map(|url| harness.notification_link_center(url).unwrap());
+        (harness, verdict, points)
+    }
+
+    fn click_at(harness: &mut HeadlessEventLoopHarness, point: (f32, f32)) {
+        use super::super::lifecycle::ChromeCaptureTestScope;
+        let window = winit::window::WindowId::dummy();
+        let native = ChromeCaptureTestScope::new(window);
+        (harness.app.state.cursor_x, harness.app.state.cursor_y) = point;
+        for down in [true, false] {
+            let receipt = native.begin(down);
+            harness
+                .app
+                .handle_mouse_button(winit::event::MouseButton::Left, down, window, None);
+            native.complete(receipt);
+        }
+        harness.drain();
+    }
+
+    /// Settle until the pressed link shows `state` (the worker reports on its
+    /// own thread), returning what the scene and the admin mirror show.
+    fn settle_link_to(
+        harness: &mut HeadlessEventLoopHarness,
+        state: tze_hud_scene::LinkFeedbackState,
+    ) -> (tze_hud_scene::LinkFeedbackTarget, Option<&'static str>) {
+        let deadline = std::time::Instant::now() + SCENE_WAIT;
+        loop {
+            harness.tick();
+            if let Some((target, shown)) = harness.scene().overlay.link_feedback.clone()
+                && shown == state
+            {
+                let admin = harness.app.state.surface_ui.lock().unwrap().link_feedback;
+                return (target, admin);
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "link never showed {state:?}"
+            );
+            std::thread::yield_now();
+        }
+    }
+
+    /// R3.2 S1, S2, S4, S5: a pressed card link says "Opening…" at once, then
+    /// what the worker reported for `link.feedback.ms`, then its label again;
+    /// a refused repeat changes nothing; a worker that cannot start fails at
+    /// once without counting; removal takes the feedback with the card.
+    /// Nothing reaches the agent and the card is unchanged.
+    #[test]
+    fn card_link_feedback_shows_opening_then_the_worker_result() {
+        use tze_hud_scene::LinkFeedbackState::{Failed, Opened, Opening};
+        use tze_hud_scene::LinkFeedbackTarget::CardAction;
+        let clock = Arc::new(tze_hud_scene::TestClock::new(1_000));
+        let (mut harness, verdict, points) = link_card_harness(clock.clone());
+        harness
+            .app
+            .state
+            .global_tokens
+            .insert("link.feedback.ms".into(), "1500".into());
+        let card = harness
+            .scene()
+            .zone_registry
+            .active_for_zone("notification-area")[0]
+            .clone();
+        let publication_id = card.publication_id;
+        let launches = harness.app.state.notification_link_opener.launches.clone();
+
+        click_at(&mut harness, points[0]);
+        let (target, admin) = settle_link_to(&mut harness, Opening);
+        assert_eq!(
+            target,
+            CardAction {
+                publication_id,
+                index: 0
+            }
+        );
+        assert_eq!(admin, Some("opening"));
+        assert_eq!(
+            harness.app.state.link_feedback.as_ref().unwrap().until,
+            None,
+            "an open handoff arms no deadline"
+        );
+        // S4: a repeat inside the 2 s limit neither relaunches nor restarts.
+        let workers = harness.app.state.notification_link_opener.workers.len();
+        click_at(&mut harness, points[0]);
+        assert_eq!(
+            harness.app.state.notification_link_opener.workers.len(),
+            workers
+        );
+        assert_eq!(launches.load(std::sync::atomic::Ordering::Relaxed), 1);
+        assert_eq!(settle_link_to(&mut harness, Opening).0, target);
+
+        verdict.send(Ok(())).unwrap();
+        assert_eq!(
+            settle_link_to(&mut harness, Opened),
+            (target.clone(), Some("opened"))
+        );
+        let until = harness
+            .app
+            .state
+            .link_feedback
+            .as_ref()
+            .unwrap()
+            .until
+            .unwrap();
+        assert!(
+            !harness
+                .app
+                .settle_link_feedback(until - std::time::Duration::from_millis(1))
+        );
+        assert!(
+            harness.app.settle_link_feedback(until),
+            "the result ends at its deadline"
+        );
+        assert_eq!(harness.scene().overlay.link_feedback, None);
+        assert!(harness.app.state.link_feedback.is_none());
+        assert_eq!(
+            harness.app.state.surface_ui.lock().unwrap().link_feedback,
+            None
+        );
+
+        // S2: the worker fails.
+        click_at(&mut harness, points[1]);
+        settle_link_to(&mut harness, Opening);
+        verdict.send(Err("injected".into())).unwrap();
+        assert_eq!(
+            settle_link_to(&mut harness, Failed),
+            (
+                CardAction {
+                    publication_id,
+                    index: 1
+                },
+                Some("failed")
+            )
+        );
+        // S2: no worker starts: "Couldn't open" at once, never "Opening…".
+        clock.advance(2000);
+        harness.app.state.notification_link_opener.fail_spawn = true;
+        click_at(&mut harness, points[0]);
+        harness.app.state.notification_link_opener.fail_spawn = false;
+        let feedback = harness.app.state.link_feedback.as_ref().unwrap();
+        assert_eq!(
+            (feedback.state, feedback.target.clone()),
+            (Failed, target.clone())
+        );
+        assert!(feedback.until.is_some());
+        assert_eq!(launches.load(std::sync::atomic::Ordering::Relaxed), 2);
+        harness.tick();
+        assert_eq!(
+            harness.scene().overlay.link_feedback,
+            Some((target.clone(), Failed))
+        );
+
+        // S5: the card leaves during "Opening…": the feedback goes with it.
+        clock.advance(2000);
+        click_at(&mut harness, points[0]);
+        settle_link_to(&mut harness, Opening);
+        assert!(harness.scene().dismiss_notification(
+            "notification-area",
+            publication_id,
+            &card.publisher_namespace
+        ));
+        harness.tick();
+        assert!(harness.app.state.link_feedback.is_none());
+        assert_eq!(harness.scene().overlay.link_feedback, None);
+        assert!(
+            take_action_ids(&harness).is_empty(),
+            "nothing reaches the agent"
+        );
+        drop(verdict);
+        for worker in harness.app.state.notification_link_opener.workers.drain(..) {
+            worker.join().unwrap();
+        }
+    }
+
+    /// R3.2 S7: a worker that never returns keeps "Opening…" with no deadline,
+    /// so nothing wakes the HUD until the control leaves.
+    #[test]
+    fn link_worker_that_never_returns_arms_no_wake() {
+        let clock = Arc::new(tze_hud_scene::TestClock::new(1_000));
+        let (mut harness, verdict, points) = link_card_harness(clock);
+        click_at(&mut harness, points[0]);
+        settle_link_to(&mut harness, tze_hud_scene::LinkFeedbackState::Opening);
+        for _ in 0..3 {
+            harness.tick();
+        }
+        let later = std::time::Instant::now() + std::time::Duration::from_secs(3600);
+        harness.app.settle_link_feedback(later);
+        let feedback = harness.app.state.link_feedback.as_ref().unwrap();
+        assert_eq!(feedback.state, tze_hud_scene::LinkFeedbackState::Opening);
+        assert_eq!(feedback.until, None, "no deadline: no wake is armed");
+        assert!(feedback.drawn, "nothing is waiting on the scene either");
+        drop(verdict);
+        for worker in harness.app.state.notification_link_opener.workers.drain(..) {
+            worker.join().unwrap();
+        }
     }
 
     /// One click on Approve queues exactly one `approve` and dismisses the
@@ -7688,6 +7963,13 @@ mod tests {
                 rx.recv_timeout(std::time::Duration::from_secs(2)).unwrap(),
                 "https://example.com/digit"
             );
+            // R3.2 S6: the digit's button shows the same feedback.
+            let (target, _) =
+                settle_link_to(&mut harness, tze_hud_scene::LinkFeedbackState::Opened);
+            assert!(matches!(
+                target,
+                tze_hud_scene::LinkFeedbackTarget::CardAction { index: 1, .. }
+            ));
             assert!(harness.app.state.answer_keyboard.focus.is_none());
             assert_eq!(
                 harness

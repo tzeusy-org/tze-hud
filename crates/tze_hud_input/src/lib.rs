@@ -544,7 +544,12 @@ impl InputProcessor {
                 Some(layout) => {
                     let scroll = scene.tile_scroll_offset_local(tile).1;
                     self.output_reading.rehover(tile, layout, scroll);
-                    self.output_reading.decor(tile, layout, scroll)
+                    self.output_reading.decor(
+                        tile,
+                        layout,
+                        scroll,
+                        scene.overlay.link_feedback.as_ref(),
+                    )
                 }
                 None => Default::default(),
             };

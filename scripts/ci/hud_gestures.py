@@ -1171,6 +1171,15 @@ def regain_owned_foreground(run: Run, what: str, timeout_s: float) -> None:
     wait_until(foreground, what=what, timeout_s=timeout_s, interval_s=0.02)
 
 
+def expect_link_feedback(run: Run) -> None:
+    """R3.2: a counted press says "Opening…" then "Opened". Off Windows the
+    handoff succeeds at once, so "opening" may already have passed."""
+    run.expect("the pressed link reports its handoff",
+               lambda s: s["link_feedback"] in ("opening", "opened"), timeout_s=1.0, interval_s=0.02)
+    run.expect("then says it opened", lambda s: s["link_feedback"] == "opened",
+               timeout_s=1.0, interval_s=0.02)
+
+
 def scenario_card_link(run: Run) -> None:
     """R14.2 S4/S5: one real link handoff; same action within 2s is refused, with no input."""
     key = "gesture-card-link"
@@ -1183,6 +1192,7 @@ def scenario_card_link(run: Run) -> None:
     run.inj.click()
     run.expect("one accepted link launch", lambda s: s["link_launches"] == before + 1,
                timeout_s=1.0, interval_s=0.02)
+    expect_link_feedback(run)
     regain_owned_foreground(run, "owned HUD foreground before second link press",
                             max(0.01, first + 1.8 - time.monotonic()))
     run.inj.click()
@@ -1277,6 +1287,7 @@ def scenario_portal_reading(run: Run) -> None:
     run.glide(x, a)
     run.click()
     run.expect("a link click launches once (R2.1 S1)", lambda st: st["link_launches"] == launches + 1)
+    expect_link_feedback(run)
     time.sleep(0.7)
     regain_owned_foreground(run, "owned HUD foreground before the link double-click", 1.0)
     run.glide(x, b)

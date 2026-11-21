@@ -464,6 +464,8 @@ struct WindowedRuntimeState {
     /// lands on the same affordance the press started on.
     zone_press: Option<String>,
     notification_link_opener: crate::shell::link::LinkOpener,
+    /// The newest pressed link's local feedback.
+    link_feedback: Option<crate::shell::link::LinkFeedback>,
     context_menu_press: Option<widgets::ContextMenuPress>,
     context_menu_open: bool,
     context_menu_dismiss_pending: bool,
@@ -930,6 +932,7 @@ impl WinitApp {
         self.drain_pending_keyboard_events();
         // Retry pointer input that found the scene lock busy.
         let retained_pointer_changed = self.drain_retained_pointer_input();
+        let link_feedback_changed = self.settle_link_feedback(Instant::now());
         self.recover_chrome_capture();
         // Render the portals.
         // Must run AFTER composer flush so draft state is settled before portal
@@ -943,7 +946,8 @@ impl WinitApp {
         let drag_scene_changed = pruned_drag.scene_changed()
             || settled_drag
             || chrome_scene_changed
-            || retained_pointer_changed;
+            || retained_pointer_changed
+            || link_feedback_changed;
         if self.state.input_processor.chrome_feedback_cancel_pending || pruned_drag.is_deferred() {
             // Chrome cleanup can consume its pending flag before the separate
             // drag-feedback borrow. Preserve either unfinished phase through the
@@ -1124,6 +1128,13 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                 crate::idle_efficiency::RuntimeWakeupSource::AnimationDeadline,
             ));
         }
+        // A shown link result ends once; an open handoff waits for its worker's wake.
+        if let Some(at) = self.state.link_feedback.as_ref().and_then(|f| f.until) {
+            deadlines.push(Deadline::new(
+                at,
+                crate::idle_efficiency::RuntimeWakeupSource::AnimationDeadline,
+            ));
+        }
         let mut inspected_scene_deadlines = false;
         if let Ok(state) = self.state.shared_state.try_lock()
             && let Ok(scene) = state.scene.try_lock()
@@ -1161,6 +1172,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
             || !self.state.pending_scroll.is_empty()
             || self.state.pending_pointer_move
             || !self.state.pending_pointer_buttons.is_empty()
+            || self.state.link_feedback.as_ref().is_some_and(|f| !f.drawn)
             || self
                 .state
                 .primary_drag_gesture
@@ -2702,7 +2714,10 @@ impl WindowedRuntime {
         let wake = WindowedWake::new(event_loop.create_proxy());
         // Main-thread focus/draft mirror read by the `/admin/status` probe.
         let surface_ui = crate::operator::surface_status::UiHandle::default();
-        let notification_link_opener = crate::shell::link::LinkOpener::default();
+        let notification_link_opener = crate::shell::link::LinkOpener {
+            wake: Some(wake.main_work_notifier()),
+            ..Default::default()
+        };
         let render_wake = wake.render_notifier();
         let portal_ingress_wake = wake.main_work_notifier();
 
@@ -3326,6 +3341,7 @@ impl WindowedRuntime {
             press_window: None,
             zone_press: None,
             notification_link_opener,
+            link_feedback: None,
             context_menu_press: None,
             context_menu_open: false,
             context_menu_dismiss_pending: false,

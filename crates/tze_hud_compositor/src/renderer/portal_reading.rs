@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use tze_hud_scene::graph::SceneGraph;
 use tze_hud_scene::types::{FontFamily, PortalPartKind, Rect, Rgba, TextAlign, TextOverflow, Tile};
-use tze_hud_scene::{PortalDocumentLayout, PortalReadingDecor, SceneId};
+use tze_hud_scene::{LinkFeedbackState, PortalDocumentLayout, PortalReadingDecor, SceneId};
 
 use super::Compositor;
 use super::token_colors::{
@@ -276,7 +276,18 @@ impl Compositor {
             pill_at(at(button.bounds), label, color, button.focused);
         }
         if let Some((host, anchor)) = &decor.hint {
-            pill_at(at(*anchor), host, text_color, false);
+            // A pressed link says what happened in place of its host.
+            let failed = decor.hint_feedback == Some(LinkFeedbackState::Failed);
+            let color = failed
+                .then(|| self.token_map.get("color.error"))
+                .flatten()
+                .and_then(|hex| super::token_colors::parse_hex_color(hex))
+                .map_or(text_color, crate::text::rgba_to_srgb_u8);
+            let label = match decor.hint_feedback {
+                Some(state) => state.label(),
+                None => host.as_str(),
+            };
+            pill_at(at(*anchor), label, color, false);
         }
     }
 }

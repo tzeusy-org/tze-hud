@@ -8,7 +8,7 @@
 
 use std::sync::Arc;
 
-use crate::types::{PortalDocumentLayout, Rect};
+use crate::types::{PortalDocumentLayout, Rect, SceneId};
 
 /// Maximum accepted link target length, shared with notification url actions.
 pub const MAX_LINK_BYTES: usize = 2048;
@@ -62,6 +62,41 @@ pub struct PortalReadingLayout {
     pub row_glyphs: Arc<[u32]>,
 }
 
+/// What a pressed link did, shown locally in place of its label or host and
+/// never reported to an agent.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LinkFeedbackState {
+    /// The browser handoff is in flight.
+    Opening,
+    /// Windows accepted the handoff (not proof the page loaded).
+    Opened,
+    /// The handoff failed or its worker could not start.
+    Failed,
+}
+
+impl LinkFeedbackState {
+    /// The on-screen words.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Opening => "Opening\u{2026}",
+            Self::Opened => "Opened",
+            Self::Failed => "Couldn't open",
+        }
+    }
+}
+
+/// The pressed link the feedback belongs to: newest press wins.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LinkFeedbackTarget {
+    /// A card url action, by exact publication and action index.
+    CardAction {
+        publication_id: SceneId,
+        index: usize,
+    },
+    /// A portal OUTPUT link, by tile and target.
+    PortalLink { tile: SceneId, href: Arc<str> },
+}
+
 /// What the compositor draws for one portal's OUTPUT reading state. Runtime
 /// state only; a change repaints, never reshapes.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -72,6 +107,8 @@ pub struct PortalReadingDecor {
     pub link: Option<(usize, usize)>,
     /// The link target host and its tile-local hint anchor (below the link).
     pub hint: Option<(String, Rect)>,
+    /// The shown link's press feedback, drawn in place of the host.
+    pub hint_feedback: Option<LinkFeedbackState>,
     /// The visible code copy button, if any.
     pub copy_button: Option<PortalCopyButton>,
 }
