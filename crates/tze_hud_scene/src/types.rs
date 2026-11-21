@@ -1967,19 +1967,31 @@ pub struct ZonePublishToken {
 
 // ─── Zone content ────────────────────────────────────────────────────────────
 
+/// What an action means; the theme decides how it looks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ActionRole {
+    /// Irreversible: drawn in the error tone and taken only by a press held
+    /// for `notification.action.hold.ms`. Callback actions only.
+    Destructive,
+}
+
 /// One notification button: a publisher callback or an owner-opened HTTPS link.
 /// The runtime resolves its target by live publication and zero-based index.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NotificationAction {
     pub label: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub callback_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<ActionRole>,
 }
 
 pub const ACTION_TARGET_HINT: &str = "action needs callback_id or url, not both";
 pub const ACTION_URL_HINT: &str = "action url must be https";
+pub const ACTION_ROLE_HINT: &str = "action role needs a callback action";
 
 impl NotificationAction {
     /// Preserve transport presence for exclusivity; only the parser's serialized
@@ -1987,9 +1999,15 @@ impl NotificationAction {
     pub fn validate(&self) -> Result<(), String> {
         match (&self.callback_id, &self.url) {
             (Some(callback), None) if !callback.is_empty() => Ok(()),
+            (None, Some(_)) if self.role.is_some() => Err(ACTION_ROLE_HINT.into()),
             (None, Some(_)) => self.encoded_url().map(|_| ()),
             _ => Err(ACTION_TARGET_HINT.into()),
         }
+    }
+
+    /// Taken only by a completed hold.
+    pub fn is_destructive(&self) -> bool {
+        self.role == Some(ActionRole::Destructive)
     }
 
     pub fn encoded_url(&self) -> Result<String, String> {
@@ -2046,6 +2064,13 @@ impl NotificationPayload {
     /// planes reject it with `INVALID_ARGUMENT`.
     pub fn is_blank(&self) -> bool {
         self.title.trim().is_empty() && self.text.trim().is_empty()
+    }
+
+    /// The primary action: the first that is not destructive. It is the
+    /// filled button and the answer chord's initial focus; it is never taken
+    /// automatically. `None` when every action is destructive (or none).
+    pub fn primary_action(&self) -> Option<usize> {
+        self.actions.iter().position(|a| !a.is_destructive())
     }
 
     /// Validate notification content before either publish plane admits or

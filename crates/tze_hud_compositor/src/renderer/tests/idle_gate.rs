@@ -355,6 +355,7 @@ async fn idle_with_notification_renders_only_at_fade() {
                 label: label.into(),
                 callback_id: Some(label.into()),
                 url: None,
+                role: None,
             })
             .collect();
     }
@@ -442,6 +443,7 @@ async fn idle_with_notification_renders_only_at_fade() {
                 label: label.into(),
                 callback_id: Some(label.into()),
                 url: None,
+                role: None,
             })
             .collect();
     }
