@@ -341,7 +341,11 @@ with the same cancellation and idle semantics as a `hud_input` wait.
   report any of `"title"`, `"body"` and `"actions"` (a label wider than its
   button; the count is the smallest among the cut labels, and stops before a
   label's first line break); widgets report the string parameters set in this
-  call whose drawn text overflows the widget. The first N characters of what
+  call whose drawn text overflows the widget; a status-bar publish reports
+  each entry it sets whose value is cut, by entry key, measured against the
+  merged bar as it draws right after this publish (0 when the full bar does
+  not draw that entry; removals and values that fit report nothing; a cut
+  entry key is not reported). The first N characters of what
   was sent always fit; a rewrite of N characters usually fits, but glyph
   widths differ, so it may report again. The field is omitted when everything
   fits, so replies are unchanged byte for byte, and never appears for
@@ -717,6 +721,12 @@ Only an unusable request (bad JSON, unknown method or tool, missing or
 unknown PSK) is a JSON-RPC error.
 
 - The message isn't repeated. The hint names the next call.
+- A portal argument refusal names the field and its limit: `portal id is
+  1..128 bytes`, `display_name is 1..128 bytes`, `portal key is 1..128
+  bytes; omit key to append` (`INVALID_ARGUMENT`), and `portal publish is at
+  most 16384 bytes; split it` (`CONTENT_REJECTED`). A scene refusal whose own
+  text is internal, and can carry ids, returns one fixed hint per code
+  instead, such as `request not accepted; call hud_surfaces and resend`.
 - Typed zone content is strict: an unknown or nested key is `INVALID_ARGUMENT` with the allowed keys in the hint, and so is empty content (a notification with no title or body, `stream_text` without text, `solid_color` missing r/g/b; over gRPC, a blank notification).
 - Invalid widget values return `WIDGET_PARAMETER_INVALID` with the parameter
   and its required type/range; invalid urgency/status entries/inner TTL return

@@ -582,6 +582,7 @@ types, and notification TTL is top-level only.
 Successful replies follow the same rule: a publish whose text the renderer
 would cut reports, per cut field, how many characters are drawn, so one
 shortened republish lands; a reply where everything fits keeps its bytes.
+Refusals name the field and limit to fix, and no hint carries an internal id.
 
 - `tze_hud_scene` [`widget_audiences_reject_agent_writes_and_survive_publication_lifecycle`](../crates/tze_hud_scene/src/graph/widget_tests.rs),
   [`clear_widget_for_publisher_refreshes_current_params_from_remaining_publish`](../crates/tze_hud_scene/src/graph/widget_tests.rs),
@@ -593,8 +594,13 @@ shortened republish lands; a reply where everything fits keeps its bytes.
 - `tze_hud_protocol` [`test_durable_widget_publish_receives_result`](../crates/tze_hud_protocol/src/session_server/tests/widget_publish.rs)
 - `clipped` counts: `integration` [`poc_publish_reports_clipped_text_only_when_cut`](../tests/integration/poc_acceptance.rs),
   `tze_hud_compositor` [`actions_report_the_smallest_cut_label`](../crates/tze_hud_compositor/src/renderer/text_fit.rs),
+  [`cut_status_value_counts_what_republishes_whole`](../crates/tze_hud_compositor/src/renderer/text_fit.rs),
+  [`status_entry_past_a_full_bar_counts_zero`](../crates/tze_hud_compositor/src/renderer/text_fit.rs),
   [`clipped_text_params_reports_labels_past_the_canvas`](../crates/tze_hud_compositor/src/widget.rs),
-  `tze_hud_mcp` [`notification_reply_counts_cut_fields_and_is_unchanged_when_it_fits`](../crates/tze_hud_mcp/src/server/tests.rs)
+  `tze_hud_mcp` [`notification_reply_counts_cut_fields_and_is_unchanged_when_it_fits`](../crates/tze_hud_mcp/src/server/tests.rs),
+  [`status_reply_counts_cut_values_only`](../crates/tze_hud_mcp/src/server/tests.rs)
+- Refusal hints: `tze_hud_mcp` [`portal_refusals_name_the_field_and_its_limit`](../crates/tze_hud_mcp/src/server/tests.rs),
+  [`scene_refusal_hints_are_fixed_id_free_and_short`](../crates/tze_hud_mcp/src/server/tests.rs)
 
 - `tze_hud_protocol` [`mutation_batch_oversized_rejected_with_structured_error`](../crates/tze_hud_protocol/tests/fuzz_protocol_boundary.rs)
 - `tze_hud_mcp` [`test_structured_error_has_hint_field`](../crates/tze_hud_mcp/src/server/tests.rs), [`error_codes_are_unique_and_documented`](../crates/tze_hud_mcp/src/error.rs),

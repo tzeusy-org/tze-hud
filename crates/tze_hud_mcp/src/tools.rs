@@ -19,7 +19,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use tokio::sync::Mutex;
-use tze_hud_portal::hub::{PortalError, PortalHub, PortalKey, PortalStatus, Publish};
+use tze_hud_portal::hub::{
+    MAX_NAME_BYTES, PortalError, PortalHub, PortalKey, PortalStatus, Publish,
+};
 use tze_hud_scene::{
     SceneId, ValidationError,
     config::AgentIdentity,
@@ -648,10 +650,35 @@ pub fn scene_error(e: &ValidationError) -> McpError {
             "CONTENT_REJECTED",
             format!("widget {widget} is full; retry later"),
         ),
-        other => tool_err(
-            tze_hud_scene::error_codes::validation_error_code(other),
-            other.to_string(),
-        ),
+        // The two MCP-reachable `key` reasons are complete hints already.
+        V::InvalidField { field, reason }
+            if field == "key" && KEY_REASONS.contains(&reason.as_str()) =>
+        {
+            tool_err("INVALID_ARGUMENT", reason.clone())
+        }
+        // Other scene text can carry ids or internal nouns: one fixed hint
+        // per code.
+        other => {
+            let code = tze_hud_scene::error_codes::validation_error_code(other);
+            tool_err(code, fallback_hint(code))
+        }
+    }
+}
+
+/// `InvalidField` reasons on `key` that are returned as the hint verbatim.
+const KEY_REASONS: [&str; 2] = [
+    "notification key must be at most 256 UTF-8 bytes",
+    "keyed clear requires a notification zone",
+];
+
+/// The hint for a scene refusal whose own text is not model-facing.
+fn fallback_hint(code: &str) -> &'static str {
+    match code {
+        "LEASE_NOT_ACTIVE" => "retry hud_publish",
+        "NOT_HELD" => "you hold nothing there; hud_publish first",
+        "BUDGET_EXCEEDED" => "too much content; hud_clear older content, then retry",
+        "CONTENT_REJECTED" => "zone refused this publish; call hud_surfaces",
+        _ => "request not accepted; call hud_surfaces and resend",
     }
 }
 
@@ -729,9 +756,17 @@ async fn publish_zone<'a>(
         SceneGraph::validate_notification_key(p.key.as_deref()).map_err(|e| scene_error(&e))?;
     }
     // Measured at admission with the renderer's shaper and current tokens.
-    // Stream text scrolls and tail-anchors by design, so only cards report.
-    let clipped = match (&content, ctx.text_fit) {
-        (ZoneContent::Notification(payload), Some(fit)) => fit.notification(&scene, zone, payload),
+    // Stream text scrolls and tail-anchors by design, so only cards and
+    // status entries report.
+    let clipped: Vec<(String, usize)> = match (&content, ctx.text_fit) {
+        (ZoneContent::Notification(payload), Some(fit)) => fit
+            .notification(&scene, zone, payload)
+            .into_iter()
+            .map(|(name, drawn)| (name.to_owned(), drawn))
+            .collect(),
+        (ZoneContent::StatusBar(payload), Some(fit)) => {
+            fit.status_bar(&scene, zone, payload, p.key.as_deref())
+        }
         _ => Vec::new(),
     };
     // Read the owner default exactly once, after resolving the content. Explicit
@@ -1130,6 +1165,21 @@ fn portal_err(e: PortalError, surface: &str) -> McpError {
 }
 
 async fn publish_portal(ctx: &ToolCtx<'_>, pid: &str, p: PublishParams) -> McpResult<Value> {
+    // The hub refuses these without saying which field; name it here.
+    let name_ok = |s: &str| !s.is_empty() && s.len() <= MAX_NAME_BYTES;
+    if !name_ok(pid) {
+        return Err(invalid(format!("portal id is 1..{MAX_NAME_BYTES} bytes")));
+    }
+    if !p.display_name.as_deref().is_none_or(name_ok) {
+        return Err(invalid(format!(
+            "display_name is 1..{MAX_NAME_BYTES} bytes"
+        )));
+    }
+    if !p.key.as_deref().is_none_or(name_ok) {
+        return Err(invalid(format!(
+            "portal key is 1..{MAX_NAME_BYTES} bytes; omit key to append"
+        )));
+    }
     let text = match p.content {
         None | Some(Value::Null) => None,
         Some(Value::String(s)) if s.is_empty() => None,

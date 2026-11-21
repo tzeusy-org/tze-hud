@@ -1431,6 +1431,9 @@ impl Compositor {
     pub fn attach_text_fit(&mut self, fit: Arc<TextFitMeasurer>) {
         fit.set_display_layout(self.display_layout.clone());
         fit.set_tokens(self.token_map.clone());
+        if let Some(bytes) = self.configured_max_truncation_input_bytes {
+            fit.set_max_truncation_input_bytes(bytes);
+        }
         if let Some(renderer) = &mut self.widget_renderer {
             renderer.set_text_fit(Arc::clone(&fit));
         }
