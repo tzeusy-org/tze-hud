@@ -19,7 +19,8 @@
 #   Informational: omit merge_group while this check is not required. Restore
 #   merge_group in the same change that makes it required.
 #   Docs-only PR/main updates skip; tag and manual runs are unaffected.
-#   Non-tag events use release-dev; v* tags keep the full release profile.
+#   Non-tag events use release-dev; v* tags keep the full release profile,
+#   which a manual dispatch with profile=release rehearses (no publish).
 # release — signs the exe with minisign (secret MINISIGN_SECRET_KEY; public key
 #   app/tze_hud_app/minisign.pub) and publishes it:
 #     push to main → rolling `dev` prerelease (tag `dev` moves to the commit)
@@ -39,7 +40,13 @@ on:
     paths-ignore:
       - "docs/**"
       - "*.md"
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: "Build profile; release rehearses a v* tag build without publishing"
+        type: choice
+        options: [release-dev, release]
+        default: release-dev
 
 permissions:
   contents: read
@@ -60,7 +67,7 @@ jobs:
       # pull_request_target or grant write access to repository contents.
       pull-requests: write
     env:
-      HUD_BUILD_PROFILE: ${{ startsWith(github.ref, 'refs/tags/v') && 'release' || 'release-dev' }}
+      HUD_BUILD_PROFILE: ${{ (startsWith(github.ref, 'refs/tags/v') || inputs.profile == 'release') && 'release' || 'release-dev' }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -108,19 +115,22 @@ jobs:
           TZE_HUD_CHANNEL: ${{ github.ref == 'refs/heads/main' && 'dev' || (startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'ci') }}
         shell: pwsh
         run: |
-          $profileArgs = if ($env:HUD_BUILD_PROFILE -eq "release") { @("--release") } else { @("--profile", "release-dev") }
+          # @() around the if: pwsh unrolls a one-element array returned from it.
+          $profileArgs = @(if ($env:HUD_BUILD_PROFILE -eq "release") { "--release" } else { "--profile", "release-dev" })
           cargo build @profileArgs --locked -p tze_hud_app --bin tze_hud
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       # Non-tags cover the runtime library; tags retain the remote fixtures.
       # Fresh per-step storage isolates headless element/widget persistence.
       - name: Runtime unit tests and app parser (selected profile)
-        timeout-minutes: 8
+        # Full release links two test binaries with fat LTO from a cold cache.
+        timeout-minutes: ${{ env.HUD_BUILD_PROFILE == 'release' && 25 || 8 }}
         shell: pwsh
         run: |
           $env:LOCALAPPDATA = Join-Path $env:RUNNER_TEMP ("runtime-unit-" + [guid]::NewGuid().ToString("N"))
           New-Item -ItemType Directory -Path $env:LOCALAPPDATA | Out-Null
-          $profileArgs = if ($env:HUD_BUILD_PROFILE -eq "release") { @("--release") } else { @("--profile", "release-dev") }
+          # @() around the if: pwsh unrolls a one-element array returned from it.
+          $profileArgs = @(if ($env:HUD_BUILD_PROFILE -eq "release") { "--release" } else { "--profile", "release-dev" })
           if ($env:HUD_BUILD_PROFILE -eq "release") {
             cargo test --release --locked -p tze_hud_runtime --lib firewall::remote:: -- --nocapture
           } else {
@@ -134,7 +144,7 @@ jobs:
       # loaded by name from the registry; faces the runner lacks are skipped
       # and recorded in the log (windows-latest is Windows Server).
       - name: Font fallback with system faces (tier-W)
-        if: steps.changes.outputs.rendered == 'true' && !startsWith(github.ref, 'refs/tags/v')
+        if: steps.changes.outputs.rendered == 'true' && env.HUD_BUILD_PROFILE != 'release'
         timeout-minutes: 15
         shell: pwsh
         run: |
@@ -174,7 +184,7 @@ jobs:
       # blinking off set on the runner (restored after), asserting
       # /admin/status os_prefs, a 1.25x card and a settling HUD.
       - name: Windows text size and caret blink (informational)
-        if: steps.changes.outputs.rendered == 'true' && !startsWith(github.ref, 'refs/tags/v')
+        if: steps.changes.outputs.rendered == 'true' && env.HUD_BUILD_PROFILE != 'release'
         continue-on-error: true
         timeout-minutes: 5
         run: python scripts/ci/windows_smoke.py --os-prefs --exe "target/$env:HUD_BUILD_PROFILE/tze_hud.exe" --config app/tze_hud_app/config/production.toml
