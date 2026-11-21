@@ -8,7 +8,7 @@
     "vocab_fingerprint": "sha256:446a9538cb6c348e3516120d7c08b09f57c36495e2acfffe59a5bf8b0cfb1a2d",
     "counting_policy": "each canonical JSON-RPC body independently; UTF-8 bytes; encode_with_special_tokens; operation and flow totals are integer sums; model_visible counts tool name + arguments + result text only"
   },
-  "fixture_fingerprint": "blake3:47a70b4ae65f44cd2fdd34b71a099b3f6c73bdd4688c4c394657d06776a83691",
+  "fixture_fingerprint": "blake3:e83837711fea394768941bcb45c8bc3b8168b582fd0f7e18c517531f56b970a6",
   "flows": {
     "discover": {
       "flow_version": 4,
@@ -294,7 +294,7 @@
     },
     "tools_list": {
       "flow_version": 4,
-      "flow_fingerprint": "blake3:1efd6e17c3edacb5abc73bc38df47d5260c767f64c2714f6f96a5071760487b4",
+      "flow_fingerprint": "blake3:5bcb0a58a6fb4c053ea7567254ad74d8627a1fdc44de5a2cdef027f04b5905bf",
       "operations": {
         "tools/list": {
           "request": {
@@ -302,26 +302,26 @@
             "tokens": 21
           },
           "response": {
-            "bytes": 2755,
-            "tokens": 638
+            "bytes": 2773,
+            "tokens": 643
           },
           "total": {
-            "bytes": 2813,
-            "tokens": 659
+            "bytes": 2831,
+            "tokens": 664
           },
           "model_visible": {
-            "bytes": 2711,
-            "tokens": 622
+            "bytes": 2729,
+            "tokens": 627
           }
         }
       },
       "total": {
-        "bytes": 2813,
-        "tokens": 659
+        "bytes": 2831,
+        "tokens": 664
       },
       "model_visible": {
-        "bytes": 2711,
-        "tokens": 622
+        "bytes": 2729,
+        "tokens": 627
       }
     },
     "widget_publish": {
@@ -428,14 +428,14 @@
     }
   },
   "approval": {
-    "status": "owner_approved",
-    "decision_reference": "hud-ohgc9.14 AC5: the owner explicitly accepted the tools_list baseline (wait_ms maximum 30000->55000; 2,711 model-visible bytes / 622 tokens and 2,813 wire bytes / 659 tokens unchanged, new flow fingerprint) for PR1673 on 2026-11-21. The prior approval (hud-ohgc9.9) is kept under previous_approval.",
-    "basis": "Source-bound calibration on 6db3a318 plus this change: the two tools/list `maximum` values for wait_ms change 30000->55000, so tools_list keeps 2,711 model-visible bytes / 622 tokens (2,813 wire bytes / 659 tokens) with a new flow fingerprint. Every other flow keeps byte-identical fingerprints and metrics: discover126, zone39, widget22, error45, complete choice114, choice wait77 (still sends wait_ms 30000), choice labels65, portal137. Ceilings, tokenizer, flow version4 and accounting unchanged. Two byte-identical current-source measurements. No Windows acceptance is inferred."
+    "status": "pending_owner_review",
+    "decision_reference": "hud-ohgc9.6 AC6: tools/list advertises role?:destructive on notification actions, +18 model-visible bytes (2711->2729) and +5 tokens (622->627; wire 2813->2831 bytes, 659->664 tokens), as the signed spec measured. Pending owner acceptance at PR review. The prior approval (hud-ohgc9.14 AC5) is kept under previous_approval.",
+    "basis": "Source-bound calibration on 66dadc83 plus this change: only tools_list changes (+18 bytes, +5 tokens). Every other flow keeps byte-identical fingerprints and metrics. Ceilings, tokenizer, flow version 4 and accounting unchanged. Two byte-identical current-source measurements. No Windows acceptance is inferred."
   },
   "previous_approval": {
     "status": "owner_approved",
-    "decision_reference": "hud-ohgc9.9 AC4: the owner explicitly accepted the one-call notification_choice_labels flow (65 model-visible / 117 wire tokens, 234 / 397 bytes) and the tools/list 2710->2711 model-visible byte change (622 tokens unchanged) for PR1670 on 2026-11-21, and set the new row ceiling to 85 (about 30% headroom) instead of 65. The prior approval (hud-ljhku.3/.9) is kept under previous_approval.",
-    "basis": "Source-bound calibration on 09ad0029 plus this change: new notification_choice_labels measures 65 model-visible tokens (234 bytes) in one call, 117 wire tokens (397 bytes), with four label-only options, wait_ms 30000 and ttl_ms 30000; the answered reply carries expires_in_ms 30000 because the calibration scene clock is frozen. tools/list rises by 1 byte (2710->2711 model-visible, 2812->2813 wire) and 0 tokens (622 model-visible, 659 wire) for `callback_id?`. Every other flow keeps byte-identical fingerprints and metrics: discover126, zone39, widget22, error45, complete choice114, choice wait77, portal137. New flow ceiling85 (owner-set headroom); existing ceilings, tokenizer, flow version4 and accounting unchanged. Two byte-identical current-source measurements. No Windows acceptance is inferred."
+    "decision_reference": "hud-ohgc9.14 AC5: the owner explicitly accepted the tools_list baseline (wait_ms maximum 30000->55000; 2,711 model-visible bytes / 622 tokens and 2,813 wire bytes / 659 tokens unchanged, new flow fingerprint) for PR1673 on 2026-11-21. The prior approval (hud-ohgc9.9) is kept under previous_approval.",
+    "basis": "Source-bound calibration on 6db3a318 plus this change: the two tools/list `maximum` values for wait_ms change 30000->55000, so tools_list keeps 2,711 model-visible bytes / 622 tokens (2,813 wire bytes / 659 tokens) with a new flow fingerprint. Every other flow keeps byte-identical fingerprints and metrics: discover126, zone39, widget22, error45, complete choice114, choice wait77 (still sends wait_ms 30000), choice labels65, portal137. Ceilings, tokenizer, flow version4 and accounting unchanged. Two byte-identical current-source measurements. No Windows acceptance is inferred."
   },
   "production_discovery": {
     "source": "c3355f6144805c219f240ab4272a33da1e33364e",
