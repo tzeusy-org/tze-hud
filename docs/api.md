@@ -636,6 +636,11 @@ agents until one is paired.
   `display`, `hover_target` (the runtime's declared trigger rect, or `null`)
   and `tooltip_visible` (the current runtime parameter is at least 0.5).
   Rects use `{x, y, w, h}` in scene pixels, and `display` indexes `displays`.
+  `cursor` (top level) is the pointer shape the runtime last applied:
+  `arrow`, `hand`, `ibeam`, `grab`, `grabbing`, `ew-resize`, `ns-resize`,
+  `nesw-resize` or `nwse-resize`; `null` before the windowed runtime starts,
+  and in overlay mode while the overlay is click-through (the app beneath
+  owns the pointer).
   `link_launches` monotonically counts accepted runtime browser handoffs after
   the per-publication/action (card) or per-link (portal OUTPUT) 2 s limit. A failed worker spawn does not count;
   a browser navigation failure does. The non-Windows no-op counts too. Scene
@@ -1007,6 +1012,17 @@ inline at the caret with a token-colored underline
 (`portal.composer.preedit_underline_color`, default the caret color) and the
 caret at the IME's cursor. It never enters the draft: only the committed
 text does, and cancelling the composition leaves the draft as it was.
+
+The pointer is a hand exactly where a primary press would act on a HUD
+control: card action buttons and the card ×, each portal's × and unread
+badge, OUTPUT links and Copy buttons, and the control panel's chips, tiles,
+steppers, Reset and pressable rows (not its search or text fields). An
+answered card's controls and card controls in safe mode show the arrow, as a
+press there does nothing. Precedence, highest first: an active resize or
+drag, a resize grip or edge, a pressable control, a drag handle (open hand;
+a portal × in the header band shows the hand), OUTPUT or composer text
+(I-beam), the arrow. The shape follows controls that appear or leave under a
+resting pointer by the next frame, without pointer motion.
 
 Overlay clicks on card buttons, badges and scroll panes act without taking
 Windows keyboard focus. Clicking a text editor (a portal composer or panel

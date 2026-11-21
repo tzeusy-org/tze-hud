@@ -3,7 +3,7 @@ use std::time::Instant;
 use tze_hud_compositor::LocalComposerState;
 use tze_hud_scene::types::{DragHandleContextMenuState, WidgetParameterValue};
 
-use super::hittest::combined_overlay_hit_regions;
+use super::hittest::{combined_overlay_hit_regions, pressable_control_regions};
 use super::input_dispatch::nanoseconds_since_start;
 use super::lifecycle::record_pending_input_latency;
 use super::{HitRegion, WinitApp};
@@ -372,6 +372,12 @@ impl WinitApp {
                     &self.state.static_hit_regions,
                     &scene,
                 ));
+                self.state.pressable_regions = pressable_control_regions(
+                    &scene,
+                    self.state
+                        .safe_mode_atomic
+                        .load(std::sync::atomic::Ordering::Acquire),
+                );
                 next_trackers = Some(next);
             }
         }

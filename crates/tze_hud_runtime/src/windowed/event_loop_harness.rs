@@ -176,6 +176,7 @@ impl WindowedRuntimeState {
             input_event_tx: None,
             composer_pointer_drag_anchor: None,
             reading_cursor: None,
+            pressable_regions: Vec::new(),
             portal_resize_states: HashMap::new(),
             consumed_portal_resize_keydowns: HashSet::new(),
             consumed_shell_shortcut_keydowns: HashSet::new(),

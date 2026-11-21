@@ -2271,6 +2271,7 @@ impl WinitApp {
             focus: ring_owner.as_ref().map(|o| (o.tile_id, o.node_id)),
             drafts,
             reading: self.reading_ui(),
+            cursor: self.applied_cursor_name(),
             hover_targets: self
                 .state
                 .widget_hover_trackers
@@ -2364,6 +2365,16 @@ impl WinitApp {
                 self.state.notification_link_opener.launch(url)
             }
         }
+    }
+
+    /// The admin `cursor`: the shape last applied, or `None` while the app
+    /// beneath a click-through overlay owns the pointer.
+    pub(super) fn applied_cursor_name(&self) -> Option<&'static str> {
+        let beneath = self.state.effective_mode == crate::window::WindowMode::Overlay
+            && !self.state.overlay_capturing;
+        (!beneath).then(|| {
+            crate::operator::surface_status::cursor_name(self.state.cursor_tracker.current())
+        })
     }
 
     /// Admin OUTPUT reading observations per portal (hud-ljhku.2).

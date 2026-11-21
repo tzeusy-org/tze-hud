@@ -527,6 +527,8 @@ struct WindowedRuntimeState {
     /// Cursor the last pointer event resolved over portal text, links, copy
     /// buttons or the composer; `None` leaves the affordance cursor (hud-ljhku.2).
     reading_cursor: Option<tze_hud_input::PortalCursor>,
+    /// Last-frame bounds of the HUD controls a primary press would act on.
+    pressable_regions: Vec<HitRegion>,
     /// Per-portal resize state machines keyed by tile `SceneId`.
     ///
     /// Holds `PortalResizeState` for every portal tile that has been focused
@@ -1039,6 +1041,8 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         self.synthesize_left_release_if_physically_up();
         self.refresh_widget_hover_tracking();
         self.update_overlay_cursor_hittest();
+        // The cursor follows controls that appear or leave under a resting pointer.
+        self.update_portal_cursor_icon();
         let portal_drain = self.settle_scene_work();
         let settled_scene_changed = portal_drain.scene_changed();
 
@@ -3329,6 +3333,7 @@ impl WindowedRuntime {
             input_event_tx,
             composer_pointer_drag_anchor: None,
             reading_cursor: None,
+            pressable_regions: Vec::new(),
             portal_resize_states: std::collections::HashMap::new(),
             consumed_portal_resize_keydowns: std::collections::HashSet::new(),
             consumed_shell_shortcut_keydowns: std::collections::HashSet::new(),

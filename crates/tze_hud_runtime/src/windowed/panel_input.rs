@@ -270,8 +270,8 @@ impl WinitApp {
         }
     }
 
-    /// True while the open panel should capture the pointer at the cursor.
-    pub(super) fn panel_captures_cursor(&self) -> bool {
+    /// The panel target under the cursor, if any.
+    fn panel_hit_at_cursor(&self) -> Option<PanelHitTarget> {
         // While click-through, no `CursorMoved` arrives and the position is
         // refreshed from the OS in primary-window coordinates, so a
         // `cursor_window` left over from an earlier move says nothing.
@@ -280,7 +280,24 @@ impl WinitApp {
                 (Some(window), Some(id)) => window.id() == id,
                 _ => true,
             };
-        self.panel_hit(primary).is_some()
+        self.panel_hit(primary)
+    }
+
+    /// True while the open panel should capture the pointer at the cursor.
+    pub(super) fn panel_captures_cursor(&self) -> bool {
+        self.panel_hit_at_cursor().is_some()
+    }
+
+    /// Over the open panel, whether a press would act: chips, tiles, steppers,
+    /// Reset and rows do; search, text fields and bare panel do not. `None`
+    /// off the panel.
+    pub(super) fn panel_pressable_at_cursor(&self) -> Option<bool> {
+        let hit = self.panel_hit_at_cursor()?;
+        let panel = self.open_panel()?;
+        Some(
+            !matches!(hit, PanelHitTarget::Search | PanelHitTarget::Panel)
+                && !panel.accepts_text(&hit),
+        )
     }
 
     /// On the open/close edge: take keyboard focus when the panel opens and
@@ -1746,7 +1763,28 @@ pub(super) mod panel_task_tests {
             .find(|h| h.target == PanelHitTarget::Tile(1, PanelPart::Body))
             .expect("pause tile")
             .rect;
+        // R3.1 S1-S2: a press on a tile acts, so it shows the hand; the
+        // search field takes text instead and keeps the arrow.
+        let search = geometry
+            .hits
+            .iter()
+            .find(|h| h.target == PanelHitTarget::Search)
+            .expect("search field")
+            .rect;
+        (app.state.cursor_x, app.state.cursor_y) = (search.x + 4.0, search.y + search.h / 2.0);
+        assert_eq!(app.panel_pressable_at_cursor(), Some(false));
+        app.update_portal_cursor_icon();
+        assert_eq!(
+            app.state.cursor_tracker.current(),
+            tze_hud_input::PortalCursor::Default
+        );
         (app.state.cursor_x, app.state.cursor_y) = (tile.x + tile.w / 2.0, tile.y + tile.h / 2.0);
+        assert_eq!(app.panel_pressable_at_cursor(), Some(true));
+        app.update_portal_cursor_icon();
+        assert_eq!(
+            app.state.cursor_tracker.current(),
+            tze_hud_input::PortalCursor::Pointer
+        );
         assert!(app.panel_captures_cursor());
         assert!(
             app.panel_other_button(Right, true, true),

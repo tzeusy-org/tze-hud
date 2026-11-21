@@ -554,6 +554,7 @@ impl StatusSource {
             "notifications": surfaces.notifications,
             "widgets": surfaces.widgets,
             "link_launches": surfaces.link_launches,
+            "cursor": surfaces.cursor,
             "clipboard_writes": crate::clipboard::writes(),
             "cpu_pct_2s": cpu_pct_2s,
             "cpu_pct_avg": cpu_pct_avg,

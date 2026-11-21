@@ -154,6 +154,30 @@ pub(super) fn combined_overlay_hit_regions(
     regions
 }
 
+/// Bounds of the HUD controls a primary press would act on: card actions and
+/// ×, unless the card is answered or safe mode is on, and each portal's × and
+/// unread badge. Drag handles are not presses.
+pub(super) fn pressable_control_regions(scene: &SceneGraph, safe_mode: bool) -> Vec<HitRegion> {
+    use tze_hud_scene::types::ZoneInteractionKind as Kind;
+    scene
+        .overlay
+        .zone_hit_regions
+        .iter()
+        .filter(|r| match r.kind {
+            Kind::Dismiss | Kind::Action { .. } => {
+                !safe_mode
+                    && !scene
+                        .overlay
+                        .notification_choices
+                        .contains_key(&r.publication_id)
+            }
+            Kind::JumpToLatest { .. } | Kind::DismissTile { .. } => true,
+            Kind::DragHandle { .. } => false,
+        })
+        .map(|r| HitRegion::new(r.bounds.x, r.bounds.y, r.bounds.width, r.bounds.height))
+        .collect()
+}
+
 pub(super) fn refresh_interaction_hit_regions_after_render(
     compositor: &Compositor,
     scene: &mut SceneGraph,
@@ -517,6 +541,17 @@ impl WinitApp {
         pointer_over_portal_affordance(focused_portal, x, y, affordance_px, over_drag_handle)
     }
 
+    /// A primary press at `(x, y)` would act on a HUD control: the open panel
+    /// answers for its own area, the last frame's controls elsewhere.
+    fn pointer_over_pressable(&self, x: f32, y: f32) -> bool {
+        self.panel_pressable_at_cursor().unwrap_or_else(|| {
+            self.state
+                .pressable_regions
+                .iter()
+                .any(|r| r.contains(x, y))
+        })
+    }
+
     /// Update the OS cursor shape to reflect the portal resize/move affordance
     /// under the pointer.
     ///
@@ -575,10 +610,14 @@ impl WinitApp {
             .and_then(|s| s.resize_grip);
         if let Some(corner) = resizing {
             desired = PortalCursor::for_grip_corner(corner);
-        } else if matches!(desired, PortalCursor::Grab | PortalCursor::Default)
-            && let Some(cursor) = snapshot.resize_grip_cursor(x, y)
-        {
-            desired = cursor;
+        } else if matches!(desired, PortalCursor::Grab | PortalCursor::Default) {
+            // Below resizing: the grip, then a pressable control, which beats
+            // the drag handle (the portal × sits in the header band).
+            if let Some(cursor) = snapshot.resize_grip_cursor(x, y) {
+                desired = cursor;
+            } else if self.pointer_over_pressable(x, y) {
+                desired = PortalCursor::Pointer;
+            }
         }
 
         // Text, links and copy buttons: I-beam / hand (hud-ljhku.2).
@@ -599,7 +638,9 @@ impl WinitApp {
 mod tests {
     use super::super::test_support::{scene_with_capture_tile, scene_with_drag_handle_tile};
     use super::*;
+    use std::sync::Arc;
     use tze_hud_compositor::HeadlessSurface;
+    use tze_hud_scene::Rect;
 
     #[test]
     fn combined_overlay_hit_regions_includes_zone_interaction_regions() {
@@ -1601,5 +1642,191 @@ mod tests {
 
         assert_eq!(scene.display_area.width, 1920.0);
         assert_eq!(scene.display_area.height, 1080.0);
+    }
+
+    fn control(
+        kind: tze_hud_scene::types::ZoneInteractionKind,
+        bounds: Rect,
+        publication: SceneId,
+    ) -> tze_hud_scene::types::ZoneHitRegion {
+        tze_hud_scene::types::ZoneHitRegion {
+            publication_id: publication,
+            zone_name: "notification-area".to_string(),
+            published_at_wall_us: 1,
+            publisher_namespace: "agent".to_string(),
+            bounds,
+            kind,
+            interaction_id: format!("control:{}:{}", bounds.x, bounds.y),
+            tab_order: 0,
+        }
+    }
+
+    /// The cursor the app resolves at `(x, y)` from the last frame's controls.
+    fn cursor_at(app: &mut WinitApp, x: f32, y: f32) -> PortalCursor {
+        app.refresh_widget_hover_tracking();
+        app.state.cursor_x = x;
+        app.state.cursor_y = y;
+        app.update_portal_cursor_icon();
+        app.state.cursor_tracker.current()
+    }
+
+    /// R3.1 S1-S3: card actions and ×, a portal × and its unread badge are
+    /// pressable; an answered card's controls, card controls in safe mode and
+    /// drag handles are not.
+    #[test]
+    fn pressable_regions_follow_what_a_press_would_do() {
+        use tze_hud_scene::types::ZoneInteractionKind as Kind;
+        let (card, answered, tile) = (SceneId::new(), SceneId::new(), SceneId::new());
+        let mut scene = SceneGraph::new(1920.0, 1080.0);
+        let at = |x: f32| Rect::new(x, 10.0, 20.0, 20.0);
+        scene.overlay.zone_hit_regions = vec![
+            control(Kind::Action { index: 0 }, at(0.0), card),
+            control(Kind::Dismiss, at(100.0), card),
+            control(Kind::JumpToLatest { tile_id: tile }, at(200.0), tile),
+            control(Kind::DismissTile { tile_id: tile }, at(300.0), tile),
+            control(Kind::Action { index: 1 }, at(400.0), answered),
+            control(
+                Kind::DragHandle {
+                    element_id: tile,
+                    element_kind: tze_hud_scene::DragHandleElementKind::Tile,
+                    is_header_band: true,
+                },
+                at(500.0),
+                tile,
+            ),
+        ];
+        scene
+            .overlay
+            .notification_choices
+            .insert(answered, "chosen".into());
+        let xs = |safe_mode| -> Vec<f32> {
+            pressable_control_regions(&scene, safe_mode)
+                .iter()
+                .map(|r| r.x)
+                .collect()
+        };
+        assert_eq!(xs(false), [0.0, 100.0, 200.0, 300.0]);
+        assert_eq!(xs(true), [200.0, 300.0], "safe mode refuses card controls");
+    }
+
+    /// R3.1 S7: a control inside a drag-handle band shows the hand and the band
+    /// beside it the open hand; S2: off every control it is the arrow.
+    #[test]
+    fn pressable_control_beats_drag_handle_cursor() {
+        use super::super::test_support::make_windowed_keyboard_test_app;
+        use tze_hud_input::{FocusManager, InputProcessor};
+        // Handle band: x 580..620, y 290..310.
+        let (mut scene, tile, _, _) = scene_with_drag_handle_tile(400.0, 300.0, 400.0, 200.0);
+        scene.overlay.zone_hit_regions.push(control(
+            tze_hud_scene::types::ZoneInteractionKind::DismissTile { tile_id: tile },
+            Rect::new(604.0, 292.0, 14.0, 14.0),
+            tile,
+        ));
+        let snapshot = crate::pipeline::HitTestSnapshot::from_scene(&scene);
+        let (mut app, _rx) =
+            make_windowed_keyboard_test_app(scene, FocusManager::new(), InputProcessor::new());
+        app.state
+            .pipeline
+            .hit_test_snapshot
+            .store(Arc::new(snapshot));
+        assert_eq!(cursor_at(&mut app, 610.0, 298.0), PortalCursor::Pointer);
+        assert_eq!(cursor_at(&mut app, 585.0, 298.0), PortalCursor::Grab);
+        assert_eq!(cursor_at(&mut app, 1000.0, 900.0), PortalCursor::Default);
+    }
+
+    /// R11.1 S2: a click-through overlay reports no cursor whatever shape the
+    /// tracker last held; a capturing overlay and other modes report it.
+    #[test]
+    fn admin_cursor_is_null_while_the_app_beneath_owns_the_pointer() {
+        use super::super::test_support::make_windowed_keyboard_test_app;
+        use tze_hud_input::{FocusManager, InputProcessor};
+        let (mut app, _rx) = make_windowed_keyboard_test_app(
+            SceneGraph::new(1920.0, 1080.0),
+            FocusManager::new(),
+            InputProcessor::new(),
+        );
+        app.state.cursor_tracker.update(PortalCursor::Pointer);
+        app.state.effective_mode = WindowMode::Overlay;
+        app.state.overlay_capturing = false;
+        assert_eq!(app.applied_cursor_name(), None);
+        app.state.overlay_capturing = true;
+        assert_eq!(app.applied_cursor_name(), Some("hand"));
+        app.state.effective_mode = WindowMode::Fullscreen;
+        app.state.overlay_capturing = false;
+        assert_eq!(app.applied_cursor_name(), Some("hand"));
+    }
+
+    /// R3.1 S3-S5: answering a card or safe mode turns its controls back to
+    /// the arrow under a resting pointer, a control that appears or leaves
+    /// changes the shape without pointer motion, and an active drag keeps its
+    /// closed hand over a control.
+    #[test]
+    fn pressable_cursor_follows_refusal_geometry_and_active_drag() {
+        use super::super::test_support::make_windowed_keyboard_test_app;
+        use tze_hud_input::{FocusManager, InputProcessor};
+        use tze_hud_scene::types::ZoneInteractionKind as Kind;
+        let card = SceneId::new();
+        let button = control(
+            Kind::Action { index: 0 },
+            Rect::new(100.0, 100.0, 80.0, 24.0),
+            card,
+        );
+        let (mut app, _rx) = make_windowed_keyboard_test_app(
+            SceneGraph::new(1920.0, 1080.0),
+            FocusManager::new(),
+            InputProcessor::new(),
+        );
+        let with_scene = |app: &mut WinitApp, f: &dyn Fn(&mut SceneGraph)| {
+            let shared = app.state.shared_state.try_lock().unwrap();
+            f(&mut shared.scene.try_lock().unwrap());
+        };
+        assert_eq!(cursor_at(&mut app, 120.0, 110.0), PortalCursor::Default);
+        // A card appears under the resting pointer.
+        with_scene(&mut app, &|scene| {
+            scene.overlay.zone_hit_regions.push(button.clone())
+        });
+        assert_eq!(cursor_at(&mut app, 120.0, 110.0), PortalCursor::Pointer);
+        app.state
+            .safe_mode_atomic
+            .store(true, std::sync::atomic::Ordering::Release);
+        assert_eq!(
+            cursor_at(&mut app, 120.0, 110.0),
+            PortalCursor::Default,
+            "safe mode"
+        );
+        app.state
+            .safe_mode_atomic
+            .store(false, std::sync::atomic::Ordering::Release);
+        with_scene(&mut app, &|scene| {
+            scene.overlay.notification_choices.insert(card, "x".into());
+        });
+        assert_eq!(
+            cursor_at(&mut app, 120.0, 110.0),
+            PortalCursor::Default,
+            "answered"
+        );
+        with_scene(&mut app, &|scene| {
+            scene.overlay.notification_choices.clear();
+        });
+        assert_eq!(cursor_at(&mut app, 120.0, 110.0), PortalCursor::Pointer);
+        // The card leaves from under the resting pointer.
+        with_scene(&mut app, &|scene| scene.overlay.zone_hit_regions.clear());
+        assert_eq!(cursor_at(&mut app, 120.0, 110.0), PortalCursor::Default);
+        // An active drag keeps its closed hand whatever lies beneath.
+        with_scene(&mut app, &|scene| {
+            scene.overlay.zone_hit_regions.push(button.clone())
+        });
+        let mut drag = tze_hud_input::DeviceDragState::new(
+            "drag".into(),
+            card,
+            tze_hud_scene::DragHandleElementKind::Zone,
+            120.0,
+            110.0,
+            250,
+            true,
+        );
+        drag.phase = tze_hud_input::DragPhase::Activated;
+        app.state.input_processor.drag_states.insert(0, drag);
+        assert_eq!(cursor_at(&mut app, 120.0, 110.0), PortalCursor::Grabbing);
     }
 }
