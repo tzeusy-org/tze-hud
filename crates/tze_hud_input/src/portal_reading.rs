@@ -13,7 +13,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use tze_hud_scene::{PortalCopyButton, PortalDocumentLayout, PortalReadingDecor, Rect, SceneId};
+use tze_hud_scene::{
+    LinkFeedbackState, LinkFeedbackTarget, PortalCopyButton, PortalDocumentLayout,
+    PortalReadingDecor, Rect, SceneId,
+};
 
 use crate::PortalCursor;
 
@@ -47,8 +50,8 @@ pub enum ReadingStop {
 /// Work the caller performs after releasing scene guards.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ReadingEffect {
-    /// Hand this validated HTTPS URL to the link worker.
-    Open(String),
+    /// Hand this link of `tile` to the link worker.
+    Open { tile: SceneId, href: Arc<str> },
     /// Write this plain text to the clipboard.
     Copy(String),
 }
@@ -240,7 +243,7 @@ impl OutputReading {
     ) -> Option<ReadingEffect> {
         let href = layout.reading.links.get(link)?.href.clone();
         self.admit_launch(tile, &href, now)
-            .then(|| ReadingEffect::Open(href.to_string()))
+            .then_some(ReadingEffect::Open { tile, href })
     }
 
     fn copy_block(
@@ -644,23 +647,35 @@ impl OutputReading {
     }
 
     /// What the compositor draws for `tile`.
+    /// `feedback` is the newest pressed link's state, drawn in its hint when
+    /// that link of `tile` is the shown one.
     pub fn decor(
         &self,
         tile: SceneId,
         layout: &PortalDocumentLayout,
         scroll_y: f32,
+        feedback: Option<&(LinkFeedbackTarget, LinkFeedbackState)>,
     ) -> PortalReadingDecor {
         let selection = self.selection.filter(|s| s.tile == tile).map(|s| s.range());
         let link = self
             .shown_link(tile)
             .and_then(|i| layout.reading.links.get(i));
+        let hint_feedback = link.and_then(|l| match feedback? {
+            (LinkFeedbackTarget::PortalLink { tile: t, href }, state)
+                if *t == tile && *href == l.href =>
+            {
+                Some(*state)
+            }
+            _ => None,
+        });
         let hint = link.and_then(|l| {
             let host = l.host()?;
+            let shown = hint_feedback.map_or(host.chars().count(), |f| f.label().chars().count());
             let last = *layout.range_rects(l.start, l.end).last()?;
             let v = layout.viewport;
             let h = layout.line_height.max(1.0);
             // Estimated label width: about 0.6 em per character plus padding.
-            let w = (h * (0.45 * host.chars().count() as f32 + 1.0)).min(v.width);
+            let w = (h * (0.45 * shown as f32 + 1.0)).min(v.width);
             let below = v.y + last.y + last.height - scroll_y;
             let y = if below + h <= v.y + v.height {
                 below
@@ -684,6 +699,7 @@ impl OutputReading {
             selection,
             link: link.map(|l| (l.start, l.end)),
             hint,
+            hint_feedback,
             copy_button,
         }
     }
@@ -781,7 +797,10 @@ mod tests {
         let up = r.pointer_up(Some(&l), 0.0, (LINK.0 + 3.0, LINK.1 + 3.0), now);
         assert_eq!(
             up.effect,
-            Some(ReadingEffect::Open("https://example.com/a".into()))
+            Some(ReadingEffect::Open {
+                tile: t,
+                href: "https://example.com/a".into()
+            })
         );
         assert!(r.selection.is_none());
     }
@@ -1000,7 +1019,10 @@ mod tests {
         assert_eq!(r.focus, Some((t, ReadingStop::Link(1))));
         assert_eq!(
             r.activate(t, &trimmed, now),
-            Some(ReadingEffect::Open("https://example.com/a".into())),
+            Some(ReadingEffect::Open {
+                tile: t,
+                href: "https://example.com/a".into()
+            }),
             "Enter still opens the focused link"
         );
         // Same text, new href: the old target is gone, so focus leaves.
@@ -1046,16 +1068,44 @@ mod tests {
         assert_eq!(r.focus, Some((t, ReadingStop::Link(0))));
         assert_eq!(
             r.activate(t, &l, now),
-            Some(ReadingEffect::Open("https://example.com/a".into()))
+            Some(ReadingEffect::Open {
+                tile: t,
+                href: "https://example.com/a".into()
+            })
         );
         assert_eq!(r.link_hint(t, &l).as_deref(), Some("example.com"));
+        // The pressed link's feedback replaces the host in its hint, sized to
+        // the words; another link's or tile's feedback does not.
+        let host = r.decor(t, &l, 0.0, None).hint.unwrap();
+        let feedback = |tile, href: &str| {
+            (
+                LinkFeedbackTarget::PortalLink {
+                    tile,
+                    href: href.into(),
+                },
+                LinkFeedbackState::Failed,
+            )
+        };
+        let shown = r.decor(t, &l, 0.0, Some(&feedback(t, "https://example.com/a")));
+        assert_eq!(shown.hint_feedback, Some(LinkFeedbackState::Failed));
+        assert_eq!(shown.hint.as_ref().unwrap().0, "example.com", "admin hint");
+        assert!(
+            shown.hint.unwrap().1.width > host.1.width,
+            "Couldn't open fits"
+        );
+        for other in [
+            feedback(t, "https://example.com/b"),
+            feedback(SceneId::new(), "https://example.com/a"),
+        ] {
+            assert_eq!(r.decor(t, &l, 0.0, Some(&other)).hint_feedback, None);
+        }
         assert!(r.tab(t, &l, 0.0, false, false));
         assert_eq!(
             r.activate(t, &l, now),
             Some(ReadingEffect::Copy("ls -la".into()))
         );
         assert!(
-            r.decor(t, &l, 0.0)
+            r.decor(t, &l, 0.0, None)
                 .copy_button
                 .is_some_and(|b| b.copied && b.focused)
         );
@@ -1072,7 +1122,10 @@ mod tests {
             Instant::now(),
         );
         r.pointer_hover(Some(t), Some(&l), 0.0, (5.0, 85.0));
-        let button = r.decor(t, &l, 0.0).copy_button.expect("hovering the block");
+        let button = r
+            .decor(t, &l, 0.0, None)
+            .copy_button
+            .expect("hovering the block");
         assert_eq!(button.bounds, Rect::new(320.0, 80.0, 80.0, 20.0));
         let at = (330.0, 85.0);
         assert_eq!(
@@ -1083,10 +1136,10 @@ mod tests {
             click(&mut r, t, &l, at, now).effect,
             Some(ReadingEffect::Copy("ls -la".into()))
         );
-        assert!(r.decor(t, &l, 0.0).copy_button.unwrap().copied);
+        assert!(r.decor(t, &l, 0.0, None).copy_button.unwrap().copied);
         r.pointer_hover(Some(t), Some(&l), 0.0, (5.0, 5.0));
         assert!(
-            r.decor(t, &l, 0.0).copy_button.is_none(),
+            r.decor(t, &l, 0.0, None).copy_button.is_none(),
             "Copied ends when the button hides"
         );
     }
@@ -1116,7 +1169,7 @@ mod tests {
     fn hint_shows_the_href_host_under_the_link_only_while_hovered() {
         let (mut r, t, l) = (OutputReading::default(), SceneId::new(), doc());
         r.pointer_hover(Some(t), Some(&l), 0.0, LINK);
-        let decor = r.decor(t, &l, 0.0);
+        let decor = r.decor(t, &l, 0.0, None);
         assert_eq!(decor.link, Some((4, 8)));
         let (host, rect) = decor.hint.expect("hint");
         assert_eq!(host, "example.com");

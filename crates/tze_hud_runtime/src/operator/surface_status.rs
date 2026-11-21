@@ -26,6 +26,8 @@ pub struct SurfaceSnapshot {
     /// The pointer shape the runtime last applied, or `None` while the app
     /// beneath the overlay owns the pointer.
     pub cursor: Option<&'static str>,
+    /// The pressed link's local feedback: `opening`, `opened` or `failed`.
+    pub link_feedback: Option<&'static str>,
 }
 
 impl SurfaceProbe {
@@ -54,6 +56,8 @@ pub struct UiMirror {
     pub reading: HashMap<SceneId, ReadingUi>,
     /// [`SurfaceSnapshot::cursor`].
     pub cursor: Option<&'static str>,
+    /// The pressed link's local feedback: `opening`, `opened` or `failed`.
+    pub link_feedback: Option<&'static str>,
 }
 
 /// Admin-only OUTPUT reading state of one portal: no text crosses here.
@@ -69,6 +73,15 @@ pub struct ReadingUi {
 
 /// The main thread's [`UiMirror`], written each settle.
 pub type UiHandle = Arc<StdMutex<UiMirror>>;
+
+/// The admin name of a link feedback state (never the URL).
+pub fn link_feedback_name(state: tze_hud_scene::LinkFeedbackState) -> &'static str {
+    match state {
+        tze_hud_scene::LinkFeedbackState::Opening => "opening",
+        tze_hud_scene::LinkFeedbackState::Opened => "opened",
+        tze_hud_scene::LinkFeedbackState::Failed => "failed",
+    }
+}
 
 /// The admin name of a cursor shape.
 pub fn cursor_name(cursor: tze_hud_input::PortalCursor) -> &'static str {
@@ -105,12 +118,15 @@ pub fn probe(
                     widgets: widgets_json(&scene, &ui, &displays),
                     link_launches: link_launches.load(Ordering::Relaxed),
                     cursor: ui.cursor,
+                    link_feedback: ui.link_feedback,
                 };
             }
             if std::time::Instant::now() >= deadline {
+                let ui = ui.lock().unwrap_or_else(|e| e.into_inner()).clone();
                 return SurfaceSnapshot {
                     link_launches: link_launches.load(Ordering::Relaxed),
-                    cursor: ui.lock().unwrap_or_else(|e| e.into_inner()).cursor,
+                    cursor: ui.cursor,
+                    link_feedback: ui.link_feedback,
                     ..Default::default()
                 };
             }
@@ -705,6 +721,22 @@ mod tests {
         assert_eq!(observation.read().cursor, Some("hand"));
         let _held = scene.try_lock().unwrap();
         assert_eq!(observation.read().cursor, Some("hand"), "scene contention");
+    }
+
+    /// R3.2: link feedback is reported by state name only, never the URL.
+    #[test]
+    fn reports_link_feedback_by_state_name() {
+        use tze_hud_scene::LinkFeedbackState as S;
+        assert_eq!(
+            [S::Opening, S::Opened, S::Failed].map(link_feedback_name),
+            ["opening", "opened", "failed"]
+        );
+        let scene = Arc::new(tokio::sync::Mutex::new(SceneGraph::new(800.0, 600.0)));
+        let ui = Arc::new(StdMutex::new(UiMirror::default()));
+        let observation = probe(scene, ui.clone(), Arc::new(AtomicU64::new(0)));
+        assert_eq!(observation.read().link_feedback, None);
+        ui.lock().unwrap().link_feedback = Some("opened");
+        assert_eq!(observation.read().link_feedback, Some("opened"));
     }
 
     #[test]

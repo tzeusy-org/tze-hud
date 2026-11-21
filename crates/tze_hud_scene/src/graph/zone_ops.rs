@@ -1272,7 +1272,11 @@ impl SceneGraph {
                         return None;
                     }
                     self.overlay.notification_link_attempts.insert(stamp, mono);
-                    return Some(super::NotificationActivation::OpenUrl(url));
+                    return Some(super::NotificationActivation::OpenUrl {
+                        url,
+                        publication_id: key,
+                        index: *index,
+                    });
                 }
                 super::PendingActionKind::Callback(action.callback_id.clone()?)
             }

@@ -841,6 +841,11 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         description: "Trailing mark on a notification HTTPS link button",
         default_value: "↗",
     },
+    CanonicalToken {
+        key: "link.feedback.ms",
+        description: "How long a pressed link shows Opened or Couldn't open (ms)",
+        default_value: "1500",
+    },
     // Runtime system card / toast (pairing code, update notices); never agent-visible.
     CanonicalToken {
         key: "system_card.background",

@@ -694,6 +694,57 @@ async fn notification_actions_layout_matches_hit_regions() {
                 .iter()
                 .any(|item| ["1", "2", "3", "4"].contains(&item.text.as_ref()))
         );
+        // A pressed url action says what happened in its label's exact box;
+        // failure takes `color.error`. Nothing else moves.
+        scene.overlay.notification_answer = None;
+        let geometry = |item: &crate::text::TextItem| {
+            (
+                item.pixel_x,
+                item.pixel_y,
+                item.bounds_width,
+                item.bounds_height,
+            )
+        };
+        let idle = after.iter().find(|item| &*item.text == labels[1]).unwrap();
+        let error =
+            super::super::token_colors::parse_hex_color(&compositor.token_map["color.error"])
+                .unwrap();
+        for state in [
+            tze_hud_scene::LinkFeedbackState::Opening,
+            tze_hud_scene::LinkFeedbackState::Opened,
+            tze_hud_scene::LinkFeedbackState::Failed,
+        ] {
+            scene.set_link_feedback(Some((
+                tze_hud_scene::LinkFeedbackTarget::CardAction {
+                    publication_id,
+                    index: 1,
+                },
+                state,
+            )));
+            let shown = compositor.collect_text_items(&scene, 1280.0, 1080.0);
+            let item = shown
+                .iter()
+                .find(|item| &*item.text == state.label())
+                .unwrap();
+            assert_eq!(
+                geometry(item),
+                geometry(idle),
+                "{state:?} keeps the label's box"
+            );
+            if state == tze_hud_scene::LinkFeedbackState::Failed {
+                assert_eq!(item.color[..3], crate::text::rgba_to_srgb_u8(error)[..3]);
+            } else {
+                assert_eq!(item.color, idle.color);
+            }
+            assert_eq!(
+                shown.iter().filter(|item| &*item.text == labels[1]).count(),
+                1,
+                "the other card's label is untouched"
+            );
+            compositor.populate_zone_hit_regions(&mut scene, 1280.0, 1080.0);
+            assert_eq!(scene.overlay.zone_hit_regions, regions);
+        }
+        scene.set_link_feedback(None);
     }
 }
 

@@ -12,7 +12,12 @@ use std::sync::Arc;
 /// An accepted notification outcome, delivered only after unlocking the scene.
 pub enum NotificationActivation {
     Callback(RenderWakeNotifier),
-    OpenUrl(String),
+    /// Open `url`, the encoded target of action `index` of `publication_id`.
+    OpenUrl {
+        url: String,
+        publication_id: SceneId,
+        index: usize,
+    },
 }
 
 /// Returns a `SystemClock` wrapped in `Arc<dyn Clock>`.
@@ -344,6 +349,17 @@ impl SceneGraph {
     #[inline]
     pub fn bump_geometry_epoch(&mut self) {
         self.geometry_epoch += 1;
+    }
+
+    /// Set the pressed link's feedback; repaints only on change.
+    pub fn set_link_feedback(
+        &mut self,
+        feedback: Option<(crate::LinkFeedbackTarget, crate::LinkFeedbackState)>,
+    ) {
+        if self.overlay.link_feedback != feedback {
+            self.overlay.link_feedback = feedback;
+            self.bump_geometry_epoch();
+        }
     }
 
     /// Set one portal's OUTPUT reading decoration; repaints only on change.

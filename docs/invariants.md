@@ -140,6 +140,13 @@ a timer or repaint. Safe mode, native permission and local cancellation remain
 fail-closed. The owned parser-encoded target leaves all scene/shared guards
 before a dedicated COM/ShellExecuteExW worker; blocking it cannot block scene
 or frame progress. Opener failures neither expose URLs nor change chrome state.
+Press feedback ("Opening…", then "Opened" or "Couldn't open") is one
+main-thread slot drawn inside the pressed control's existing bounds: the
+worker sets a completion flag and wakes the loop once, the shown result has
+one deadline, and a handoff that never returns arms nothing. It never moves
+hit geometry and never reaches an agent
+(`card_link_feedback_shows_opening_then_the_worker_result`,
+`link_worker_that_never_returns_arms_no_wake`).
 The existing event-loop action/keyboard/idle parents and compositor layout/scale
 parents exercise these contracts; physical Windows browser foreground remains
 separate acceptance.

@@ -56,8 +56,8 @@ pub use mutation::{
     BatchTimingHints, MAX_BATCH_SIZE, MutationBatch, MutationResult, SceneMutation,
 };
 pub use portal_reading::{
-    PortalCopyButton, PortalGlyph, PortalLink, PortalReadingDecor, PortalReadingLayout,
-    https_link_target,
+    LinkFeedbackState, LinkFeedbackTarget, PortalCopyButton, PortalGlyph, PortalLink,
+    PortalReadingDecor, PortalReadingLayout, https_link_target,
 };
 pub use publication_defaults::{
     DEFAULT_ANSWER_WINDOW_MS, MAX_ANSWER_WINDOW_MS, PublicationDefaults,

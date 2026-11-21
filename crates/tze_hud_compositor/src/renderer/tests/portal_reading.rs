@@ -27,6 +27,7 @@ async fn selection_highlight_and_link_underline_use_reading_tokens() {
         "portal.transcript.link_color".to_string(),
         "#00FF00".to_string(),
     );
+    tokens.insert("color.error".to_string(), "#FF00FF".to_string());
     compositor.set_token_map(tokens);
 
     let mut scene = SceneGraph::new(w as f32, h as f32);
@@ -142,6 +143,48 @@ async fn selection_highlight_and_link_underline_use_reading_tokens() {
         before,
         "clearing restores the frame"
     );
+
+    // A pressed link's hint pill says what happened in place of the host;
+    // failure takes `color.error`.
+    let tile = scene.tiles[&tile_id].clone();
+    let anchor = Rect::new(10.0, 10.0, 160.0, 20.0);
+    let mut host_color = None;
+    for (feedback, words) in [
+        (None, "example.com"),
+        (
+            Some(tze_hud_scene::LinkFeedbackState::Opening),
+            "Opening\u{2026}",
+        ),
+        (Some(tze_hud_scene::LinkFeedbackState::Opened), "Opened"),
+        (
+            Some(tze_hud_scene::LinkFeedbackState::Failed),
+            "Couldn't open",
+        ),
+    ] {
+        scene.set_portal_reading(
+            tile_id,
+            tze_hud_scene::PortalReadingDecor {
+                link: Some((link.start, link.end)),
+                hint: Some(("example.com".into(), anchor)),
+                hint_feedback: feedback,
+                ..Default::default()
+            },
+        );
+        let (mut rects, mut items) = (Vec::new(), Vec::new());
+        compositor.collect_portal_reading_affordances(&tile, &scene, &mut rects, &mut items);
+        let pill = items
+            .iter()
+            .find(|i| i.pixel_x == tile_bounds.x + anchor.x)
+            .expect("hint pill label");
+        assert_eq!(&*pill.text, words);
+        let host = *host_color.get_or_insert(pill.color);
+        if feedback == Some(tze_hud_scene::LinkFeedbackState::Failed) {
+            assert_eq!(pill.color[..3], [255, 0, 255], "color.error");
+        } else {
+            assert_eq!(pill.color, host);
+        }
+    }
+    scene.set_portal_reading(tile_id, Default::default());
 
     // Same visible text, new target (a keyed replacement): the shape
     // signature is unchanged, but the published link must carry the new href.
