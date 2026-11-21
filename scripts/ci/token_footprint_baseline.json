@@ -428,8 +428,8 @@
     }
   },
   "approval": {
-    "status": "pending_owner_review",
-    "decision_reference": "hud-ohgc9.14 owner-signed spec (2026-11-20, option A): AC5 requires owner acceptance of the new tools_list bytes at review. Until then this baseline is pending; the prior approval (hud-ohgc9.9) is kept under previous_approval.",
+    "status": "owner_approved",
+    "decision_reference": "hud-ohgc9.14 AC5: the owner explicitly accepted the tools_list baseline (wait_ms maximum 30000->55000; 2,711 model-visible bytes / 622 tokens and 2,813 wire bytes / 659 tokens unchanged, new flow fingerprint) for PR1673 on 2026-11-21. The prior approval (hud-ohgc9.9) is kept under previous_approval.",
     "basis": "Source-bound calibration on 6db3a318 plus this change: the two tools/list `maximum` values for wait_ms change 30000->55000, so tools_list keeps 2,711 model-visible bytes / 622 tokens (2,813 wire bytes / 659 tokens) with a new flow fingerprint. Every other flow keeps byte-identical fingerprints and metrics: discover126, zone39, widget22, error45, complete choice114, choice wait77 (still sends wait_ms 30000), choice labels65, portal137. Ceilings, tokenizer, flow version4 and accounting unchanged. Two byte-identical current-source measurements. No Windows acceptance is inferred."
   },
   "previous_approval": {

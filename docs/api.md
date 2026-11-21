@@ -1677,8 +1677,8 @@ Raising the `wait_ms` cap to 55000 (`hud-ohgc9.14`) changes the two
 `maximum` values in `tools/list` from 30000 to 55000: the same 2,711
 model-visible bytes and 622 tokens, a new fingerprint. Every other flow,
 including `notification_choice_wait` (which still sends `wait_ms:30000`),
-keeps identical bytes; the new `tools/list` bytes await owner acceptance
-(baseline approval `pending_owner_review`).
+keeps identical bytes. The owner **accepted** the new `tools/list` baseline
+for PR1673 on 2026-11-21.
 
 All nine measurements use canonical flow version 4 and `tiktoken-rs` 0.12.0,
 `o200k_base`. The discovery-audience change (`hud-ljhku.7`, source `177e1096`)
