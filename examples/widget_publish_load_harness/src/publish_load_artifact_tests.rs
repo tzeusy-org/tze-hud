@@ -1,4 +1,4 @@
-use tze_hud_telemetry::{
+use crate::publish_load::{
     ByteAccountingMode, PublishLoadArtifact, PublishLoadCalibrationStatus, PublishLoadIdentity,
     PublishLoadMetrics, PublishLoadMode, PublishLoadThresholds, PublishLoadTraceability,
     PublishLoadTransport, PublishLoadVerdict,
