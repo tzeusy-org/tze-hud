@@ -361,6 +361,9 @@ pub struct Compositor {
     /// scale ([`tze_hud_config::tokens::secondary_zone_tokens`]); rebuilt by
     /// `set_token_map`. Read through [`Compositor::zone_tokens`].
     secondary_zone_tokens: HashMap<String, HashMap<String, String>>,
+    /// While a stack placed on another display is walked: its zone and the
+    /// token key that zone resolves by ([`Compositor::tokens_for_stack`]).
+    placed_stack: std::cell::RefCell<Option<(String, String)>>,
     /// Startup-resolved zone curves and fallback exit span, never parsed per frame.
     zone_motion: easing::ZoneMotion,
     /// Decoded RGBA image bytes indexed by `ResourceId`.
@@ -845,6 +848,111 @@ pub(crate) fn zone_geometry_in(
     }
 }
 
+/// One display's share of a shown zone's publications. A notification-area
+/// question placed on another display draws in its own stack there, laid out
+/// on that display's rect; everything else keeps one stack per zone.
+pub(crate) struct ZoneStack<'a> {
+    pub(crate) name: &'a String,
+    pub(crate) publishes: std::borrow::Cow<'a, [ZonePublishRecord]>,
+    /// The display (bounds, name) this stack resolves on, when it is not
+    /// the zone's own.
+    pub(crate) display: Option<(Rect, String)>,
+}
+
+impl ZoneStack<'_> {
+    /// The key this stack's tokens resolve by: the zone, or the zone placed
+    /// on another display (that monitor's scale).
+    pub(crate) fn token_key(&self) -> std::borrow::Cow<'_, str> {
+        match &self.display {
+            Some((_, display)) => crate::display::placed_zone_key(self.name, display).into(),
+            None => self.name.as_str().into(),
+        }
+    }
+}
+
+/// Shown zones in paint order, the notification area split per display.
+pub(crate) fn zone_stacks_in<'a>(
+    layout: &crate::display::DisplayLayout,
+    scene: &'a SceneGraph,
+) -> Vec<ZoneStack<'a>> {
+    scene
+        .shown_zone_publishes()
+        .flat_map(|(name, publishes)| zone_stacks_for(layout, name, publishes))
+        .collect()
+}
+
+/// [`zone_stacks_in`] for one zone. Records keep their stack order inside
+/// each display; a display that is the zone's own, or is not connected,
+/// draws with the zone's stack (S7: a disconnected display's cards fall back).
+pub(crate) fn zone_stacks_for<'a>(
+    layout: &crate::display::DisplayLayout,
+    name: &'a String,
+    publishes: &'a Vec<ZonePublishRecord>,
+) -> Vec<ZoneStack<'a>> {
+    let own = layout
+        .zone_display_rect(name)
+        .or_else(|| layout.displays().iter().find(|d| d.primary).map(|d| d.rect));
+    let elsewhere = |record: &ZonePublishRecord| {
+        let display = record.display.as_deref()?;
+        let rect = layout
+            .display_rect(display)
+            .filter(|rect| Some(*rect) != own)?;
+        Some((rect, crate::display::normalize_display_name(display)))
+    };
+    if !publishes.iter().any(|record| elsewhere(record).is_some()) {
+        return vec![ZoneStack {
+            name,
+            publishes: std::borrow::Cow::Borrowed(publishes),
+            display: None,
+        }];
+    }
+    type Placed = Option<(Rect, String)>;
+    let mut stacks: Vec<(Placed, Vec<ZonePublishRecord>)> = vec![(None, Vec::new())];
+    for record in publishes {
+        let display = elsewhere(record);
+        match stacks.iter_mut().find(|(d, _)| *d == display) {
+            Some((_, records)) => records.push(record.clone()),
+            None => stacks.push((display, vec![record.clone()])),
+        }
+    }
+    stacks
+        .into_iter()
+        .filter(|(_, records)| !records.is_empty())
+        .map(|(display, records)| ZoneStack {
+            name,
+            publishes: std::borrow::Cow::Owned(records),
+            display,
+        })
+        .collect()
+}
+
+/// A stack's zone bounds in canvas pixels: on its display when it has one.
+pub(crate) fn stack_geometry_in(
+    layout: &crate::display::DisplayLayout,
+    stack: &ZoneStack<'_>,
+    policy: &GeometryPolicy,
+    sw: f32,
+    sh: f32,
+) -> (f32, f32, f32, f32) {
+    match &stack.display {
+        Some((display, _)) => {
+            let (x, y, w, h) =
+                Compositor::resolve_zone_geometry(policy, display.width, display.height);
+            (x + display.x, y + display.y, w, h)
+        }
+        None => zone_geometry_in(layout, stack.name, policy, sw, sh),
+    }
+}
+
+/// Clears [`Compositor::tokens_for_stack`]'s override when dropped.
+pub(super) struct StackTokens<'a>(&'a std::cell::RefCell<Option<(String, String)>>);
+
+impl Drop for StackTokens<'_> {
+    fn drop(&mut self) {
+        self.0.borrow_mut().take();
+    }
+}
+
 /// Backends the windowed compositor requests: Vulkan on Linux, D3D12 and
 /// Vulkan on Windows, Metal on macOS. Headless hardware selection uses all
 /// backends; forced software selection defers GL until primary backends have
@@ -1003,6 +1111,7 @@ impl Compositor {
             last_scroll_smooth_at: None,
             token_map: HashMap::new(),
             secondary_zone_tokens: HashMap::new(),
+            placed_stack: Default::default(),
             zone_motion: easing::ZoneMotion::from_token_map(&HashMap::new()),
             markdown_primer: crate::markdown::MarkdownPrimer::new(),
             node_key_cache: HashMap::new(),
@@ -1355,6 +1464,7 @@ impl Compositor {
             last_scroll_smooth_at: None,
             token_map: HashMap::new(),
             secondary_zone_tokens: HashMap::new(),
+            placed_stack: Default::default(),
             zone_motion: easing::ZoneMotion::from_token_map(&HashMap::new()),
             markdown_primer: crate::markdown::MarkdownPrimer::new(),
             node_key_cache: HashMap::new(),
@@ -1451,6 +1561,33 @@ impl Compositor {
         sh: f32,
     ) -> (f32, f32, f32, f32) {
         zone_geometry_in(&self.display_layout, zone_name, policy, sw, sh)
+    }
+
+    /// Resolve `stack`'s tokens through [`Self::zone_tokens`] until the
+    /// returned guard drops, so a card placed on another display draws, lays
+    /// out and fits at that monitor's scale.
+    pub(super) fn tokens_for_stack(&self, stack: &ZoneStack<'_>) -> StackTokens<'_> {
+        *self.placed_stack.borrow_mut() = stack
+            .display
+            .as_ref()
+            .map(|_| (stack.name.clone(), stack.token_key().into_owned()));
+        StackTokens(&self.placed_stack)
+    }
+
+    /// Shown zone stacks in paint order; see [`zone_stacks_in`].
+    pub(super) fn zone_stacks<'a>(&self, scene: &'a SceneGraph) -> Vec<ZoneStack<'a>> {
+        zone_stacks_in(&self.display_layout, scene)
+    }
+
+    /// A stack's bounds; see [`stack_geometry_in`].
+    pub(super) fn stack_geometry(
+        &self,
+        stack: &ZoneStack<'_>,
+        policy: &GeometryPolicy,
+        sw: f32,
+        sh: f32,
+    ) -> (f32, f32, f32, f32) {
+        stack_geometry_in(&self.display_layout, stack, policy, sw, sh)
     }
 
     /// Attempt a recovery transition queued by a real window-surface acquire
@@ -1739,6 +1876,14 @@ impl Compositor {
     /// The tokens `zone` draws with: its monitor's px per dp when it is
     /// placed on a secondary at another scale, else `token_map`.
     pub(crate) fn zone_tokens(&self, zone: &str) -> &HashMap<String, String> {
+        if let Some((placed_zone, key)) = self.placed_stack.borrow().as_ref()
+            && placed_zone == zone
+        {
+            return self
+                .secondary_zone_tokens
+                .get(key)
+                .unwrap_or(&self.token_map);
+        }
         self.secondary_zone_tokens
             .get(zone)
             .unwrap_or(&self.token_map)

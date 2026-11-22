@@ -131,6 +131,7 @@ impl tze_hud_scene::TextFit for TextFitMeasurer {
             lease_id: None,
             publication_origin: None,
             caption: None,
+            display: None,
         };
         let slots = Compositor::zone_slot_layout_with_tokens(
             &zone_tokens,
@@ -304,6 +305,7 @@ impl tze_hud_scene::TextFit for TextFitMeasurer {
             lease_id: None,
             publication_origin: None,
             caption: None,
+            display: None,
         };
         // A publish the scene would refuse has nothing to report.
         if tze_hud_scene::graph::apply_contention(
@@ -665,6 +667,7 @@ mod tests {
             lease_id: None,
             publication_origin: None,
             caption: None,
+            display: None,
         };
         scene
             .zone_registry

@@ -288,6 +288,9 @@ pub(super) fn display_log_line(key: &str, spec: &MonitorSpec, primary: bool) -> 
     )
 }
 
+/// The zone whose question cards are placed per display.
+const QUESTION_ZONE: &str = "notification-area";
+
 /// Each monitor's scale factor for appearance: the primary's, and that of
 /// every zone placed on a connected secondary.
 pub(super) fn display_scales(
@@ -304,6 +307,13 @@ pub(super) fn display_scales(
                 .find(|m| m.name == display)
                 .map(|m| (zone.clone(), m.scale))
         })
+        // A question card placed on a secondary draws at that monitor's scale.
+        .chain(secondaries.iter().map(|m| {
+            (
+                tze_hud_compositor::placed_zone_key(QUESTION_ZONE, &m.name),
+                m.scale,
+            )
+        }))
         .collect();
     crate::appearance::DisplayScales {
         primary: primary.scale,
@@ -1452,6 +1462,11 @@ impl super::WinitApp {
     /// `specs` is the already accepted overlay plan, never fresh OS discovery.
     pub(super) fn publish_displays_for(&mut self, primary: &MonitorSpec, specs: &[MonitorSpec]) {
         let layout = display_layout(primary, specs, &self.state.zone_targets);
+        *self
+            .state
+            .placement_layout
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = layout.clone();
         let zones_on = |name: &str| -> Vec<String> {
             let mut zones: Vec<String> = self
                 .state
@@ -2032,7 +2047,18 @@ mod tests {
         ]);
         let scales = display_scales(&primary, &secondaries, &zones);
         assert_eq!(scales.primary, 1.25);
-        assert_eq!(scales.zones, HashMap::from([("subtitle".to_string(), 2.0)]));
+        assert_eq!(
+            scales.zones,
+            HashMap::from([
+                ("subtitle".to_string(), 2.0),
+                // Each secondary also scales a question placed there.
+                (
+                    "notification-area@DISPLAY6".to_string(),
+                    secondaries[0].scale
+                ),
+                ("notification-area@DISPLAY8".to_string(), 2.0),
+            ])
+        );
     }
 
     /// A DPI change alone is the same place: the window is kept.
@@ -2045,6 +2071,23 @@ mod tests {
         };
         assert!(before.same_place(&after));
         assert!(!before.same_place(&spec("DISPLAY6", 3840, 0)));
+    }
+
+    #[test]
+    fn a_question_placed_on_a_secondary_takes_its_scale() {
+        let (primary, mut secondaries) = rig();
+        secondaries[1].scale = 1.5;
+        let scales = display_scales(&primary, &secondaries, &HashMap::new());
+        assert_eq!(
+            scales.zones,
+            HashMap::from([
+                (
+                    "notification-area@DISPLAY6".to_string(),
+                    secondaries[0].scale
+                ),
+                ("notification-area@DISPLAY8".to_string(), 1.5),
+            ])
+        );
     }
 
     #[test]

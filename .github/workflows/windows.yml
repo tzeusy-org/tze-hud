@@ -190,6 +190,18 @@ jobs:
         timeout-minutes: 5
         run: python scripts/ci/windows_smoke.py --os-prefs --exe "target/$env:HUD_BUILD_PROFILE/tze_hud.exe" --config app/tze_hud_app/config/production.toml
 
+      # hud-ljhku.12.2, informational: the real question-placement reads
+      # (foreground, pointer, notification state) on the single-display
+      # runner resolve to that display.
+      - name: Question placement on one display (informational)
+        if: steps.changes.outputs.rendered == 'true' && env.HUD_BUILD_PROFILE != 'release'
+        continue-on-error: true
+        timeout-minutes: 15
+        shell: pwsh
+        run: |
+          cargo test --profile release-dev --locked -p tze_hud_runtime --lib -- question_placement::tests::windows_single_display --ignored --nocapture
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Install, single-instance, uninstall smoke
         timeout-minutes: 5
         run: python scripts/ci/windows_install_smoke.py --exe "target/$env:HUD_BUILD_PROFILE/tze_hud.exe"

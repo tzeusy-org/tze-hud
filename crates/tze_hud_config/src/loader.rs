@@ -482,6 +482,16 @@ pub(crate) fn validate_runtime(runtime: &crate::raw::RawRuntime, errors: &mut Ve
             "set answer_window_ms between 1 and 300000",
         ));
     }
+    if let Some(placement) = runtime.question_placement.as_deref()
+        && tze_hud_scene::QuestionPlacement::parse(placement).is_none()
+    {
+        errors.push(invalid(
+            "question_placement",
+            "focused, pointer or fixed",
+            format!("{placement:?}"),
+            "use one of focused, pointer, fixed",
+        ));
+    }
     if let Some(fps) = runtime.fps
         && !(1..=MAX_FPS).contains(&fps)
     {

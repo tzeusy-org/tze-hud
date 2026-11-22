@@ -430,14 +430,17 @@ pub(crate) fn default_sections(deps: &ControlPanelDeps) -> Vec<Box<dyn Section>>
         )));
     }
     sections.extend::<[Box<dyn Section>; 2]>([
-        Box::new(sections::LayoutSection::new(
-            Arc::clone(&deps.scene),
-            deps.render_wake.clone(),
-            deps.runtime.as_ref().and_then(|r| r.write_widget.clone()),
-            deps.runtime.as_ref().map(|r| r.displays.clone()),
-            deps.runtime.as_ref().and_then(|r| r.write_display.clone()),
-            deps.main_wake.clone(),
-        )),
+        Box::new(
+            sections::LayoutSection::new(
+                Arc::clone(&deps.scene),
+                deps.render_wake.clone(),
+                deps.runtime.as_ref().and_then(|r| r.write_widget.clone()),
+                deps.runtime.as_ref().map(|r| r.displays.clone()),
+                deps.runtime.as_ref().and_then(|r| r.write_display.clone()),
+                deps.main_wake.clone(),
+            )
+            .with_runtime(deps.runtime.clone()),
+        ),
         Box::new(sections::InputSection::new(
             deps.chords.clone(),
             deps.pairing.is_some(),

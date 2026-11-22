@@ -404,7 +404,9 @@ impl super::Compositor {
         if !scene.zones_shown() {
             return result;
         }
-        for (zone_name, publishes) in scene.shown_zone_publishes() {
+        for stack in self.zone_stacks(scene) {
+            let _tokens = self.tokens_for_stack(&stack);
+            let (zone_name, publishes) = (stack.name, &*stack.publishes);
             if publishes.is_empty() {
                 continue;
             }
@@ -432,7 +434,7 @@ impl super::Compositor {
             }
 
             let (x, y, w, h) =
-                self.zone_geometry(zone_name, &scene.effective_zone_geometry(zone_def), sw, sh);
+                self.stack_geometry(&stack, &scene.effective_zone_geometry(zone_def), sw, sh);
             let out = match zone_def.layer_attachment {
                 LayerAttachment::Background => &mut result.background,
                 LayerAttachment::Content => &mut result.content,

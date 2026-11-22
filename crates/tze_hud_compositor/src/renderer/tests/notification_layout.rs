@@ -1809,6 +1809,7 @@ fn test_update_publication_animations_seeds_fresh_state() {
         lease_id: None,
         publication_origin: None,
         caption: None,
+        display: None,
         zone_name: "notification-area".to_string(),
         publisher_namespace: "agent-b".to_string(),
         content: ZoneContent::Notification(NotificationPayload {

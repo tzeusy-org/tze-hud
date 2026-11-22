@@ -437,6 +437,8 @@ struct WindowedRuntimeState {
     secondaries: Vec<displays::SecondaryDisplay>,
     /// Secondary surfaces + layout for the compositor thread.
     display_targets: displays::SharedDisplayTargets,
+    /// The overlaid displays new question cards may be placed on.
+    placement_layout: Arc<StdMutex<tze_hud_compositor::DisplayLayout>>,
     /// Set when the monitor layout may have changed; re-synced next turn.
     displays_dirty: displays::DisplaysDirty,
     /// Creates secondary surfaces on the compositor's device.
@@ -2890,6 +2892,16 @@ impl WindowedRuntime {
                 .with_answer_window(cfg.answer_window_ms)
                 .with_capture(capture),
         );
+        let placement_layout = Arc::new(StdMutex::new(Default::default()));
+        crate::question_placement::install(
+            &mut shared_scene
+                .try_lock()
+                .expect("startup holds no scene lock"),
+            cfg.config_toml.as_deref(),
+            &live.publication_defaults,
+            Arc::clone(&placement_layout),
+            Arc::new(crate::question_placement::Win32Probe),
+        );
         let appearance = Arc::new(crate::appearance::Appearance::for_startup(
             raw_config_for_startup.as_ref(),
             cfg.config_file_path.as_deref().map(std::path::Path::new),
@@ -3375,6 +3387,7 @@ impl WindowedRuntime {
             primary_monitor: None,
             secondaries: Vec::new(),
             display_targets: Default::default(),
+            placement_layout,
             displays_dirty: Default::default(),
             surface_factory: None,
             zone_displays,
