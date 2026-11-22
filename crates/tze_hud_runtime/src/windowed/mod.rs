@@ -437,7 +437,8 @@ struct WindowedRuntimeState {
     secondaries: Vec<displays::SecondaryDisplay>,
     /// Secondary surfaces + layout for the compositor thread.
     display_targets: displays::SharedDisplayTargets,
-    /// The overlaid displays new question cards may be placed on.
+    /// The overlaid displays, secondaries in window order: where new
+    /// question cards may be placed, and which window shows a card.
     placement_layout: Arc<StdMutex<tze_hud_compositor::DisplayLayout>>,
     /// Set when the monitor layout may have changed; re-synced next turn.
     displays_dirty: displays::DisplaysDirty,
@@ -454,6 +455,10 @@ struct WindowedRuntimeState {
     /// The window the cursor was last reported in; `CursorMoved` positions
     /// are relative to it.
     cursor_window: Option<WindowId>,
+    /// The overlay window that last took keyboard focus (`Some` index into
+    /// `secondaries`, `None` for the primary). Tab onto a card on another
+    /// display moves keys to that display's window.
+    keyboard_window: Option<usize>,
     /// Times each secondary's window was recreated after its surface was
     /// lost; capped so a persistently failing monitor is left alone.
     secondary_recreates: std::collections::HashMap<String, u32>,
@@ -3394,6 +3399,7 @@ impl WindowedRuntime {
             display_keys: Vec::new(),
             zone_targets: Default::default(),
             cursor_window: None,
+            keyboard_window: None,
             secondary_recreates: Default::default(),
             overlay_refits: Default::default(),
             press_window: None,

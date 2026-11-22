@@ -321,6 +321,18 @@ pub fn populate_notification_hit_regions(
     )
 }
 
+/// [`populate_notification_hit_regions`] across the displays of `layout`:
+/// per-display stacks, as a windowed frame draws them.
+pub fn populate_notification_hit_regions_on(
+    scene: &mut SceneGraph,
+    layout: &crate::display::DisplayLayout,
+    sw: f32,
+    sh: f32,
+    token_map: &HashMap<String, String>,
+) -> u32 {
+    populate_notification_hit_regions_in(scene, layout, sw, sh, token_map, &Default::default())
+}
+
 /// [`populate_notification_hit_regions`] with zones resolved through a
 /// multi-display `layout` (regions land in scene coordinates).
 fn populate_notification_hit_regions_in(
@@ -353,6 +365,19 @@ fn populate_notification_hit_regions_in(
         .iter()
         .filter_map(|name| active.get_key_value(name))
         .flat_map(|(name, publishes)| super::zone_stacks_for(layout, name, publishes))
+        .collect();
+    let split_ranks: Vec<(String, HashMap<tze_hud_scene::SceneId, usize>)> = zone_names
+        .iter()
+        .filter(|name| stacks.iter().filter(|s| s.name == *name).count() > 1)
+        .filter_map(|name| {
+            let publishes = active.get(name)?;
+            let ranks = Compositor::stack_order(scene, name, publishes)
+                .into_iter()
+                .enumerate()
+                .map(|(rank, index)| (publishes[index].publication_id, rank))
+                .collect();
+            Some((name.clone(), ranks))
+        })
         .collect();
     for stack in &stacks {
         let (zone_name, publishes) = (stack.name, &*stack.publishes);
@@ -479,6 +504,28 @@ fn populate_notification_hit_regions_in(
                     tab_order += 1;
                 }
             }
+        }
+    }
+    // A zone split across displays tabs through its cards in the one stack
+    // order its cards would draw in on a single display, crossing windows.
+    for (zone_name, ranks) in split_ranks {
+        let members: Vec<usize> = (0..scene.overlay.zone_hit_regions.len())
+            .filter(|&i| scene.overlay.zone_hit_regions[i].zone_name == zone_name)
+            .collect();
+        let regions = &mut scene.overlay.zone_hit_regions;
+        let mut orders: Vec<u32> = members.iter().map(|&i| regions[i].tab_order).collect();
+        orders.sort_unstable();
+        let mut by_stack = members.clone();
+        by_stack.sort_by_key(|&i| {
+            (
+                ranks.get(&regions[i].publication_id).copied(),
+                regions[i].tab_order,
+            )
+        });
+        let reordered: Vec<_> = by_stack.iter().map(|&i| regions[i].clone()).collect();
+        for ((&slot, mut region), order) in members.iter().zip(reordered).zip(orders) {
+            region.tab_order = order;
+            regions[slot] = region;
         }
     }
     // Pointer queries are vector-first: later-painted zone groups go first.

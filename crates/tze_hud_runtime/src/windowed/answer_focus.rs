@@ -285,20 +285,31 @@ impl WinitApp {
         Ok(true)
     }
 
+    /// The overlay window that shows scene point (x, y): `Some` index into
+    /// the secondaries, `None` for the primary.
+    pub(super) fn display_window_at(&self, x: f32, y: f32) -> Option<usize> {
+        // The published layout lists the secondaries in window order.
+        self.state
+            .placement_layout
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .displays()
+            .iter()
+            .filter(|display| !display.primary)
+            .position(|display| display.rect.contains_point(x, y))
+    }
+
     /// Take OS keyboard focus on the window that shows scene point (x, y).
-    fn focus_native_window_at(&mut self, x: f32, y: f32) {
-        let secondary = self.state.primary_monitor.as_ref().and_then(|primary| {
-            self.state
-                .secondaries
-                .iter()
-                .find(|display| display.spec.scene_rect(primary).contains_point(x, y))
-        });
+    pub(super) fn focus_native_window_at(&mut self, x: f32, y: f32) {
+        let secondary = self.display_window_at(x, y);
         let window = secondary
+            .and_then(|index| self.state.secondaries.get(index))
             .map(|display| &display.window)
             .or(self.state.window.as_ref());
         if let Some(window) = window {
             super::lifecycle::focus_window_for_text_input(window);
         }
+        self.state.keyboard_window = secondary;
         self.state
             .wake
             .mark_main_work_pending(crate::idle_efficiency::RuntimeWakeupSource::SceneChange);
