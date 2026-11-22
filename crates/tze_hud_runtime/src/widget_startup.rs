@@ -12,7 +12,7 @@
 //!
 //! ## Built-in bundles
 //!
-//! The shipped gauge, progress-bar, status-indicator, countdown, KPI and stepper bundles are
+//! The shipped gauge, progress-bar, status-indicator, countdown, elapsed, KPI and stepper bundles are
 //! embedded in the binary and always registered. `[widget_bundles].paths` is
 //! optional; an on-disk bundle with the same type name overrides the built-in.
 //!
@@ -58,6 +58,7 @@ const BUILTIN_BUNDLES: &[(&str, BundleFiles)] = &[
     builtin_bundle!("progress-bar", ["track.svg", "fill.svg"]),
     builtin_bundle!("status-indicator", ["indicator.svg"]),
     builtin_bundle!("countdown", ["card.svg"]),
+    builtin_bundle!("elapsed", ["card.svg"]),
     builtin_bundle!("kpi", ["card.svg"]),
     builtin_bundle!("stepper", ["card.svg"]),
 ];
@@ -382,12 +383,13 @@ mod tests {
         v
     }
 
-    /// WHEN no [widget_bundles] section exists THEN all six built-in bundles
+    /// WHEN no [widget_bundles] section exists THEN all seven built-in bundles
     /// are still registered, and a missing on-disk root does not break startup.
     #[test]
     fn builtin_bundles_register_without_any_paths() {
         let expected = [
             "countdown",
+            "elapsed",
             "gauge",
             "kpi",
             "progress-bar",
@@ -518,6 +520,7 @@ mod tests {
             registered_types(&scene),
             [
                 "countdown",
+                "elapsed",
                 "gauge",
                 "kpi",
                 "progress-bar",

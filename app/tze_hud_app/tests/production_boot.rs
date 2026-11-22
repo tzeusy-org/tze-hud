@@ -82,13 +82,14 @@ async fn production_config_boots_with_builtin_widget_bundles() {
             .widget_registry
             .instances
             .values()
-            .any(|i| matches!(i.widget_type_name.as_str(), "kpi" | "stepper"))
+            .any(|i| matches!(i.widget_type_name.as_str(), "kpi" | "stepper" | "elapsed"))
     );
     for widget_type in [
         "gauge",
         "progress-bar",
         "status-indicator",
         "countdown",
+        "elapsed",
         "kpi",
         "stepper",
     ] {

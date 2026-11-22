@@ -292,7 +292,10 @@ pub fn build_widget_instance(
             .iter()
             .find(|p| p.name == *param_name)
         {
-            if let Some(value) = coerce_toml_to_widget_value(&any_val.0, decl.param_type) {
+            if let Some(mut value) = coerce_toml_to_widget_value(&any_val.0, decl.param_type) {
+                if let WidgetParameterValue::Deadline(d) = &mut value {
+                    d.counts_up = decl.deadline_counts_up();
+                }
                 current_params.insert(param_name.clone(), value);
             }
         }
@@ -388,11 +391,11 @@ fn validate_initial_params(
         // Type check.
         if coerce_toml_to_widget_value(raw_val, decl.param_type).is_none() {
             let type_name = match decl.param_type {
-                WidgetParamType::Deadline => "deadline<=24h (integer milliseconds 0..86400000)",
-                WidgetParamType::F32 => "f32 (numeric)",
-                WidgetParamType::String => "string",
-                WidgetParamType::Color => "color (array of 4 integers [r, g, b, a])",
-                WidgetParamType::Enum => "enum (string)",
+                WidgetParamType::Deadline => decl.value_hint(),
+                WidgetParamType::F32 => "f32 (numeric)".into(),
+                WidgetParamType::String => "string".into(),
+                WidgetParamType::Color => "color (array of 4 integers [r, g, b, a])".into(),
+                WidgetParamType::Enum => "enum (string)".into(),
             };
             errors.push(ConfigError {
                 code: ConfigErrorCode::WidgetInvalidInitialParams,

@@ -90,10 +90,12 @@ impl SceneGraph {
 
         match (&decl.param_type, submitted_value) {
             (WidgetParamType::Deadline, WidgetParameterValue::Deadline(d)) if d.valid() => {
-                // A supplied runtime snapshot is never an agent-set absolute time.
-                Ok(WidgetParameterValue::Deadline(
-                    crate::WidgetDeadline::relative(d.ends_in_ms),
-                ))
+                // A supplied runtime snapshot is never an agent-set absolute
+                // time; the direction comes from the declaration.
+                Ok(WidgetParameterValue::Deadline(crate::WidgetDeadline {
+                    counts_up: decl.deadline_counts_up(),
+                    ..crate::WidgetDeadline::relative(d.ends_in_ms)
+                }))
             }
             (WidgetParamType::Deadline, _) => Err(ValidationError::WidgetParameterTypeMismatch {
                 widget: widget_name.to_string(),
@@ -849,6 +851,7 @@ impl SceneGraph {
                 validated_params
                     .insert(decl.name.clone(), WidgetParameterValue::Deadline(d.clone()));
             } else if let WidgetParameterValue::Deadline(mut d) = decl.default_value.clone() {
+                d.counts_up = decl.deadline_counts_up();
                 d.snapshot(now_us);
                 validated_params.insert(decl.name.clone(), WidgetParameterValue::Deadline(d));
             }
