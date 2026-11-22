@@ -329,9 +329,9 @@ source links when implementation changes the status.
   builds scene nodes from `PortalView` and resolved tokens; the driver applies
   them directly. The resident adapter and protobuf render round trip are gone.
   The [projection crate](../crates/tze_hud_portal/src/lib.rs) no longer exports
-  the external authority, contract or coalescer. Portal-only `MutationProto`
-  fields 13–17 and their names are reserved; their wire messages, converters and
-  scene mutation variants are removed. Native rendering retains the checked
+  the external authority, contract or coalescer. The portal-only wire
+  mutations, their converters and scene mutation variants are removed, and the
+  remaining node and mutation messages followed once nothing carried them. Native rendering retains the checked
   direct scene methods. This is source evidence, not Windows owner acceptance.
   Follow-up source regressions cover cumulative unread/read-through state,
   an opaque foreground jump badge and the header drag band yielding to its own

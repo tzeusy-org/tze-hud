@@ -388,8 +388,9 @@ one composer node across root replacements. Regression owners:
 [`composer_focus_lost_on_blur_preserves_keyed_draft`](../crates/tze_hud_input/src/lib.rs),
 [`removing_focused_composer_tile_clears_local_echo`](../crates/tze_hud_runtime/src/windowed/lifecycle.rs),
 [`streamed_output_keeps_the_focused_draft`](../crates/tze_hud_runtime/src/windowed/keyboard.rs),
-[`composer_interaction_hit_region_survives_consecutive_transcript_republishes`](../crates/tze_hud_scene/src/mutation.rs),
-and [`hit_region_wire_cannot_enable_local_composer`](../crates/tze_hud_protocol/src/convert.rs).
+and [`composer_interaction_hit_region_survives_consecutive_transcript_republishes`](../crates/tze_hud_scene/src/mutation.rs).
+No wire message carries a node, so no agent can mark a hit region as a
+composer: [`removed_client_request_numbers_decode_to_empty_payload`](../crates/tze_hud_protocol/src/session_server/tests/session_handshake.rs).
 
 
 Native portal INPUT history and OUTPUT have independent local scroll tracking.
@@ -658,7 +659,7 @@ Refusals name the field and limit to fix, and no hint carries an internal id.
 - Refusal hints: `tze_hud_mcp` [`portal_refusals_name_the_field_and_its_limit`](../crates/tze_hud_mcp/src/server/tests.rs),
   [`scene_refusal_hints_are_fixed_id_free_and_short`](../crates/tze_hud_mcp/src/server/tests.rs)
 
-- `tze_hud_protocol` [`mutation_batch_oversized_rejected_with_structured_error`](../crates/tze_hud_protocol/tests/fuzz_protocol_boundary.rs)
+- `tze_hud_scene` [`batch_size_exceeded`](../crates/tze_hud_scene/tests/batch_atomicity.rs)
 - `tze_hud_mcp` [`test_structured_error_has_hint_field`](../crates/tze_hud_mcp/src/server/tests.rs), [`error_codes_are_unique_and_documented`](../crates/tze_hud_mcp/src/error.rs),
   [`every_returned_code_is_in_the_closed_set`](../crates/tze_hud_mcp/src/server/tests.rs)
 - `tze_hud_resource` `store_behavior`: [`rejections_carry_stable_wire_code_and_actionable_detail`](../crates/tze_hud_resource/tests/store_behavior.rs),
