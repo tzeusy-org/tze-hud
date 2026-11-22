@@ -404,8 +404,8 @@ pub const PORTAL_TOKEN_COMPOSER_PLACEHOLDER_COLOR: &str = "portal.composer.place
 //
 // These portal keys put the keyboard focus ring under the portal token
 // surface; the compositor resolves `portal.focus_ring.*` from its token map.
-// The color default in `tze_hud_scene::portal_defaults` is the one definition:
-// `tze_hud_input::default_focus_ring_color` parses it like any token value.
+// Their defaults in `tze_hud_scene::portal_defaults` are the one definition;
+// the compositor parses an unset color like any token value.
 
 /// Keyboard focus-ring stroke color (RGBA hex).
 pub const PORTAL_TOKEN_FOCUS_RING_COLOR: &str = "portal.focus_ring.color";

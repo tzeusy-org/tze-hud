@@ -191,9 +191,8 @@ pub const COMPOSER_SELECTION_COLOR: &str = "#3A7BD573";
 /// text) so an empty prompt reads as a hint.
 pub const COMPOSER_PLACEHOLDER_COLOR: &str = "#6B7689";
 
-// Focus-ring defaults. The color is the one definition: the input crate and
-// the compositor parse it sRGB→linear (≈ 0.033/0.216/1.0). The width matches
-// `tze_hud_input::DEFAULT_FOCUS_RING_WIDTH_PX`.
+// Focus-ring defaults, the one definition: the compositor parses the color
+// sRGB→linear (≈ 0.033/0.216/1.0) whether the token is set or not.
 pub const FOCUS_RING_COLOR: &str = "#3380FF";
 pub const FOCUS_RING_WIDTH_PX: &str = "2";
 

@@ -190,9 +190,39 @@ pub(super) fn sort_alert_banner_indices(publishes: &[ZonePublishRecord]) -> Vec<
     indices
 }
 
-/// Token hex colors parse to linear RGB through the input crate, so its
-/// focus-ring default and every compositor token read share one conversion.
-pub(super) use tze_hud_input::parse_hex_color;
+/// Parse a `#RRGGBB` or `#RRGGBBAA` hex string into `Rgba`.
+///
+/// This is a minimal, allocation-free parser used to resolve token color
+/// values at render time without depending on `tze_hud_config`.
+/// Hex channels are interpreted as sRGB design-token values and converted to
+/// linear RGB for the compositor pipeline.
+/// Returns `None` if the string does not match either form.
+pub(super) fn parse_hex_color(s: &str) -> Option<Rgba> {
+    let s = s.trim();
+    if !s.starts_with('#') || !s.is_ascii() {
+        return None;
+    }
+    let hex = &s[1..];
+    match hex.len() {
+        6 | 8 => {
+            let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+            let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+            let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+            let a = if hex.len() == 8 {
+                u8::from_str_radix(&hex[6..8], 16).ok()?
+            } else {
+                255
+            };
+            Some(Rgba::new(
+                srgb_to_linear(r as f32 / 255.0),
+                srgb_to_linear(g as f32 / 255.0),
+                srgb_to_linear(b as f32 / 255.0),
+                a as f32 / 255.0,
+            ))
+        }
+        _ => None,
+    }
+}
 
 /// Look up a token key in the resolved token map and parse it as a color.
 /// Returns `None` if the key is absent or the value is not a valid hex color.
@@ -430,11 +460,9 @@ pub(super) fn resolve_transcript_max_measure_px(token_map: &HashMap<String, Stri
 ///
 /// The keyboard focus ring is drawn by [`Compositor::render_node`] around the
 /// focused `HitRegionNode` so a keyboard-only viewer can always see where focus
-/// landed. Color and width are token-driven — never hardcoded in
-/// the compositor. The color default is
-/// [`default_focus_ring_color`](tze_hud_input::default_focus_ring_color), the
-/// token default parsed like any token value; the width default is
-/// [`DEFAULT_FOCUS_RING_WIDTH_PX`](tze_hud_input::DEFAULT_FOCUS_RING_WIDTH_PX).
+/// landed. Color and width are token-driven — never hardcoded in the
+/// compositor — and an unset token falls back to its default in
+/// `tze_hud_scene::portal_defaults`, parsed like a set token.
 #[derive(Clone, Copy, Debug)]
 pub(super) struct FocusRingTokens {
     /// Ring color as a linear-sRGB `[r, g, b, a]` array (ready for `gpu_color_raw`).
@@ -446,18 +474,19 @@ pub(super) struct FocusRingTokens {
 /// Resolve [`FocusRingTokens`] from the compositor token map.
 ///
 /// Keys follow the portal token namespace (`portal.focus_ring.*`). Falls back to
-/// the `tze_hud_input` focus-ring defaults for any missing/unparsable token.
+/// the `portal_defaults` focus-ring defaults for any missing/unparsable token.
 #[inline]
 pub(super) fn resolve_focus_ring_tokens(token_map: &HashMap<String, String>) -> FocusRingTokens {
     let color = resolve_token_color(token_map, "portal.focus_ring.color")
-        .unwrap_or_else(tze_hud_input::default_focus_ring_color)
+        .or_else(|| parse_hex_color(portal_default::FOCUS_RING_COLOR))
+        .expect("the focus-ring token default is a hex color")
         .to_array();
 
     let width_px = token_map
         .get("portal.focus_ring.width_px")
         .and_then(|v| v.parse::<f32>().ok())
         .filter(|v| v.is_finite() && *v > 0.0)
-        .unwrap_or(tze_hud_input::DEFAULT_FOCUS_RING_WIDTH_PX)
+        .unwrap_or_else(|| portal_default::number(portal_default::FOCUS_RING_WIDTH_PX))
         * px_scale(token_map);
 
     FocusRingTokens { color, width_px }
@@ -1075,24 +1104,28 @@ mod tests {
             .collect()
     }
 
-    /// The input crate's focus-ring default and the compositor's ring agree:
-    /// both are the token default, parsed sRGB→linear like a set token.
+    /// An unset focus-ring token draws exactly its default, parsed sRGB→linear
+    /// like a set token (≈ 0.033/0.216/1.0 at 2px).
     #[test]
-    fn focus_ring_default_matches_input_and_the_token_default() {
-        let token_default = tze_hud_scene::portal_defaults::FOCUS_RING_COLOR;
-        let input = tze_hud_input::ResolvedFeedbackStyle::defaults().focus_ring_color;
-        let unset = resolve_focus_ring_tokens(&token_map(&[])).color;
-        let set =
-            resolve_focus_ring_tokens(&token_map(&[("portal.focus_ring.color", token_default)]))
-                .color;
-        assert_eq!(unset, input.to_array());
-        assert_eq!(set, unset);
-        let [r, g, b, a] = unset;
+    fn unset_focus_ring_equals_the_token_default() {
+        let unset = resolve_focus_ring_tokens(&token_map(&[]));
+        let set = resolve_focus_ring_tokens(&token_map(&[
+            ("portal.focus_ring.color", portal_default::FOCUS_RING_COLOR),
+            (
+                "portal.focus_ring.width_px",
+                portal_default::FOCUS_RING_WIDTH_PX,
+            ),
+        ]));
+        assert_eq!(unset.color, set.color);
+        assert_eq!(unset.width_px, set.width_px);
+        let [r, g, b, a] = unset.color;
         assert!(
             (r - 0.033).abs() < 1e-3 && (g - 0.216).abs() < 1e-3,
-            "{unset:?}"
+            "{:?}",
+            unset.color
         );
         assert_eq!((b, a), (1.0, 1.0));
+        assert_eq!(unset.width_px, 2.0);
     }
 
     #[test]

@@ -59,40 +59,6 @@ pub fn srgb_to_linear(c: f32) -> f32 {
     }
 }
 
-/// Parse a `#RRGGBB` or `#RRGGBBAA` hex string into `Rgba`.
-///
-/// This is a minimal, allocation-free parser used to resolve token color
-/// values without depending on `tze_hud_config`.
-/// Hex channels are interpreted as sRGB design-token values and converted to
-/// linear RGB for the compositor pipeline, which uses this same function.
-/// Returns `None` if the string does not match either form.
-pub fn parse_hex_color(s: &str) -> Option<tze_hud_scene::Rgba> {
-    let s = s.trim();
-    if !s.starts_with('#') || !s.is_ascii() {
-        return None;
-    }
-    let hex = &s[1..];
-    match hex.len() {
-        6 | 8 => {
-            let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
-            let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
-            let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
-            let a = if hex.len() == 8 {
-                u8::from_str_radix(&hex[6..8], 16).ok()?
-            } else {
-                255
-            };
-            Some(tze_hud_scene::Rgba::new(
-                srgb_to_linear(r as f32 / 255.0),
-                srgb_to_linear(g as f32 / 255.0),
-                srgb_to_linear(b as f32 / 255.0),
-                a as f32 / 255.0,
-            ))
-        }
-        _ => None,
-    }
-}
-
 /// Token-resolved visual properties for the "jump to latest" pill.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct JumpToLatestTokens {
