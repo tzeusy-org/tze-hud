@@ -33,6 +33,7 @@ class FakeHud(BaseHTTPRequestHandler):
     sessions = set()  # live Mcp-Session-Id values
     opened = 0
     deletes = []  # (session id, monotonic time) per DELETE /mcp
+    inputs = {}  # session id -> hud_input items for that session
 
     def do_DELETE(self):
         session = self.headers.get("Mcp-Session-Id")
@@ -125,6 +126,9 @@ class FakeHud(BaseHTTPRequestHandler):
             elif method == "tools/list":
                 result = {"tools": [{"name": name, "description": "upstream sentinel", "inputSchema": {"type": "object"}}
                                     for name in ["hud_surfaces", "hud_publish", "hud_hold", "hud_clear", "hud_input"]]}
+            elif method == "tools/call" and body["params"].get("name") == "hud_input" and session in self.inputs:
+                text = json.dumps({"items": self.inputs[session]})
+                result = {"content": [{"type": "text", "text": text}]}
             elif method == "tools/call" and mode == "publish_success":
                 result = {"content": [{"type": "text", "text": '{"ok":true}'}]}
             elif method == "tools/call":
@@ -162,7 +166,7 @@ def hud(tmp_path):
     FakeHud.issued = 0
     FakeHud.grpc_target = "h:50051"
     FakeHud.requests, FakeHud.modes, FakeHud.entered = [], {}, {}
-    FakeHud.sessions, FakeHud.opened, FakeHud.deletes = set(), 0, []
+    FakeHud.sessions, FakeHud.opened, FakeHud.deletes, FakeHud.inputs = set(), 0, [], {}
     FakeHud.release = threading.Event()
     server = ThreadingHTTPServer(("127.0.0.1", 0), FakeHud)
     # Teardown is fixture housekeeping, not part of an adapter deadline.
@@ -1447,6 +1451,8 @@ def test_adapter_reinitializes_once_after_404_and_retries_each_call(hud):
         adapter.send("ping", "after")
         assert adapter.receive() == {"jsonrpc": "2.0", "id": "after", "result": {}}
         assert not adapter.buffer, "no second initialize result reached the client"
+        record = home / ".config" / "tze-hud" / "sessions" / f"{os.getpid()}.json"
+        assert json.loads(record.read_text())["session"] == "session-2", "helpers follow the new id"
 
         # A retried call refused again fails instead of looping.
         FakeHud.modes["again"] = "unknown-session"
@@ -1482,3 +1488,54 @@ def test_session_label_is_the_project_folder_else_the_cwd(tmp_path, monkeypatch)
     sent = module["with_label"]({"jsonrpc": "2.0", "id": 1, "method": "initialize",
                                  "params": {"_meta": {"other": 1}}})
     assert sent["params"]["_meta"] == {"other": 1, "tze-hud/label": tmp_path.name}
+
+
+PORTAL_CLIENT = SCRIPTS.parents[1] / "hud-projection" / "scripts" / "portal_client.py"
+
+
+def test_a_background_waiter_joins_the_adapter_session(hud):
+    """The adapter keeps its session id in a private record for processes
+    its client starts; portal_client.py's waiter sends it and so sees the
+    replies to a portal the model attached through MCP. A clean stop removes
+    the record."""
+    host, home = hud
+    pair(host, home)
+    record = home / ".config" / "tze-hud" / "sessions" / f"{os.getpid()}.json"
+    item = {"id": "in-1", "s": "portal:main", "text": "ship it"}
+    env = {**os.environ, "HOME": str(home)}
+    env.pop("HUD_HOST", None)
+    with AdapterProcess(home) as adapter:
+        adapter.ready()
+        assert record.stat().st_mode & 0o777 == 0o600
+        assert record.parent.stat().st_mode & 0o077 == 0
+        saved = json.loads(record.read_text())
+        assert saved["session"] == "session-1" and saved["adapter"] == adapter.process.pid
+        assert FakeHud.last_psk not in record.read_text()
+        FakeHud.inputs["session-1"] = [item]
+        waiter = subprocess.run([sys.executable, str(PORTAL_CLIENT), "poll", "--wait-ms", "0", "--ack"],
+                                capture_output=True, text=True, env=env, timeout=10)
+        assert waiter.returncode == 0, waiter.stderr
+        assert json.loads(waiter.stdout.splitlines()[0]) == item
+        polls = [r for r in FakeHud.requests if r["body"].get("params", {}).get("name") == "hud_input"]
+        assert polls and {r["session"] for r in polls} == {"session-1"}
+        adapter.stop(None)
+    assert not record.exists()
+
+
+def test_a_crashed_adapters_record_is_not_joined(hud):
+    """A record whose adapter is gone (or whose pid was reused) is ignored:
+    the client stays the agent's unscoped caller."""
+    host, home = hud
+    pair(host, home)
+    gone = subprocess.run([sys.executable, "-c", "import os; print(os.getpid())"],
+                          capture_output=True, text=True, check=True)
+    record = home / ".config" / "tze-hud" / "sessions" / f"{os.getpid()}.json"
+    record.parent.mkdir(mode=0o700, parents=True)
+    record.write_text(json.dumps({"schema": 1, "host": "127.0.0.1", "url": f"http://{host}/mcp",
+                                  "session": "session-9", "adapter": int(gone.stdout)}))
+    record.chmod(0o600)
+    env = {**os.environ, "HOME": str(home), "HUD_HOST": host}
+    subprocess.run([sys.executable, str(PORTAL_CLIENT), "poll", "--wait-ms", "0"],
+                   capture_output=True, text=True, env=env, timeout=10)
+    polls = [r for r in FakeHud.requests if r["body"].get("params", {}).get("name") == "hud_input"]
+    assert polls and all(r["session"] is None for r in polls)

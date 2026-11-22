@@ -19,7 +19,10 @@ with a 1 s deadline, even with calls in flight, releasing the session. A 404
 (the HUD restarted or released the session) re-initializes once, single-flight
 across concurrent calls and replaying the client's initialize, and retries
 each refused call once; the client never sees a second initialize result.
-A stopping adapter never re-initializes.
+A stopping adapter never re-initializes. The live session id is also kept in
+`~/.config/tze-hud/sessions/<client-pid>.json` (mode 0600, removed on a
+clean stop) so a helper the client starts, such as portal_client.py's
+background waiter, joins this session instead of running unscoped.
 """
 
 from __future__ import annotations
@@ -187,9 +190,11 @@ class Adapter:
     init_request = None
     reinitializing = False
     ending = None
+    owner = None  # The client process whose helpers may join this session.
 
     def __init__(self, endpoint):
         self.endpoint = endpoint
+        self.owner = os.getppid()
         self.selector = selectors.DefaultSelector()
         self.tasks = []
         self.input = bytearray()
@@ -363,8 +368,24 @@ class Adapter:
             elif "id" in request:
                 self.queue(failure(request["id"], "HUD session ended; reconnect the tze-hud MCP server"))
 
+    def set_session(self, session):
+        """Adopt `session` and record it privately for helpers the client
+        starts (portal_client.py's background waiter joins it)."""
+        self.session = session
+        if self.owner is None:
+            return
+        try:
+            if session is None or not re_session(session):
+                hud_env.remove_session(self.owner)
+            else:
+                hud_env.write_session(self.owner, self.endpoint, session)
+        except OSError:
+            print("hud_mcp_stdio: cannot record the session for helpers", file=sys.stderr)
+
     def end_session(self):
         """DELETE this session once, without waiting on calls in flight."""
+        if self.owner is not None:
+            hud_env.remove_session(self.owner)
         if self.ending is not None or self.session is None:
             return
         payload = json.dumps({"request": {"jsonrpc": "2.0", "method": "notifications/end"},
@@ -433,7 +454,7 @@ class Adapter:
                     # Refused on the old session after a re-initialize: retry now.
                     self.admit(task.request, task.deadline, retried=True)
                     return
-                self.session = None
+                self.set_session(None)
                 self.retry.append((task.request, task.deadline, task.retried))
                 self.reinitialize()
                 return
@@ -454,14 +475,14 @@ class Adapter:
             result = response.get("result") if isinstance(response, dict) else None
             ok = isinstance(result, dict) and isinstance(opened, str) and not task.cancelled
             if ok:
-                self.session = opened
+                self.set_session(opened)
             self.reinitialized(ok)
             return
         if task.cancelled:
             return
         method = task.request["method"]
         if method == "initialize" and isinstance(opened, str):
-            self.session = opened
+            self.set_session(opened)
         if method == "initialize":
             self.initializing = False
             result = response.get("result") if isinstance(response, dict) else None

@@ -14,10 +14,17 @@ The first publish to a portal attaches it. The portal is keyed by your agent
 identity (the PSK), so no command handles a token. Environment: HUD_HOST
 (the HUD's host); the PSK is read from ~/.config/tze-hud/<host>.psk, written
 by `.claude/skills/user-test/scripts/hud_pair.py`.
+
+Started under a Claude session whose tze-hud MCP adapter is running, every
+command joins that adapter's HUD session (its private record in
+~/.config/tze-hud/sessions/), so a background waiter sees the portals the
+model attached through the MCP tools. HUD_HOST, when set, must name the same
+HUD; without such a session the client is the agent's unscoped caller.
 """
 
 import argparse
 import json
+import os
 import sys
 import urllib.error
 import urllib.request
@@ -41,9 +48,30 @@ def die(msg, code=1):
     sys.exit(code)
 
 
+_SESSION = []  # [record or None], resolved once per process
+
+
+def session():
+    """The enclosing Claude session's adapter session record, if any."""
+    if not _SESSION:
+        record = hud_env.inherited_session()
+        if record and os.environ.get("HUD_HOST"):
+            try:
+                if hud_env.mcp_url() != record["url"]:
+                    record = None  # HUD_HOST names another HUD
+            except hud_env.HudEnvError:
+                record = None
+        _SESSION.append(record)
+    return _SESSION[0]
+
+
 def endpoint():
-    """(mcp_url, psk) from HUD_HOST and the paired PSK file."""
+    """(mcp_url, psk): the joined session's HUD, else HUD_HOST's."""
     try:
+        record = session()
+        if record:
+            key = hud_env.adapter_key({"host": record["host"], "url": record["url"], "explicit": True})
+            return record["url"], key
         return hud_env.resolve()
     except hud_env.HudEnvError as error:
         die(str(error))
@@ -64,10 +92,17 @@ def rpc(method, params, request_id=1, *, timeout=60):
             "Accept": "application/json, text/event-stream",
         },
     )
+    record = session()
+    if record:
+        request.add_header("Mcp-Session-Id", record["session"])
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             return json.loads(response.read())
-    except (urllib.error.HTTPError, urllib.error.URLError) as error:
+    except urllib.error.HTTPError as error:
+        if error.code == 404 and record:
+            die("the Claude session's HUD session ended; reconnect the tze-hud MCP server")
+        die(f"MCP transport failed: {error}")
+    except urllib.error.URLError as error:
         die(f"MCP transport failed: {error}")
 
 

@@ -95,8 +95,9 @@ model makes no requests until input arrives:
 
 ```bash
 # Claude Code: run with run_in_background; it exits (and wakes you) on the
-# first reply, or after rounds x 30 s with exit 3.
-HUD_HOST=<host> python3 .claude/skills/hud-projection/scripts/portal_client.py \
+# first reply, or after rounds x 30 s with exit 3. HUD_HOST is optional
+# here: it joins this session's HUD.
+python3 .claude/skills/hud-projection/scripts/portal_client.py \
   poll --wait-ms 30000 --rounds 120 --ack
 ```
 
@@ -104,9 +105,9 @@ HUD_HOST=<host> python3 .claude/skills/hud-projection/scripts/portal_client.py \
 - `--ack` acks what it prints; read the replies from its output. Don't also
   poll from the model while it runs, or the two consumers race for items.
 - Exit 3 means no reply within the window: republish or wait again.
-- It has no MCP session, so it sees only portals the CLI itself attached,
-  never one this session attached through the MCP tools. Attach and poll
-  from the same side.
+- It joins this session's HUD session (the adapter keeps a private record in
+  `~/.config/tze-hud/sessions/`), so it sees the portal you attached through
+  the MCP tools. Start it from this Claude session, not another terminal.
 
 ## Connect
 
