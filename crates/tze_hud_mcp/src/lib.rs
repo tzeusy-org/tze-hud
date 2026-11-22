@@ -28,6 +28,7 @@
 
 pub mod error;
 pub mod schema;
+pub mod scopes;
 pub mod server;
 pub mod tools;
 pub mod types;

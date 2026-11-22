@@ -214,8 +214,26 @@ async fn start_mcp_http_server_inner(
         Some(pairing) => pairing.binds(&local_addrs),
         None => Arc::new(std::sync::Mutex::new(local_addrs.clone())),
     };
+    let admin_scene = Arc::clone(&scene);
+    let mut server_builder = McpServer::with_shared_scene(scene)
+        .with_config(McpConfig {
+            agents: config.agents.clone(),
+            widget_transition_ms: config.widget_transition_ms,
+            publication_defaults: config.publication_defaults.clone(),
+        })
+        .with_render_wake_notifier(render_wake)
+        .with_portal_ingress_wake_notifier(portal_ingress_wake)
+        .with_safe_mode(Arc::clone(&safe_mode));
+    if let Some(tx) = portals.clone() {
+        server_builder = server_builder.with_portals(tx);
+    }
+    if let Some(fit) = config.text_fit.clone() {
+        server_builder = server_builder.with_text_fit(fit);
+    }
+    let server = Arc::new(server_builder);
     let admin = Arc::new(StatusSource {
-        scene: Some(Arc::clone(&scene)),
+        scene: Some(Arc::clone(&admin_scene)),
+        sessions: Some(Arc::clone(server.scopes())),
         portals: portals.clone(),
         startup: config.startup.clone(),
         agents: config.agents.clone(),
@@ -237,23 +255,6 @@ async fn start_mcp_http_server_inner(
         binds,
         log_path: crate::operator::logs::log_path(),
     });
-
-    let mut server_builder = McpServer::with_shared_scene(scene)
-        .with_config(McpConfig {
-            agents: config.agents.clone(),
-            widget_transition_ms: config.widget_transition_ms,
-            publication_defaults: config.publication_defaults.clone(),
-        })
-        .with_render_wake_notifier(render_wake)
-        .with_portal_ingress_wake_notifier(portal_ingress_wake)
-        .with_safe_mode(safe_mode);
-    if let Some(tx) = portals {
-        server_builder = server_builder.with_portals(tx);
-    }
-    if let Some(fit) = config.text_fit.clone() {
-        server_builder = server_builder.with_text_fit(fit);
-    }
-    let server = Arc::new(server_builder);
 
     let mut loops = Vec::with_capacity(listeners.len() + 1);
     if let Some(gate) = config.bind_gate.clone() {
@@ -555,7 +556,8 @@ async fn handle_connection(
             Route::Mcp => {
                 // Config-gated resident-principal grant; the PSK
                 // check still happens independently inside `dispatch`.
-                let ctx = server.caller_context(req.bearer);
+                let mut ctx = server.caller_context(req.bearer);
+                ctx.session_id = req.session_id;
                 let body = std::str::from_utf8(&req.body).unwrap_or("");
                 if let Some(started) = &phase_started {
                     tracing::debug!(
@@ -564,7 +566,7 @@ async fn handle_connection(
                         elapsed_us = started.elapsed().as_micros()
                     );
                 }
-                let result = server.dispatch(body, &ctx).await;
+                let result = server.dispatch_session(body, &ctx).await;
                 if let Some(started) = &phase_started {
                     tracing::debug!(
                         target: "tze_hud_mcp_phases",
@@ -572,7 +574,24 @@ async fn handle_connection(
                         elapsed_us = started.elapsed().as_micros()
                     );
                 }
-                Response::json(result)
+                match result {
+                    // MCP: an unknown session is 404, and nothing ran.
+                    tze_hud_mcp::server::SessionReply::UnknownSession => Response::not_found(),
+                    tze_hud_mcp::server::SessionReply::Body { body, opened } => {
+                        let mut response = Response::json(body);
+                        response.session_id = opened;
+                        response
+                    }
+                }
+            }
+            Route::McpEnd => {
+                let mut ctx = server.caller_context(req.bearer);
+                ctx.session_id = req.session_id;
+                match server.end_session(&ctx).await {
+                    tze_hud_mcp::server::SessionEnd::Released => Response::accepted(),
+                    tze_hud_mcp::server::SessionEnd::Unknown => Response::not_found(),
+                    tze_hud_mcp::server::SessionEnd::Unauthenticated => Response::unauthorized(),
+                }
             }
             Route::Pair => match &admin.pairing {
                 Some(pairing) => pairing.pair(&req.body),
@@ -838,13 +857,93 @@ mod tests {
         }
         let r = http_raw(addr, "GET / HTTP/1.1\r\n\r\n").await;
         assert!(
-            r.starts_with("HTTP/1.1 405 ") && r.contains("Allow: POST"),
+            r.starts_with("HTTP/1.1 405 ") && r.contains("Allow: POST, DELETE"),
             "{r}"
         );
         assert!(!r.contains("jsonrpc"));
         let r = http_raw(addr, &post("/nope")).await;
         assert!(r.starts_with("HTTP/1.1 404 "), "{r}");
         assert!(!r.contains("jsonrpc"));
+        shutdown.trigger(crate::threads::ShutdownReason::Clean);
+        handle.await.expect("task");
+    }
+
+    /// MCP sessions over HTTP: `initialize` hands back `Mcp-Session-Id`
+    /// (body unchanged), calls carry it, `DELETE` releases it, and an
+    /// unknown id is a bare 404 before anything runs.
+    #[tokio::test]
+    async fn mcp_sessions_are_issued_ended_and_refused_over_http() {
+        let shutdown = ShutdownToken::new();
+        let scene = make_scene();
+        let (handle, addrs) = start_mcp_http_server(
+            Arc::clone(&scene),
+            make_config(0, "k"),
+            shutdown.clone(),
+            None,
+        )
+        .await
+        .expect("start");
+        let addr = addrs[0];
+        let request = |method: &str, session: Option<&str>, body: &str| {
+            let session = session
+                .map(|id| format!("Mcp-Session-Id: {id}\r\n"))
+                .unwrap_or_default();
+            format!(
+                "{method} /mcp HTTP/1.1\r\nAuthorization: Bearer k\r\n{session}Content-Length: {}\r\n\r\n{body}",
+                body.len()
+            )
+        };
+        let body_of = |r: &str| r.split_once("\r\n\r\n").unwrap().1.to_owned();
+        let init = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"_meta":{"tze-hud/label":"tze-hud\u0007"}}}"#;
+        let opened = http_raw(addr, &request("POST", None, init)).await;
+        let id = opened
+            .lines()
+            .find_map(|l| l.strip_prefix("Mcp-Session-Id: "))
+            .expect("session header")
+            .to_owned();
+        let plain = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"result":{}}}"#,
+            tze_hud_mcp::schema::initialize_result()
+        );
+        let plain: serde_json::Value = serde_json::from_str(&plain).unwrap();
+        let opened_body: serde_json::Value = serde_json::from_str(&body_of(&opened)).unwrap();
+        assert_eq!(opened_body, plain, "the initialize body is unchanged");
+
+        let card = r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"hud_publish","arguments":{"surface":"zone:notification-area","content":{"type":"notification","title":"hi"}}}}"#;
+        {
+            let mut scene = scene.lock().await;
+            scene.zone_registry = tze_hud_scene::types::ZoneRegistry::with_defaults();
+        }
+        let r = http_raw(addr, &request("POST", Some(&id), card)).await;
+        assert!(
+            r.starts_with("HTTP/1.1 200 ") && !r.contains("isError"),
+            "{r}"
+        );
+        assert!(
+            !r.contains("Mcp-Session-Id"),
+            "only initialize hands one out"
+        );
+        let shown = || async {
+            scene
+                .lock()
+                .await
+                .zone_registry
+                .active_for_zone("notification-area")
+                .len()
+        };
+        assert_eq!(shown().await, 1);
+
+        let r = http_raw(addr, &request("DELETE", Some(&id), "")).await;
+        assert!(r.starts_with("HTTP/1.1 202 "), "{r}");
+        assert_eq!(shown().await, 0, "ending the session released its card");
+        for method in ["POST", "DELETE"] {
+            let r = http_raw(addr, &request(method, Some(&id), card)).await;
+            assert!(r.starts_with("HTTP/1.1 404 "), "{method}: {r}");
+            assert!(!r.contains("jsonrpc"));
+        }
+        assert_eq!(shown().await, 0, "a 404 had no effect");
+        let r = http_raw(addr, "DELETE /mcp HTTP/1.1\r\nMcp-Session-Id: x\r\n\r\n").await;
+        assert!(r.starts_with("HTTP/1.1 401 "), "{r}");
         shutdown.trigger(crate::threads::ShutdownReason::Clean);
         handle.await.expect("task");
     }
@@ -863,6 +962,7 @@ mod tests {
             perms(&["*"]),
         );
         StatusSource {
+            sessions: None,
             scene: None,
             portals: None,
             startup: None,
@@ -897,6 +997,7 @@ mod tests {
             path: path.into(),
             query: query.into(),
             bearer: bearer.map(str::to_owned),
+            session_id: None,
             body: Vec::new(),
         }
     }
@@ -1151,6 +1252,44 @@ mod tests {
         let outside = handle_admin(Update, &post(Some("root-psk"), ok), &src).await;
         assert_eq!(outside.status, 409);
         assert!(body_of(&outside).contains("NOT_INSTALLED"));
+    }
+
+    /// `/admin/status` lists each live MCP session with its label and how
+    /// much it holds, so a leaked session is visible.
+    #[tokio::test]
+    async fn admin_status_lists_live_sessions() {
+        let mut src = admin_source(std::env::temp_dir().join("tze_hud_no_such.log"));
+        let scopes = Arc::new(tze_hud_mcp::scopes::Scopes::default());
+        let (busy, _) = scopes.open("claude", Some("tze-hud"), |_| true);
+        scopes.open("claude", Some("tze-hud"), |_| true);
+        let mut scene = SceneGraph::new(1920.0, 1080.0);
+        scene.zone_registry = tze_hud_scene::types::ZoneRegistry::with_defaults();
+        scene
+            .publish_to_zone(
+                "subtitle",
+                tze_hud_scene::types::ZoneContent::StreamText("hi".into()),
+                &busy.namespace,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        src.scene = Some(Arc::new(Mutex::new(scene)));
+        src.sessions = Some(scopes);
+        let r = handle_admin(
+            crate::http::AdminRoute::Status,
+            &admin_get("/admin/status?cpu=0", Some("root-psk")),
+            &src,
+        )
+        .await;
+        let v: serde_json::Value = serde_json::from_slice(&r.body).unwrap();
+        assert_eq!(
+            v["sessions"],
+            serde_json::json!([
+                {"agent": "claude", "label": "tze-hud", "holdings": 1},
+                {"agent": "claude", "label": "tze-hud (2)", "holdings": 0},
+            ])
+        );
     }
 
     /// `?cpu=0` answers without the CPU sample window, for polling harnesses.

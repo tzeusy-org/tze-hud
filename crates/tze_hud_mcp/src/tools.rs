@@ -79,7 +79,8 @@ struct AgentState {
     delivered: Vec<ActionItem>,
 }
 
-/// Server-side MCP state, keyed by agent id.
+/// Server-side MCP state, keyed by owner (agent id, or a session scope's
+/// namespace).
 #[derive(Default, Debug)]
 pub struct McpState {
     agents: std::sync::Mutex<HashMap<String, AgentState>>,
@@ -104,6 +105,18 @@ impl McpState {
         let mut agents = self.agents.lock().unwrap_or_else(|p| p.into_inner());
         f(agents.entry(agent.to_string()).or_default())
     }
+
+    /// Drop a released session's lease record and un-ACKed actions.
+    pub(crate) fn forget(&self, owner: &str) {
+        let mut agents = self.agents.lock().unwrap_or_else(|p| p.into_inner());
+        agents.remove(owner);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn knows(&self, owner: &str) -> bool {
+        let agents = self.agents.lock().unwrap_or_else(|p| p.into_inner());
+        agents.contains_key(owner)
+    }
 }
 
 /// Everything a verb needs for one call.
@@ -120,6 +133,13 @@ pub struct ToolCtx<'a> {
     /// mutating verb is refused.
     pub safe_mode: &'a AtomicBool,
     pub agent: &'a AgentIdentity,
+    /// Who owns what this call touches: the agent id, or its session
+    /// scope's namespace. Permissions still come from `agent`.
+    pub owner: &'a str,
+    /// The caller's session scope, if it named one.
+    pub scope: Option<&'a crate::scopes::Scope>,
+    /// Every live session, for naming another session's portal.
+    pub scopes: &'a crate::scopes::Scopes,
     /// Server-owned implicit widget motion; never a model-visible parameter.
     pub widget_transition_ms: u32,
     pub publication_defaults: &'a tze_hud_scene::PublicationDefaults,
@@ -133,6 +153,16 @@ fn safe_mode_active() -> McpError {
         "SAFE_MODE_ACTIVE",
         "the human paused agents; carry on in chat and retry at your next milestone",
     )
+}
+
+/// Refuse a call whose session ended while it was in flight. Checked under
+/// the scene or hub lock, after release marked the scope, so released
+/// content can never be re-added.
+fn check_scope_live(ctx: &ToolCtx<'_>) -> McpResult<()> {
+    if ctx.scope.is_some_and(crate::scopes::Scope::is_released) {
+        return Err(invalid("this MCP session ended; reconnect"));
+    }
+    Ok(())
 }
 
 /// Refuse a mutating verb during safe mode (all surfaces, including portals).
@@ -323,7 +353,7 @@ fn widget_params(scene: &SceneGraph, instance: &str) -> Value {
 
 /// List the surfaces this agent may use and what it holds now.
 pub async fn hud_surfaces(ctx: &ToolCtx<'_>) -> McpResult<Value> {
-    let ns = ctx.agent.agent_id.as_str();
+    let ns = ctx.owner;
     let mut surfaces = Vec::new();
     {
         let lock_started = tracing::enabled!(target: "tze_hud_mcp_phases", tracing::Level::DEBUG)
@@ -483,7 +513,7 @@ pub(crate) async fn hud_publish<'a>(ctx: &ToolCtx<'a>, args: Value) -> McpResult
     let surface = Surface::parse(&p.surface)?;
     check_allowed(ctx, &surface)?;
     check_not_safe_mode(ctx)?;
-    check_fields(&surface, &p)?;
+    check_fields(&surface, &p, ctx.scope.is_some())?;
     match surface {
         Surface::Zone(zone) => publish_zone(ctx, &zone, p, started).await,
         Surface::Widget(widget) => publish_widget(ctx, &widget, p)
@@ -495,13 +525,14 @@ pub(crate) async fn hud_publish<'a>(ctx: &ToolCtx<'a>, args: Value) -> McpResult
 
 /// Reject fields that don't apply to the surface kind, so a mistaken call
 /// fails loudly instead of silently dropping intent.
-fn check_fields(surface: &Surface, p: &PublishParams) -> McpResult<()> {
+/// A session (`scoped`) may name its zone cards with `display_name`.
+fn check_fields(surface: &Surface, p: &PublishParams, scoped: bool) -> McpResult<()> {
     let misplaced = match surface {
         Surface::Zone(_) => [
             ("params", p.params.is_some()),
             ("status", p.status.is_some()),
             ("expects_reply", p.expects_reply.is_some()),
-            ("display_name", p.display_name.is_some()),
+            ("display_name", p.display_name.is_some() && !scoped),
         ]
         .into_iter()
         .find(|(_, set)| *set),
@@ -531,7 +562,7 @@ fn check_fields(surface: &Surface, p: &PublishParams) -> McpResult<()> {
 /// Check the current lease without renewing or granting one. Hold must refuse
 /// a suspended lease before changing content, even if the pause atomic is stale.
 fn existing_lease(ctx: &ToolCtx<'_>, scene: &SceneGraph) -> McpResult<Option<SceneId>> {
-    let existing = ctx.state.with(ctx.agent.agent_id.as_str(), |s| s.lease);
+    let existing = ctx.state.with(ctx.owner, |s| s.lease);
     if existing
         .and_then(|id| scene.leases.get(&id))
         .is_some_and(|lease| lease.state == LeaseState::Suspended)
@@ -544,7 +575,7 @@ fn existing_lease(ctx: &ToolCtx<'_>, scene: &SceneGraph) -> McpResult<Option<Sce
 /// The agent's MCP lease: reuse (and renew) it while active, else grant one.
 /// A Suspended lease means safe mode: never grant around it.
 fn ensure_lease(ctx: &ToolCtx<'_>, scene: &mut SceneGraph) -> McpResult<SceneId> {
-    let ns = ctx.agent.agent_id.as_str();
+    let ns = ctx.owner;
     let existing = existing_lease(ctx, scene)?;
     if let Some(id) = existing {
         match scene.leases.get(&id).map(|l| l.state) {
@@ -710,7 +741,7 @@ async fn publish_zone<'a>(
     p: PublishParams,
     started: tokio::time::Instant,
 ) -> McpResult<PublishReply<'a>> {
-    let ns = ctx.agent.agent_id.clone();
+    let ns = ctx.owner.to_owned();
     let raw = p
         .content
         .filter(|c| !c.is_null() && c.as_str() != Some(""))
@@ -723,6 +754,12 @@ async fn publish_zone<'a>(
             "TIMESTAMP_TOO_FUTURE",
             format!("delay_ms is at most {MAX_DELAY_MS}"),
         ));
+    }
+    // Only a session gets here with a name: it labels this and later cards.
+    if let (Some(name), Some(scope)) = (p.display_name.as_deref(), ctx.scope) {
+        let label = crate::scopes::sanitize_label(name)
+            .ok_or_else(|| invalid("display_name needs a visible character"))?;
+        scope.set_label(label);
     }
     let lock_started = tracing::enabled!(target: "tze_hud_mcp_phases", tracing::Level::DEBUG)
         .then(std::time::Instant::now);
@@ -742,6 +779,7 @@ async fn publish_zone<'a>(
             elapsed_us = started.elapsed().as_micros()
         );
     }
+    check_scope_live(ctx)?;
     let Some(def) = scene.zone_registry.zones.get(zone) else {
         return Err(tool_err(
             "ZONE_NOT_FOUND",
@@ -976,7 +1014,7 @@ fn widget_transition_ms(scene: &SceneGraph, ctx: &ToolCtx<'_>) -> u32 {
 }
 
 async fn publish_widget(ctx: &ToolCtx<'_>, widget: &str, p: PublishParams) -> McpResult<Value> {
-    let ns = ctx.agent.agent_id.clone();
+    let ns = ctx.owner.to_owned();
     let delay_ms = p.delay_ms.unwrap_or(0);
     if delay_ms > MAX_DELAY_MS {
         return Err(tool_err(
@@ -988,6 +1026,7 @@ async fn publish_widget(ctx: &ToolCtx<'_>, widget: &str, p: PublishParams) -> Mc
         .params
         .ok_or_else(|| invalid("widget publish needs params; see params in hud_surfaces"))?;
     let mut scene = ctx.scene.lock().await;
+    check_scope_live(ctx)?;
     if !scene.widget_registry.instances.contains_key(widget) {
         return Err(tool_err(
             "WIDGET_NOT_FOUND",
@@ -1197,14 +1236,25 @@ async fn publish_portal(ctx: &ToolCtx<'_>, pid: &str, p: PublishParams) -> McpRe
         .transpose()
         .map_err(|_| invalid("portal status must be active or degraded; hud_clear detaches"))?;
     let outcome = with_portals(ctx, |hub, now| {
-        if let Err(error) = check_not_safe_mode(ctx) {
+        if let Err(error) = check_not_safe_mode(ctx).and_then(|()| check_scope_live(ctx)) {
             return (Err(error), false);
         }
+        if let Some(error) = another_sessions_portal(ctx, hub, pid) {
+            return (Err(error), false);
+        }
+        let key = PortalKey::new(ctx.owner, pid);
+        // A session's portal is titled with its label until it names one.
+        let display_name = p.display_name.or_else(|| {
+            hub.get(&key)
+                .is_none()
+                .then(|| ctx.scope.and_then(crate::scopes::Scope::label))
+                .flatten()
+        });
         (
             hub.publish_with_hold(
-                &PortalKey::new(ctx.agent.agent_id.clone(), pid),
+                &key,
                 Publish {
-                    display_name: p.display_name,
+                    display_name,
                     text,
                     key: p.key,
                     expects_reply: p.expects_reply.unwrap_or(false),
@@ -1224,6 +1274,29 @@ async fn publish_portal(ctx: &ToolCtx<'_>, pid: &str, p: PublishParams) -> McpRe
         result["unread"] = json!(outcome.unread);
     }
     Ok(result)
+}
+
+/// A portal id belongs to the session that attached it until it detaches
+/// or the runtime reclaims it; another session of the agent is refused.
+fn another_sessions_portal(ctx: &ToolCtx<'_>, hub: &PortalHub, pid: &str) -> Option<McpError> {
+    let mut owner = None;
+    hub.visit_holdings(|key, _, _| {
+        if key.id == pid
+            && key.agent != ctx.owner
+            && tze_hud_scene::scope::owner_agent(&key.agent) == ctx.agent.agent_id
+        {
+            owner = Some(key.agent.clone());
+        }
+    });
+    let label = ctx.scopes.by_namespace(&owner?).and_then(|s| s.label());
+    let who = label.map_or_else(
+        || "another session".to_owned(),
+        |l| format!("session \"{l}\""),
+    );
+    Some(tool_err(
+        "NOT_ALLOWED",
+        format!("portal:{pid} belongs to your {who}; publish to another portal id"),
+    ))
 }
 
 // ─── hud_hold ────────────────────────────────────────────────────────────────
@@ -1248,7 +1321,7 @@ pub async fn hud_hold(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
     let surface = Surface::parse(&p.surface)?;
     check_allowed(ctx, &surface)?;
     check_not_safe_mode(ctx)?;
-    let ns = ctx.agent.agent_id.clone();
+    let ns = ctx.owner.to_owned();
     let expiry =
         |now: u64| (p.ttl_ms > 0).then(|| now.saturating_add(p.ttl_ms.saturating_mul(1_000)));
     let mut result = ok_with_expiry((p.ttl_ms > 0).then_some(p.ttl_ms));
@@ -1256,6 +1329,7 @@ pub async fn hud_hold(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
         Surface::Zone(zone) => {
             let mut scene = ctx.scene.lock().await;
             check_not_safe_mode(ctx)?;
+            check_scope_live(ctx)?;
             existing_lease(ctx, &scene)?;
             let ttl_us = (p.ttl_ms > 0).then(|| p.ttl_ms.saturating_mul(1_000));
             if !scene.hold_zone_publications(&zone, &ns, ttl_us) {
@@ -1266,6 +1340,7 @@ pub async fn hud_hold(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
         Surface::Widget(widget) => {
             let mut scene = ctx.scene.lock().await;
             check_not_safe_mode(ctx)?;
+            check_scope_live(ctx)?;
             existing_lease(ctx, &scene)?;
             let expires = expiry(now_us(&scene));
             if !scene.hold_widget_publications(&widget, &ns, expires) {
@@ -1280,7 +1355,7 @@ pub async fn hud_hold(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
             // The runtime keeps a held portal (and its transcript) past the
             // idle reclaim until the hold lapses or hud_clear.
             with_portals(ctx, |hub, now| {
-                if let Err(error) = check_not_safe_mode(ctx) {
+                if let Err(error) = check_not_safe_mode(ctx).and_then(|()| check_scope_live(ctx)) {
                     return (Err(error), false);
                 }
                 (
@@ -1313,7 +1388,7 @@ pub async fn hud_clear(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
     if key.is_some() && !matches!(&surface, Surface::Zone(_)) {
         return Err(invalid("keyed clear requires a notification zone"));
     }
-    let ns = ctx.agent.agent_id.clone();
+    let ns = ctx.owner.to_owned();
     match surface {
         Surface::Zone(zone) => {
             let mut scene = ctx.scene.lock().await;
@@ -1465,7 +1540,7 @@ impl Drop for InputPollLease {
 /// first. Unacked items are redelivered.
 pub async fn hud_input(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
     let p: InputParams = parse_args(args)?;
-    let ns = ctx.agent.agent_id.clone();
+    let ns = ctx.owner.to_owned();
 
     // Acks first, so a poll+ack is one round trip.
     ctx.state
@@ -1559,7 +1634,9 @@ pub async fn hud_input(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
             ));
         }
         let now = tokio::time::Instant::now();
-        if !items.is_empty() || backlog > 0 || now >= deadline {
+        // A released session's wait ends at once with its deadline reply.
+        let released = ctx.scope.is_some_and(crate::scopes::Scope::is_released);
+        if !items.is_empty() || backlog > 0 || now >= deadline || released {
             return Ok(json!({ "items": items, "remaining": backlog }));
         }
         {

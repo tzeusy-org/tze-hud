@@ -340,7 +340,11 @@ with the same cancellation and idle semantics as a `hud_input` wait.
   (`active` or `degraded`), and `expects_reply` arms the composer. `key`
   replaces the newest output
   with the same key (progress lines). Portals are per agent: another agent's
-  `portal:<id>` with the same id is a separate portal. Fresh expanded portals
+  `portal:<id>` with the same id is a separate portal. Within one agent, a
+  portal id belongs to the session that attached it until it detaches or the
+  runtime reclaims it; another session's publish is `NOT_ALLOWED` naming the
+  owner's label, and attaching after a reclaim reports `reattached: false`
+  (it is that session's first attachment). Fresh expanded portals
   request 1440×1080 before fitting each dimension to the display, subject to
   the existing scaled legibility minima. Fitting adds reading room at the same
   base font; compact portals remain 420×96. Existing live geometry and saved
@@ -616,6 +620,38 @@ agents until one is paired.
   and `hud_surfaces` lists only allowed surfaces.
 - An agent has whatever the allowlist says. There is no capability
   negotiation and no resident principal.
+- **Sessions.** `initialize` opens an MCP session: the response carries an
+  `Mcp-Session-Id` header (the result body is unchanged), and calls that send
+  it back act within that session. Each session of an agent owns its own
+  content, holdings, portals and input: `hud_input` returns and ACKs only its
+  items and `remaining` counts only its backlog; a keyless `hud_clear` clears
+  only its content; `hud_surfaces` marks `held` only for its holdings, lists
+  only its portals, and shows another session's content in a single-occupant
+  zone as `busy`; a notification `key` names a slot per session; answers,
+  `wait_ms` waits and displaced receipts go to the publishing session; idle
+  portal liveness counts per session. Calls without the header are the
+  agent's one unscoped caller and behave as before among themselves (scripts,
+  gRPC publications); they are a session of their own toward scoped ones.
+  Unchanged per agent: the allowlist, budgets (a stack zone's publisher cap
+  counts the whole agent), and every human override (Clear, Hide, safe mode,
+  unpair act on all sessions). An optional label rides in `initialize`
+  `params._meta["tze-hud/label"]`, outside model context: the runtime strips
+  control characters, cuts it to 32 bytes on a character boundary (nothing
+  left means no label) and suffixes a duplicate live label with the lowest
+  free ` (2)`, ` (3)`. A session's portal header shows its label until a
+  `display_name` names it, and `display_name` on a session's zone publish
+  replaces its label (unscoped zone and all widget publishes still refuse
+  `display_name`). `DELETE /mcp` with the header ends the session as an
+  explicit release (`202`): its zone and widget content, delayed publishes
+  and portals clear, its un-ACKed input is discarded, and its armed waits
+  return at once (`hud_input` with its deadline reply, a `wait_ms` publish
+  with `"gone":"cleared"`). A crashed client sends nothing; its content
+  follows the ordinary TTL and portal idle rules. An unknown or ended id gets
+  a bare `404` before anything runs; the client re-initializes. An agent
+  holds at most 64 sessions; opening another releases the least-recently-
+  called one, preferring one with nothing held, as on `DELETE`. Session
+  start and end are logged, and `/admin/status` `sessions` lists each live
+  one as `{agent, label, holdings}`.
 - `admin` is an operator entry, outside the model surface: it opens
   `GET /admin/status`, `GET /admin/logs`, and `GET /admin/screenshot` on the
   MCP port, and `*` does not grant it. `/admin/status` includes `tailnet_inbound` (`state`: `allowed`, `blocked`, `unknown`, `not_applicable`; `reason`, `rule` and `fix` when `blocked`; `error` when `unknown`): whether Windows Firewall lets remote agents reach the tailnet bind, and `safe_mode_hotkey`, `panel_hotkey`, `pairing_hotkey`, `answer_hotkey` and `hide_hotkey`
@@ -823,7 +859,7 @@ unknown PSK) is a JSON-RPC error.
 | Code | Meaning |
 |---|---|
 | `INVALID_ARGUMENT` | Unknown field, wrong type, or bad surface string |
-| `NOT_ALLOWED` | The agent's `allow` list doesn't cover the surface |
+| `NOT_ALLOWED` | The agent's `allow` list doesn't cover the surface, or another of its sessions owns the portal id |
 | `NOT_HELD` | `hud_hold` with nothing to extend (including a portal the viewer dismissed); `hud_clear` on a portal this agent never attached (a dismissed portal's `hud_clear` is an ok no-op) |
 | `ZONE_NOT_FOUND` | No such zone |
 | `WIDGET_NOT_FOUND` | No such widget instance |

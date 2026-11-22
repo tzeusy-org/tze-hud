@@ -437,6 +437,8 @@ mod imp {
 pub struct StatusSource {
     pub scene: Option<Arc<tokio::sync::Mutex<tze_hud_scene::SceneGraph>>>,
     pub portals: Option<tze_hud_mcp::PortalHandle>,
+    /// Live MCP session scopes behind `sessions`.
+    pub sessions: Option<Arc<tze_hud_mcp::scopes::Scopes>>,
     pub startup: Option<crate::operator::diagnostics::StartupDiagnostics>,
     pub agents: SharedAgents,
     pub binds: Arc<Mutex<Vec<SocketAddr>>>,
@@ -472,6 +474,36 @@ fn pct(cpu_delta: f64, wall_delta: f64) -> Value {
 }
 
 impl StatusSource {
+    /// Each live MCP session: agent, label and how much it holds (zones,
+    /// widgets and portals).
+    async fn sessions_json(&self) -> Vec<Value> {
+        let Some(sessions) = &self.sessions else {
+            return Vec::new();
+        };
+        let live = sessions.list();
+        let mut held: Vec<usize> = match &self.scene {
+            Some(scene) => {
+                let scene = scene.lock().await;
+                live.iter()
+                    .map(|s| {
+                        let h = scene.scope_holdings(&s.namespace);
+                        h.zones + h.widgets
+                    })
+                    .collect()
+            }
+            None => vec![0; live.len()],
+        };
+        if let Some(hub) = self.portals.as_ref().and_then(|p| p.hub.lock().ok()) {
+            for (count, s) in held.iter_mut().zip(&live) {
+                *count += hub.list(&s.namespace).len();
+            }
+        }
+        live.into_iter()
+            .zip(held)
+            .map(|(s, holdings)| json!({"agent": s.agent, "label": s.label, "holdings": holdings}))
+            .collect()
+    }
+
     /// Build the status object. With `sample_cpu`, sleeps [`CPU_SAMPLE`] to
     /// measure `cpu_pct_2s` (percent of one core over the window); without
     /// it, answers at once with `cpu_pct_2s` null (polling harnesses).
@@ -522,8 +554,11 @@ impl StatusSource {
             self.portals.as_ref(),
             self.startup.as_ref(),
         );
+        let sessions = self.sessions_json().await;
         json!({
             "holdings": holdings,
+            // Live MCP sessions, so a leaked scope is visible.
+            "sessions": sessions,
             "warnings": warnings,
             "version": env!("CARGO_PKG_VERSION"),
             "sha": build.map_or("unknown", |b| b.sha.as_str()),

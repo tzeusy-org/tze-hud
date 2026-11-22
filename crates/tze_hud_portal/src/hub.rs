@@ -935,7 +935,7 @@ impl PortalHub {
     pub fn reclaim_agent(&mut self, agent: &str) -> usize {
         let mut reclaimed = 0;
         for (key, portal) in &mut self.portals {
-            if key.agent == agent && portal.live() {
+            if tze_hud_scene::scope::owner_agent(&key.agent) == agent && portal.live() {
                 *portal = Portal::tombstone();
                 reclaimed += 1;
             }
@@ -965,16 +965,12 @@ impl PortalHub {
         }
     }
 
-    /// Live portals per agent.
+    /// Live portals per agent, across its session scopes.
     pub fn live_counts(&self) -> std::collections::BTreeMap<String, usize> {
         let mut counts = std::collections::BTreeMap::new();
-        for key in self
-            .portals
-            .iter()
-            .filter(|(_, p)| p.live())
-            .map(|(k, _)| k)
-        {
-            *counts.entry(key.agent.clone()).or_insert(0) += 1;
+        for (key, _) in self.portals.iter().filter(|(_, p)| p.live()) {
+            let agent = tze_hud_scene::scope::owner_agent(&key.agent);
+            *counts.entry(agent.to_owned()).or_insert(0) += 1;
         }
         counts
     }
