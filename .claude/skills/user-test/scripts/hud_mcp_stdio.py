@@ -258,15 +258,21 @@ class Adapter:
 
     def abort(self, batch):
         now = time.monotonic()
+        lost_reinitialize = False
         for task in batch:
             if task.abort_phase is None:
                 task.cancelled = True
+                lost_reinitialize = lost_reinitialize or task.internal
                 task.abort_phase, task.abort_deadline = "term", now + TERM_SECONDS
                 self.signal_task(task, signal.SIGTERM)
                 if task.process.stdin is not None:
                     self.unregister(task.process.stdin)
                     task.process.stdin.close()
                     task.payload = memoryview(b"")
+        if lost_reinitialize and self.reinitializing:
+            # Every abort site (deadline, broken job pipe, oversized result)
+            # reports here: the abandoned worker's exit no longer does.
+            self.reinitialized(False)
 
     def admit(self, request, deadline=None, *, retried=False, internal=False):
         if not isinstance(request, dict) or request.get("jsonrpc") != "2.0" or not isinstance(request.get("method"), str):
@@ -304,13 +310,15 @@ class Adapter:
                                retried))
             self.reinitialize()
             return
-        if has_id and any("id" in t.request and t.request["id"] == request_id for t in self.tasks):
+        # An abandoned re-initialize can still be exiting; its id is not live.
+        if has_id and any("id" in t.request and t.request["id"] == request_id
+                          and not (internal and t.cancelled) for t in self.tasks):
             self.queue(failure(request_id, "Request ID is already pending"))
             return
         seconds = INITIALIZE_SECONDS if method == "initialize" else REQUEST_SECONDS
         deadline = deadline if deadline is not None else time.monotonic() + seconds
         if len(self.tasks) >= MAX_WORKERS or time.monotonic() >= deadline:
-            if has_id:
+            if has_id and not internal:  # The internal id never reaches the client.
                 self.queue(failure(request_id, "HUD request deadline or capacity exceeded"))
             return
         if internal:
@@ -367,7 +375,7 @@ class Adapter:
         request = dict(self.init_request or {"jsonrpc": "2.0", "method": "initialize", "params": {}})
         request["id"] = REINIT_ID
         self.admit(request, time.monotonic() + INITIALIZE_SECONDS, internal=True)
-        if not any(t.internal for t in self.tasks):
+        if not any(t.internal and not t.cancelled for t in self.tasks):
             self.reinitialized(False)
 
     def reinitialized(self, ok):
@@ -484,6 +492,8 @@ class Adapter:
                            else "HUD initialize startup/protocol failed (phase unavailable)")
             response = failure(task.request.get("id"), message)
         if task.internal:
+            if task.cancelled:
+                return  # Its failure was reported when it was abandoned.
             result = response.get("result") if isinstance(response, dict) else None
             ok = isinstance(result, dict) and isinstance(opened, str) and not task.cancelled
             if ok:
@@ -539,7 +549,6 @@ class Adapter:
             elif task.abort_phase is None and now >= task.deadline:
                 if task.internal:
                     self.abort([task])
-                    self.reinitialized(False)
                     continue
                 if "id" in task.request:
                     message = INITIALIZE_TIMEOUT if task.request["method"] == "initialize" else "HUD request deadline exceeded"

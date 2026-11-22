@@ -1564,6 +1564,118 @@ def test_a_failed_reinitialize_never_leaves_the_adapter_unscoped(hud):
                    if r["body"].get("method") not in ("initialize",)), "no call went out unscoped"
 
 
+def reinit_adapter(monkeypatch):
+    """An in-process adapter with a lost session, fake workers and a fake
+    clock: (module, client, exits, clock). Set exits[pid] to exit a worker."""
+    import runpy
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    module = runpy.run_path(str(SCRIPTS / "hud_mcp_stdio.py"), run_name="reinit_fixture")
+    client = module["Adapter"].__new__(module["Adapter"])
+    client.__dict__.update(endpoint={}, selector=Mock(), tasks=[], output=bytearray(), retry=[],
+                           output_registered=False, initialized=True, protocol="2025-06-18",
+                           initializing=False, stop=False, fatal=False, owner=None,
+                           had_session=True, session=None,
+                           init_request={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})
+    exits = {}  # pid -> exit code once the worker has exited
+    workers = []
+
+    def popen(*a, **kw):
+        pid = 100 + len(workers)
+        workers.append(SimpleNamespace(pid=pid, stdin=Mock(), stdout=Mock(), returncode=None,
+                                       poll=lambda: exits.get(pid)))
+        return workers[-1]
+
+    clock = [100.0]
+    monkeypatch.setattr(module["time"], "monotonic", lambda: clock[0])
+    monkeypatch.setattr(module["subprocess"], "Popen", popen)
+    monkeypatch.setattr(module["os"], "pidfd_open", lambda pid: pid)
+    monkeypatch.setattr(module["os"], "close", lambda fd: None)
+    monkeypatch.setattr(module["os"], "set_blocking", lambda *a: None)
+    monkeypatch.setattr(module["signal"], "pidfd_send_signal", Mock())
+    return module, client, exits, clock
+
+
+def test_a_new_reinitialize_starts_while_the_abandoned_one_is_still_exiting(monkeypatch):
+    """A timed-out re-initialize is abandoned but its worker may not have
+    exited yet. The next call must start a fresh re-initialize anyway: the
+    internal id never collides, never reaches the client, and the old
+    worker's late exit does not fail the call waiting on the new one."""
+    module, client, exits, clock = reinit_adapter(monkeypatch)
+    reinit = module["REINIT_ID"]
+
+    client.admit({"jsonrpc": "2.0", "id": "lost", "method": "ping"})
+    abandoned = client.tasks[0]
+    assert abandoned.internal and abandoned.request["id"] == reinit
+    clock[0] = 103.0  # Past the re-initialize deadline; the worker has not exited.
+    assert client.reap() and abandoned.cancelled and abandoned in client.tasks
+    assert json.loads(client.output)["id"] == "lost"
+    client.output.clear()
+
+    client.admit({"jsonrpc": "2.0", "id": "later", "method": "ping"})
+    fresh = client.tasks[-1]
+    assert fresh is not abandoned and fresh.internal and not fresh.cancelled
+    assert client.reinitializing and not client.output, bytes(client.output)
+
+    exits[abandoned.process.pid] = -signal.SIGTERM  # The abandoned worker exits late.
+    assert client.reap() and abandoned not in client.tasks
+    assert client.reinitializing and [r["id"] for r, *_ in client.retry] == ["later"]
+    assert not client.output, bytes(client.output)
+
+    fresh.output = bytearray(json.dumps({"response": {"jsonrpc": "2.0", "id": reinit, "result": {}},
+                                         "session": "session-2"}).encode())
+    exits[fresh.process.pid] = 0
+    assert client.reap() and not client.reinitializing and client.session == "session-2"
+    later = client.tasks[-1]
+    assert later.request["id"] == "later" and later.session == "session-2" and later.retried
+    assert not client.output, bytes(client.output)
+
+
+def test_a_reinitialize_aborted_before_its_deadline_fails_the_waiting_call(monkeypatch):
+    """A broken job pipe or an oversized result aborts the re-initialize
+    early. The call waiting on it fails at once instead of queueing behind
+    a re-initialize that will never report."""
+    _, client, exits, clock = reinit_adapter(monkeypatch)
+    client.admit({"jsonrpc": "2.0", "id": "waiting", "method": "ping"})
+    reinit = client.tasks[0]
+    assert reinit.internal and client.reinitializing
+
+    client.abort([reinit])  # What drive() does on BrokenPipeError or MAX_RESPONSE.
+    assert not client.reinitializing and not client.retry
+    assert json.loads(client.output)["id"] == "waiting"
+    client.output.clear()
+
+    exits[reinit.process.pid] = -signal.SIGTERM
+    clock[0] = 100.5
+    assert client.reap() and reinit not in client.tasks and not client.output
+
+
+def test_a_reinitialize_refused_for_capacity_fails_the_waiting_call(monkeypatch):
+    """With every worker slot taken, one by an abandoned re-initialize that is
+    still exiting, the fresh re-initialize cannot start. The abandoned one
+    does not count as running, so the waiting call fails now rather than
+    waiting on it; the refused internal id never reaches the client."""
+    from types import SimpleNamespace
+
+    module, client, exits, clock = reinit_adapter(monkeypatch)
+    client.admit({"jsonrpc": "2.0", "id": "lost", "method": "ping"})
+    abandoned = client.tasks[0]
+    clock[0] = 103.0
+    assert client.reap() and abandoned.cancelled and abandoned in client.tasks
+    client.output.clear()
+    busy = [SimpleNamespace(request={"jsonrpc": "2.0", "id": f"busy-{n}", "method": "ping"},
+                            internal=False, cancelled=False)
+            for n in range(module["MAX_WORKERS"] - 1)]
+    client.tasks.extend(busy)
+
+    client.admit({"jsonrpc": "2.0", "id": "waiting", "method": "ping"})
+    assert client.tasks == [abandoned, *busy], "no fresh worker fits"
+    assert not client.reinitializing and not client.retry
+    replies = [json.loads(line) for line in bytes(client.output).splitlines()]
+    assert [r["id"] for r in replies] == ["waiting"], replies
+
+
 def test_a_loose_sessions_directory_is_made_private(hud):
     """A pre-existing group/world-readable sessions directory is tightened to
     0700 before the record is written, so helpers can read it."""
