@@ -467,7 +467,7 @@ async fn idle_with_notification_renders_only_at_fade() {
     let version = scene.version;
     assert!(matches!(
         scene.activate_notification(&link, 240),
-        Some(tze_hud_scene::graph::NotificationActivation::OpenUrl(_))
+        Some(tze_hud_scene::graph::NotificationActivation::OpenUrl { .. })
     ));
     assert!(scene.pending_actions.is_empty());
     assert!(scene.overlay.notification_choices.is_empty());

@@ -2272,6 +2272,7 @@ impl WinitApp {
             drafts,
             reading: self.reading_ui(),
             cursor: self.applied_cursor_name(),
+            link_feedback: self.link_feedback_name(),
             hover_targets: self
                 .state
                 .widget_hover_trackers
@@ -2361,10 +2362,100 @@ impl WinitApp {
     ) {
         match outcome {
             tze_hud_scene::graph::NotificationActivation::Callback(wake) => wake.notify(),
-            tze_hud_scene::graph::NotificationActivation::OpenUrl(url) => {
-                self.state.notification_link_opener.launch(url)
-            }
+            tze_hud_scene::graph::NotificationActivation::OpenUrl {
+                url,
+                publication_id,
+                index,
+            } => self.launch_link(
+                url,
+                tze_hud_scene::LinkFeedbackTarget::CardAction {
+                    publication_id,
+                    index,
+                },
+            ),
         }
+    }
+
+    /// Launch a pressed link and show its feedback, replacing any older one.
+    /// Drawn by this turn's settle; nothing reaches an agent.
+    fn launch_link(&mut self, url: String, target: tze_hud_scene::LinkFeedbackTarget) {
+        let done = self.state.notification_link_opener.launch(url);
+        let hold = crate::shell::link::feedback_hold(&self.state.global_tokens);
+        self.state.link_feedback = Some(crate::shell::link::LinkFeedback::start(
+            target,
+            done,
+            Instant::now(),
+            hold,
+        ));
+        self.state
+            .wake
+            .mark_main_work_pending(crate::idle_efficiency::RuntimeWakeupSource::SceneChange);
+    }
+
+    /// Advance and draw the link feedback: take a finished worker's result,
+    /// end a shown result at its deadline, and drop it with its card or
+    /// portal. Returns whether the scene changed. Idle (no feedback) costs
+    /// one check; a busy scene retries through the availability wake.
+    pub(super) fn settle_link_feedback(&mut self, now: Instant) -> bool {
+        let hold = crate::shell::link::feedback_hold(&self.state.global_tokens);
+        let Some(feedback) = self.state.link_feedback.as_mut() else {
+            return false;
+        };
+        feedback.advance(now, hold);
+        let Ok(shared) = self.state.shared_state.try_lock() else {
+            return false;
+        };
+        let Ok(mut scene) = shared.scene.try_lock() else {
+            return false;
+        };
+        let before = scene.geometry_epoch;
+        let alive = match &feedback.target {
+            tze_hud_scene::LinkFeedbackTarget::CardAction { publication_id, .. } => scene
+                .zone_registry
+                .active_publishes
+                .values()
+                .flatten()
+                .any(|record| record.publication_id == *publication_id),
+            tze_hud_scene::LinkFeedbackTarget::PortalLink { tile, .. } => {
+                scene.tiles.contains_key(tile) && !scene.tile_id_hidden(*tile)
+            }
+        };
+        let portal = matches!(
+            feedback.target,
+            tze_hud_scene::LinkFeedbackTarget::PortalLink { .. }
+        );
+        if feedback.expired(now) || !alive {
+            self.state.link_feedback = None;
+            scene.set_link_feedback(None);
+        } else {
+            feedback.drawn = true;
+            scene.set_link_feedback(Some((feedback.target.clone(), feedback.state)));
+        }
+        if portal
+            || scene
+                .overlay
+                .portal_reading
+                .values()
+                .any(|d| d.hint_feedback.is_some())
+        {
+            self.state.input_processor.sync_output_reading(&mut scene);
+        }
+        let changed = scene.geometry_epoch != before;
+        drop(scene);
+        drop(shared);
+        self.state
+            .surface_ui
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .link_feedback = self.link_feedback_name();
+        changed
+    }
+
+    fn link_feedback_name(&self) -> Option<&'static str> {
+        self.state
+            .link_feedback
+            .as_ref()
+            .map(|f| crate::operator::surface_status::link_feedback_name(f.state))
     }
 
     /// The admin `cursor`: the shape last applied, or `None` while the app
@@ -2415,11 +2506,14 @@ impl WinitApp {
         effect: tze_hud_input::portal_reading::ReadingEffect,
     ) {
         match effect {
-            tze_hud_input::portal_reading::ReadingEffect::Open(url) => {
+            tze_hud_input::portal_reading::ReadingEffect::Open { tile, href } => {
                 // Defense in depth: only a valid HTTPS target ever launches,
                 // whatever produced the effect.
-                if let Some(url) = tze_hud_scene::https_link_target(&url) {
-                    self.state.notification_link_opener.launch(url)
+                if let Some(url) = tze_hud_scene::https_link_target(&href) {
+                    self.launch_link(
+                        url,
+                        tze_hud_scene::LinkFeedbackTarget::PortalLink { tile, href },
+                    );
                 }
             }
             tze_hud_input::portal_reading::ReadingEffect::Copy(text) => {

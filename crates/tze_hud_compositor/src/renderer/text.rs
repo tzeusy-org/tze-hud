@@ -532,6 +532,27 @@ impl super::Compositor {
                                     });
                                     let label_y = b.y + action_layout.label_y;
                                     let label_h = action_layout.label_height.max(1.0);
+                                    // A pressed url action's feedback replaces its
+                                    // label in the same bounds; failure is the error color.
+                                    let feedback = match &scene.overlay.link_feedback {
+                                        Some((
+                                            tze_hud_scene::LinkFeedbackTarget::CardAction {
+                                                publication_id,
+                                                index: pressed,
+                                            },
+                                            state,
+                                        )) if *publication_id == record.publication_id
+                                            && *pressed == index =>
+                                        {
+                                            Some(*state)
+                                        }
+                                        _ => None,
+                                    };
+                                    let error_color = feedback
+                                        .filter(|s| *s == tze_hud_scene::LinkFeedbackState::Failed)
+                                        .and_then(|_| self.token_map.get("color.error"))
+                                        .and_then(|hex| super::token_colors::parse_hex_color(hex))
+                                        .map(tone_color);
                                     let label = |text: Arc<str>, x: f32, width: f32, align| {
                                         let mut item = Self::make_zone_text_item(
                                             text,
@@ -564,12 +585,19 @@ impl super::Compositor {
                                             tze_hud_scene::types::TextAlign::Start,
                                         ));
                                     }
-                                    items.push(label(
-                                        Arc::from(action.label.as_str()),
+                                    let mut text = label(
+                                        Arc::from(match feedback {
+                                            Some(state) => state.label(),
+                                            None => action.label.as_str(),
+                                        }),
                                         b.x + action_layout.padding + hint_width,
                                         action_layout.label_width(&b, index),
                                         tze_hud_scene::types::TextAlign::Center,
-                                    ));
+                                    );
+                                    if let Some(color) = error_color {
+                                        text.color = color;
+                                    }
+                                    items.push(text);
                                     if let Some((mark, _)) = mark {
                                         items.push(label(
                                             Arc::from(mark.as_str()),

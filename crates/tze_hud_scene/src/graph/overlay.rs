@@ -98,6 +98,10 @@ pub struct RuntimeOverlayState {
     /// The chosen interaction keeps its pressed fill; it has no hit region.
     #[serde(skip, default)]
     pub notification_choices: HashMap<SceneId, String>,
+    /// The newest pressed link's local feedback (one at a time); the runtime
+    /// sets and clears it, the compositor draws it.
+    #[serde(skip, default)]
+    pub link_feedback: Option<(crate::LinkFeedbackTarget, crate::LinkFeedbackState)>,
     /// Last accepted local link attempt per exact publication/button. No timer.
     #[serde(skip, default)]
     pub notification_link_attempts: HashMap<(SceneId, usize), u64>,

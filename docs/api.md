@@ -189,6 +189,17 @@ with the same cancellation and idle semantics as a `hud_input` wait.
   color and scale; layout reserves its shaped width separately from the
   clipped label. Browser foreground and card-stays behavior remain a
   separate Windows owner acceptance check.
+  Press feedback is local: a counted press shows "Opening…" in the
+  button's label box within a frame, then "Opened" or "Couldn't open" (in
+  `color.error`) for `link.feedback.ms` (default 1500), then the label
+  again. A worker that cannot start shows "Couldn't open" at once and does
+  not count. "Opened" means Windows accepted the request, not that the page
+  loaded. The worker reports once through a completion flag and one wake; a
+  handoff that never returns keeps "Opening…" without a timer. A refused
+  repeat inside 2 s changes nothing, the newest press replaces older
+  feedback, removing the card clears it, and keyboard activation (Enter,
+  Space, an answer-chord digit) shows the same states. Nothing reaches the
+  agent.
 - `zone:ambient-background` draws its fill or image at most
   `opacity.ambient.max` (0.9 by default) opaque, so the desktop under the
   overlay always shows through.
@@ -287,7 +298,10 @@ with the same cancellation and idle semantics as a `hud_input` wait.
   moved within the system drag threshold (`SM_CXDRAG`/`SM_CYDRAG`; 4 px off
   Windows), through the same browser handoff as card links, once
   per 2 s per link; a double-click opens it once and selects nothing, and a
-  press-drag on a link selects instead. Dragging selects text (double-click a
+  press-drag on a link selects instead. While the pressed link is hovered or
+  focused, its hint pill shows the card links' press feedback ("Opening…",
+  then "Opened" or "Couldn't open") in place of the host; "Opened" means
+  Windows accepted the request, not that the page loaded. Dragging selects text (double-click a
   word, triple-click a paragraph); the selection keeps its bytes across
   appends and head trims (it clears once its text is trimmed or rewritten)
   and stops follow-tail until it is cleared. Ctrl+C copies the selection as
@@ -652,6 +666,8 @@ agents until one is paired.
   `nesw-resize` or `nwse-resize`; `null` before the windowed runtime starts,
   and in overlay mode while the overlay is click-through (the app beneath
   owns the pointer).
+  `link_feedback` (top level) is the pressed link's local feedback:
+  `opening`, `opened`, `failed`, or `null`; never the URL.
   `link_launches` monotonically counts accepted runtime browser handoffs after
   the per-publication/action (card) or per-link (portal OUTPUT) 2 s limit. A failed worker spawn does not count;
   a browser navigation failure does. The non-Windows no-op counts too. Scene
@@ -1489,7 +1505,7 @@ color overrides still take precedence.
 | Gauge ring | `gauge.{width,height,edge.*,ring.*,caption.y,hover.delay_ms}`, `type.gauge.readout.size` (centred percent; family and weight follow `type.readout`) |
 | Progress card | `progress.{width,height,edge.*,content.x,text.y,label.width,track.*,readout.*,hover.delay_ms}`, `type.label.m`, `type.readout.family` |
 | Status pill | `status.{width,height,pill.*,edge.*,marker.*,name.x,text.*,separator.*,reason.*,tooltip.*,hover.*}`, `type.body.m`, `type.label.m` |
-| Choice actions | `notification.action.link_mark` |
+| Choice actions | `notification.action.link_mark`, `link.feedback.ms` (how long "Opened" or "Couldn't open" shows; default 1500) |
 | Motion | `motion.{enter,exit,state}.ms`, `motion.{enter,exit}.easing` (`linear`, `standard`, `decelerate`, `accelerate`) |
 | Shape | `shape.{xs,s,m,l,xl,full}` (corner radius) |
 | Spacing | `space.{xs,s,m,l,xl,xxl}` (4 px grid) |
