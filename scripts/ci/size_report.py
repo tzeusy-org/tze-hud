@@ -12,8 +12,8 @@ is one surface, and anything else is its top-level directory (or `(root)`).
 Rust test lines are files under a `tests/` or `benches/` directory, inline
 `#[cfg(test)] mod name { ... }` blocks (also `cfg(all(test, ...))`), and files
 a `#[cfg(test)] mod name;` declaration pulls in. Python test lines are `test_*.py` files and files under
-a `tests/` directory. Markdown excludes recorded evidence (`docs/evidence`)
-and tracker state (`.beads`): it is what a session or contributor reads.
+a `tests/` directory. Markdown excludes tracker state (`.beads`): it is what a
+session or contributor reads.
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ from pathlib import Path, PurePosixPath
 
 COLUMNS = ("rust", "rust_test", "python", "python_test", "markdown")
 TWO_PART = {"crates", "app", "examples", "tests"}
-MARKDOWN_SKIP = ("docs/evidence/", ".beads/")
+MARKDOWN_SKIP = (".beads/",)
 # `cfg(all(test, ...))` is test-only; `cfg(any(test, ...))` is shared code.
 CFG_TEST = re.compile(r"^(\s*)#\[cfg\((?:test|all\(test\b.*\))\)\]\s*$")
 TEST_MOD = re.compile(r"^(\s*)(?:pub(?:\([a-z]+\))? )?mod (\w+)\s*(\{|;)\s*$")

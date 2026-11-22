@@ -1824,109 +1824,32 @@ distinguishes arguments from responses and partial configuration examples.
 | Discover (unheld `production.toml`: 6 zones, 4 widget instances) | n/a | 321 | 245 | ≤ 250 |
 | Error | up to ~212 | 101 | 45 | ≤ 60 |
 
-The new `notification_choice_wait` flow uses the same four callback options,
-`wait_ms:30000` and `ttl_ms:0`; the explicit hold makes its response independent
-of elapsed wall-clock milliseconds. It exercises real shared activation and
-returns the accepted Skip action in its only call, without polling or ACK.
-Its 77 model-visible tokens compare with 114 for the unchanged three-call flow.
-Advertising the optional argument changes `tools/list` from 590 to 622 tokens;
-all six other existing flows keep identical fingerprints, bytes and counts.
-The owner **accepted** the new bytes, the new 90-token row and this necessary
-discovery exception to the signed byte-identity criterion for PR1602 on
-2026-11-12 (Asia/Singapore); the prior PR1598 approval covers only the previous baseline. All existing
-ceilings, reply defaults, counting rules, tokenizer and flow versions remain.
+All rows use canonical flow version 4 and `tiktoken-rs` 0.12.0
+(`o200k_base`); the canonical gate requires two byte-identical final-source
+measurements. A change to any flow's bytes or ceiling is an owner decision,
+recorded on the PR that makes it; the current bytes and ceilings were last
+accepted with PR1676 (`tools/list`, 2026-11-21).
 
-The `notification_choice_labels` flow (`hud-ohgc9.9`) asks the same
-four-option question with label-only actions, `wait_ms:30000` and
-`ttl_ms:30000`, so the card leaves with the wait; the accepted Skip comes back
-as `"action":"Skip"` in the only call. It measures 65 model-visible tokens
-(234 bytes) and 117 wire, against 77 for the explicit-id `ttl_ms:0` flow. The
-answered reply carries `"expires_in_ms":30000` (22 bytes, the gap to the
-212-byte, 58-token estimate in the signed spec); the calibration freezes the
-scene clock so that expiry is byte-stable, while a live reply carries the
-remaining milliseconds. Advertising `callback_id?` adds 1
-byte and 0 tokens to `tools/list` (2,710 to 2,711 model-visible bytes, 622
-tokens); every other flow keeps identical fingerprints, bytes and counts.
-The owner **accepted** these bytes and the new row for PR1670 on
-2026-11-21, with an 85-token ceiling (about 30% headroom over the 65
-measured).
-
-Raising the `wait_ms` cap to 55000 (`hud-ohgc9.14`) changes the two
-`maximum` values in `tools/list` from 30000 to 55000: the same 2,711
-model-visible bytes and 622 tokens, a new fingerprint. Every other flow,
-including `notification_choice_wait` (which still sends `wait_ms:30000`),
-keeps identical bytes. The owner **accepted** the new `tools/list` baseline
-for PR1673 on 2026-11-21.
-
-Advertising `role?:destructive` on notification actions (`hud-ohgc9.6`) adds
-18 bytes and 5 tokens to `tools/list` (2,711 to 2,729 model-visible bytes, 622
-to 627 tokens; wire 659 to 664); every other flow keeps identical
-fingerprints, bytes and counts. The owner **accepted** these bytes for
-PR1676 on 2026-11-21.
-
-All nine measurements use canonical flow version 4 and `tiktoken-rs` 0.12.0,
-`o200k_base`. The discovery-audience change (`hud-ljhku.7`, source `177e1096`)
-changes model-visible `tools/list` from 564 to 590 tokens and default discovery
-from 113 to 126. The five other flows retain identical request/response
-fingerprints and metrics: zone 39, widget 22, error 45, complete choice 114 and
-portal 137. At that baseline production discovery was 210, down from ~232; occupancy hints and all
-model-owned values/limits remain. The seven canonical flow ceilings are unchanged; the countdown package uses the signed 250-token production envelope. Numeric discovery
-says `number`; admission and error hints still enforce finite f32.
-
-The countdown (`hud-ljhku.9`) adds one production instance: the actual handler
-comparison measures model-visible 754 → 882 bytes / 210 → 245 tokens and wire
-1025 → 1171 bytes / 283 → 321 tokens. All prior discovery rows compare equal;
-KPI and stepper remain bundles without production instances. The new production
-bytes were **accepted by the owner** for PR1606 on 2026-11-12 (Asia/Singapore);
-the PR1598 approval below covers only the previous baseline.
-The seven canonical flow objects and ceilings remain unchanged in the baseline.
-
-The owner **accepted these concrete new baseline bytes** for PR1598 on
-2026-11-10 (Asia/Singapore). Earlier `hud-j7kxn` approval covered the old baseline
-only. The canonical gate still requires two byte-identical final-source
-measurements. Reply defaults `reattached`, `pending_input` and `remaining` stay
-byte-identical, including the unchanged full portal flow. The outcome receipts
-(`hud-ljhku.5`: `clipped`, `unread` and displaced items) are omitted on every
-canonical flow, so the baseline bytes are unchanged. `unread` stays out of the
-canonical portal flow because it publishes once and the count excludes the
-unit that publish appends. Only a reply that reports unread output grows, by
-the `"unread":N` field. Reporting `clipped` as
-drawn counts (`hud-ohgc9.2`) adds about one token per cut field to a clipped
-reply only; no canonical flow is clipped, so their bytes stay unchanged too.
-
-The `notification_choice` flow publishes Ship/Hold/Skip/Open, activates Skip through
-`SceneGraph::activate_notification` (the shared pointer/keyboard producer), polls
-its actual retained `hud_input` answer and acknowledges that returned id normally.
-All three calls count toward the owner-approved 120-token ceiling. That ceiling
-applies only to this new complete four-option flow; the six established flow
-ceilings and public serialization/accounting remain unchanged.
-
-Historical runtime-backed version-4 calibration measured 114 model-visible tokens:
-ask 69, answer 28, ACK 17. It failed the former 104-token ceiling and remains a historical failure. Fresh
-runtime measurements meet the amended 120-token ceiling. The owner separately
-accepted the measured version-4 baseline on 2026-11-08; the earlier approval
-of the choice ceiling alone did not approve those bytes.
-
-The calibration fixture waits for shared activation through a local readiness
-pipe before issuing the choice's default `hud_input {}` poll. `wait_ms` already
-defaults to zero; omitting it measures the supported concise form without a
-producer race. This fixture signal is outside MCP and carries no answer;
-the returned answer and its ACK still pass through the real MCP handler.
-The fixture injects its one fixed portal reply in the synchronous post-Hub-unlock
-callback for the exact canonical attachment, preserving the snapshotted publish
-response. It performs no scene probes or periodic Hub work through the portal's
-1000ms poll and default-zero ACK. Only that observed portal's subsequent clear
-allows choice probes, and layout waits for the actual choice publication.
-Fixture scene work stops before the old choice readiness, protecting its default-zero
-answer/ACK calls too. A second local driver barrier re-arms choice work only after
-those calls and the action-limit candidate finish, for the new in-band wait flow. This fixture ordering does not promise success under
-external scene contention or change the finite public input contract.
-
-The same calibration separately executes an over-limit notification publish.
-Its `notification_action_limit_error` candidate records full wire and
-model-visible transaction costs, and checks the returned `result_text` against
-the existing 60-token error ceiling. Caller-supplied action arguments retain
-their measured cost; the six canonical flow budgets above are unchanged.
+- `notification_choice` publishes Ship/Hold/Skip/Open, activates Skip through
+  `SceneGraph::activate_notification` (the shared pointer/keyboard producer),
+  polls the retained `hud_input` answer and acknowledges it; all three calls
+  count toward its 120-token ceiling.
+- `notification_choice_wait` asks the same question with `wait_ms:30000` and
+  `ttl_ms:0` and returns the accepted Skip in its only call, without polling
+  or ACK. `notification_choice_labels` uses label-only actions with
+  `ttl_ms:30000`, so the card leaves with the wait, and returns
+  `"action":"Skip"`; the calibration freezes the scene clock so the reply's
+  `expires_in_ms` is byte-stable.
+- The calibration also runs an over-limit notification publish
+  (`notification_action_limit_error`) and holds its `result_text` to the
+  60-token error ceiling.
+- Default reply fields (`reattached`, `pending_input`, `remaining`) stay
+  byte-identical, and outcome receipts (`clipped`, `unread`, displaced items)
+  are omitted on every canonical flow. Only a reply that reports them grows:
+  `"unread":N`, or about one token per clipped field.
+- The fixture signals shared activation through a local readiness pipe outside
+  MCP; answers and ACKs still pass through the real MCP handler. Its ordering
+  does not promise success under external scene contention.
 
 The portal flow takes 4 round trips in the canonical fixture because the
 first poll has nothing to ack; in a steady loop each `hud_input` both acks
@@ -1936,13 +1859,10 @@ the previous items and polls, so poll+ack is one round trip.
 acceptance flows (`docs/scope.md`), run end to end against `production.toml`.
 Its fresh, unheld discovery budget is the production row above: <=250 tokens,
 retaining model-owned parameter names, bounds and actionable occupancy hints.
-The live-state POC fixture envelope is 285 tokens (previously 250): it adds
-the same measured 35-token countdown row while retaining the prior 40-token
-allowance for holdings/portal state above the actual unheld baseline.
-This fixture-only change is included in the pending byte/budget review;
-none of the seven canonical flow ceilings changes. That
-fixture envelope is not a promise for arbitrary numbers of live portals;
-required state fields are never dropped to fit the unheld baseline.
+The live-state POC fixture envelope is 285 tokens: the unheld baseline plus a
+40-token allowance for holdings and portal state. It is not a promise for
+arbitrary numbers of live portals; required state fields are never dropped to
+fit the unheld baseline.
 
 The compact model schema retains `gauge.label` (metric name),
 `progress-bar.label` (32-byte task text), status `label`/`reason`, values and
@@ -2007,16 +1927,3 @@ mismatched history or bounded-admission failure disable notification actions
 until a clean runtime restart. Valid reentrant histories may trigger that
 availability limit; its frequency has not been measured. Unrelated pointer input
 continues, and this source model does not replace held-press/release owner proof.
-
-Alert-banner restyle evidence: `docs/evidence/alert-banner/before.json` records
-three own-frame owner-host captures from build `24818c39` (info, caution and
-critical sequentially on display 1). The existing theme and settings were left
-unchanged; its theme/scale selection is not exposed by that status API. The
-shipped one-banner-per-publisher limit prevented a simultaneous stack from this
-single pairing. The exact severity payloads in `alert-banner-{info,caution,critical}-test.json`
-are captured separately under every theme by the existing Windows CI capture
-lane; headless tests retain distinct-publisher severity ordering coverage.
-The [evidence gallery](evidence/alert-banner/README.md) includes the nine
-branch captures with their source, fixture, token and PNG hashes. These use
-llvmpipe at 1920×1080 because the headless device rejects the owner's 4K
-dimensions; they do not establish owner hardware or visual acceptance.
