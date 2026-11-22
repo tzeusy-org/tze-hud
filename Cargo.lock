@@ -3769,7 +3769,6 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-stream",
- "toml 0.8.23",
  "tonic",
  "tonic-build",
  "tracing",

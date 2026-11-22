@@ -2925,7 +2925,10 @@ impl WindowedRuntime {
             ),
             runtime_widget_store: runtime_widget_store.clone(),
             element_store: startup_element_store,
-            element_store_path: Some(startup_element_store_path),
+            element_store_file: Some(tze_hud_protocol::session::ElementStoreFile {
+                path: startup_element_store_path,
+                write: crate::element_store::persist_element_store_to_path,
+            }),
             safe_mode_atomic: Arc::clone(&safe_mode_atomic),
             active_tab_mirror: Arc::clone(&active_tab_mirror),
             token_store: TokenStore::new(),

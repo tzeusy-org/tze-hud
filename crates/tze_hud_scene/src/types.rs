@@ -40,8 +40,8 @@ impl SceneId {
     /// When encoded as a protobuf `bytes` field, this value serializes to 16
     /// zero bytes. Note that in proto3 an unset `bytes` field defaults to an
     /// empty vector (length 0), not 16 zero bytes; callers must explicitly
-    /// handle the empty-bytes case (e.g., `proto_to_scene_id` returns `None`
-    /// for empty input) and decide whether to treat it as this sentinel.
+    /// handle the empty-bytes case (`from_bytes_le` returns `None` for empty
+    /// input) and decide whether to treat it as this sentinel.
     pub fn null() -> Self {
         SceneId(Uuid::nil())
     }
