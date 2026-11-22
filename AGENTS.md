@@ -119,10 +119,11 @@ status entry, notification stream or portal.
   link that destination. Do not invent link-action support on an older build.
 - **Own the interaction:** identify the originating work in each prompt.
   Route input by surface and the current question's callback identity, handle
-  it once, then ACK only the items handled by this session. `hud_input` spans
-  all surfaces of the authenticated agent: sessions sharing a pairing must
-  coordinate one input consumer/demultiplexer or use separate identities.
-  Never run an indiscriminate auto-ACK poll or clear another session's surface.
+  it once, then ACK the items handled. Each MCP session (one stdio adapter per
+  Claude session) owns its own cards, portals and input under the shared
+  pairing; the adapter releases them when the session exits cleanly. Python
+  scripts without a session share the agent's one unscoped owner: they don't
+  see a session's input or portals.
   Do not offer action buttons without safe answer routing; use chat instead.
 - **Bound the footprint:** use finite, appropriate TTLs, update existing
   status instead of stacking repeats, and remove or let expire owned content

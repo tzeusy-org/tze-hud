@@ -66,9 +66,12 @@ zones and widgets (`docs/api.md`):
   the viewer had not yet reached N output units before this publish (also on
   the `hud_surfaces` portal entry). Check it before raising a separate
   notification: unread output means the viewer has not caught up yet.
-- `hud_input` returns input from every surface you hold, oldest first,
-  including notification action presses. Unacked items are redelivered, so
-  ack each one once handled; the ack rides on your next poll.
+- `hud_input` returns input from every surface this session holds, oldest
+  first, including notification action presses. Each MCP session is its own
+  owner: other sessions on the same pairing never see your replies, and your
+  portal header shows your folder name until you set `display_name`.
+  Unacked items are redelivered, so ack each one once handled; the ack rides
+  on your next poll.
 - `hud_surfaces` lists your attached portals with `state` and
   `pending_input`.
 - A portal you stop calling degrades after 30 s and is reclaimed 30 s later,
@@ -92,8 +95,9 @@ model makes no requests until input arrives:
 
 ```bash
 # Claude Code: run with run_in_background; it exits (and wakes you) on the
-# first reply, or after rounds x 30 s with exit 3.
-HUD_HOST=<host> python3 .claude/skills/hud-projection/scripts/portal_client.py \
+# first reply, or after rounds x 30 s with exit 3. HUD_HOST is optional
+# here: it joins this session's HUD.
+python3 .claude/skills/hud-projection/scripts/portal_client.py \
   poll --wait-ms 30000 --rounds 120 --ack
 ```
 
@@ -101,7 +105,9 @@ HUD_HOST=<host> python3 .claude/skills/hud-projection/scripts/portal_client.py \
 - `--ack` acks what it prints; read the replies from its output. Don't also
   poll from the model while it runs, or the two consumers race for items.
 - Exit 3 means no reply within the window: republish or wait again.
-- It uses the same PSK as the MCP adapter, so it sees the same portal.
+- It joins this session's HUD session (the adapter keeps a private record in
+  `~/.config/tze-hud/sessions/`), so it sees the portal you attached through
+  the MCP tools. Start it from this Claude session, not another terminal.
 
 ## Connect
 

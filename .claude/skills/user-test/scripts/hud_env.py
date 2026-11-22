@@ -232,6 +232,73 @@ def adapter_key(endpoint: dict) -> str:
     return key
 
 
+def _parent(pid: int) -> int | None:
+    try:
+        text = Path(f"/proc/{pid}/stat").read_text()
+        return int(text[text.rindex(")") + 2:].split()[1])
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+def session_path(owner: int) -> Path:
+    """The private session record the stdio adapter keeps for its client
+    process `owner` (the Claude process that launched it)."""
+    return config_dir() / "sessions" / f"{owner}.json"
+
+
+def write_session(owner: int, endpoint: dict, session: str) -> None:
+    """Record `session` for processes started under `owner` (mode 0600,
+    replaced atomically). Never model-visible: only the session id and the
+    nonsecret endpoint, never a key."""
+    path = session_path(owner)
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    directory = path.parent.lstat()
+    if not stat.S_ISDIR(directory.st_mode) or directory.st_uid != os.getuid():
+        raise PermissionError("the HUD sessions directory is not this user's own")
+    if directory.st_mode & 0o077:
+        path.parent.chmod(0o700)  # Readers reject a loose directory.
+    record = {"schema": 1, "host": endpoint["host"], "url": endpoint["url"],
+              "session": session, "adapter": os.getpid()}
+    temp = path.with_name(f".{owner}.{os.getpid()}.tmp")
+    temp.unlink(missing_ok=True)
+    fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        json.dump(record, handle)
+    os.replace(temp, path)
+
+
+def remove_session(owner: int) -> None:
+    """Drop this adapter's record (a successor's record is left alone)."""
+    path = session_path(owner)
+    try:
+        if json.loads(path.read_text(encoding="utf-8")).get("adapter") == os.getpid():
+            path.unlink()
+    except (OSError, ValueError, AttributeError):
+        pass
+
+
+def inherited_session() -> dict | None:
+    """The live stdio adapter session of the nearest ancestor process that
+    has one (Linux/WSL), so a helper the model starts joins the model's own
+    session; None when there is none."""
+    pid = os.getppid()
+    while pid and pid > 1:
+        path = session_path(pid)
+        if os.path.lexists(path):
+            try:
+                record = json.loads(_private_bytes(path, 4096))
+                session, adapter = record["session"], record["adapter"]
+                host, url = _adapter_url(record["url"])
+                if host != record["host"] or not isinstance(session, str) or type(adapter) is not int:
+                    raise ValueError
+            except (HudEnvError, ValueError, TypeError, KeyError, UnicodeError):
+                return None
+            # A crashed adapter's record, or a reused pid, is not a session.
+            return {"host": host, "url": url, "session": session} if _parent(adapter) == pid else None
+        pid = _parent(pid)
+    return None
+
+
 def main(argv: list[str]) -> int:
     """`mcp-headers`: the MCP client's `headersHelper` (JSON for the harness, not a terminal)."""
     if argv != ["mcp-headers"]:

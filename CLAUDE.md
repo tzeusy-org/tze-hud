@@ -59,7 +59,9 @@ The PSK stays in `~/.config/tze-hud/<hostname>.psk`; a private nonsecret endpoin
 record retains the actual pairing port. The project MCP stdio adapter discovers
 one paired host without `HUD_HOST`; multiple hosts require explicit `HUD_HOST`.
 An old key without metadata uses 9090; an old custom port needs re-pairing or
-explicit selection. Ordinary Python clients still use `HUD_HOST`. The adapter
+explicit selection. Ordinary Python clients still use `HUD_HOST`. Each adapter
+is its own HUD session: it owns only its cards, portals and input, titles its
+portals with its folder name, and releases them on a clean exit. The adapter
 runs on Linux/WSL; native Windows/macOS client lifetime support is not claimed.
 
 For sessions outside this repository, use the managed user-scope installation
