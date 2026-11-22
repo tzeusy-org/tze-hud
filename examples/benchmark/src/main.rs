@@ -46,9 +46,13 @@ use serde::{Deserialize, Serialize};
 mod cpu_calibration;
 #[cfg(feature = "headless")]
 mod publish;
+// Only the headless benchmark run builds a report; the stub binary keeps the types for its tests.
+#[cfg_attr(not(feature = "headless"), allow(dead_code))]
+mod validation;
 
 use cpu_calibration::CpuCalibrationResult;
-use tze_hud_telemetry::{HardwareFactors, SessionSummary, ValidationReport};
+use tze_hud_telemetry::SessionSummary;
+use validation::{HardwareFactors, ValidationReport};
 
 #[cfg(feature = "headless")]
 const CALIBRATION_VECTOR_VERSION: &str = "tze_hud.cpu-gpu-upload.v1";
@@ -187,7 +191,7 @@ pub struct CalibrationOutput {
     /// Upload calibration result.  None if --cpu-only.
     pub upload: Option<UploadCalibrationResult>,
     /// Normalized hardware factors used for budget assertions.
-    pub factors: HardwareFactors,
+    pub(crate) factors: HardwareFactors,
 }
 
 /// Full benchmark output emitted to `--emit path`.
@@ -198,7 +202,7 @@ pub struct BenchmarkOutput {
     /// Per-scenario session summaries.
     pub sessions: Vec<ScenarioResult>,
     /// Layer-3 validation report (runs against the notification session).
-    pub validation: ValidationReport,
+    pub(crate) validation: ValidationReport,
     /// Present only when `--constrained-envelope` requests fail-closed proxy proof.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub constrained_profile: Option<ConstrainedProfileIdentity>,
@@ -924,7 +928,7 @@ mod headless_impl {
     // ── Entry point ───────────────────────────────────────────────────────────
 
     pub(crate) async fn run() {
-        use tze_hud_telemetry::AssertionOutcome;
+        use crate::validation::AssertionOutcome;
 
         tracing_subscriber::fmt()
             .with_env_filter(

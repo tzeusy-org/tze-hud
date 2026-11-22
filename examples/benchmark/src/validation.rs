@@ -1,7 +1,7 @@
-//! # Performance Validation Harness (Layer 3)
+//! # Benchmark validation report
 //!
-//! Hardware-normalized budget assertions for Layer 3 of the five-validation-layer
-//! architecture (see `heart-and-soul/validation.md`).
+//! Hardware-normalized budget assertions over the benchmark's session summary.
+//! This is the benchmark's own report schema; nothing else reads it.
 //!
 //! ## Overview
 //!
@@ -44,7 +44,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::record::{LatencyBucket, SessionSummary};
+use tze_hud_telemetry::{LatencyBucket, SessionSummary};
 
 // ─── Hardware factors ─────────────────────────────────────────────────────────
 
@@ -58,7 +58,7 @@ use crate::record::{LatencyBucket, SessionSummary};
 /// `None` means calibration for that dimension was not performed or failed
 /// (triggers uncalibrated mode for assertions that use it).
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct HardwareFactors {
+pub(crate) struct HardwareFactors {
     /// CPU scene-graph throughput factor (from `tze_hud_scene::calibration`).
     pub cpu: Option<f64>,
     /// GPU fill/composition throughput factor (from headless render loop).
@@ -69,7 +69,7 @@ pub struct HardwareFactors {
 
 impl HardwareFactors {
     /// Create a fully uncalibrated set (all None).
-    pub fn uncalibrated() -> Self {
+    pub(crate) fn uncalibrated() -> Self {
         Self {
             cpu: None,
             gpu: None,
@@ -78,7 +78,8 @@ impl HardwareFactors {
     }
 
     /// Create a calibrated set with known factors.
-    pub fn new(cpu: f64, gpu: f64, upload: f64) -> Self {
+    #[cfg(test)]
+    pub(crate) fn new(cpu: f64, gpu: f64, upload: f64) -> Self {
         Self {
             cpu: Some(cpu),
             gpu: Some(gpu),
@@ -108,7 +109,7 @@ impl Default for HardwareFactors {
 /// Which hardware dimension normalizes a given budget.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum CalibrationDimension {
+pub(crate) enum CalibrationDimension {
     Cpu,
     Gpu,
     Upload,
@@ -118,7 +119,7 @@ pub enum CalibrationDimension {
 
 impl CalibrationDimension {
     /// Extract the factor for this dimension from a [`HardwareFactors`].
-    pub fn factor_from(&self, factors: &HardwareFactors) -> Option<f64> {
+    pub(crate) fn factor_from(&self, factors: &HardwareFactors) -> Option<f64> {
         match self {
             Self::Cpu => factors.cpu,
             Self::Gpu => factors.gpu,
@@ -133,7 +134,7 @@ impl CalibrationDimension {
 /// Result of a single budget assertion.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
-pub enum AssertionOutcome {
+pub(crate) enum AssertionOutcome {
     /// Assertion passed: p99 value is within the calibrated budget.
     Pass {
         /// The name of the metric being checked.
@@ -171,17 +172,17 @@ pub enum AssertionOutcome {
 
 impl AssertionOutcome {
     /// Returns true if the outcome is a definitive pass.
-    pub fn is_pass(&self) -> bool {
+    pub(crate) fn is_pass(&self) -> bool {
         matches!(self, Self::Pass { .. })
     }
 
     /// Returns true if the outcome is a definitive fail.
-    pub fn is_fail(&self) -> bool {
+    pub(crate) fn is_fail(&self) -> bool {
         matches!(self, Self::Fail { .. })
     }
 
     /// Returns true if uncalibrated (neither pass nor fail).
-    pub fn is_uncalibrated(&self) -> bool {
+    pub(crate) fn is_uncalibrated(&self) -> bool {
         matches!(self, Self::Uncalibrated { .. })
     }
 }
@@ -192,7 +193,7 @@ impl AssertionOutcome {
 ///
 /// Scaling: `effective_budget = base_budget_us * factor`
 /// where `factor` comes from the hardware calibration dimension.
-pub struct BudgetAssertion {
+pub(crate) struct BudgetAssertion {
     /// Human-readable name for this metric.
     pub metric: String,
     /// Base budget on reference hardware (microseconds).
@@ -203,7 +204,7 @@ pub struct BudgetAssertion {
 
 impl BudgetAssertion {
     /// Create a new budget assertion.
-    pub fn new(
+    pub(crate) fn new(
         metric: impl Into<String>,
         base_budget_us: u64,
         dimension: CalibrationDimension,
@@ -221,7 +222,11 @@ impl BudgetAssertion {
     /// - If the required dimension is not calibrated → `Uncalibrated`.
     /// - If p99 ≤ effective_budget → `Pass`.
     /// - If p99 > effective_budget → `Fail`.
-    pub fn check(&self, bucket: &LatencyBucket, factors: &HardwareFactors) -> AssertionOutcome {
+    pub(crate) fn check(
+        &self,
+        bucket: &LatencyBucket,
+        factors: &HardwareFactors,
+    ) -> AssertionOutcome {
         // Check for samples first; a missing dimension on an empty bucket is
         // meaningless — report the data absence, not the calibration state.
         let p99 = match bucket.p99() {
@@ -271,7 +276,7 @@ impl BudgetAssertion {
     /// Check a raw count value (e.g., lease_violations, budget_overruns) must be zero.
     ///
     /// For zero-violation counters the calibration dimension is always `None`.
-    pub fn check_zero(metric: impl Into<String>, value: u64) -> AssertionOutcome {
+    pub(crate) fn check_zero(metric: impl Into<String>, value: u64) -> AssertionOutcome {
         let metric = metric.into();
         if value == 0 {
             AssertionOutcome::Pass {
@@ -295,7 +300,7 @@ impl BudgetAssertion {
 
 /// Full set of Layer-3 assertion outcomes for a session.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ValidationReport {
+pub(crate) struct ValidationReport {
     /// Hardware factors used for normalization.
     pub hardware_factors: HardwareFactors,
     /// Individual assertion outcomes.
@@ -327,7 +332,7 @@ impl ValidationReport {
     /// - `lease_violations` == 0
     /// - `budget_overruns` == 0
     /// - `sync_drift_violations` == 0
-    pub fn run(summary: &SessionSummary, factors: &HardwareFactors) -> Self {
+    pub(crate) fn run(summary: &SessionSummary, factors: &HardwareFactors) -> Self {
         let assertions_to_run = [
             BudgetAssertion::new("frame_time_p99", 16_600, CalibrationDimension::Gpu),
             BudgetAssertion::new("input_to_local_ack_p99", 4_000, CalibrationDimension::Cpu),

@@ -4478,7 +4478,6 @@ dependencies = [
  "toml 0.8.23",
  "tonic",
  "tze_hud_protocol",
- "tze_hud_telemetry",
 ]
 
 [[package]]

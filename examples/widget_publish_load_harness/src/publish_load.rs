@@ -8,41 +8,41 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum PublishLoadTransport {
+pub(crate) enum PublishLoadTransport {
     Grpc,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum PublishLoadMode {
+pub(crate) enum PublishLoadMode {
     Burst,
     Paced,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum ByteAccountingMode {
+pub(crate) enum ByteAccountingMode {
     PayloadOnly,
     PayloadPlusWire,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum PublishLoadCalibrationStatus {
+pub(crate) enum PublishLoadCalibrationStatus {
     Calibrated,
     Uncalibrated,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum PublishLoadVerdict {
+pub(crate) enum PublishLoadVerdict {
     Pass,
     Fail,
     Uncalibrated,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct PublishLoadIdentity {
+pub(crate) struct PublishLoadIdentity {
     pub target_id: String,
     pub target_host: String,
     pub network_scope: String,
@@ -56,7 +56,7 @@ pub struct PublishLoadIdentity {
 }
 
 impl PublishLoadIdentity {
-    pub fn stable_comparison_key(&self) -> String {
+    pub(crate) fn stable_comparison_key(&self) -> String {
         let transport = match self.transport {
             PublishLoadTransport::Grpc => "grpc",
         };
@@ -107,7 +107,7 @@ impl PublishLoadIdentity {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct PublishLoadMetrics {
+pub(crate) struct PublishLoadMetrics {
     pub request_count: u64,
     pub success_count: u64,
     pub error_count: u64,
@@ -126,20 +126,20 @@ pub struct PublishLoadMetrics {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct PublishLoadThresholds {
+pub(crate) struct PublishLoadThresholds {
     pub target_p99_rtt_us: Option<u64>,
     pub target_throughput_rps: Option<f64>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct PublishLoadTraceability {
+pub(crate) struct PublishLoadTraceability {
     pub spec_id: Option<String>,
     pub budget_id: Option<String>,
     pub threshold_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct PublishLoadArtifact {
+pub(crate) struct PublishLoadArtifact {
     pub benchmark_key: String,
     pub identity: PublishLoadIdentity,
     pub metrics: PublishLoadMetrics,
@@ -156,7 +156,7 @@ pub struct PublishLoadArtifact {
 }
 
 impl PublishLoadArtifact {
-    pub fn validate(&self) -> Result<(), String> {
+    pub(crate) fn validate(&self) -> Result<(), String> {
         self.validate_benchmark_key()?;
         self.validate_counts()?;
         self.validate_mode_shape()?;
