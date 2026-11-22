@@ -258,15 +258,21 @@ class Adapter:
 
     def abort(self, batch):
         now = time.monotonic()
+        lost_reinitialize = False
         for task in batch:
             if task.abort_phase is None:
                 task.cancelled = True
+                lost_reinitialize = lost_reinitialize or task.internal
                 task.abort_phase, task.abort_deadline = "term", now + TERM_SECONDS
                 self.signal_task(task, signal.SIGTERM)
                 if task.process.stdin is not None:
                     self.unregister(task.process.stdin)
                     task.process.stdin.close()
                     task.payload = memoryview(b"")
+        if lost_reinitialize and self.reinitializing:
+            # Every abort site (deadline, broken job pipe, oversized result)
+            # reports here: the abandoned worker's exit no longer does.
+            self.reinitialized(False)
 
     def admit(self, request, deadline=None, *, retried=False, internal=False):
         if not isinstance(request, dict) or request.get("jsonrpc") != "2.0" or not isinstance(request.get("method"), str):
@@ -283,8 +289,7 @@ class Adapter:
                 wanted = params.get("requestId")
                 if valid_id(wanted):
                     self.abort([t for t in self.tasks if "id" in t.request and t.request["id"] == wanted
-                                and t.request["method"] != "initialize" and not t.result_seen
-                                and not t.internal])
+                                and t.request["method"] != "initialize" and not t.result_seen])
             return
         if method == "notifications/initialized" and not has_id:
             # Consumed locally (the runtime ignores it): readiness never
@@ -313,7 +318,7 @@ class Adapter:
         seconds = INITIALIZE_SECONDS if method == "initialize" else REQUEST_SECONDS
         deadline = deadline if deadline is not None else time.monotonic() + seconds
         if len(self.tasks) >= MAX_WORKERS or time.monotonic() >= deadline:
-            if has_id:
+            if has_id and not internal:  # The internal id never reaches the client.
                 self.queue(failure(request_id, "HUD request deadline or capacity exceeded"))
             return
         if internal:
@@ -544,7 +549,6 @@ class Adapter:
             elif task.abort_phase is None and now >= task.deadline:
                 if task.internal:
                     self.abort([task])
-                    self.reinitialized(False)
                     continue
                 if "id" in task.request:
                     message = INITIALIZE_TIMEOUT if task.request["method"] == "initialize" else "HUD request deadline exceeded"
