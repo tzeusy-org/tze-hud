@@ -899,6 +899,7 @@ impl WinitApp {
             || self.state.pending_pointer_move
             || !self.state.pending_pointer_buttons.is_empty()
             || self.state.link_feedback.as_ref().is_some_and(|f| !f.drawn)
+            || self.state.press_guard.observation_due
             || self
                 .state
                 .primary_drag_gesture
