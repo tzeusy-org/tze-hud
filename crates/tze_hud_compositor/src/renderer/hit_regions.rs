@@ -1,12 +1,5 @@
 //! Hit-region population methods for the compositor.
 //!
-//! Moved from `renderer/mod.rs` (the "Hit regions" cluster,
-//! formerly ~L7346–7899 at plan date) by Step R-8 of the renderer module
-//! split. No logic was changed; only the `pub(super)` visibility
-//! modifier was added to `populate_drag_handle_hit_regions_from` and
-//! `collect_context_menu` so that callers in sibling modules can
-//! access them.
-//!
 //! ## Methods in this file
 //!
 //! - `populate_drag_handle_hit_regions_from` — populate drag-handle hit regions

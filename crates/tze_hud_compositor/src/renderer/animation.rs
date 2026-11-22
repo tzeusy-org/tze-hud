@@ -1,12 +1,7 @@
 //! Animation-state update methods for the compositor.
 //!
-//! Moved from `renderer/mod.rs` (the animation-update method cluster, approx.
-//! L4288–5095 at plan date) by Step R-5 of the renderer module split.
-//! No logic was changed; only visibility modifiers were added
-//! where Rust's module-privacy rules require them.
-//!
 //! Animation-state **types** (`ZoneAnimationState`, `PublicationAnimationState`,
-//! `StreamRevealState`) remain in `draw_cmds.rs` (placed there by Step R-1).
+//! `StreamRevealState`) live in `draw_cmds.rs`.
 //! This file contains only the `impl Compositor` methods that operate on those
 //! types.
 

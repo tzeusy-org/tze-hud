@@ -6,14 +6,14 @@
 //!
 //! | Authority | Module | Role |
 //! |-----------|--------|------|
-//! | Resource accounting | `tze_hud_resource` | Decoded-byte budget registry; GC; dedup |
+//! | Resource accounting | `tze_hud_resource` | Decoded-byte budget registry; dedup |
 //! | Mutation budgets | `tze_hud_runtime::mutation_budget_bridge` | Per-session and aggregate hard caps |
 //! | Override state | `tze_hud_runtime::shell::safe_mode` | Sole writer of safe-mode state |
 //! | Scene orchestration | `tze_hud_runtime` (this crate) | Wires authority modules; drives pipeline |
 //!
 //! ## Threads
 //!
-//! Four fixed thread groups — no dynamic spawning after startup:
+//! Three fixed thread groups — no dynamic spawning after startup:
 //!
 //! - **Main thread**: winit event loop, input drain, local feedback,
 //!   surface.present() when signalled by the frame-ready watch.
@@ -28,8 +28,8 @@
 //!
 //! | Feature | Purpose |
 //! |---------|---------|
-//! | `headless` | Enable headless GPU surface (required for CI and tests) |
 //! | `dev-mode` | Allow `HeadlessConfig { config_toml: None }` — grants unrestricted capabilities to all agents; opt into compositor/telemetry headless work observations. **MUST NOT be enabled in production binaries.** Safe for integration tests, examples, and local development. |
+//! | `test-harness` | Expose `windowed::HeadlessEventLoopHarness` and headless gRPC listener adoption for end-to-end fixtures. Not for production builds. |
 //!
 //! In unit tests (compiled with `cfg(test)`), the `dev-mode` bypass is also
 //! available without the feature flag, because unit tests run inside the

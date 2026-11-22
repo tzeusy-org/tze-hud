@@ -1,19 +1,5 @@
 //! Tile and node rendering methods for the compositor.
 //!
-//! Moved from `renderer/mod.rs` (the "Drag-boost helpers" + tile/node
-//! rendering cluster, formerly ~L7900–8213 at plan date) by Step R-9 of the
-//! renderer module split. No logic was changed; `pub(super)`
-//! visibility was added to the methods called from sibling modules or from
-//! `mod.rs`:
-//!
-//! - `effective_tile_z_order` — called by tests in `mod.rs`
-//! - `effective_tile_opacity` — called by tests in `mod.rs`
-//! - `sort_tiles_with_drag_boost` — called by `render_frame*` in `mod.rs`
-//! - `tile_background_color` — called by `render_frame*` in `mod.rs`
-//! - `render_composer_overlay` — called by `render_frame*` in `mod.rs`
-//! - `render_node` — called by `render_frame*` in `mod.rs`
-//! - `collect_composer_text_item` — called by `collect_text_items` in `text.rs`
-//!
 //! ## Methods in this file
 //!
 //! - `effective_tile_z_order` — effective sort key for a tile, with drag boost.

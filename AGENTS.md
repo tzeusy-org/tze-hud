@@ -4,13 +4,10 @@ This project uses **bd** (beads) for issue tracking. Run `bd onboard` to get sta
 
 ## Current project documentation
 
-Read `docs/vision.md` for direction, `docs/scope.md` for the source-evidenced
-T0–T10 status, `docs/architecture.md` for code ownership, and `docs/api.md` /
-`docs/invariants.md` for current contracts. The 2026-10-02 slim reset retired
-`about/`, OpenSpec and their navigation skills; references to those paths in
-older notes below are historical, not instructions to restore them. Update
-current docs alongside behavior changes. Source implementation and Windows
-owner acceptance are separate evidence.
+Read `docs/vision.md`, `docs/scope.md` (status and open owner checks),
+`docs/architecture.md`, `docs/api.md` and `docs/invariants.md`. The retired
+`about/`, OpenSpec and doctrine trees stay retired; update current docs with
+behavior changes. This file holds recipes and gotchas only.
 
 ## Local Dev Harness
 
@@ -49,19 +46,13 @@ The toolchain is pinned in `rust-toolchain.toml` (Rust 1.88, matching CI and the
 `[workspace.lints]` in the root `Cargo.toml` and inherited via `lints.workspace = true`
 in every member crate.
 
-GPU tests: run `just test-gpu` (compositor render tests plus runtime `pixel_readback`,
-pinned to Mesa llvmpipe via `VK_ICD_FILENAMES`). Test-only async gates serialize
-GPU initialization per test process in the compositor helpers, runtime `pixel_helpers`,
-integration GPU suites, `vertical_slice` budget/lifecycle tests, `present_ack`, and
-canonical-app production boot tests.
-The shared runtime `test_support` source is included once per external test binary;
-its initialization guard is released before clients or rendering, while runtime-lib
-scenarios keep their existing outer guards. Single-GPU-test binaries (including
-`vertical_slice` production boot and canonical-app `benchmark_config_schema`) need
-no in-process gate. Separate processes are not coordinated.
-Every `just` recipe that builds a GPU device pins llvmpipe when its ICD is installed;
-discovery supports both `lvp_icd.x86_64.json` and Mesa 25's `lvp_icd.json`. Don't run
-bare `cargo test -p tze_hud_compositor` on a host with a hardware Vulkan ICD (recorded hangs were NVIDIA driver threads). Protocol generation uses bundled protoc 31.1 (`protoc-bin-vendored =3.2.0`), selected for the build host; system protoc and `PROTOC` overrides are not used.
+GPU tests: run `just test-gpu` (compositor render tests plus runtime
+`pixel_readback`, pinned to Mesa llvmpipe via `VK_ICD_FILENAMES`). GPU
+initialization is serialized per test process by test-only gates; separate
+processes are not coordinated. Every `just` recipe that builds a GPU device pins
+llvmpipe when its ICD is installed (`lvp_icd.x86_64.json` or Mesa 25's
+`lvp_icd.json`). Don't run bare `cargo test -p tze_hud_compositor` on a host
+with a hardware Vulkan ICD (recorded hangs were NVIDIA driver threads).
 
 On Windows, `just` needs Git for Windows' `sh` and a real `python3`; setup, the
 per-recipe status, and runtime differences are in `docs/development/windows.md`.
@@ -146,59 +137,21 @@ an accepted publish or runtime screenshot is not owner visual acceptance.
 
 ## LLM Self-Projection
 
-If you are an LLM session that wants to project itself onto the HUD — to show your output, status, or live transcript on screen — use the **`hud-projection`** skill (`.claude/skills/hud-projection/SKILL.md` / `.codex/skills/hud-projection/SKILL.md`).
-
-Trigger phrases: "project this session to the HUD", "attach this agent to HUD", "show this LLM session in a text-stream portal", "check HUD input", "publish status to screen".
-
-This is cooperative opt-in projection, not PTY capture or terminal scraping. Portal state lives in the runtime's `PortalHub`, keyed by agent and portal id; you reach it with the MCP verbs on the surface `portal:<id>` (`hud_publish` attaches and publishes, `hud_input` collects replies, `hud_clear` detaches; see `docs/api.md`). For one-shot zone publishing (no session lifecycle), use the **`th-hud-publish`** skill instead.
+Use the **`hud-projection`** skill to project a session onto the HUD, and
+**`th-hud-publish`** for one-shot zone publishing; CLAUDE.md has pairing details.
 
 ## Non-Interactive Shell Commands
 
-**ALWAYS use non-interactive flags** with file operations to avoid hanging on confirmation prompts.
-
-Shell commands like `cp`, `mv`, and `rm` may be aliased to include `-i` (interactive) mode on some systems, causing the agent to hang indefinitely waiting for y/n input.
-
-**Use these forms instead:**
-```bash
-# Force overwrite without prompting
-cp -f source dest           # NOT: cp source dest
-mv -f source dest           # NOT: mv source dest
-rm -f file                  # NOT: rm file
-
-# For recursive operations
-rm -rf directory            # NOT: rm -r directory
-cp -rf source dest          # NOT: cp -r source dest
-```
-
-**Other commands that may prompt:**
-- `apt-get` - use `-y` flag
-- `brew` - use `HOMEBREW_NO_AUTO_UPDATE=1` env var
+`cp`, `mv` and `rm` may be aliased to `-i`; use `cp -f`, `mv -f`, `rm -f`
+(`-rf` for directories), `apt-get -y` and `HOMEBREW_NO_AUTO_UPDATE=1`.
 
 ## Landing the Plane (Session Completion)
 
-**When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
-
-**MANDATORY WORKFLOW:**
-
-1. **File issues for remaining work** - Create issues for anything that needs follow-up
-2. **Run quality gates** (if code changed) - Tests, linters, builds
-3. **Update issue status** - Close finished work, update in-progress items
-4. **PUSH TO REMOTE** - This is MANDATORY:
-   ```bash
-   git pull --rebase
-   git push
-   git status  # MUST show "up to date with origin"
-   ```
-5. **Clean up** - Clear stashes, prune remote branches
-6. **Verify** - All changes committed AND pushed
-7. **Hand off** - Provide context for next session
-
-**CRITICAL RULES:**
-- Work is NOT complete until `git push` succeeds
-- NEVER stop before pushing - that leaves work stranded locally
-- NEVER say "ready to push when you are" - YOU must push
-- If push fails, resolve and retry until it succeeds
-- `git pull --rebase` can stall ~4-5 min: the post-checkout hook runs `bd import` of the full issues JSONL. This is normal — wait it out; do not abort the rebase or restart Dolt.
+Work is not complete until it is pushed: file follow-up beads, run the quality
+gates for what changed, update bead status, then `git pull --rebase`,
+`git push`, and confirm `git status` is up to date with origin. Never stop at
+"ready to push". `git pull --rebase` can stall 4–5 min while the
+post-checkout hook runs `bd import`; wait it out, do not abort or restart Dolt.
 
 ## Worker Isolation for Rust Code Changes
 
@@ -208,18 +161,12 @@ Use a worktree of this repo for isolated workers; don't switch branches in the m
 scripts/worktree-add.sh .worktrees/<name> -b <branch>
 ```
 
-Run `just pre-push` before pushing Rust/Cargo changes. `just bootstrap` installs
-the repository-local `.githooks/pre-push` only when existing hooks are safe;
-`--check` reports installation without changing it. The hook checks every pushed
-ref against `origin/main`, skips proven docs-only/deletion pushes, and refuses
-Rust-bearing heads that are not checked out. Missing metadata fails closed.
-`just bootstrap --hooks-only` installs only that guarded hook;
-`just bootstrap --hooks-only --check` reports it without writes (either flag order
-works). Default bootstrap still performs full dependency setup; hook-only success
-does not establish host readiness.
-Its lock serializes hooks, not other Cargo processes: workers still need the
-coordinator's target/resource lease. `git push --no-verify` is an explicit bypass
-only when the coordinator has accepted exact-source gates and authorized it.
+Run `just pre-push` before pushing Rust/Cargo changes. `just bootstrap`
+(`--hooks-only` for just the hook, `--check` to report without writes) installs
+the guarded `.githooks/pre-push`: it checks each pushed ref against
+`origin/main`, skips proven docs-only pushes and refuses Rust heads that are not
+checked out. Its lock serializes hooks, not other Cargo processes.
+`git push --no-verify` needs the coordinator's explicit authorization.
 
 ## Beads / Issue Tracking
 
@@ -232,36 +179,35 @@ only when the coordinator has accepted exact-source gates and authorized it.
 - `bd backup status` can report recent auto-backups while `bd backup sync` still fails with no destination configured; `.beads/backup/` is local-only and ignored by git, so treat this as local recovery state unless a backup destination is explicitly configured.
 - Beads coordination backup setup is documented in `docs/operations/beads-coordination-backup.md`; a real fix requires an operator-owned DoltHub/NAS/synced-repo destination, not a local `.beads/backup/` path.
 - `bd stats --json` hangs indefinitely (>5 min, observed 2026-06-12) while the Dolt server reports healthy and other bd queries return in <1s. Avoid it in scripts; derive counts from `bd list --json` instead, and kill any leaked `bd stats` process.
+- `bd create --graph <plan.json>` (bd v1.x, this repo) has two traps: (1) `--dry-run` is IGNORED for `--graph` — it CREATES real beads (delete junk with `bd delete <id>... -f`); (2) per-node `deps` entries (e.g. `"deps":["blocks:otherKey"]`) are SILENTLY DROPPED — only `parent` links and the nodes themselves are created, blocking edges are NOT. Wire edges separately afterward via `bd dep add --file edges.jsonl` where each line is `{"from":"<blocked/dependent-id>","to":"<blocker/prereq-id>"}` (from depends on to; default type `blocks`). Then verify with `bd dep cycles` and `bd ready`. Graph-plan schema: top-level `{"nodes":[...]}`, each node keyed by `key` (not `id`), with `title`/`type`/`priority`/`description`/`parent`.
+- `bd create --json` occasionally returns EMPTY output while the create actually succeeded or silently no-opped — if a --json create looks like it did nothing, verify with `bd show` / retry WITHOUT --json before assuming either outcome.
 
 ## Git / GitHub Workflow
 
 - `main` takes no direct merges: the `main merge queue` ruleset requires every PR to land through the queue, so the older `gh pr merge <N> --squash [--delete-branch]` recipes no longer apply. Enqueue instead (CI / Build below) and confirm the landing with `gh pr view <N> --json state,mergedAt`.
 - `beads-pr-reviewer-worker`: automated reviewer threads (Copilot, Gemini) are left by bots and count toward `UNRESOLVED_COUNT`; they must be replied to and resolved before merge just like human threads.
 - `beads-pr-reviewer-worker`: the `list_review_threads.py` helper may return 0 threads even when threads exist; always verify with `evaluate_merge_readiness.py` or `gh api repos/.../pulls/<N>/comments` before treating unresolved count as zero.
-- Current `main` branch protection requires status checks but not pull-request reviews. Empty GitHub `reviewDecision` is not itself a blocker for Windows soak PR lanes; verify required checks and merge state before creating approval blocker beads.
-- `git pull --rebase` in this repo can stall ~4-5 min in a detached-HEAD state: the post-checkout hook runs `bd import` of the full 1,745-issue `.beads/issues.jsonl` under `timeout 300`. This is normal, not a hung rebase — wait it out; do not abort the rebase or restart Dolt. Light bd commands (`bd ready`) stay sub-second throughout.
 - `.codex/skills` should remain a symlink to `../.claude/skills`; `.claude/skills` is the canonical tracked tree and currently strictly supersets the Codex mirror.
 - Run mechanical UI checks yourself before asking the owner (T13): `just gesture` (scenario names: `python3 scripts/ci/hud_gestures.py --list`), then the Windows tier: `gh workflow run windows.yml --ref <branch>` runs the same scenarios plus no-focus-steal and the safe-mode chord with real `SendInput` on a hosted VM (fullscreen, WARP; results in the step summary, evidence in the `gestures` artifact; it also runs on PRs touching rendered, input or portal paths). Scenarios in that step's `GESTURES_REQUIRED` fail `windows-build` (withholding `dev`, not merges); the rest are informational. Graduate a scenario only by citing 10 consecutive main runs where it PASSed; demote a flaking one at once, never retry it to green. Tier L launches its own HUD on a private Xvfb display, refuses to inject anywhere else, and writes `timeline.json`, status snapshots and frames to `test_results/gestures/<sha>/<time>-<pid>/`; parallel runs take distinct displays and ports. Ask the owner only about the T13 residual list in `docs/scope.md` (visual preference, owner hardware, network/install, time-based behaviour), with a link to the evidence. A scenario FAIL names the failing step and the last observed portal state; read that before the HUD log.
 - `test_results/` and `.handoff/` hold local execution receipts and are gitignored. Put durable evidence in PR descriptions and CI artifacts; never force-add files from either root. The same Git-index guard runs early in CI and `just ci`.
 - Tracked files never carry real host identifiers: tailnet addresses or MagicDNS names, private-key filenames, or the owner's host names (owner rule, 2026-11-08). Keep them in local config outside the repository, such as the per-host endpoint record under `~/.config/tze-hud/`. Fixtures use the synthetic CGNAT values listed in `scripts/ci/check_host_identifiers.py`, documentation-only IPv4 addresses or `example` names. That check (`just host-identifiers`, in `static checks`, `just ci` and pre-push) fails on any other CGNAT literal. Locally it also applies a literal denylist from `~/.config/tze-hud/host-identifiers.deny`, which CI never sees. It reports `path:line` only, never the value.
-- Merged `agent/*` branches are deleted automatically by `.github/workflows/delete-merged-branches.yml` (daily cron, 03:00 UTC). The workflow runs `scripts/prune-merged-branches.sh --execute` which: (a) fetches remote state, (b) lists all remote `agent/*` branches reachable from `origin/main`, (c) skips any branch checked out in a local worktree, and (d) deletes the rest with `git push origin --delete` (never force). To preview deletions without executing: `bash scripts/prune-merged-branches.sh --dry-run`. To trigger an immediate cleanup via CI: `gh workflow run delete-merged-branches.yml`. Stale merged branches that accumulated before this automation was added (hud-3qpgv.6) were cleaned up in that same PR.
+- Merged `agent/*` branches are deleted daily by `.github/workflows/delete-merged-branches.yml` (`scripts/prune-merged-branches.sh --execute`; it skips branches checked out in a local worktree and never force-deletes). Preview with `bash scripts/prune-merged-branches.sh --dry-run`.
 
 ## CI / Build
 
 - If an Actions workflow or check suite fails while all emitted jobs succeed, reconcile the exact attempt's jobs, suite check runs and annotations with its head-SHA workflow before changing gates. Keep required checks, aggregate conclusion and actual merge state separate; missing jobs are incomplete provider evidence, not a proven repository cause. Preserve the original failure and put the diagnosis and evidence limits in the PR description (observed in CI run 37655059228, attempt 1).
 - `main` merges go through the GitHub merge queue (ruleset `main merge queue`, squash). `gh pr merge <N> --squash --auto` fails here; enqueue with the GraphQL mutation once required checks are green: `PR_ID=$(gh pr view <N> --json id -q .id)`, then `gh api graphql -f query='mutation($id:ID!){enqueuePullRequest(input:{pullRequestId:$id}){mergeQueueEntry{position state}}}' -f id="$PR_ID"`. A non-null `mergeQueueEntry` means it is queued. `gh pr view --json` has no `mergeQueueEntry` field; to re-check later, query `gh api graphql -f query='query{repository(owner:"tzeusy-org",name:"tze-hud"){pullRequest(number:<N>){state mergeQueueEntry{position state}}}}'` (entry `null` with state `MERGED` means it landed; `null` with state `OPEN` means it was dequeued, so check the merge-group run for the reason). Every required check in `ci.yml` must also trigger on `merge_group`; a required check name that no job emits blocks the queue forever, so update the ruleset whenever a required job is renamed or removed.
-- CI follows the owner-approved three required checks (2026-11-01): `static checks` (no compilation: host identifiers, fmt, metadata, dev-mode guard, machete, cargo-deny, Python suites), `cargo clippy` (Linux all-targets, then the windows-gnu cfg(windows) crates) and `cargo test` (nextest workspace, integration, token footprint). Each job holds a slot of the shared hosted-runner pool and pays its own setup, so add a step to an existing job before adding a job; nine jobs per run queued 4–15 min for runners. Both production_boot suites and pixel_readback run in the `cargo test` job with explicit runtime dev-mode; focused local boot/GPU recipes remain available. Linux jobs use ubuntu-24.04. Rust caches retain job-specific default keys and restore on PR/merge-group runs, with saves limited to main; required jobs perform their own setup without a check dependency.
-- Required checks must finish within 6 minutes of a merge-group run starting, pass on the first attempt, and never wait on a person or the owner's hardware (`docs/scope.md` "Merge gate and testability"); slower suites go to the weekly lanes (`perf-budget.yml`, `perf-assert.yml`). Every job has a job-level `timeout-minutes` and every apt step has its own (plus `$APT_OPTS` retries), so a stalled runner fails fast instead of timing out the merge queue.
+- CI has three required checks (owner-approved 2026-11-01): `static checks` (no compilation), `cargo clippy` and `cargo test`. Add a step to an existing job before adding a job; every job draws on one shared hosted-runner pool. Targets are in `docs/scope.md` "Merge gate and testability".
+- Every job has a job-level `timeout-minutes` and every apt step its own (plus `$APT_OPTS` retries), so a stalled runner fails fast instead of timing out the merge queue.
 
 - `tze_hud_protocol/build.rs` selects bundled protoc 31.1 through pinned `protoc-bin-vendored =3.2.0` and `prost-build =0.13.5`. Cargo fetches the tool; no apt/zip/choco protoc prerequisite or `PROTOC` override is needed. Native and cross-target builds choose the build-host binary, and unsupported hosts fail rather than falling back. The original three protos regenerate into `OUT_DIR` during the ordinary build.
 - Quiescent-efficiency proof is emitted by the real constrained windowed runtime via `--quiescent-efficiency-emit`; keep its sampler deadline independent of `scheduled_main_deadline` so a normal winit resume cannot be counted as an excluded measurement wake. The canonical Windows CI harness is `scripts/ci/windows/run-quiescent-efficiency.ps1`: it enforces process affinity and validates an actual `overlay` artifact through `check_idle_efficiency.py` rather than accepting a host-side fixture.
 - Timing assertions in tests use `tze_hud_scene::perf_budget::test_budget(base)`: the reference budget times a fixed slack (default 20×, override with `TZE_HUD_TEST_BUDGET_SLACK`). p99 hard asserts stay gated behind `TZE_HUD_PERF_ASSERT=1` (`perf-assert.yml`). The headless `benchmark` example keeps its own CPU/GPU/upload factor vector because the weekly Windows and constrained-envelope gates (`perf-budget.yml`) normalize locked ceilings by it.
 - CI's clippy gate runs `cargo clippy --workspace --all-targets -- -D warnings`, so test, example, and bench code must be clippy-clean too. The `integration` package's headless test targets are gated by the integration step of the `cargo test` CI job.
 - FOOTGUN (bit 3 PRs in the 2026-07-04 coordinator session): the repo-root `tests/integration/` is a SEPARATE cargo package that crate-scoped runs do NOT compile. `cargo test -p tze_hud_scene`, `cargo clippy -p <crate>`, or a crate's own `cargo test` all PASS while a struct/field/signature change you made (e.g. adding a field to `ElementStoreEntry` or `WindowedRuntimeState`, changing `MarkdownCache::get`'s arity) leaves stale struct-literals/call-sites in `tests/integration/*.rs` — which then fail CI's `cargo clippy --workspace --all-targets` and integration step with `E0063`/`E0061`. ALWAYS validate a crate-level type change with `cargo clippy --workspace --all-targets -- -D warnings` (or `just clippy`) + `cargo check --workspace` before pushing, and grep `tests/integration/` for literals/calls of the symbol you changed. Note `--all-features` is NOT what CI runs (it pulls glib-sys/GStreamer sys deps the runners lack) — use `--workspace --all-targets` exactly. Related: on a repo where `main` advances under parallel branches, `git fetch && git rebase origin/main` + `cargo check --workspace` right before finalizing catches the same drift when a concurrent PR adds a field to a struct your branch constructs.
-- GitHub-hosted `ubuntu-latest` runners can enter a TOTAL queue-stall (observed 2026-06-14 ~03:14–05:47 UTC, ~2.5h): every workflow created after the cutoff sits `queued` with 0 jobs picked up — including `main` post-merge runs. Diagnose it's GitHub-side (not the repo/your infra): `gh run view <id> --json status,jobs` shows `status:queued`, all jobs `queued`, empty `runner_name`; `gh api repos/<o>/<r>/actions/runners` is empty (no self-hosted) and the queued jobs are labeled `ubuntu-latest`. Likely cause: Actions spending-limit hit or a GitHub incident (check Settings→Billing→Actions and githubstatus.com). Not fixable from the repo — surface to the owner.
+- A total GitHub-hosted runner stall (every new run `queued`, jobs with empty `runner_name`, no self-hosted runners) is GitHub-side: an incident or the Actions spending limit. Surface it to the owner; it is not fixable from the repo.
 - Agents cannot bypass the `main merge queue` ruleset (`current_user_can_bypass: never`), so `gh pr merge --admin` is never an agent action. During a confirmed runner stall, ask the owner.
-- Phase-1 portal review pattern (seen twice, 2026-06-11): perf/wiring beads got closed on PR merge while a named vector or scope item remained undelivered (hud-xq0uo's backtick flood still O(n^2) because the test had no timing assertion; hud-2ps6p's pointer-affordance leg never wired). Summary: (a) production call-site coverage — every caller of a changed shared symbol must be updated and build-clean, not just the changed definition; (b) adversarial re-review by bead type: perf beads require empirical re-run of the exact named payloads in release mode with timing assertions; wiring beads require grep-verified production call-sites before merge.
-- Host disk imbalance (observed 2026-07-18 on this rig's build host): `/` is the main OS disk (1.4T) and hosts both `.worktrees/` and their `target/` build dirs — it was at 84% used (221G free) while `/data` (1.8T, separate disk) sat at 13% used (~1.5T free). `.worktrees/` alone measured 118G; `target/` dirs are the bulk of that (255G observed in a fuller swarm run) and are fully regenerable. If `/` fills again, the durable fix is structural, not a one-off prune: point cargo at the empty disk via `CARGO_TARGET_DIR` (or relocate `.worktrees/` there), since idle->6h `target/` pruning only buys time and recurs. Neither fix is applied yet as of this note.
+- Review rule: perf beads need an empirical re-run of the named payloads in release mode with timing assertions; wiring beads need grep-verified production call sites. Every caller of a changed shared symbol must build clean.
 
 ## Scene / Runtime
 
@@ -271,15 +217,13 @@ only when the coordinator has accepted exact-source gates and authorized it.
 - When `HitRegionNode` gains new fields with `#[serde(default)]`, all existing struct literal constructions in tests and production code must add `..Default::default()`. Grep for `HitRegion(HitRegionNode {` across the workspace to find them all.
 - `update_hover_state` should use `entry().or_insert_with()` rather than `get_mut` so that HitRegionNodes inserted directly into `self.nodes` (bypassing `set_tile_root`/`add_node_to_tile`) still get local state initialized on first hit.
 - Zone ontology (rig-ar23): `ZoneDefinition` needs `#[serde(default)]` on `layer_attachment` and a `Default` impl returning `Content` so older serialized defs without the field still deserialize correctly.
-- When the scene's `publish_to_zone` signature grows (e.g., adding `expires_at_wall_us`, `content_classification`), any main-branch wrapper that calls it (e.g., `publish_to_zone_with_lease`) will fail to compile — grep for all call sites.
 - When proto messages gain new fields (for example `Publish`), `prost` struct literals in both `crates/tze_hud_protocol/src/session_server/tests/` and `crates/tze_hud_protocol/tests/*.rs` must add explicit defaults (typically `element_id: Vec::new()`), or test-target compilation fails even if library code builds.
 - `RenderingPolicy::from_zone_policy()` margin fallback: `margin_horizontal`/`margin_vertical` must fall back to `margin_px` (via `.or(policy.margin_px)`), not hardcoded 8.0. Preserve that fallback when changing zone policies.
 - `update_zone_animations` (PR #260) only iterates `current_active` (zones in `active_publishes`). Zones removed from registry entirely (unregistered) disappear from that map, so fade-out on unregistration must be handled by pruning stale animation states for absent zones after the main loop.
 - Runtime hover/tooltip behavior is now widget-definition-driven: `WidgetDefinition.hover_behavior` declares trigger rect + delay + target f32 param, `windowed.rs` builds generic trackers via `widget_hover.rs`, and local hover writes MUST use `SceneGraph::set_widget_param_local` (not `publish_to_widget`) to avoid polluting contention/publication state.
 - Retained widget SVG text has a simple sans-serif fast path in `crates/tze_hud_compositor/src/widget.rs` using `ab_glyph`; unsupported font families or dominant-baseline values intentionally fall back to the cropped `resvg` text-mask path.
-- Font-residency budgeting must cover two different compositor owners: `TextRasterizer` initializes a bundled-only font system, while the widget renderer's `shared_widget_fontdb()` currently calls `load_system_fonts()` and is host-dependent. A deterministic profile font ceiling must either converge the widget path on bundled fonts or measure and preflight supported-host system-font residency before enforcement.
 - Pixel-readback tests for display-relative canonical scenes must sample display-relative coordinates too; stale fixed 800x600-era samples can hit the clear background (`[63, 63, 89, 255]`) on the 1920x1080 runtime and look like z-order/contention failures.
-- `cargo test -p tze_hud_runtime --lib` should be reliable in headless Linux after GPU-backed runtime-lib tests serialize real headless compositor/runtime construction with the test-only `HEADLESS_RUNTIME_MUTEX`; before that guard, the default parallel harness could wedge under llvmpipe/wgpu while `-- --test-threads=1` passed. Use `timeout 180s cargo test -p tze_hud_runtime --lib` as the bounded focused runtime-lib gate; a warmed run should complete in seconds, while a fresh worktree may spend ~1-2 minutes compiling before tests start.
+- Bound the focused runtime-lib gate: `timeout 180s cargo test -p tze_hud_runtime --lib`. A warm run takes seconds; a fresh worktree may compile for 1–2 minutes first.
 - Runtime widget cleanup contract: clearing/TTL expiry removes active publications, refreshes `WidgetInstance.current_params` from remaining publications/defaults, and the compositor only draws widgets with active publications; default params alone should not leave a visible stale widget.
 - Text-layout logic in `tze_hud_compositor` is CPU-testable WITHOUT a GPU (dodging the llvmpipe deadlock): cosmic-text/glyphon shaping (`FontSystem::new()` → `Buffer::set_text`/`shape_until_scroll` with `Shaping::Advanced`) is pure-CPU; only the wgpu render pass needs a GPU. So functions that consume shaped `Buffer`s — e.g. `compute_inline_backdrop_quads` (selection/inline-code backdrop geometry), and the composer wrap/caret measurements — can be unit-tested by shaping a `Buffer` in the test and asserting the returned geometry (`InlineBackdropQuad`s, line/caret byte↔x). Prefer this over the GPU `require_gpu!`/`render_frame_headless` path, which is CI-only. Note: with `Shaping::Advanced`, `LayoutGlyph::start`/`end` are byte offsets within their `BufferLine`; add the `BufferLine` base offset (`sum(line.text().len()+1)`) for full-text byte ranges when a draft has hard `\n`.
 - Shared local Cargo targets can supply another isolated checkout's types or test binaries; a passing count alone does not prove current-source execution. Use the opt-in [source-binding policy](docs/development/source-freshness.md) for every writer of a shared target under the coordinator's exclusive lease. Each checkout gets one HOME target, reused warm across its commits and refused to other checkouts; the coordinator deletes it when the bead's PR merges or closes, keeping receipts, per the [retention rule](docs/development/source-freshness.md#retention). Never touch source mtimes. The guard covers canonical `just` Cargo gates and their effective pre-push descendant when enabled; ordinary unset defaults and direct Cargo are outside that cooperative policy. The exact historical Cargo-internal cause remains unproved.
@@ -307,24 +251,20 @@ only when the coordinator has accepted exact-source gates and authorized it.
 
 - `.claude/skills/user-test-performance/scripts/perf_common.py` owns the `results.csv` schema and now auto-migrates existing CSV headers during append; add new audit fields there first, then wire both MCP/gRPC scripts. `grpc_widget_publish_perf.py` now imports vendored stubs from `user-test-performance/scripts/proto_gen/` (self-contained, no `/user-test` path dependency).
 - Durable gRPC widget `Publish` replies are `RequestResult` correlated by `seq`. The Rust publish-load harness (`examples/widget_publish_load_harness/`) is the canonical gRPC widget benchmark path; `/user-test-performance` routes gRPC widget benchmarks through it.
-- The default config is not benchmark-ready for live widget publishing because benchmark agents lack `publish_widget:*` caps.
 - `examples/benchmark` times what agents send: `notification_publish`, `widget_param_update` and `portal_append` each make one `hud_publish` per frame over the real MCP listener (`input_to_scene_commit` is that call's round trip; only `notification_publish` samples `input_to_local_ack`, by hovering its action). The publish-call budgets in `scripts/ci/check_windows_perf_budgets.py` are absolute, not scaled by the CPU factor, so a fixed admission delay fails them on any host. The GPU and upload calibration workloads still build tiles; nothing else in the benchmark does.
-- Scene-lock double-buffer work (`hud-ibzl4`) remains unwarranted after `hud-pio04`: its paced model deliberately synchronizes 18 single-mutation holds across 180 frames and treats `1..=20` misses as healthy, while non-contended sessions remain 0. It does not exercise the 10x shape or establish a latency breach. Do not add clone-on-dirty / clone-on-writer full-scene snapshots (they violate `efficiency.md` work-proportional-to-change and risk Stage 4/commit budgets); reopen only with live miss-to-staleness/latency correlation, a failing 30-agent/240-tile gate, or a spec-defined change-proportional front/back mutation model.
+- Do not add clone-on-dirty or clone-on-writer full-scene snapshots for scene-lock contention (`hud-ibzl4`); they break work-proportional-to-change. Reopen only with a measured latency breach.
 - Windows live widget benchmarks use `app/tze_hud_app/config/benchmark.toml` (`tze_hud.exe --config <path>`); three-agent soak artifacts are emitted by `.claude/skills/user-test-performance/scripts/widget_soak_runner.py`.
 - Long `widget_publish_load_harness` paced runs can hang without per-agent artifacts because responses are drained only after sending; a valid 60-minute Windows soak needs concurrent result draining or an overall diagnostic drain deadline.
 - `hud-nfl7n` release soak resource sampling should pass `--windows-process-command-match` set to the benchmark config path so samples target the benchmark-config HUD process rather than any unrelated `tze_hud*` process.
 - `widget_publish_load_harness` paced/burst runs must drain `HudSession` responses concurrently while sending; missing `RequestResult` acks should still produce a diagnostic artifact, then exit nonzero so `widget_soak_runner.py` can report per-agent failures.
 - Current `widget_publish_load_harness` artifacts preserve aggregate RTT percentiles/max only (`histogram_path: null`), so max-tail outlier localization needs a future bounded top-N RTT tail with request sequence plus send/ack timestamps.
-- Production degradation wiring is contract-blocked beyond the fixed 60 Hz case: The legacy controller uses 14/12 ms and 10/30 presented-frame windows, while the windowed idle gate emits no frame telemetry. Before wiring it, decide cadence-derived thresholds/time windows, quiescent recovery, and the six-level runtime to seven-value `DegradationNotice` mapping. Use `tze_hud_runtime::DegradationController` as the sole transition authority; the independent scene-side `DegradationTracker` must not also run. Level 1 belongs to outbound state-stream fan-out, Levels 2-5 are compositor policy, and the current protocol `broadcast` path can lag/drop despite the transactional contract.
+- Production degradation wiring is contract-blocked beyond the fixed 60 Hz case: decide cadence-derived thresholds, quiescent recovery and the level-to-`DegradationNotice` mapping first. `tze_hud_runtime::DegradationController` is the sole transition authority.
 - Headless `max_agent_update_hz` is 60 Hz (`DisplayProfile::headless()`), not 30. It is a per-agent state-stream admission ceiling consumed by configuration validation; neither headless nor windowed runtime uses it for compositor cadence, so it must not be used to justify idle frame submission.
 
 ## Text-Stream Portals
 
-- Text-stream-portals phase-0 intentionally avoids new portal-specific proto RPCs; transport-agnostic adapter proof currently lives in integration tests (`text_stream_portal_adapter.rs`) over the existing primary `HudSession` stream.
 - Tile creation and portal mutations are runtime-internal scene calls: only the in-process portal driver applies them, and the protocol has no node or mutation message. The portal is driven through the MCP `portal:` surface (`hud_publish`/`hud_input`/`hud_hold`/`hud_clear`); agents never draw portal tiles.
 - Text-stream portal composer text currently uses a full-span `TextMarkdownNode.color_runs` marker (same color as base text) to request literal monospace rendering; normal printable input should come from runtime character events, with key-down fallback only for Space on the Windows path.
-- Text Stream Portal minimized-icon restore should be pointer-down driven; current gRPC hit-region input can drop `pointer_up` for icon gestures, leaving click-vs-drag state stuck until an idle watchdog fires.
-- If a long-lived text-stream portal appears frozen while stdout repeatedly prints `Composer text/caret updated`, suspect a composer render/mutation storm rather than a dead gRPC connection. Stop the bridge, inspect the transcript for cleanup errors, and restart `TzeHudOverlay` if lease release times out and leaves orphaned tiles.
 - Composer local echo is runtime-owned (`LocalComposerState`) and should render in the focused composer `HitRegionNode` bounds, not as a bottom strip of the whole tile.
 - Keep text-stream portal submitted history bounded in adapter/projection state and materialize only visible cards plus the live draft in the scene graph.
 
@@ -333,7 +273,6 @@ only when the coordinator has accepted exact-source gates and authorized it.
 - `/hud-projection` is cooperative opt-in for an already-running LLM session, with no PTY attachment or terminal capture. The session owns durable history and uses the standard MCP publish/input/clear verbs; the runtime owns ephemeral portal presentation and queued replies.
 - `tze_hud_portal` owns `PortalHub`, resolved tokens and the pure scene-node renderer. MCP and `crates/tze_hud_runtime/src/portal.rs` share `PortalHandle`; `PortalDriver` applies native scene data directly. No resident adapter, external authority or portal protobuf round trip remains.
 - The MCP `tools/list` schemas are hand-written in `crates/tze_hud_mcp/src/schema.rs`; every byte is paid by every attached session. `schema::tests` pins them to the `*Params` structs (`deny_unknown_fields`) and to the byte budget, and `scripts/ci/check_token_footprint.py` gates model-visible tokens per flow against `docs/api.md`.
-- `bd create --graph <plan.json>` (bd v1.x, this repo) has two traps: (1) `--dry-run` is IGNORED for `--graph` — it CREATES real beads (delete junk with `bd delete <id>... -f`); (2) per-node `deps` entries (e.g. `"deps":["blocks:otherKey"]`) are SILENTLY DROPPED — only `parent` links and the nodes themselves are created, blocking edges are NOT. Wire edges separately afterward via `bd dep add --file edges.jsonl` where each line is `{"from":"<blocked/dependent-id>","to":"<blocker/prereq-id>"}` (from depends on to; default type `blocks`). Then verify with `bd dep cycles` and `bd ready`. Graph-plan schema: top-level `{"nodes":[...]}`, each node keyed by `key` (not `id`), with `title`/`type`/`priority`/`description`/`parent`.
 - cargo-deny `[advisories].ignore` entries are per-advisory-ID and cannot be scoped to one crate instance: if an advisory hits both a direct dep and a build-time transitive (e.g. quick-xml RUSTSEC-2026-0194/0195 in our workspace AND inside winit's wayland-scanner), first bump the direct workspace dep to the patched version, then add the ID waiver documenting that the only remaining instance is the pinned transitive. Follow the existing documented-waiver style in deny.toml (id/reason/action). Verify with `cargo deny check advisories licenses` (fast, local, safe).
 - After the merge queue lands a PR whose branch is checked out in a `.worktrees/` worktree, clean up with `git worktree remove .worktrees/<dir> --force`, `git branch -D <branch>`, `git push origin --delete <branch>` (or leave `agent/*` branches to `delete-merged-branches.yml`).
 - Review trap (learned from PR #982→#988): when a PR claims an existing mechanism provides behavior "for free" (e.g. "new focusable nodes inherit the token-driven focus ring"), grep for actual CONSUMERS of that mechanism before accepting — `FocusRingUpdate`/`compute_ring` had zero consumers outside `tze_hud_input`, so the focus ring had never rendered anywhere and the claim was unverifiable-by-construction. Draw-list/CI green proves the tested seam only; a mechanism with no consumer renders nothing.
@@ -344,7 +283,5 @@ only when the coordinator has accepted exact-source gates and authorized it.
 - Fresh scrollable/portal tiles are mid fade-IN on frame 0 (fills translucent at t=0). Tests asserting opaque portal fills must settle first: warm one frame then `compositor.portal_tile_anim_states.clear()`, or pin with a `duration_ms:0` ZoneAnimationState.
 - Markdown parse-cache identity includes content and resolved token values. Resolve `MarkdownScope::Generic` for non-portal surfaces so portal token overrides do not leak; keep commit-time node keys and fallback lookup under the same token scope.
 - `RuntimeContext.profile` reaches truncation bounds and config-time agent-ceiling validation; it does not alone prove one unified runtime cadence/budget envelope. `DegradationController` has headless/windowed consumers and `CommandProcessor` feeds the windowed keyboard adapter; verify these callers when reconciling configuration/runtime/input behavior. These paths are not glasses/VR implementation.
-- `bd create --json` occasionally returns EMPTY output while the create actually succeeded or silently no-opped — if a --json create looks like it did nothing, verify with `bd show` / retry WITHOUT --json before assuming either outcome.
 - Runtime-produced input must use `tze_hud_protocol::session_server::InputEventSender`, not a raw Tokio broadcast channel: it fans transactional variants (down/up/key/focus/capture/command and submit/cancel) into ordered per-session durable queues while keeping pointer move/hover, scroll-offset, and composer draft state on the bounded droppable lane.
 - Portals (`PortalHub`, `crates/tze_hud_portal/src/hub.rs`, keyed by agent and portal id) degrade 30 s after the agent's last publish, poll, or hold (the driver orphans the portal's scene lease: badge, content kept) and are reclaimed 30 s later, taking the transcript and pending input with them. `hud_hold {surface: "portal:<id>", ttl_ms}` suspends that until the hold lapses (0 = until `hud_clear`); a long-poll `hud_input` also keeps it live. After a reap, the next `hud_publish` re-attaches with an empty transcript.
-- Mutation-batch fan-out from user-test clients must call `HudClient.configure_batch_pacing(0.035)` (or stay under 30Hz) — the profile envelope hard-rejects faster with RESOURCE_BUDGET_EXCEEDED/UpdateRateExceeded (hud-2j9as).

@@ -1,8 +1,4 @@
 //! Tile-background color constants, zone ordering and free color helpers.
-//!
-//! Moved from `renderer.rs` banners 1–3 by Step R-1 of the renderer module split.
-//! No logic was changed; only visibility modifiers were added where
-//! Rust's module-privacy rules require them.
 
 use std::collections::HashMap;
 use tze_hud_config::tokens::px_scale;

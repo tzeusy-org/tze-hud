@@ -1883,8 +1883,9 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                         false,
                     );
 
-                    // ── Stage 3: Mutation Intake ───────────────────────────
-                    // (placeholder — real mutations come via gRPC session)
+                    // Stage 3 (mutation intake) has no step here: gRPC and MCP
+                    // handlers apply their changes under the scene lock between
+                    // frames, and Stage 4 commits whatever they left.
 
                     // ── Stage 4: Scene Commit + HitTest Snapshot ──────────
                     // Lock the scene directly (never lock SharedState here).
