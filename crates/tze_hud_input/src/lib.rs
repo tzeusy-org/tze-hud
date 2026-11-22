@@ -18,8 +18,7 @@
 //!   paste, coalescible state-stream notifications, and transactional submit
 //!
 //! - [`pointer`] — rich pointer event types (PointerDownEvent, ClickEvent, etc.)
-//! - [`events`] — HitTestResult, RouteTarget, SceneLocalPatch, InputEnvelope, EventBatch
-//! - [`hit_test`] — headless-testable hit-test pipeline
+//! - [`events`] — RouteTarget, SceneLocalPatch, InputEnvelope, EventBatch
 //! - `local_feedback` — rollback tracker
 //! - `scroll` — `ScrollConfig`, `ScrollState`, scroll-local-first processing
 //! - `capture` — pointer capture manager
@@ -37,15 +36,11 @@
 
 pub mod capture;
 pub mod events;
-pub mod hit_test;
 pub mod local_feedback;
 pub mod pointer;
 pub mod scroll;
 
-pub use events::{
-    HitTestResult, LocalStateUpdate, RouteTarget, SceneLocalPatch, ScrollOffsetUpdate,
-};
-pub use hit_test::hit_test;
+pub use events::{LocalStateUpdate, RouteTarget, SceneLocalPatch, ScrollOffsetUpdate};
 pub use local_feedback::{ROLLBACK_ANIMATION_MS, RollbackTracker};
 pub use pointer::{
     CancelReason, ClickEvent, ContextMenuEvent, DoubleClickEvent, Modifiers, PointerButton,
