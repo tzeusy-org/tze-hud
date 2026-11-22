@@ -114,12 +114,12 @@ pub const DEFAULT_HOVER_TINT: Rgba = Rgba {
     a: 0.1,
 };
 pub const DEFAULT_PRESS_DARKEN: f32 = 0.85;
-pub const DEFAULT_FOCUS_RING_COLOR: Rgba = Rgba {
-    r: 0.2,
-    g: 0.5,
-    b: 1.0,
-    a: 1.0,
-};
+/// The focus-ring default is the `portal.focus_ring.color` token default in
+/// linear RGB, through the same parse the compositor applies to token values.
+pub fn default_focus_ring_color() -> Rgba {
+    crate::parse_hex_color(tze_hud_scene::portal_defaults::FOCUS_RING_COLOR)
+        .expect("the focus-ring token default is a hex color")
+}
 pub const DEFAULT_FOCUS_RING_WIDTH_PX: f32 = 2.0;
 
 impl ResolvedFeedbackStyle {
@@ -129,7 +129,9 @@ impl ResolvedFeedbackStyle {
             hover_tint: style.hover_tint.unwrap_or(DEFAULT_HOVER_TINT),
             press_tint: style.press_tint,
             press_darken: style.press_darken.unwrap_or(DEFAULT_PRESS_DARKEN),
-            focus_ring_color: style.focus_ring_color.unwrap_or(DEFAULT_FOCUS_RING_COLOR),
+            focus_ring_color: style
+                .focus_ring_color
+                .unwrap_or_else(default_focus_ring_color),
             focus_ring_width_px: style
                 .focus_ring_width_px
                 .unwrap_or(DEFAULT_FOCUS_RING_WIDTH_PX),

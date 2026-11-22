@@ -47,9 +47,8 @@ pub use events::{
 };
 pub use hit_test::hit_test;
 pub use local_feedback::{
-    DEFAULT_FOCUS_RING_COLOR, DEFAULT_FOCUS_RING_WIDTH_PX, DEFAULT_HOVER_TINT,
-    DEFAULT_PRESS_DARKEN, LocalFeedbackStyle, ROLLBACK_ANIMATION_MS, ResolvedFeedbackStyle,
-    RollbackTracker,
+    DEFAULT_FOCUS_RING_WIDTH_PX, DEFAULT_HOVER_TINT, DEFAULT_PRESS_DARKEN, LocalFeedbackStyle,
+    ROLLBACK_ANIMATION_MS, ResolvedFeedbackStyle, RollbackTracker, default_focus_ring_color,
 };
 pub use pointer::{
     CancelReason, ClickEvent, ContextMenuEvent, DoubleClickEvent, Modifiers, PointerButton,
@@ -88,7 +87,7 @@ pub use focus::{
 pub use focus_tree::{FocusOwner, FocusTree};
 pub use jump_to_latest::{
     JumpToLatestGeometry, JumpToLatestTokens, compute_jump_to_latest_pill,
-    jump_to_latest_badge_label, srgb_to_linear,
+    jump_to_latest_badge_label, parse_hex_color, srgb_to_linear,
 };
 pub use keyboard::{
     KeyboardDispatch, KeyboardDispatchKind, KeyboardModifiers, KeyboardProcessor,
