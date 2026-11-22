@@ -131,7 +131,7 @@ pub struct ToolCtx<'a> {
 fn safe_mode_active() -> McpError {
     tool_err(
         "SAFE_MODE_ACTIVE",
-        "the human paused agents; retry after safe mode ends",
+        "the human paused agents; carry on in chat and retry at your next milestone",
     )
 }
 
@@ -615,10 +615,7 @@ pub fn scene_error(e: &ValidationError) -> McpError {
             "CONTENT_REJECTED",
             format!("zone {zone} is full; hud_clear your older publication or reuse its key"),
         ),
-        V::ZonePublishSafeModeActive { .. } => tool_err(
-            "SAFE_MODE_ACTIVE",
-            "the human paused agents; retry after safe mode ends",
-        ),
+        V::ZonePublishSafeModeActive { .. } => safe_mode_active(),
         V::ZonePublishLeaseOrphaned { .. }
         | V::ZonePublishLeaseNotActive { .. }
         | V::ZonePublishLeaseNotFound { .. } => tool_err("LEASE_NOT_ACTIVE", "retry hud_publish"),

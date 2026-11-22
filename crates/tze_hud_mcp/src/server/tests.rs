@@ -14,6 +14,10 @@ use tze_hud_scene::{
     },
 };
 
+/// Every MCP safe-mode refusal's hint.
+const PAUSED_HINT: &str =
+    "the human paused agents; carry on in chat and retry at your next milestone";
+
 const TEST_PSK: &str = "test-psk-do-not-use-in-production";
 
 fn psk() -> String {
@@ -4409,15 +4413,16 @@ async fn hud_publish_in_safe_mode_returns_safe_mode_active() {
             "widget:gauge" => json!({"surface": surface, "params": {"level": 0.9}}),
             _ => json!({"surface": surface, "content": "during"}),
         };
+        let paused = json!({"code": "SAFE_MODE_ACTIVE", "hint": PAUSED_HINT});
         let err = call_err(&server, "hud_publish", publish).await;
-        assert_eq!(err["code"], "SAFE_MODE_ACTIVE", "publish {surface}");
+        assert_eq!(err, paused, "publish {surface}");
         let err = call_err(
             &server,
             "hud_hold",
             json!({"surface": surface, "ttl_ms": 1000}),
         )
         .await;
-        assert_eq!(err["code"], "SAFE_MODE_ACTIVE", "hold {surface}");
+        assert_eq!(err, paused, "hold {surface}");
     }
     let key = PortalKey::new(psk_agent(), "main");
     assert_eq!(
@@ -4429,6 +4434,9 @@ async fn hud_publish_in_safe_mode_returns_safe_mode_active() {
     // Reading stays open: already-queued input is still delivered.
     let v = call(&server, "hud_input", json!({})).await;
     assert_eq!(v["items"][0]["action"], "approve");
+    // Clearing stays open too.
+    let cleared = call(&server, "hud_clear", json!({"surface": "zone:subtitle"})).await;
+    assert_eq!(cleared["ok"], true, "{cleared}");
 
     // An admission already holding the Hub commits before pause. The pause
     // transition takes that same lock, then refuses every later publication.
@@ -4733,7 +4741,10 @@ async fn safe_mode_does_not_regrant_suspended_mcp_lease() {
         json!({"surface": "widget:gauge", "params": {"level": 0.5}}),
     ] {
         let err = call_err(&server, "hud_publish", args).await;
-        assert_eq!(err["code"], "SAFE_MODE_ACTIVE");
+        assert_eq!(
+            err,
+            json!({"code": "SAFE_MODE_ACTIVE", "hint": PAUSED_HINT})
+        );
     }
     let scene = server.scene.lock().await;
     assert_eq!(
@@ -5494,7 +5505,6 @@ fn scene_refusal_hints_are_fixed_id_free_and_short() {
             | V::ZoneMediaTypeMismatch { .. }
             | V::ZoneMaxPublishersReached { .. }
             | V::ZoneMaxKeysReached { .. }
-            | V::ZonePublishSafeModeActive { .. }
             | V::WidgetNotFound { .. }
             | V::WidgetUnknownParameter { .. }
             | V::WidgetParameterTypeMismatch { .. }
@@ -5506,6 +5516,7 @@ fn scene_refusal_hints_are_fixed_id_free_and_short() {
             | V::ZonePublishLeaseNotActive { .. }
             | V::ZonePublishLeaseOrphaned { .. } => Some(lease.to_owned()),
             V::TileNotFound { .. } | V::NamespaceMismatch { .. } => Some(held.to_owned()),
+            V::ZonePublishSafeModeActive { .. } => Some(PAUSED_HINT.to_owned()),
             V::BudgetExceeded { .. }
             | V::NodeCountExceeded { .. }
             | V::BatchSizeExceeded { .. } => Some(budget.to_owned()),
