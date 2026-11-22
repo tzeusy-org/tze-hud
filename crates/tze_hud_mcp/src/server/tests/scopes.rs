@@ -185,6 +185,16 @@ async fn sessions_clear_and_hold_only_their_own_content() {
     assert_eq!(entry(&seen_by_b, "zone:subtitle")["held"], true);
     assert!(entry(&seen_by_b, "zone:subtitle").get("busy").is_none());
 
+    // A refused publish leaves the label alone.
+    let mut refused =
+        json!({"surface": "zone:no-such-zone", "content": "x", "display_name": "nope"});
+    let (_, is_error) = call_as(&server, &a, "hud_publish", refused.clone()).await;
+    assert!(is_error);
+    refused["surface"] = json!("zone:notification-area");
+    refused["delay_ms"] = json!(u64::MAX);
+    assert!(call_as(&server, &a, "hud_publish", refused).await.1);
+    assert_eq!(scope_of(&server, &a).label().as_deref(), Some("a"));
+
     // display_name relabels a session; elsewhere it is still refused.
     let mut named = question("named");
     named["display_name"] = json!("release bot");

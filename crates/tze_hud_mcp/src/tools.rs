@@ -755,12 +755,16 @@ async fn publish_zone<'a>(
             format!("delay_ms is at most {MAX_DELAY_MS}"),
         ));
     }
-    // Only a session gets here with a name: it labels this and later cards.
-    if let (Some(name), Some(scope)) = (p.display_name.as_deref(), ctx.scope) {
-        let label = crate::scopes::sanitize_label(name)
-            .ok_or_else(|| invalid("display_name needs a visible character"))?;
-        scope.set_label(label);
-    }
+    // Only a session gets here with a name: once this publish is accepted it
+    // labels this and later cards.
+    let relabel = match (p.display_name.as_deref(), ctx.scope) {
+        (Some(name), Some(scope)) => Some((
+            scope,
+            crate::scopes::sanitize_label(name)
+                .ok_or_else(|| invalid("display_name needs a visible character"))?,
+        )),
+        _ => None,
+    };
     let lock_started = tracing::enabled!(target: "tze_hud_mcp_phases", tracing::Level::DEBUG)
         .then(std::time::Instant::now);
     if lock_started.is_some() {
@@ -904,6 +908,9 @@ async fn publish_zone<'a>(
         scene
             .publish_to_zone_until_with_lease(zone, content, &ns, lease_id, p.key, expires_at)
             .map_err(|error| scene_error(&error))?;
+    }
+    if let Some((scope, label)) = relabel {
+        scope.set_label(label);
     }
     let wakes = scene.take_notification_wait_notifiers();
     drop(scene);

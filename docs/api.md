@@ -651,7 +651,9 @@ agents until one is paired.
   holds at most 64 sessions; opening another releases the least-recently-
   called one, preferring one with nothing held, as on `DELETE`. Session
   start and end are logged, and `/admin/status` `sessions` lists each live
-  one as `{agent, label, holdings}`.
+  one as `{agent, label, holdings}`. A script that calls `initialize` but
+  never sends the header back opens a session it never uses; it shows there
+  unlabeled with no holdings, and the bound releases such sessions first.
 - `admin` is an operator entry, outside the model surface: it opens
   `GET /admin/status`, `GET /admin/logs`, and `GET /admin/screenshot` on the
   MCP port, and `*` does not grant it. `/admin/status` includes `tailnet_inbound` (`state`: `allowed`, `blocked`, `unknown`, `not_applicable`; `reason`, `rule` and `fix` when `blocked`; `error` when `unknown`): whether Windows Firewall lets remote agents reach the tailnet bind, and `safe_mode_hotkey`, `panel_hotkey`, `pairing_hotkey`, `answer_hotkey` and `hide_hotkey`
