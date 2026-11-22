@@ -3118,8 +3118,9 @@ async fn publish_wait_endings_deadline_delay_and_validation() {
             }
         }
     }
-    // Scene contention cannot extend the original cap. Both an unanswered
-    // card and an already accepted answer retain ordinary input on failure.
+    // Scene contention extends the original cap by at most the lock grace
+    // (500 ms). Both an unanswered card and an already accepted answer
+    // retain ordinary input on failure.
     for accepted_early in [false, true] {
         let (server, clock) = self::server();
         let mut ask = Box::pin(call_err(&server, "hud_publish", question(1000)));
@@ -3134,6 +3135,11 @@ async fn publish_wait_endings_deadline_delay_and_validation() {
         let held = server.scene.lock().await;
         clock.advance(1500 - event_at);
         tokio::time::advance(std::time::Duration::from_millis(1500 - event_at)).await;
+        assert!(
+            ask.as_mut().poll(&mut context).is_pending(),
+            "a transient holder at the deadline is waited out"
+        );
+        tokio::time::advance(std::time::Duration::from_millis(500)).await;
         match ask.as_mut().poll(&mut context) {
             Poll::Ready(error) => assert_eq!(error["code"], "INTERNAL"),
             Poll::Pending => deadline_failures.push(format!(
@@ -5788,6 +5794,71 @@ async fn elapsed_timer_runs_from_one_publish() {
     let mut scene = server.scene.lock().await;
     scene.apply_due_batches();
     assert_eq!(shown(&scene), "0:00");
+}
+
+/// A poll with no `wait_ms`, and an ack, outlast a transient holder of the
+/// scene or the portal Hub (a frame turn, the runtime's scene-availability
+/// waiter): under load such a holder is preempted for milliseconds, and the
+/// call used to fail at once with "input state busy". A holder past the
+/// bounded grace still fails the call.
+#[tokio::test]
+async fn a_poll_outlasts_a_transient_scene_or_hub_holder() {
+    use std::{
+        future::Future,
+        task::{Context, Waker},
+    };
+    let mut cx = Context::from_waker(Waker::noop());
+    let (server, _) = self::server();
+    let (server, hub) = hub_portal(server);
+    call(
+        &server,
+        "hud_publish",
+        json!({"surface":"portal:main", "content":"contention"}),
+    )
+    .await;
+    let key = PortalKey::new(psk_agent(), "main");
+    let reply = server
+        .portals
+        .as_ref()
+        .unwrap()
+        .submit_reply(&key, "held".into(), 0)
+        .unwrap()
+        .result
+        .unwrap();
+
+    // The scene is busy when the poll starts; it frees a moment later.
+    let mut poll = Box::pin(call(&server, "hud_input", json!({})));
+    {
+        let _scene = server.scene.lock().await;
+        assert!(
+            poll.as_mut().poll(&mut cx).is_pending(),
+            "waits for the scene"
+        );
+    }
+    let found = poll.await;
+    assert_eq!(found["items"][0]["id"], reply);
+
+    // The Hub is busy for the ack; it frees a moment later.
+    let mut ack = Box::pin(call(&server, "hud_input", json!({"ack":[reply]})));
+    {
+        let _hub = hub.lock().unwrap();
+        assert!(ack.as_mut().poll(&mut cx).is_pending(), "waits for the Hub");
+    }
+    assert_eq!(ack.await, json!({"items":[],"remaining":0}));
+
+    // A scene held past the grace still fails the call, within a bound.
+    let started = tokio::time::Instant::now();
+    let held = server.scene.lock().await;
+    let err = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        call_err(&server, "hud_input", json!({})),
+    )
+    .await
+    .expect("a busy scene cannot hold a poll indefinitely");
+    drop(held);
+    assert_eq!(err["code"], "INTERNAL");
+    assert_eq!(err["hint"], "input state busy; retry hud_input");
+    assert!(started.elapsed() >= std::time::Duration::from_millis(500));
 }
 
 mod scopes;

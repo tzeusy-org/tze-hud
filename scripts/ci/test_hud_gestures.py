@@ -758,5 +758,15 @@ class SafeModeWitnessTests(unittest.TestCase):
         run.observe_for.assert_not_called()
 
 
+class SmokeErrorTests(unittest.TestCase):
+    def test_a_refused_tool_names_its_code_and_hint(self) -> None:
+        smoke = g.Smoke("http://127.0.0.1:5555/mcp", "psk")
+        refusal = {"code": "INTERNAL", "hint": "input state busy; retry hud_input"}
+        with mock.patch.object(smoke, "call", return_value=(True, refusal)), \
+                self.assertRaisesRegex(AssertionError, "hud_input: tool error response "
+                                       "INTERNAL: input state busy; retry hud_input"):
+            smoke.ok("hud_input", {"ack": ["a1"]})
+
+
 if __name__ == "__main__":
     unittest.main()

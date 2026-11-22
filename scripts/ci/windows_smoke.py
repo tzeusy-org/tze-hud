@@ -321,8 +321,9 @@ class Smoke:
 
     def ok(self, tool: str, args: dict | None = None, *, timeout_s: float = 10) -> dict:
         is_error, payload = self.call(tool, args, timeout_s=timeout_s)
-        if is_error:
-            raise AssertionError(f"{tool if tool in TOOLS else 'other'}: tool error response")
+        if is_error:  # the refusal's code and hint (runtime text), never content
+            raise AssertionError(f"{tool if tool in TOOLS else 'other'}: tool error response "
+                                 f"{payload.get('code')}: {payload.get('hint')}")
         return payload
 
 
