@@ -294,23 +294,21 @@ impl tze_hud_scene::TextFit for TextFitMeasurer {
             lease_id: None,
             publication_origin: None,
         };
-        match zone_def.contention_policy {
-            ContentionPolicy::MergeByKey { max_keys } => {
-                let key = merge_key.unwrap_or("");
-                if let Some(old) = records
-                    .iter_mut()
-                    .find(|r| r.merge_key.as_deref().unwrap_or("") == key)
-                {
-                    *old = record;
-                } else {
-                    if max_keys > 0 && records.len() >= max_keys as usize {
-                        records.remove(0);
-                    }
-                    records.push(record);
-                }
-            }
-            ContentionPolicy::Stack { .. } => records.push(record),
-            _ => records = vec![record],
+        // A publish the scene would refuse has nothing to report.
+        if tze_hud_scene::graph::apply_contention(
+            &mut records,
+            record,
+            zone_def.contention_policy,
+            zone_def.max_publishers,
+            |_| tze_hud_scene::ValidationError::ZoneMaxPublishersReached {
+                zone: zone.to_owned(),
+                max: zone_def.max_publishers,
+            },
+            |_| false,
+        )
+        .is_err()
+        {
+            return Vec::new();
         }
         let zone_tokens = tze_hud_config::tokens::for_zone(tokens, zone);
         let policy = &zone_def.rendering_policy;
@@ -628,5 +626,47 @@ mod tests {
             clipped[first_zero..].iter().all(|(_, n)| *n == 0),
             "{clipped:?}"
         );
+    }
+
+    /// The bar is merged with the scene's own contention rules: a Stack
+    /// status bar at full depth evicts its oldest record and draws only the
+    /// newest, and a zero-depth stack discards the publish, so nothing it
+    /// set is measured.
+    #[test]
+    fn status_fit_applies_the_scene_contention_rules() {
+        let (fit, mut scene) = bar_scene();
+        let value = "deploying release candidate 42 to every production and staging region";
+        let alone = fit.status_bar(&scene, "status-bar", &status(&[("build", value)]), None);
+        assert_eq!(alone.len(), 1, "{alone:?}");
+        let old = |key: &str| ZonePublishRecord {
+            publication_id: SceneId::new(),
+            zone_name: "status-bar".into(),
+            publisher_namespace: String::new(),
+            content: ZoneContent::StatusBar(status(&[(key, value)])),
+            published_at_wall_us: 0,
+            merge_key: None,
+            expires_at_wall_us: None,
+            content_classification: None,
+            breakpoints: Vec::new(),
+            lease_id: None,
+            publication_origin: None,
+        };
+        scene
+            .zone_registry
+            .active_publishes
+            .insert("status-bar".into(), vec![old("a"), old("b")]);
+        let zone = scene.zone_registry.zones.get_mut("status-bar").unwrap();
+        zone.contention_policy = ContentionPolicy::Stack { max_depth: 2 };
+        zone.max_publishers = 8;
+        let stacked = fit.status_bar(&scene, "status-bar", &status(&[("build", value)]), None);
+        assert_eq!(stacked, alone, "only the newest record draws");
+        scene
+            .zone_registry
+            .zones
+            .get_mut("status-bar")
+            .unwrap()
+            .contention_policy = ContentionPolicy::Stack { max_depth: 0 };
+        let discarded = fit.status_bar(&scene, "status-bar", &status(&[("build", value)]), None);
+        assert!(discarded.is_empty(), "{discarded:?}");
     }
 }
