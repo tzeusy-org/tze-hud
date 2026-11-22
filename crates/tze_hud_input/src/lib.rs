@@ -558,6 +558,20 @@ impl InputProcessor {
         scene.geometry_epoch != before
     }
 
+    /// Hover chrome control `id` (or none) without a pointer event: a control
+    /// that becomes pressable under a still pointer shows its hover at once.
+    pub fn hover_chrome(&mut self, scene: &mut SceneGraph, id: Option<String>) {
+        if self.current_chrome_hover != id
+            && let Some(old) = self.current_chrome_hover.take()
+        {
+            scene.set_chrome_hovered(&old, false);
+        }
+        if let Some(id) = &id {
+            scene.set_chrome_hovered(id, true);
+        }
+        self.current_chrome_hover = id;
+    }
+
     /// Clear runtime chrome feedback without synthesizing input or changing
     /// agent capture, node focus, composer state, or the action queue.
     /// Scene setters invalidate geometry only when a visible flag changes.

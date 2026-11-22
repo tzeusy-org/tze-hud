@@ -175,6 +175,7 @@ fn notifications_json(scene: &SceneGraph, displays: &[Rect]) -> Value {
             "focus": focus,
             "chosen": card.chosen,
             "state": card.state,
+            "guarded": scene.overlay.notification_press_guard == Some(card.publication_id),
         }))
     }).collect();
     json!(entries)
@@ -545,6 +546,11 @@ mod tests {
         assert_eq!(card["actions"].as_array().unwrap().len(), 2);
         assert!(card["focus"].is_null());
         assert!(card["chosen"].is_null());
+        assert_eq!(card["guarded"], false);
+        scene.overlay.notification_press_guard =
+            Some(scene.overlay.notification_geometry[0].publication_id);
+        assert_eq!(notifications_json(&scene, &displays)[0]["guarded"], true);
+        scene.overlay.notification_press_guard = None;
         assert!(!card.to_string().contains("private body"));
         assert!(!card.to_string().contains("secret=value"));
         for rect in [

@@ -119,6 +119,17 @@ accepted input FIFO or changes ACK ownership. One matching live callback activat
 produces one callback; unclicked, foreign, replaced, and stale controls produce
 none. Existing end-to-end coverage:
 [`poc_notification_action_reaches_hud_input`](../tests/integration/poc_acceptance.rs).
+A card an agent puts under a resting pointer drops pointer presses on its
+controls for `notification.press_guard.ms` (bounded at five intervals of
+restarts) with no hover and the arrow cursor; a pointer that moved there,
+the keyboard and the owner's own re-layout are never delayed, and only a
+guarded card under the pointer arms a wake
+([`a_card_arriving_under_a_resting_pointer_drops_the_press`](../crates/tze_hud_runtime/src/windowed/event_loop_harness/tests/press_guard.rs),
+[`dropped_presses_restart_the_guard_up_to_five_intervals`](../crates/tze_hud_runtime/src/windowed/event_loop_harness/tests/press_guard.rs),
+[`a_pointer_that_moved_there_is_never_guarded`](../crates/tze_hud_runtime/src/windowed/event_loop_harness/tests/press_guard.rs),
+[`keyboard_answers_are_never_guarded`](../crates/tze_hud_runtime/src/windowed/event_loop_harness/tests/press_guard.rs),
+[`the_owners_own_relayout_starts_no_guard`](../crates/tze_hud_runtime/src/windowed/event_loop_harness/tests/press_guard.rs),
+[`press_guard_is_not_zeroed_by_os_motion`](../crates/tze_hud_config/src/tokens.rs)).
 
 A notification action has exactly one callback or HTTPS URL target, validated
 by the shared payload contract on both planes before mutation/scheduling. MCP

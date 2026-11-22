@@ -1405,6 +1405,7 @@ impl SceneGraph {
             self.prune_notification_feedback();
             self.version += 1;
         }
+        self.overlay.notification_owner_activated = Some(region.publication_id);
         Some(super::NotificationActivation::Callback(
             self.push_pending_action(super::PendingAction {
                 publication_id: Some(region.publication_id),

@@ -1233,6 +1233,9 @@ async fn poc_notification_action_reaches_hud_input() {
             )
             .await;
         assert!(publish.model_tokens <= ZONE_PUBLISH_BUDGET);
+        // The card can arrive where the last click rested; a person waits out
+        // the fresh-card press guard before pressing again.
+        poc.advance(400).await;
         assert_eq!(
             poc.shown(NOTIFICATION),
             2,

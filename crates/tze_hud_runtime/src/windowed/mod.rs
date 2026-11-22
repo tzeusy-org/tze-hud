@@ -198,6 +198,7 @@ mod network;
 mod notification_hold;
 mod panel_input;
 mod portal;
+mod press_guard;
 #[cfg(any(target_os = "windows", test))]
 pub(crate) mod shell_presence;
 mod wake;
@@ -464,6 +465,8 @@ struct WindowedRuntimeState {
     /// began on. A release activates a dismiss/action button only when it
     /// lands on the same affordance the press started on.
     zone_press: Option<String>,
+    /// Fresh-card press guard ([`press_guard::PressGuard`]).
+    press_guard: press_guard::PressGuard,
     notification_link_opener: crate::shell::link::LinkOpener,
     /// The newest pressed link's local feedback.
     link_feedback: Option<crate::shell::link::LinkFeedback>,
@@ -954,6 +957,7 @@ impl WinitApp {
         let retained_pointer_changed = self.drain_retained_pointer_input();
         let link_feedback_changed = self.settle_link_feedback(Instant::now());
         let hold_changed = self.settle_notification_hold();
+        let guard_changed = self.settle_press_guard();
         self.recover_chrome_capture();
         // Render the portals.
         // Must run AFTER composer flush so draft state is settled before portal
@@ -969,7 +973,8 @@ impl WinitApp {
             || chrome_scene_changed
             || retained_pointer_changed
             || link_feedback_changed
-            || hold_changed;
+            || hold_changed
+            || guard_changed;
         if self.state.input_processor.chrome_feedback_cancel_pending || pruned_drag.is_deferred() {
             // Chrome cleanup can consume its pending flag before the separate
             // drag-feedback borrow. Preserve either unfinished phase through the
@@ -1179,6 +1184,17 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
             let (hold_ms, _) = notification_hold::hold_timing(&self.state.global_tokens);
             if let Some(due) = scene.notification_hold_due_mono_us(hold_ms) {
                 let remaining_us = due.saturating_sub(scene.now_monotonic_us());
+                deadlines.push(Deadline::new(
+                    now + std::time::Duration::from_micros(remaining_us),
+                    crate::idle_efficiency::RuntimeWakeupSource::AnimationDeadline,
+                ));
+            }
+            // A press guard ending under a still pointer brings back hover
+            // and the hand without pointer motion.
+            if let Some(until) = self.state.press_guard.until_us()
+                && until > scene.now_monotonic_us()
+            {
+                let remaining_us = until - scene.now_monotonic_us();
                 deadlines.push(Deadline::new(
                     now + std::time::Duration::from_micros(remaining_us),
                     crate::idle_efficiency::RuntimeWakeupSource::AnimationDeadline,
@@ -3362,6 +3378,7 @@ impl WindowedRuntime {
             overlay_refits: Default::default(),
             press_window: None,
             zone_press: None,
+            press_guard: Default::default(),
             notification_link_opener,
             link_feedback: None,
             context_menu_press: None,

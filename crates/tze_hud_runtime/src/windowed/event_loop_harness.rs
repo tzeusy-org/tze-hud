@@ -160,6 +160,7 @@ impl WindowedRuntimeState {
             overlay_refits: Default::default(),
             press_window: None,
             zone_press: None,
+            press_guard: Default::default(),
             notification_link_opener: Default::default(),
             link_feedback: None,
             context_menu_press: None,
@@ -1089,6 +1090,8 @@ impl HeadlessEventLoopHarness {
         for wake in wakes {
             wake.notify();
         }
+        // The turn after a frame observes what it drew (the press guard).
+        self.app.settle_press_guard();
         settled
     }
 
@@ -1530,6 +1533,7 @@ mod tests {
     use super::*;
 
     mod hold;
+    mod press_guard;
     use tze_hud_input::{KeyboardModifiers, RawCharacterEvent, RawKeyDownEvent, RawKeyUpEvent};
     use tze_hud_protocol::proto::input_envelope::Event as ProtoInputEvent;
     use tze_hud_protocol::proto::{CommandAction, CommandSource};
@@ -5514,6 +5518,8 @@ mod tests {
                     None,
                 )
                 .unwrap();
+            // The pointer is away while it arrives, so no press guard applies.
+            (harness.app.state.cursor_x, harness.app.state.cursor_y) = (0.0, 0.0);
             assert!(harness.tick());
             assert!(harness.scene().activate_notification(&stale, 0).is_none());
             let point = harness.notification_link_center(urls[0]).unwrap();
