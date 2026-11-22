@@ -283,7 +283,8 @@ class Adapter:
                 wanted = params.get("requestId")
                 if valid_id(wanted):
                     self.abort([t for t in self.tasks if "id" in t.request and t.request["id"] == wanted
-                                and t.request["method"] != "initialize" and not t.result_seen])
+                                and t.request["method"] != "initialize" and not t.result_seen
+                                and not t.internal])
             return
         if method == "notifications/initialized" and not has_id:
             # Consumed locally (the runtime ignores it): readiness never
@@ -304,7 +305,9 @@ class Adapter:
                                retried))
             self.reinitialize()
             return
-        if has_id and any("id" in t.request and t.request["id"] == request_id for t in self.tasks):
+        # An abandoned re-initialize can still be exiting; its id is not live.
+        if has_id and any("id" in t.request and t.request["id"] == request_id
+                          and not (internal and t.cancelled) for t in self.tasks):
             self.queue(failure(request_id, "Request ID is already pending"))
             return
         seconds = INITIALIZE_SECONDS if method == "initialize" else REQUEST_SECONDS
@@ -367,7 +370,7 @@ class Adapter:
         request = dict(self.init_request or {"jsonrpc": "2.0", "method": "initialize", "params": {}})
         request["id"] = REINIT_ID
         self.admit(request, time.monotonic() + INITIALIZE_SECONDS, internal=True)
-        if not any(t.internal for t in self.tasks):
+        if not any(t.internal and not t.cancelled for t in self.tasks):
             self.reinitialized(False)
 
     def reinitialized(self, ok):
@@ -484,6 +487,8 @@ class Adapter:
                            else "HUD initialize startup/protocol failed (phase unavailable)")
             response = failure(task.request.get("id"), message)
         if task.internal:
+            if task.cancelled:
+                return  # Its failure was reported when it was abandoned.
             result = response.get("result") if isinstance(response, dict) else None
             ok = isinstance(result, dict) and isinstance(opened, str) and not task.cancelled
             if ok:
