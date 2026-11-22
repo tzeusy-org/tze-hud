@@ -6066,4 +6066,179 @@ async fn a_poll_outlasts_a_transient_scene_or_hub_holder() {
     assert!(started.elapsed() >= std::time::Duration::from_millis(500));
 }
 
+/// A question that takes the owner's 15 s answer window (no `ttl_ms`).
+fn window_question(wait_ms: u64) -> Value {
+    json!({"surface":"zone:notification-area","key":"question","wait_ms":wait_ms,
+        "content":{"title":"Ship?","actions":[{"label":"Ship","callback_id":"ship"}]}})
+}
+
+/// Press action 0 of card `id` as the windowed runtime would on Down.
+async fn press_ship(server: &McpServer, id: SceneId) -> tze_hud_scene::types::ZoneHitRegion {
+    use tze_hud_scene::types::{Rect, ZoneHitRegion, ZoneInteractionKind};
+    let mut scene = server.scene.lock().await;
+    let record = scene
+        .zone_registry
+        .active_for_zone("notification-area")
+        .iter()
+        .find(|record| record.publication_id == id)
+        .unwrap()
+        .clone();
+    let region = ZoneHitRegion {
+        publication_id: id,
+        zone_name: record.zone_name,
+        published_at_wall_us: record.published_at_wall_us,
+        publisher_namespace: record.publisher_namespace,
+        bounds: Rect::new(0.0, 0.0, 100.0, 30.0),
+        kind: ZoneInteractionKind::Action { index: 0 },
+        interaction_id: format!("test:{id}:ship"),
+        tab_order: 0,
+    };
+    scene.overlay.zone_hit_regions.push(region.clone());
+    scene.begin_notification_press(&region);
+    region
+}
+
+/// Release the press: on its button (`activate`) or elsewhere. Waits are
+/// woken after unlock, as the runtime does.
+async fn release(server: &McpServer, region: &tze_hud_scene::types::ZoneHitRegion, activate: bool) {
+    let (activation, wakes) = {
+        let mut scene = server.scene.lock().await;
+        let activation = activate
+            .then(|| scene.activate_notification(region, 0))
+            .flatten();
+        scene.end_notification_press();
+        (activation, scene.take_notification_wait_notifiers())
+    };
+    for wake in wakes {
+        wake.notify();
+    }
+    if let Some(tze_hud_scene::graph::NotificationActivation::Callback(wake)) = activation {
+        wake.notify();
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn armed_wait_returns_action_for_press_held_past_deadline() {
+    use std::{
+        future::Future,
+        task::{Context, Poll, Waker},
+    };
+    let mut context = Context::from_waker(Waker::noop());
+    // R13.4 S1/S2: the wait is still armed at the deadline.
+    for answered in [true, false] {
+        let (server, clock) = self::server();
+        server
+            .config
+            .publication_defaults
+            .set_answer_window_ms(15_000);
+        let mut ask = Box::pin(call(&server, "hud_publish", window_question(30_000)));
+        assert!(ask.as_mut().poll(&mut context).is_pending());
+        let id = latest_card(&server).await;
+        clock.advance(14_900);
+        let region = press_ship(&server, id).await;
+        clock.advance(300);
+        assert_eq!(
+            server.scene.lock().await.drain_expired_zone_publications(),
+            0,
+            "the press holds the card"
+        );
+        assert!(
+            ask.as_mut().poll(&mut context).is_pending(),
+            "no gone while held"
+        );
+        release(&server, &region, answered).await;
+        let Poll::Ready(reply) = ask.as_mut().poll(&mut context) else {
+            panic!("answered={answered}: the release ends the wait");
+        };
+        if answered {
+            assert_eq!(reply["action"], "ship");
+        } else {
+            assert_eq!(reply, json!({"ok":true,"gone":"expired"}));
+            assert!(latest_card_gone(&server).await);
+        }
+        assert_eq!(
+            call(&server, "hud_input", json!({})).await,
+            json!({"items":[],"remaining":0}),
+            "answered={answered}: nothing reaches hud_input"
+        );
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn press_held_card_answers_through_hud_input_after_the_wait() {
+    use std::{
+        future::Future,
+        task::{Context, Poll, Waker},
+    };
+    let mut context = Context::from_waker(Waker::noop());
+    // R13.4 S3: the wait ended before the deadline; the press answers after
+    // it, within 5 s of the reported expiry.
+    let (server, clock) = self::server();
+    server
+        .config
+        .publication_defaults
+        .set_answer_window_ms(15_000);
+    let mut ask = Box::pin(call(&server, "hud_publish", window_question(1_000)));
+    assert!(ask.as_mut().poll(&mut context).is_pending());
+    let id = latest_card(&server).await;
+    tokio::time::advance(std::time::Duration::from_millis(1_001)).await;
+    let Poll::Ready(reply) = ask.as_mut().poll(&mut context) else {
+        panic!("the wait ends at wait_ms");
+    };
+    assert_eq!(reply["expires_in_ms"], 15_000);
+    clock.advance(14_900);
+    let region = press_ship(&server, id).await;
+    clock.advance(4_000);
+    // R13.4 S4: discovery reports the reported expiry as passed.
+    let surfaces = call(&server, "hud_surfaces", json!({})).await;
+    let row = surfaces["surfaces"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["s"] == "zone:notification-area")
+        .unwrap();
+    assert_eq!(row["expires_in_ms"], 0);
+    release(&server, &region, true).await;
+    let input = call(&server, "hud_input", json!({})).await;
+    assert_eq!(input["items"].as_array().unwrap().len(), 1);
+    assert_eq!(input["items"][0]["action"], "ship");
+}
+
+async fn latest_card_gone(server: &McpServer) -> bool {
+    server
+        .scene
+        .lock()
+        .await
+        .zone_registry
+        .active_for_zone("notification-area")
+        .is_empty()
+}
+
+/// The private answer-window marker: set when MCP admission applies the
+/// owner default (also through `delay_ms`), never for `ttl_ms`, and absent
+/// from every reply.
+#[tokio::test]
+async fn mcp_admission_marks_only_the_owner_answer_window() {
+    for (extra, marked) in [
+        (json!({}), true),
+        (json!({"delay_ms": 500}), true),
+        (json!({"ttl_ms": 15_000}), false),
+    ] {
+        let (server, clock) = self::server();
+        let mut params = json!({"surface":"zone:notification-area",
+            "content":{"title":"Ship?","actions":[{"label":"Ship","callback_id":"ship"}]}});
+        params
+            .as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        let reply = call(&server, "hud_publish", params).await;
+        assert!(!reply.to_string().contains("answer_window"), "{reply}");
+        let mut scene = server.scene.lock().await;
+        clock.advance(500);
+        scene.apply_due_publications();
+        let record = &scene.zone_registry.active_for_zone("notification-area")[0];
+        assert_eq!(record.answer_window, marked, "{extra}");
+    }
+}
+
 mod scopes;

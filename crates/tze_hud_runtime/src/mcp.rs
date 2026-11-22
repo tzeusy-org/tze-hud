@@ -1752,6 +1752,7 @@ mod tests {
                     content_classification: None,
                     breakpoints: vec![],
                     held: false,
+                    answer_window: false,
                 },
             );
             let mut pending = Vec::new();

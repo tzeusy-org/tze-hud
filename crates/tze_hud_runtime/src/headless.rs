@@ -1290,6 +1290,7 @@ mod tests {
                 content_classification: None,
                 breakpoints: Vec::new(),
                 held: false,
+                answer_window: false,
             };
             scene.publish(&publisher, &publication).unwrap();
             scene.orphan_publications(

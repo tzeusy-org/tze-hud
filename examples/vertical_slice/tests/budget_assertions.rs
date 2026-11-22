@@ -677,6 +677,7 @@ fn test_transaction_validation_p99_within_budget() {
             content_classification: None,
             breakpoints: Vec::new(),
             held: false,
+            answer_window: false,
         };
         let start = std::time::Instant::now();
         let result = scene.publish(&publisher, &publication);

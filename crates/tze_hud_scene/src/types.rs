@@ -2453,6 +2453,12 @@ pub struct ZonePublishRecord {
     /// own display. Set once; a same-key replacement keeps it.
     #[serde(skip)]
     pub display: Option<String>,
+    /// The expiry came from the owner's answer window, not the agent: a
+    /// pointer press in progress on the card may outlive it
+    /// ([`crate::graph::SceneGraph::notification_press_holds`]). Cleared by
+    /// `hud_hold`. Runtime-only: never on the wire or in snapshots.
+    #[serde(skip)]
+    pub answer_window: bool,
 }
 
 /// A zone instance — zone type bound to a specific tab.

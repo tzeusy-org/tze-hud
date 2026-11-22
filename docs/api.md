@@ -112,7 +112,10 @@ bounded `INTERNAL` error with a `retry hud_input` hint, releasing the
 reservation without consuming input.
 
 An unanswered card removed during the wait returns `gone:"expired"`,
-`"replaced"` (same key), `"displaced"` (contention), or `"cleared"`. These endings
+`"replaced"` (same key), `"displaced"` (contention), or `"cleared"`.
+`gone:"expired"` is returned when the card is actually removed, which a press
+in progress can delay; after an ordinary reply, that press's answer arrives
+through `hud_input`. These endings
 never queue an additional displacement event: a trim during an armed wait
 returns `gone:"displaced"` and nothing reaches `hud_input`. If the wait ends while the card
 is still admitted, the reply has the ordinary shape with `expires_in_ms`
@@ -353,7 +356,8 @@ with the same cancellation and idle semantics as a `hud_input` wait.
   the selected theme takes effect at config load/restart; live theme reload
   is separate work. Zone enter/exit durations use the resolved motion tokens
   unless explicitly overridden by zone policy, and Stack TTL fades use the
-  exit duration/curve without extending authoritative expiry.
+  exit duration/curve without extending authoritative expiry; a card held by
+  a press in progress is drawn fully shown until that press ends.
   Shipped bundles also include `countdown` (`ends_in_ms`, `label<=24`,
   `severity`), `kpi` (`value<=12`, `label<=24`, `trend=up|down|flat`,
   `severity`), `elapsed` (`started_ms_ago`, `label<=24`, `severity`: the
@@ -460,7 +464,11 @@ with the same cancellation and idle semantics as a `hud_input` wait.
   a default, not a cap. The accepted publication stores one absolute expiry,
   counted from presentation, and both `hud_publish` and `hud_surfaces` report
   it as `expires_in_ms`, including any delay. A later setting change does not
-  retime active or already-scheduled cards. Widgets are durable unless given one. A widget's owner-set "Clears after" limit
+  retime active or already-scheduled cards. One exception: a card with actions
+  and no explicit expiry is not removed while a pointer press that began on
+  one of its controls before its expiry is still down; it leaves when that
+  press ends, at most 5 s later. The reported `expires_in_ms` does not change.
+  Widgets are durable unless given one. A widget's owner-set "Clears after" limit
   (`[[tabs.widgets]] auto_clear_ms`) caps every publication, held or not, at
   that long after it was published; `hud_publish`, `hud_hold` and
   `hud_surfaces` report the capped expiry. On a portal, an optional `ttl_ms` holds the

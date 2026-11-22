@@ -327,10 +327,10 @@ pub(crate) type PubKey = tze_hud_scene::SceneId;
 /// 4. When `is_fade_complete()` returns `true`, the publication is removed
 ///    from `SceneGraph::zone_registry::active_publishes`.
 ///
-/// The fade delay is derived by [`Compositor::publication_fade_delay_ms`] from
-/// `ZonePublishRecord.expires_at_wall_us` alone. A publication with no expiry
-/// is held until cleared and never fades; `hud_hold` moves the expiry, which
-/// [`Self::retarget_at`] follows.
+/// The fade delay is derived from `ZonePublishRecord.expires_at_wall_us`
+/// alone. A publication with no expiry is held until cleared and never fades,
+/// and neither does a card a press in progress holds; `hud_hold` moves the
+/// expiry, which [`Self::retarget_at`] follows.
 pub(crate) struct PublicationAnimationState {
     /// Monotonic renderer instant when the compositor first rendered this publication.
     pub(crate) first_seen: std::time::Instant,

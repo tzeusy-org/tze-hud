@@ -612,14 +612,27 @@ async fn grpc_zone_publish_ttl_sets_expiry_and_is_swept() {
                 .zone_registry
                 .active_publishes
                 .get("notification-area");
+            // Only the owner's answer window is marked (privately).
+            let answer_window = actions && explicit_ttl == 0;
             if scheduled {
                 assert!(records.is_none_or(Vec::is_empty), "not shown early");
+                let marked = scene.scheduled_publications.iter().any(|s| {
+                    matches!(
+                        s.publication,
+                        tze_hud_scene::Publication::Zone {
+                            answer_window: true,
+                            ..
+                        }
+                    )
+                });
+                assert_eq!(marked, answer_window);
             } else {
                 assert_eq!(
                     records.unwrap()[0].expires_at_wall_us,
                     Some(shown_at + default_ttl_ms * 1_000),
                     "omitted timing uses the notification's urgency default"
                 );
+                assert_eq!(records.unwrap()[0].answer_window, answer_window);
             }
         }
         let held = request(

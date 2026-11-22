@@ -343,6 +343,7 @@ proptest! {
             graph.zone_registry.active_publishes.insert(
                 zone_name.clone(),
                 vec![ZonePublishRecord {
+                    answer_window: false,
                     publication_id: SceneId::new(),
                     lease_id: None,
                     resident_raster: None,

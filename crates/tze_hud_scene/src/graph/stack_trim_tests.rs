@@ -119,6 +119,7 @@ fn publish_keyed(
                 content_classification: None,
                 breakpoints: Vec::new(),
                 held: true,
+                answer_window: false,
             };
             scene.publish(&publisher, &publication).unwrap();
         }
@@ -288,7 +289,16 @@ fn armed_wait_takes_the_displacement_and_no_receipt_is_queued() {
         RenderWakeNotifier::default(),
     );
     scene
-        .publish_notification_until_with_id(ZONE, question("q1"), "asker", lease, None, None, id)
+        .publish_notification_until_with_id(
+            ZONE,
+            question("q1"),
+            "asker",
+            lease,
+            None,
+            None,
+            id,
+            false,
+        )
         .unwrap();
     for text in ["q2", "q3", "q4", "q5", "q6"] {
         publish(&mut scene, Plane::Mcp, "other", question(text));
@@ -316,7 +326,16 @@ fn a_finished_wait_does_not_swallow_the_receipt() {
         RenderWakeNotifier::default(),
     );
     scene
-        .publish_notification_until_with_id(ZONE, question("q1"), "asker", lease, None, None, id)
+        .publish_notification_until_with_id(
+            ZONE,
+            question("q1"),
+            "asker",
+            lease,
+            None,
+            None,
+            id,
+            false,
+        )
         .unwrap();
     // The call returned at its deadline; the card stays on screen.
     active.store(false, Ordering::Release);
@@ -519,6 +538,7 @@ fn questions_are_placed_once_when_presented() {
         content_classification: None,
         breakpoints: Vec::new(),
         held: true,
+        answer_window: false,
     };
     scene.schedule_publication(clock.now_us() + 5_000, publisher, publication);
     scene.apply_due_publications();

@@ -252,12 +252,14 @@ impl SceneGraph {
                 zone_name,
                 expires_at_wall_us,
                 held: is_held,
+                answer_window,
                 ..
             } = &mut s.publication
                 && zone_name == zone
             {
                 *expires_at_wall_us = ttl_us.map(|t| s.present_at_wall_us.saturating_add(t));
                 *is_held = ttl_us.is_none();
+                *answer_window = false;
                 held = true;
             }
         }

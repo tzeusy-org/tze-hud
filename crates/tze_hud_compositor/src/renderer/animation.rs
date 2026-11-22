@@ -502,9 +502,14 @@ impl Compositor {
     ///
     /// 1. If it is new (not in `pub_animation_states`), insert a fresh
     ///    [`PublicationAnimationState`] whose fade delay comes from
-    ///    [`Compositor::publication_fade_delay_ms`]. A publication with no expiry
-    ///    is held until cleared and never fades.
-    /// 2. If the effective expiry changed, follow the new deadline or hold.
+    ///    [`Compositor::publication_fade_delay_ms`] for its effective expiry
+    ///    ([`SceneGraph::zone_publication_expiry`]). A publication with no
+    ///    expiry is held until cleared and never fades; while a press in
+    ///    progress holds a card ([`SceneGraph::notification_press_holds`]) it
+    ///    has none either.
+    /// 2. If that expiry changed (`hud_hold`, a reply field or a press
+    ///    beginning or ending), retarget the state so the single fade deadline
+    ///    moves (or disappears when held).
     /// 3. Call `tick()` to check whether the delay has elapsed and start the fade.
     ///
     /// Stale entries (publications no longer present in `active_publishes`) are
@@ -556,7 +561,12 @@ impl Compositor {
             // Ensure every active publication has an animation state; tick existing ones.
             for record in publishes {
                 let key: PubKey = record.publication_id;
-                let expiry = scene.zone_publication_expiry(record);
+                // A card held by an open reply field or a press in progress is
+                // drawn fully shown until the hold ends: no expiry, so no (or
+                // no more) fade.
+                let expiry = scene
+                    .zone_publication_expiry(record)
+                    .filter(|_| !scene.notification_press_holds(record));
                 let state = zone_states.entry(key).or_insert_with(|| {
                     PublicationAnimationState::new_at(
                         Self::publication_fade_delay_ms(expiry, now_us, fade_duration_ms),

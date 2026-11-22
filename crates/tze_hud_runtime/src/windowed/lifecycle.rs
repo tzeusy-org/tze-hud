@@ -3547,6 +3547,22 @@ impl WinitApp {
                     if let Some(region) = held {
                         scene.begin_notification_hold(region, None);
                     }
+                    // An accepted press on an action or × can keep its card
+                    // past the answer-window deadline until it ends.
+                    let pressed = self.state.zone_press.as_ref().and_then(|id| {
+                        scene
+                            .overlay
+                            .zone_hit_regions
+                            .iter()
+                            .find(|region| region.interaction_id == *id)
+                            .cloned()
+                    });
+                    match pressed {
+                        Some(region) => scene.begin_notification_press(&region),
+                        None => {
+                            scene.end_notification_press();
+                        }
+                    }
                 }
                 if pointer_event.kind == PointerEventKind::Up {
                     let pressed = self.state.zone_press.take();
@@ -3654,6 +3670,9 @@ impl WinitApp {
                             }
                         }
                     }
+                    // Its own activation came first; any other ending
+                    // expires a card it held past the deadline.
+                    scene.end_notification_press();
                 }
 
                 // ── Drag-to-move: long-press drag state machine ──────────────

@@ -905,6 +905,7 @@ fn zone_occupancy_query_returns_correct_state() {
         .entry("subtitle".to_string())
         .or_default()
         .push(tze_hud_scene::types::ZonePublishRecord {
+            answer_window: false,
             publication_id: SceneId::new(),
             lease_id: None,
             resident_raster: None,

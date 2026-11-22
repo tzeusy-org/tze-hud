@@ -224,6 +224,10 @@ pub struct RuntimeOverlayState {
     /// leaving causes is the owner's own and starts no press guard.
     #[serde(skip, default)]
     pub notification_owner_activated: Option<SceneId>,
+    /// The primary pointer press in progress on a notification control
+    /// ([`NotificationPress`]); the runtime begins and ends it.
+    #[serde(skip, default)]
+    pub notification_press: Option<NotificationPress>,
     /// Set of element_ids that are currently being actively dragged.
     ///
     /// Written by the input processor on DragActivated and cleared on
@@ -459,6 +463,18 @@ pub struct NotificationHold {
     pub key: Option<String>,
     /// Scene monotonic time of the press.
     pub started_mono_us: u64,
+}
+
+/// An accepted primary pointer press on a notification's action or ×, still
+/// down. A card using the owner's answer window that it began on before the
+/// deadline is not removed until the press ends, at most
+/// [`super::NOTIFICATION_PRESS_HOLD_MAX_US`] past that deadline.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NotificationPress {
+    /// The exact control pressed.
+    pub region: ZoneHitRegion,
+    /// Scene wall-clock time of the press.
+    pub began_wall_us: u64,
 }
 
 /// An early-released hold whose fill drains back to rest.
