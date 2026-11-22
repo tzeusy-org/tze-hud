@@ -81,12 +81,9 @@ class ConstrainedEnvelopeCheckerTests(unittest.TestCase):
             },
             "sessions": [
                 {"name": name, "summary": dict(base_summary)}
-                for name in ("steady_state_render", "high_mutation")
+                for name in ("notification_publish", "widget_param_update", "portal_append")
             ]
-            + [
-                {"name": "scene_lock_contention", "summary": dict(base_summary)},
-                {"name": "scene_lock_paced_contention", "summary": paced_summary},
-            ],
+            + [{"name": "scene_lock_paced_contention", "summary": paced_summary}],
         }
 
     def test_valid_proxy_reuses_reference_normalized_ceilings(self) -> None:
@@ -119,8 +116,10 @@ class ConstrainedEnvelopeCheckerTests(unittest.TestCase):
         }
         expected = {
             (session, budget.metric)
-            for session in check_constrained_envelope.windows_budgets.REQUIRED_SESSIONS
-            for budget in check_constrained_envelope.windows_budgets.WINDOWS_HEADLESS_BUDGETS
+            for session, budgets in (
+                check_constrained_envelope.windows_budgets.SESSION_BUDGETS.items()
+            )
+            for budget in budgets
         }
         self.assertEqual(expected, observed)
 
@@ -131,7 +130,7 @@ class ConstrainedEnvelopeCheckerTests(unittest.TestCase):
         frame_result = next(
             result
             for result in report["normalized_results"]
-            if result["session"] == "steady_state_render"
+            if result["session"] == "notification_publish"
             and result["metric"] == "frame_time_p99"
         )
 

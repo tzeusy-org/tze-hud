@@ -34,17 +34,21 @@ REFERENCE_FACTORS = {
     "upload": 0.215,
 }
 
-# Sessions that must satisfy the full Windows timing budget table.
-REQUIRED_SESSIONS = ("steady_state_render", "high_mutation")
+# The timed sessions are the publish path agents use: one `hud_publish` per
+# frame over the real MCP listener. Its `input_to_scene_commit` bucket is the
+# call's round trip (admission and scene commit included), and
+# `input_to_next_present` runs from the call to the end of the frame it caused.
+PUBLISH_SESSIONS = ("notification_publish", "widget_param_update", "portal_append")
 
 # Sessions that must satisfy correctness/contention counter baselines. This is
-# wider than REQUIRED_SESSIONS because `scene_lock_paced_contention` is a
-# counter-only gate: it intentionally does not emit the full latency buckets.
-REQUIRED_COUNTER_SESSIONS = (
-    "steady_state_render",
-    "high_mutation",
-    "scene_lock_paced_contention",
-)
+# wider than the timed sessions because `scene_lock_paced_contention` is a
+# counter-only gate: it intentionally does not emit the latency buckets.
+REQUIRED_COUNTER_SESSIONS = PUBLISH_SESSIONS + ("scene_lock_paced_contention",)
+
+
+# Reference budgets for one `hud_publish` round trip (see PUBLISH_BUDGETS).
+PUBLISH_CALL_P50_US = 2_000
+PUBLISH_CALL_P99_US = 4_000
 
 
 @dataclass(frozen=True)
@@ -56,25 +60,35 @@ class Budget:
     factor: str
 
 
-WINDOWS_HEADLESS_BUDGETS = (
+# Budgets every publish session must meet. The publish-call budgets are the
+# guard on admission: a fixed delay added there shifts the whole call
+# distribution, so the median moves as surely as the tail. They are absolute
+# (`none`), not scaled: the CPU calibration factor is measured on scene-graph
+# work and swings several-fold between build profiles and hosts while a
+# loopback call does not, so a scaled budget would grow loose enough to admit
+# the very delay it exists to catch.
+PUBLISH_BUDGETS = (
     Budget("frame_time_p99", "frame_time", 99.0, 8_300, "gpu"),
     Budget("frame_time_p99_9", "frame_time", 99.9, 16_600, "gpu"),
-    Budget("input_to_local_ack_p99", "input_to_local_ack", 99.0, 2_000, "cpu"),
+    Budget("publish_call_p50", "input_to_scene_commit", 50.0, PUBLISH_CALL_P50_US, "none"),
+    Budget("publish_call_p99", "input_to_scene_commit", 99.0, PUBLISH_CALL_P99_US, "none"),
     Budget(
-        "input_to_scene_commit_p99",
-        "input_to_scene_commit",
-        99.0,
-        25_000,
-        "cpu",
-    ),
-    Budget(
-        "input_to_next_present_p99",
+        "publish_to_next_present_p99",
         "input_to_next_present",
         99.0,
         16_600,
         "gpu",
     ),
 )
+
+# Per-session budgets. Only the notification session has a pointer target, so
+# it alone carries the local-feedback budget (hover on its action).
+SESSION_BUDGETS: dict[str, tuple[Budget, ...]] = {
+    "notification_publish": PUBLISH_BUDGETS
+    + (Budget("input_to_local_ack_p99", "input_to_local_ack", 99.0, 2_000, "cpu"),),
+    "widget_param_update": PUBLISH_BUDGETS,
+    "portal_append": PUBLISH_BUDGETS,
+}
 
 # Correctness / contention counters whose committed baseline is zero.
 #
@@ -181,8 +195,7 @@ def session_by_name(artifact: dict[str, Any]) -> dict[str, dict[str, Any]]:
         name = session.get("name") if isinstance(session, dict) else None
         if isinstance(name, str):
             by_name[name] = session
-    required = tuple(dict.fromkeys(REQUIRED_SESSIONS + REQUIRED_COUNTER_SESSIONS))
-    missing = [name for name in required if name not in by_name]
+    missing = [name for name in REQUIRED_COUNTER_SESSIONS if name not in by_name]
     if missing:
         raise SystemExit("benchmark artifact is missing sessions: " + ", ".join(missing))
     return by_name
@@ -209,15 +222,15 @@ def validate_benchmark(artifact: dict[str, Any]) -> tuple[list[dict[str, Any]], 
     results: list[dict[str, Any]] = []
     failures: list[str] = []
 
-    for session_name in REQUIRED_SESSIONS:
+    for session_name, budgets in SESSION_BUDGETS.items():
         summary = sessions[session_name].get("summary", {})
         if not isinstance(summary, dict):
             failures.append(f"{session_name}: missing summary")
             continue
 
-        for budget in WINDOWS_HEADLESS_BUDGETS:
-            factor = factors[budget.factor]
-            reference_factor = REFERENCE_FACTORS[budget.factor]
+        for budget in budgets:
+            factor = factors.get(budget.factor, 1.0)
+            reference_factor = REFERENCE_FACTORS.get(budget.factor, 1.0)
             effective_budget = max(
                 1, math.ceil(budget.reference_budget_us * (factor / reference_factor))
             )
