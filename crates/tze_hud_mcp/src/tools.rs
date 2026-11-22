@@ -930,12 +930,7 @@ async fn publish_zone<'a>(
     loop {
         let mut notified = std::pin::pin!(ready.notified());
         notified.as_mut().enable();
-        let mut scene = match ctx.scene.try_lock() {
-            Ok(scene) => scene,
-            Err(_) => tokio::time::timeout_at(deadline, ctx.scene.lock())
-                .await
-                .map_err(|_| tool_err("INTERNAL", "input state busy; retry hud_input"))?,
-        };
+        let mut scene = lock_scene(ctx, deadline).await?;
         match scene.notification_wait_outcome(claim.id) {
             Some(NotificationOutcome::Answered) => {
                 let action = scene
@@ -1439,6 +1434,33 @@ pub struct InputParams {
 
 static NEXT_ACTION_ID: AtomicU64 = AtomicU64::new(1);
 
+/// How long one wait for the shared scene or portal Hub may outlast the
+/// call's input deadline. Their holders (a frame turn, the runtime's
+/// scene-availability waiter, another call) keep them for milliseconds, more
+/// when preempted under load; a poll with no `wait_ms` has no deadline to
+/// spend, so without this a single overlapping holder failed the call. Only
+/// a lock held past it fails.
+const LOCK_GRACE: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// The latest a lock wait may end: the input deadline, or the grace from now
+/// when that is later.
+fn lock_deadline(deadline: tokio::time::Instant) -> tokio::time::Instant {
+    deadline.max(tokio::time::Instant::now() + LOCK_GRACE)
+}
+
+/// The scene, waited for until [`lock_deadline`].
+async fn lock_scene<'a>(
+    ctx: &ToolCtx<'a>,
+    deadline: tokio::time::Instant,
+) -> McpResult<tokio::sync::MutexGuard<'a, SceneGraph>> {
+    match ctx.scene.try_lock() {
+        Ok(scene) => Ok(scene),
+        Err(_) => tokio::time::timeout_at(lock_deadline(deadline), ctx.scene.lock())
+            .await
+            .map_err(|_| tool_err("INTERNAL", "input state busy; retry hud_input")),
+    }
+}
+
 /// The runtime shares a synchronous Hub mutex. Cooperatively wait only while
 /// it is contended, without blocking an executor or leaving a detached owner
 /// after cancellation. Ordinary empty input waits still use readiness below.
@@ -1447,6 +1469,7 @@ async fn with_input_hub<T>(
     deadline: tokio::time::Instant,
     apply: impl FnOnce(&mut PortalHub) -> McpResult<T>,
 ) -> McpResult<T> {
+    let deadline = lock_deadline(deadline);
     loop {
         match portals.hub.try_lock() {
             Ok(mut hub) => return apply(&mut hub),
@@ -1561,15 +1584,7 @@ pub async fn hud_input(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
     let _active_poll = InputPollLease::start(ctx, &ns, deadline).await?;
     let action_ready = Arc::clone(&input_ready);
     {
-        let mut scene = match ctx.scene.try_lock() {
-            Ok(scene) => scene,
-            Err(_) => tokio::time::timeout_at(deadline, ctx.scene.lock())
-                .await
-                .map_err(|_| McpError::Tool {
-                    code: "INTERNAL",
-                    hint: "input state busy; retry hud_input".to_string(),
-                })?,
-        };
+        let mut scene = lock_scene(ctx, deadline).await?;
         scene.register_action_notifier(
             &ns,
             RenderWakeNotifier::new(move || action_ready.notify_waiters()),
@@ -1581,12 +1596,7 @@ pub async fn hud_input(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
         let mut notified = std::pin::pin!(input_ready.notified());
         notified.as_mut().enable();
         let (mut items, mut backlog) = {
-            let mut scene = match ctx.scene.try_lock() {
-                Ok(scene) => scene,
-                Err(_) => tokio::time::timeout_at(deadline, ctx.scene.lock())
-                    .await
-                    .map_err(|_| tool_err("INTERNAL", "input state busy; retry hud_input"))?,
-            };
+            let mut scene = lock_scene(ctx, deadline).await?;
             ctx.state.try_with(&ns, |s| {
                 // Both guards exist before removal. No await occurs between
                 // destructive take and retained-until-ack state commit.

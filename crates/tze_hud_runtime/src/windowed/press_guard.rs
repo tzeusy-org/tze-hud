@@ -48,7 +48,15 @@ struct Guarded {
 #[derive(Default)]
 pub(super) struct PressGuard {
     seen: Vec<(ControlKey, Rect)>,
+    /// The pointer when `seen` was recorded: a control that is new under the
+    /// pointer came there by an agent's change only if the pointer is still
+    /// here; otherwise the pointer moved onto it.
+    seen_pointer: Option<(f32, f32)>,
     guarded: Option<Guarded>,
+    /// The turn's observation found the scene busy and is retried as
+    /// deferred scene work, so a card drawn under the resting pointer is
+    /// guarded from then, not from the owner's next press.
+    pub(super) observation_due: bool,
 }
 
 /// The drawn card controls, or `None` while the last frame's geometry names a
@@ -161,6 +169,7 @@ impl PressGuard {
             && guard_ms > 0
             && !owner_relayout
             && let Some((x, y)) = pointer
+            && self.seen_pointer == pointer
             && let Some(hit) = current.iter().find(|c| c.rect.contains_point(x, y))
             && !self
                 .seen
@@ -178,6 +187,7 @@ impl PressGuard {
             });
         }
         self.seen = current.into_iter().map(|c| (c.key, c.rect)).collect();
+        self.seen_pointer = pointer;
         self.mirror(scene);
         ended
     }
@@ -239,11 +249,13 @@ impl super::WinitApp {
     pub(super) fn settle_press_guard(&mut self) -> bool {
         let changed = {
             let Ok(shared) = self.state.shared_state.try_lock() else {
-                return false;
+                return self.defer_press_guard_observation();
             };
             let Ok(mut scene) = shared.scene.try_lock() else {
-                return false;
+                drop(shared);
+                return self.defer_press_guard_observation();
             };
+            self.state.press_guard.observation_due = false;
             let before = (scene.geometry_epoch, scene.overlay.notification_press_guard);
             let pointer = (!self.state.cursor_left_window)
                 .then_some((self.state.cursor_x, self.state.cursor_y));
@@ -264,6 +276,13 @@ impl super::WinitApp {
             self.update_portal_cursor_icon();
         }
         changed
+    }
+
+    /// A missed observation is deferred scene work: the loop's one coalesced
+    /// availability waiter retries it once the scene frees (no polling).
+    fn defer_press_guard_observation(&mut self) -> bool {
+        self.state.press_guard.observation_due = true;
+        false
     }
 }
 

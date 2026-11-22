@@ -1098,9 +1098,10 @@ impl HeadlessEventLoopHarness {
         for wake in wakes {
             wake.notify();
         }
-        // The turn after a frame observes what it drew (the press guard).
+        // The turn after a frame observes what it drew (the press guard); a
+        // busy scene leaves that observation, and so the turn, unsettled.
         self.app.settle_press_guard();
-        settled
+        settled && !self.app.state.press_guard.observation_due
     }
 
     /// Press and release the primary pointer button at display `(x, y)`

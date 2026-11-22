@@ -101,8 +101,9 @@ answer. Acceptance uses the scene's monotonic clock: an answer accepted before
 this deadline stays reserved even if the request resumes later; a press at or
 after the deadline goes to ordinary input. HTTPS link presses do not fabricate
 a callback answer. Post-admission scene acquisition uses the remaining wait
-window; contention at its end returns the existing bounded `INTERNAL` error
-with a `retry hud_input` hint, releasing the reservation without consuming input.
+window, or 500 ms when that is longer; contention past it returns the existing
+bounded `INTERNAL` error with a `retry hud_input` hint, releasing the
+reservation without consuming input.
 
 An unanswered card removed during the wait returns `gone:"expired"`,
 `"replaced"` (same key), `"displaced"` (contention), or `"cleared"`. These endings
@@ -528,10 +529,12 @@ The gRPC `Hold` and `Clear` behave the same on zones. An internal scene
   A finite active poll protects only its agent from idle degradation, including
   first attachment; completion/cancellation releases ownership without a future
   heartbeat. Explicit upstream loss, reclaim, holds and input TTL still apply.
-- Acquiring the scene or portal Hub waits within the same request deadline.
+- Acquiring the scene or portal Hub waits within the same request deadline,
+  or 500 ms from the attempt when that is later, so a poll with no `wait_ms`
+  or an ACK outlasts a transient holder (a frame turn) instead of failing.
   A contended Hub waits cooperatively without blocking the async executor;
-  ordinary empty input waits remain event-driven. If contention exhausts the
-  deadline, the call can return `INTERNAL` with `input state busy; retry hud_input`.
+  ordinary empty input waits remain event-driven. If contention outlasts that
+  bound, the call can return `INTERNAL` with `input state busy; retry hud_input`.
   Repeating the same ACK is safe:
   acknowledgements are idempotent and unacknowledged input keeps its stable id.
   The production `poc_demo` client retries only this exact typed input error,

@@ -536,3 +536,67 @@ fn a_trim_shift_under_a_resting_pointer_is_guarded() {
     press(&mut harness, after);
     assert!(take_action_ids(&harness).is_empty());
 }
+
+/// A card drawn and then missed by a busy observation, the pointer resting
+/// on its approve control or off the card; the press guard observed only the
+/// empty stack before it.
+fn drawn_but_unobserved(on_card: bool) -> (HeadlessEventLoopHarness, Clock, (f32, f32)) {
+    let clock = Arc::new(tze_hud_scene::TestClock::new(1_000));
+    let mut harness = approve_reject_notification_harness_on(clock.clone());
+    let approve = harness.notification_action_center("approve").unwrap();
+    let card = content(&harness);
+    harness.scene().clear_zone(ZONE).unwrap();
+    rest(&mut harness, if on_card { approve } else { (1.0, 1.0) });
+    harness.tick();
+    publish(&harness, card, "notif-agent", None);
+    let (width, height) = (
+        harness.app.state.config.window.width as f32,
+        harness.app.state.config.window.height as f32,
+    );
+    tze_hud_compositor::renderer::hit_regions::populate_notification_hit_regions(
+        &mut harness.scene(),
+        width,
+        height,
+        &std::collections::HashMap::new(),
+    );
+    let scene = harness.app.state.shared_state.blocking_lock().scene.clone();
+    let busy = scene.blocking_lock();
+    assert!(!harness.app.settle_press_guard());
+    drop(busy);
+    (harness, clock, approve)
+}
+
+/// An observation that finds the scene busy is deferred work, not a settled
+/// turn, so a card that arrived under the resting pointer is guarded from the
+/// retry rather than from whenever the owner next clicks.
+#[test]
+fn a_missed_observation_is_retried_before_the_turn_settles() {
+    let (mut harness, clock, approve) = drawn_but_unobserved(true);
+    assert!(harness.app.state.press_guard.observation_due);
+    assert!(
+        harness
+            .app
+            .has_deferred_scene_work(&crate::windowed::PortalProjectionDrain::Completed {
+                scene_changed: false
+            }),
+        "the turn is not settled"
+    );
+    harness.tick();
+    assert!(!harness.app.state.press_guard.observation_due);
+    assert!(guarded(&harness), "the retry starts the guard");
+    clock.advance(400);
+    harness.tick();
+    assert!(!guarded(&harness));
+    press(&mut harness, approve);
+    assert_eq!(take_action_ids(&harness), ["approve"]);
+}
+
+/// A press that is the first observation of a card the pointer moved onto is
+/// a deliberate press, not one under a resting pointer.
+#[test]
+fn a_press_after_moving_onto_an_unobserved_card_answers() {
+    let (mut harness, _clock, approve) = drawn_but_unobserved(false);
+    press(&mut harness, approve);
+    assert!(!guarded(&harness));
+    assert_eq!(take_action_ids(&harness), ["approve"]);
+}
