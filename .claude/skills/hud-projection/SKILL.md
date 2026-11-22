@@ -66,9 +66,12 @@ zones and widgets (`docs/api.md`):
   the viewer had not yet reached N output units before this publish (also on
   the `hud_surfaces` portal entry). Check it before raising a separate
   notification: unread output means the viewer has not caught up yet.
-- `hud_input` returns input from every surface you hold, oldest first,
-  including notification action presses. Unacked items are redelivered, so
-  ack each one once handled; the ack rides on your next poll.
+- `hud_input` returns input from every surface this session holds, oldest
+  first, including notification action presses. Each MCP session is its own
+  owner: other sessions on the same pairing never see your replies, and your
+  portal header shows your folder name until you set `display_name`.
+  Unacked items are redelivered, so ack each one once handled; the ack rides
+  on your next poll.
 - `hud_surfaces` lists your attached portals with `state` and
   `pending_input`.
 - A portal you stop calling degrades after 30 s and is reclaimed 30 s later,
@@ -101,7 +104,9 @@ HUD_HOST=<host> python3 .claude/skills/hud-projection/scripts/portal_client.py \
 - `--ack` acks what it prints; read the replies from its output. Don't also
   poll from the model while it runs, or the two consumers race for items.
 - Exit 3 means no reply within the window: republish or wait again.
-- It uses the same PSK as the MCP adapter, so it sees the same portal.
+- It has no MCP session, so it sees only portals the CLI itself attached,
+  never one this session attached through the MCP tools. Attach and poll
+  from the same side.
 
 ## Connect
 

@@ -125,16 +125,15 @@ is already consumed and needs no ACK; human × includes `kind:"dismiss"`.
 `gone:expired|replaced|displaced|cleared` ends an unanswered card and is not
 consent. An ordinary reply without action/gone means the wait ended: continue
 with the same safely routed `hud_input` consumer. Cancellation leaves accepted
-input queued. Do not use this with a shared pairing unless the question's
-callback identity and fallback input consumer are coordinated. Earlier builds
-retain the three-call path below; discover before using the new argument.
+input queued. Earlier builds retain the three-call path below; discover
+before using the new argument.
 
 Route by surface **and** the current callback identity, handle once, then send
 `hud_input {"ack":["<handled-id>"]}`. Unacked input repeats with stable ids;
-ACKs are idempotent. Input covers every surface of the authenticated agent.
-Sessions sharing a pairing need one coordinated consumer/demultiplexer or
-separate identities. Do not auto-ACK another session's records. `wait_ms` defaults
-to 0 and caps at 30000; a CLI/network timeout does not establish a user's answer.
+ACKs are idempotent. Input covers every surface this MCP session holds:
+another session on the pairing never receives or ACKs your answers, and a
+keyless clear removes only your cards. `wait_ms` defaults to 0 and caps at
+30000; a CLI/network timeout does not establish a user's answer.
 
 Unanswered questions appear before other cards in a regular notification stack;
 newest-first order is retained within each group. Answered cards lose that priority.

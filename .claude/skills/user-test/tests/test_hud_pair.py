@@ -30,6 +30,18 @@ class FakeHud(BaseHTTPRequestHandler):
     release = threading.Event()
     condition = threading.Condition()
     grpc_target = "h:50051"
+    sessions = set()  # live Mcp-Session-Id values
+    opened = 0
+    deletes = []  # (session id, monotonic time) per DELETE /mcp
+
+    def do_DELETE(self):
+        session = self.headers.get("Mcp-Session-Id")
+        with self.condition:
+            self.deletes.append((session, time.monotonic()))
+            live = session in self.sessions
+            self.sessions.discard(session)
+            self.condition.notify_all()
+        self.reply(202 if live else 404, b"")
 
     def do_GET(self):
         if self.headers.get("Authorization") != f"Bearer {type(self).last_psk}":
@@ -41,13 +53,17 @@ class FakeHud(BaseHTTPRequestHandler):
         if self.path == "/mcp":
             authorized = self.headers.get("Authorization") == f"Bearer {type(self).last_psk}"
             request_id = body.get("id")
+            session = self.headers.get("Mcp-Session-Id")
             with self.condition:
-                self.requests.append({"body": body, "authorized": authorized,
+                self.requests.append({"body": body, "authorized": authorized, "session": session,
                                       "protocol": self.headers.get("MCP-Protocol-Version")})
                 self.entered.setdefault(request_id, threading.Event()).set()
                 self.condition.notify_all()
             if not authorized:
                 return self.reply(401, {"code": "UNAUTHORIZED"})
+            if session is not None and (session not in self.sessions
+                                        or self.modes.get(request_id) == "unknown-session"):
+                return self.reply(404, b"")  # MCP: unknown session, nothing ran
             mode = self.modes.get(request_id)
             if mode == "hold":
                 if not self.release.wait(70):
@@ -98,9 +114,14 @@ class FakeHud(BaseHTTPRequestHandler):
                 self.send_header("Content-Length", "0")
                 self.end_headers()
                 return
+            headers = {}
             if method == "initialize":
                 result = {"protocolVersion": "2025-06-18", "serverInfo": {"name": "fake-upstream", "version": "fixture"},
                           "capabilities": {"tools": {"listChanged": False}}, "instructions": "upstream sentinel"}
+                with self.condition:
+                    type(self).opened += 1
+                    headers["Mcp-Session-Id"] = f"session-{type(self).opened}"
+                    self.sessions.add(headers["Mcp-Session-Id"])
             elif method == "tools/list":
                 result = {"tools": [{"name": name, "description": "upstream sentinel", "inputSchema": {"type": "object"}}
                                     for name in ["hud_surfaces", "hud_publish", "hud_hold", "hud_clear", "hud_input"]]}
@@ -113,7 +134,7 @@ class FakeHud(BaseHTTPRequestHandler):
             if mode == "large":
                 result = {"content": "z" * 700000}
             try:
-                return self.reply(200, {"jsonrpc": "2.0", "id": request_id, "result": result})
+                return self.reply(200, {"jsonrpc": "2.0", "id": request_id, "result": result}, headers)
             except (BrokenPipeError, ConnectionResetError):
                 return
         if self.path != "/pair" or body.get("code") != CODE:
@@ -123,9 +144,11 @@ class FakeHud(BaseHTTPRequestHandler):
         type(self).last_psk = psk
         self.reply(200, {"agent": body["agent"], "psk": psk, "mcp": "http://h:9090/mcp", "grpc": type(self).grpc_target})
 
-    def reply(self, status, payload):
+    def reply(self, status, payload, headers=None):
         data = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
         self.send_response(status)
+        for name, value in (headers or {}).items():
+            self.send_header(name, value)
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
@@ -139,6 +162,7 @@ def hud(tmp_path):
     FakeHud.issued = 0
     FakeHud.grpc_target = "h:50051"
     FakeHud.requests, FakeHud.modes, FakeHud.entered = [], {}, {}
+    FakeHud.sessions, FakeHud.opened, FakeHud.deletes = set(), 0, []
     FakeHud.release = threading.Event()
     server = ThreadingHTTPServer(("127.0.0.1", 0), FakeHud)
     # Teardown is fixture housekeeping, not part of an adapter deadline.
@@ -1109,7 +1133,7 @@ def test_mcp_headers_needs_a_bare_host(hud, monkeypatch):
                                  str(time.monotonic() + 3.0)], input=json.dumps(job), capture_output=True,
                                 text=True, env={**os.environ, "HOME": str(home)}, timeout=5)
         assert result.returncode == 0 and not result.stderr
-        refused = json.loads(result.stdout)
+        refused = json.loads(result.stdout)["response"]
         assert refused["id"] == job["request"]["id"] and refused["error"]["code"] == -32603
         assert refused["error"]["message"] == f"HUD initialize {layer} " + ("lookup failed" if layer == "DNS" else "failed")
         assert "PRIVATE_FAILURE_SENTINEL" not in result.stdout and FakeHud.last_psk not in result.stdout
@@ -1118,10 +1142,10 @@ def test_mcp_headers_needs_a_bare_host(hud, monkeypatch):
     for status in (401, 403):
         request_id = f"initialize-auth-{status}"
 
-        def auth_reply(self, code, payload):
+        def auth_reply(self, code, payload, headers=None):
             if isinstance(payload, dict) and payload.get("id") == request_id:
                 return original_reply(self, status, {"code": "UNAUTHORIZED"})
-            return original_reply(self, code, payload)
+            return original_reply(self, code, payload, headers)
 
         with monkeypatch.context() as patch:
             patch.setattr(FakeHud, "reply", auth_reply)
@@ -1372,3 +1396,89 @@ def test_mcp_headers_needs_a_bare_host(hud, monkeypatch):
         adapter.send("ping", "final-valid-ping")
         assert adapter.receive(strict=True)["result"] == {}
     assert FakeHud.last_psk not in adapter.stderr
+
+
+PROJECT_LABEL = SCRIPTS.parents[3].name
+
+
+@pytest.mark.parametrize("stop", [None, signal.SIGTERM, signal.SIGINT, signal.SIGHUP])
+def test_adapter_is_one_labeled_session_released_on_a_clean_stop(hud, stop):
+    """Initialize sends the folder label and keeps the session id for later
+    calls; every clean stop DELETEs the session within 1 s, even with a call
+    in flight."""
+    host, home = hud
+    pair(host, home)
+    FakeHud.modes["in-flight"] = "hold"
+    with AdapterProcess(home) as adapter:
+        adapter.ready()
+        init = next(r for r in FakeHud.requests if r["body"]["method"] == "initialize")
+        assert init["body"]["params"]["_meta"] == {"tze-hud/label": PROJECT_LABEL}
+        assert init["body"]["params"]["clientInfo"] == {"name": "fixture", "version": "1"}
+        assert init["session"] is None
+        assert FakeHud.requests[-1]["session"] == "session-1"  # the readiness ping
+        adapter.send("tools/call", "in-flight", {"name": "hud_input", "arguments": {"wait_ms": 30000}})
+        wait_request("in-flight")
+        started = time.monotonic()
+        adapter.stop(stop)
+        assert [d[0] for d in FakeHud.deletes] == ["session-1"]
+        assert FakeHud.deletes[0][1] - started < 1.0
+        assert "session-1" not in FakeHud.sessions
+
+
+def test_adapter_reinitializes_once_after_404_and_retries_each_call(hud):
+    """Four calls refused as an unknown session share one internal
+    initialize (never forwarded) and are each retried once on the new id."""
+    host, home = hud
+    pair(host, home)
+    with AdapterProcess(home) as adapter:
+        adapter.ready()
+        FakeHud.sessions.clear()  # the HUD restarted
+        for n in range(4):
+            adapter.send("ping", f"lost-{n}")
+        answers = sorted((adapter.receive() for _ in range(4)), key=lambda r: r["id"])
+        assert answers == [{"jsonrpc": "2.0", "id": f"lost-{n}", "result": {}} for n in range(4)]
+        inits = [r for r in FakeHud.requests if r["body"]["method"] == "initialize"]
+        assert len(inits) == 2, "one re-initialize for four refusals"
+        assert inits[1]["body"]["params"]["clientInfo"] == {"name": "fixture", "version": "1"}
+        assert inits[1]["body"]["params"]["_meta"] == {"tze-hud/label": PROJECT_LABEL}
+        for n in range(4):
+            sent = [r["session"] for r in FakeHud.requests if r["body"].get("id") == f"lost-{n}"]
+            assert sent[-1] == "session-2" and len(sent) <= 2, sent
+        adapter.send("ping", "after")
+        assert adapter.receive() == {"jsonrpc": "2.0", "id": "after", "result": {}}
+        assert not adapter.buffer, "no second initialize result reached the client"
+
+        # A retried call refused again fails instead of looping.
+        FakeHud.modes["again"] = "unknown-session"
+        adapter.send("ping", "again")
+        response = adapter.receive()
+        assert response["id"] == "again" and response["error"]["message"].startswith("HUD session ended")
+        assert sum(r["body"].get("id") == "again" for r in FakeHud.requests) == 2
+        assert [r["body"]["method"] for r in FakeHud.requests].count("initialize") == 3
+
+
+def test_a_stopping_adapter_never_reinitializes(hud):
+    host, home = hud
+    pair(host, home)
+    FakeHud.modes["held"] = "hold"
+    with AdapterProcess(home) as adapter:
+        adapter.ready()
+        adapter.send("tools/call", "held", {"name": "hud_input", "arguments": {"wait_ms": 30000}})
+        wait_request("held")
+        FakeHud.sessions.clear()
+        FakeHud.release.set()  # the held call now answers 404 while stopping
+        adapter.stop()
+    assert [r["body"]["method"] for r in FakeHud.requests].count("initialize") == 1
+
+
+def test_session_label_is_the_project_folder_else_the_cwd(tmp_path, monkeypatch):
+    import runpy
+    module = runpy.run_path(str(SCRIPTS / "hud_mcp_stdio.py"), run_name="label_fixture")
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", "/work/tze-hud/")
+    assert module["session_label"]() == "tze-hud"
+    monkeypatch.delenv("CLAUDE_PROJECT_DIR")
+    monkeypatch.chdir(tmp_path)
+    assert module["session_label"]() == tmp_path.name
+    sent = module["with_label"]({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                                 "params": {"_meta": {"other": 1}}})
+    assert sent["params"]["_meta"] == {"other": 1, "tze-hud/label": tmp_path.name}

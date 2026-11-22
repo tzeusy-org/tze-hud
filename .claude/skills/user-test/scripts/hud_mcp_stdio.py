@@ -10,6 +10,16 @@ The runtime ignores `notifications/*`; this adapter consumes
 `notifications/initialized` locally and does not forward it, so the runtime
 must not require it. A session is ready once that notice follows a successful
 initialize, and no HUD request can undo that.
+
+Each adapter is one HUD session: initialize sends the working folder's name
+as the session label (`_meta`, outside model context) and keeps the returned
+`Mcp-Session-Id` for later calls, so this client owns only its own content and
+input. A clean stop (stdin EOF, SIGTERM, SIGINT or SIGHUP) sends `DELETE /mcp`
+with a 1 s deadline, even with calls in flight, releasing the session. A 404
+(the HUD restarted or released the session) re-initializes once, single-flight
+across concurrent calls and replaying the client's initialize, and retries
+each refused call once; the client never sees a second initialize result.
+A stopping adapter never re-initializes.
 """
 
 from __future__ import annotations
@@ -35,6 +45,10 @@ REQUEST_SECONDS = 60.0
 INITIALIZE_SECONDS = 3.0
 INITIALIZE_TIMEOUT = "HUD initialize DNS/TCP/startup deadline exceeded (phase unavailable)"
 TERM_SECONDS = 1.0
+END_SECONDS = 1.0
+LABEL_META_KEY = "tze-hud/label"
+REINIT_ID = "tze-hud-reinitialize"
+SESSION_HEADER = "Mcp-Session-Id"
 KILL_SECONDS = 1.0
 OUTPUT_STALL_SECONDS = 5.0
 MAX_WORKERS = 4
@@ -70,6 +84,7 @@ def worker(parent: int, deadline: float) -> int:
     notification = False
     failed = False
     initializing = False
+    opened = None
     phase = "protocol"
     try:
         data = sys.stdin.buffer.read(MAX_REQUEST + 4097)
@@ -84,6 +99,11 @@ def worker(parent: int, deadline: float) -> int:
             request_id = None
             raise ValueError("invalid worker request ID")
         initializing = request["method"] == "initialize"
+        ending = job.get("end") is True
+        session = job.get("session")
+        if session is not None and not (isinstance(session, str) and session.isascii()
+                                        and session.isprintable() and " " not in session and session):
+            raise ValueError("invalid session id")
         phase = "auth"
         key = hud_env.adapter_key(job["endpoint"])
         phase = "protocol"
@@ -93,13 +113,27 @@ def worker(parent: int, deadline: float) -> int:
                    "Accept": "application/json, text/event-stream", "Connection": "close"}
         if job["protocol"]:
             headers["MCP-Protocol-Version"] = job["protocol"]
+        if session is not None:
+            headers[SESSION_HEADER] = session
         connection = http.client.HTTPConnection(url.hostname, url.port, timeout=max(0.001, deadline - time.monotonic()))
         try:
             phase = "TCP"
             connection.connect()
             phase = "response/read"
-            connection.request("POST", "/mcp", body=body, headers=headers)
+            connection.request("DELETE" if ending else "POST", "/mcp",
+                               body=None if ending else body, headers=headers)
             response = connection.getresponse()
+            if ending:
+                response.read(MAX_RESPONSE)
+                sys.stdout.buffer.write(b"null")
+                sys.stdout.buffer.flush()
+                return 0
+            if response.status == 404 and session is not None:
+                # The session is unknown; the HUD refused before dispatch.
+                sys.stdout.buffer.write(json.dumps({"unknown_session": True}).encode())
+                sys.stdout.buffer.flush()
+                return 0
+            opened = response.getheader(SESSION_HEADER) if initializing else None
             if response.status != 200 and not (notification and response.status == 202):
                 phase = "auth" if response.status in (401, 403) else "HTTP"
                 raise ValueError("HTTP refusal or redirect")
@@ -126,7 +160,10 @@ def worker(parent: int, deadline: float) -> int:
             request_id, f"HUD initialize {phase} failed" if initializing else "HUD connection failed"
         )
     # Parent owns stdout; this pipe carries one bounded private result only.
-    sys.stdout.buffer.write(json.dumps(result, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode())
+    envelope = {"response": result}
+    if not failed and opened is not None and re_session(opened):
+        envelope["session"] = opened
+    sys.stdout.buffer.write(json.dumps(envelope, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode())
     sys.stdout.buffer.flush()
     return 1 if notification and failed else 0
 
@@ -140,9 +177,17 @@ class Task:
         self.abort_deadline = None
         self.cancelled = False
         self.result_seen = False
+        self.retried = False
+        self.internal = False
 
 
 class Adapter:
+    # Session state; class defaults keep partially built fixtures unscoped.
+    session = None
+    init_request = None
+    reinitializing = False
+    ending = None
+
     def __init__(self, endpoint):
         self.endpoint = endpoint
         self.selector = selectors.DefaultSelector()
@@ -156,9 +201,10 @@ class Adapter:
         self.protocol = None
         self.initialized = False
         self.output_registered = False
+        self.retry = []  # (request, deadline, retried) waiting for a session
         self.wake_read, self.wake_write = os.pipe2(os.O_NONBLOCK | os.O_CLOEXEC)
         self.old_wakeup = signal.set_wakeup_fd(self.wake_write, warn_on_full_buffer=False)
-        self.old_handlers = {s: signal.getsignal(s) for s in (signal.SIGTERM, signal.SIGINT)}
+        self.old_handlers = {s: signal.getsignal(s) for s in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)}
         for s in self.old_handlers:
             signal.signal(s, self.terminate)
         os.set_blocking(sys.stdin.fileno(), False)
@@ -214,7 +260,7 @@ class Adapter:
                     task.process.stdin.close()
                     task.payload = memoryview(b"")
 
-    def admit(self, request, deadline=None):
+    def admit(self, request, deadline=None, *, retried=False, internal=False):
         if not isinstance(request, dict) or request.get("jsonrpc") != "2.0" or not isinstance(request.get("method"), str):
             self.queue(failure(None, "Invalid JSON-RPC message"))
             return
@@ -237,6 +283,11 @@ class Adapter:
             if self.protocol is not None:
                 self.initialized = True
             return
+        if self.reinitializing and not internal and method != "initialize":
+            # Wait for the new session rather than run unscoped or on a dead id.
+            self.retry.append((request, deadline if deadline is not None else time.monotonic() + REQUEST_SECONDS,
+                               retried))
+            return
         if has_id and any("id" in t.request and t.request["id"] == request_id for t in self.tasks):
             self.queue(failure(request_id, "Request ID is already pending"))
             return
@@ -246,7 +297,9 @@ class Adapter:
             if has_id:
                 self.queue(failure(request_id, "HUD request deadline or capacity exceeded"))
             return
-        if method == "initialize":
+        if internal:
+            permitted = True
+        elif method == "initialize":
             permitted = not self.initializing and self.protocol is None and has_id
         else:
             permitted = self.initialized
@@ -254,8 +307,13 @@ class Adapter:
             if has_id:
                 self.queue(failure(request_id, "HUD session not ready; reconnect the tze-hud MCP server"))
             return
+        if method == "initialize":
+            if not internal:
+                self.init_request = request
+            request = with_label(request)
         try:
-            payload = json.dumps({"request": request, "endpoint": self.endpoint, "protocol": self.protocol},
+            payload = json.dumps({"request": request, "endpoint": self.endpoint, "protocol": self.protocol,
+                                  "session": None if method == "initialize" else self.session},
                                  ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode()
         except (TypeError, ValueError):
             if has_id:
@@ -274,14 +332,54 @@ class Adapter:
             self.stop = self.fatal = True
             return
         task = Task(process, pidfd, request, deadline, payload)
+        task.retried, task.internal = retried, internal
+        task.session = None if method == "initialize" else self.session
         self.tasks.append(task)
         os.set_blocking(process.stdin.fileno(), False)
         os.set_blocking(process.stdout.fileno(), False)
         self.selector.register(process.stdin, selectors.EVENT_WRITE, ("job", task))
         self.selector.register(process.stdout, selectors.EVENT_READ, ("result", task))
         self.selector.register(pidfd, selectors.EVENT_READ, ("exit", task))
-        if method == "initialize":
+        if method == "initialize" and not internal:
             self.initializing = True
+
+    def reinitialize(self):
+        """One internal initialize replaying the client's own, never forwarded."""
+        if self.reinitializing or self.stop:
+            return
+        self.reinitializing = True
+        request = dict(self.init_request or {"jsonrpc": "2.0", "method": "initialize", "params": {}})
+        request["id"] = REINIT_ID
+        self.admit(request, time.monotonic() + INITIALIZE_SECONDS, internal=True)
+        if not any(t.internal for t in self.tasks):
+            self.reinitialized(False)
+
+    def reinitialized(self, ok):
+        self.reinitializing = False
+        waiting, self.retry = self.retry, []
+        for request, deadline, retried in waiting:
+            if ok and not retried and not self.stop:
+                self.admit(request, deadline, retried=True)
+            elif "id" in request:
+                self.queue(failure(request["id"], "HUD session ended; reconnect the tze-hud MCP server"))
+
+    def end_session(self):
+        """DELETE this session once, without waiting on calls in flight."""
+        if self.ending is not None or self.session is None:
+            return
+        payload = json.dumps({"request": {"jsonrpc": "2.0", "method": "notifications/end"},
+                              "endpoint": self.endpoint, "protocol": self.protocol,
+                              "session": self.session, "end": True}).encode()
+        deadline = time.monotonic() + END_SECONDS
+        try:
+            self.ending = subprocess.Popen(
+                [sys.executable, str(Path(__file__).resolve()), "--worker", str(os.getpid()), str(deadline)],
+                stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            self.ending.stdin.write(payload)
+            self.ending.stdin.close()
+        except OSError:
+            pass
+        self.ending_deadline = deadline
 
     def input_ready(self):
         data = os.read(sys.stdin.fileno(), CHUNK)
@@ -315,9 +413,32 @@ class Adapter:
             self.admit(request, accepted_at + seconds)
 
     def result(self, task):
+        opened = None
         try:
-            response = json.loads(task.output, parse_constant=invalid_number)
-            json.dumps(response, allow_nan=False)
+            envelope = json.loads(task.output, parse_constant=invalid_number)
+            json.dumps(envelope, allow_nan=False)
+            if not isinstance(envelope, dict):
+                raise ValueError("invalid worker envelope")
+            if envelope.get("unknown_session") is True:
+                if task.cancelled:
+                    return
+                if task.internal:
+                    self.reinitialized(False)
+                    return
+                if task.retried or self.stop:
+                    if "id" in task.request:
+                        self.queue(failure(task.request["id"], "HUD session ended; reconnect the tze-hud MCP server"))
+                    return
+                if task.session != self.session and self.session is not None:
+                    # Refused on the old session after a re-initialize: retry now.
+                    self.admit(task.request, task.deadline, retried=True)
+                    return
+                self.session = None
+                self.retry.append((task.request, task.deadline, task.retried))
+                self.reinitialize()
+                return
+            response = envelope.get("response")
+            opened = envelope.get("session")
             if "id" in task.request:
                 if not isinstance(response, dict) or response.get("jsonrpc") != "2.0" or not valid_id(response.get("id")) or response.get("id") != task.request["id"]:
                     raise ValueError("invalid worker response")
@@ -329,9 +450,18 @@ class Adapter:
                 message = (INITIALIZE_TIMEOUT if task.process.returncode == -signal.SIGALRM
                            else "HUD initialize startup/protocol failed (phase unavailable)")
             response = failure(task.request.get("id"), message)
+        if task.internal:
+            result = response.get("result") if isinstance(response, dict) else None
+            ok = isinstance(result, dict) and isinstance(opened, str) and not task.cancelled
+            if ok:
+                self.session = opened
+            self.reinitialized(ok)
+            return
         if task.cancelled:
             return
         method = task.request["method"]
+        if method == "initialize" and isinstance(opened, str):
+            self.session = opened
         if method == "initialize":
             self.initializing = False
             result = response.get("result") if isinstance(response, dict) else None
@@ -356,7 +486,7 @@ class Adapter:
                         if not part:
                             break
                         task.output.extend(part)
-                self.result(task)
+                # Free the slot first: a result may admit a retry or re-initialize.
                 for stream in (task.process.stdin, task.process.stdout):
                     self.unregister(stream)
                     if not stream.closed:
@@ -364,6 +494,7 @@ class Adapter:
                 self.unregister(task.pidfd)
                 os.close(task.pidfd)
                 self.tasks.remove(task)
+                self.result(task)
                 continue
             if task.abort_phase == "term" and now >= task.abort_deadline:
                 self.signal_task(task, signal.SIGKILL)
@@ -373,6 +504,10 @@ class Adapter:
                 print("hud_mcp_stdio: unreaped worker; stopping admission", file=sys.stderr)
                 return False
             elif task.abort_phase is None and now >= task.deadline:
+                if task.internal:
+                    self.abort([task])
+                    self.reinitialized(False)
+                    continue
                 if "id" in task.request:
                     message = INITIALIZE_TIMEOUT if task.request["method"] == "initialize" else "HUD request deadline exceeded"
                     self.queue(failure(task.request["id"], message))
@@ -387,6 +522,7 @@ class Adapter:
                 if self.output and time.monotonic() - self.output_progress >= OUTPUT_STALL_SECONDS:
                     self.stop = self.fatal = True
                 if self.stop:
+                    self.end_session()
                     self.abort(self.tasks)
                     self.output.clear()
                 if not self.reap():
@@ -435,6 +571,7 @@ class Adapter:
                                 self.queue(failure(task.request["id"]))
                             self.abort([task])
         finally:
+            self.end_session()
             # Ordinary exceptions use the same ONE global TERM and ONE global KILL deadlines.
             self.abort(self.tasks)
             while self.tasks and self.reap():
@@ -444,6 +581,12 @@ class Adapter:
                     if not stream.closed:
                         stream.close()
                 os.close(task.pidfd)
+            if self.ending is not None:
+                try:
+                    self.ending.wait(timeout=max(0.0, self.ending_deadline - time.monotonic()) + 0.05)
+                except subprocess.TimeoutExpired:
+                    self.ending.kill()
+                    self.ending.wait()
             signal.set_wakeup_fd(self.old_wakeup)
             for sig, handler in self.old_handlers.items():
                 signal.signal(sig, handler)
@@ -451,6 +594,30 @@ class Adapter:
             os.close(self.wake_read)
             os.close(self.wake_write)
         return 1 if self.fatal else 0
+
+
+def re_session(value):
+    """A session id is visible ASCII the adapter may send back as a header."""
+    return bool(value) and len(value) <= 128 and value.isascii() and value.isprintable() and " " not in value
+
+
+def session_label():
+    """The working folder's name: CLAUDE_PROJECT_DIR, else the cwd."""
+    folder = os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
+    return Path(folder.rstrip("/") or "/").name
+
+
+def with_label(request):
+    """The initialize to send: the client's own, plus this session's label."""
+    params = request.get("params")
+    params = dict(params) if isinstance(params, dict) else {}
+    meta = params.get("_meta")
+    meta = dict(meta) if isinstance(meta, dict) else {}
+    label = session_label()
+    if label:
+        meta[LABEL_META_KEY] = label
+        params["_meta"] = meta
+    return {**request, "params": params}
 
 
 def re_protocol(value):
