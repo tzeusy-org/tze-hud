@@ -73,6 +73,10 @@ another agent currently occupies a single-occupant zone.
 MCP accepts lists omit `static_image`: resource upload is on gRPC. Strings with
 an explicit positive byte limit appear as `string<=N`; others as `string`. Numeric discovery hints use JSON `number` with the
 declared bounds (for example `number 0..1`); admission still enforces finite f32.
+A whole-number count (`f32_integer = true` in the manifest) appears as
+`integer lo..hi` (for example `"step":"integer 0..12"`). `2` and `2.0` are the
+same count; a fraction is refused on both planes, never floored, and every
+refusal of such a count reads `<widget>.<param> must be an integer in lo..hi`.
 Widget discovery includes only parameters with `audience = "model"` (the
 manifest default). `owner` and `runtime` parameters remain declared for local
 configuration/rendering but are rejected atomically on both agent transports.
@@ -270,11 +274,11 @@ with the same cancellation and idle semantics as a `hud_input` wait.
   exit duration/curve without extending authoritative expiry.
   Shipped bundles also include `countdown` (`ends_in_ms`, `label<=24`,
   `severity`), `kpi` (`value<=12`, `label<=24`, `trend=up|down|flat`,
-  `severity`), and `stepper` (`step` 0..12, `total` 1..12,
+  `severity`), and `stepper` (integer `step` 0..12, integer `total` 1..12,
   `state=active|blocked|done`, `label<=24`). Production config instantiates
   only `main-countdown` from these additions; KPI and stepper are available
-  for owner configuration. Stepper dots floor fractional steps and clamp to
-  total; the current dot uses primary/caution/success for active/blocked/done.
+  for owner configuration. A fractional count is rejected; a step above total
+  fills every dot; the current dot uses primary/caution/success for active/blocked/done.
 
   `deadline` appears in discovery as `deadline<=24h`. Send integer relative
   milliseconds 0..86400000 (`ends_in_ms` in the countdown bundle); gRPC uses

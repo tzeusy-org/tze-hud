@@ -983,3 +983,99 @@ fn deadline_defaults_and_threshold_bindings_admit_only_their_typed_contract() {
         );
     }
 }
+
+/// Stepper counts are whole numbers: `2` and `2.0` are the same count, a
+/// fraction is refused (never floored), and every refusal names the integer
+/// bound. A step above total is still accepted (it fills every dot).
+#[test]
+fn stepper_counts_are_whole_numbers() {
+    use tze_hud_scene::validation::ValidationError;
+    for (param, value, accepted) in [
+        ("step", 2.0, true),
+        ("step", 0.0, true),
+        ("step", 12.0, true),
+        ("total", 1.0, true),
+        ("step", 2.5, false),
+        ("step", 2.000_001, false),
+        ("step", -1.0, false),
+        ("step", 13.0, false),
+        ("total", 0.0, false),
+        ("total", 4.5, false),
+    ] {
+        let mut scene = scene_with("stepper");
+        let result = publish(
+            &mut scene,
+            "stepper",
+            &[(param, WidgetParameterValue::F32(value))],
+        );
+        if accepted {
+            assert!(result.is_ok(), "{param}={value}: {result:?}");
+            continue;
+        }
+        let range = if param == "step" { "0..12" } else { "1..12" };
+        match result {
+            Err(ValidationError::WidgetParameterTypeMismatch { expected, .. }) => {
+                assert_eq!(
+                    expected,
+                    format!("an integer in {range}"),
+                    "{param}={value}"
+                )
+            }
+            other => panic!("{param}={value}: {other:?}"),
+        }
+        assert!(
+            scene
+                .widget_registry
+                .active_for_widget("stepper")
+                .is_empty()
+        );
+    }
+    let mut scene = scene_with("stepper");
+    publish(
+        &mut scene,
+        "stepper",
+        &[
+            ("step", WidgetParameterValue::F32(7.0)),
+            ("total", WidgetParameterValue::F32(5.0)),
+        ],
+    )
+    .unwrap();
+}
+
+/// `f32_integer` needs an f32 with whole bounds and default; the load error
+/// names the parameter.
+#[test]
+fn integer_constraint_needs_whole_bounds_and_default() {
+    for (kind, default, bounds, accepted) in [
+        ("f32", "2.0", "f32_min = 0.0\nf32_max = 12.0\n", true),
+        ("f32", "2", "f32_min = 0\nf32_max = 12\n", true),
+        ("f32", "2.5", "f32_min = 0.0\nf32_max = 12.0\n", false),
+        ("f32", "2.0", "f32_min = 0.5\nf32_max = 12.0\n", false),
+        ("f32", "2.0", "f32_min = 0.0\nf32_max = 11.5\n", false),
+        ("string", "\"a\"", "", false),
+    ] {
+        let source = manifest(
+            "counts",
+            &format!(
+                "[[parameter_schema]]\nname = \"count\"\ntype = \"{kind}\"\ndefault = {default}\n[parameter_schema.constraints]\n{bounds}f32_integer = true\n"
+            ),
+        );
+        match load_files(&[("widget.toml", &source)], &HashMap::new()) {
+            BundleScanResult::Ok(bundle) if accepted => {
+                let c = bundle.definition.parameter_schema[0]
+                    .constraints
+                    .clone()
+                    .unwrap();
+                assert!(c.f32_integer);
+            }
+            BundleScanResult::Err(error) if !accepted => {
+                let text = error.to_string();
+                assert!(
+                    text.contains("'count'") && text.contains("f32_integer"),
+                    "{text}"
+                );
+            }
+            other => panic!("{kind} {default} {bounds}: {other:?}"),
+        }
+    }
+}

@@ -101,6 +101,9 @@ pub struct RawConstraints {
     pub f32_min: Option<f64>,
     /// Maximum f32 value.
     pub f32_max: Option<f64>,
+    /// Whole numbers only (f32); bounds and default must be whole.
+    #[serde(default)]
+    pub f32_integer: bool,
     /// Max UTF-8 byte length for string parameters.
     pub string_max_bytes: Option<u32>,
     /// Allowed values for enum parameters.

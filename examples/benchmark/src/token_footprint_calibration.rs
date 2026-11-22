@@ -133,6 +133,7 @@ mod calibration {
                         f32_max: Some(1.0),
                         string_max_bytes: None,
                         enum_allowed_values: vec![],
+                        ..Default::default()
                     }),
                 },
                 WidgetParameterDeclaration {

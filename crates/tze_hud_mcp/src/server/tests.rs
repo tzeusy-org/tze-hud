@@ -36,8 +36,7 @@ fn scene(clock: &TestClock) -> SceneGraph {
     let f32_range = WidgetParamConstraints {
         f32_min: Some(0.0),
         f32_max: Some(1.0),
-        string_max_bytes: None,
-        enum_allowed_values: vec![],
+        ..Default::default()
     };
     scene.widget_registry.register_definition(WidgetDefinition {
         id: "gauge".into(),
@@ -5565,4 +5564,73 @@ fn scene_refusal_hints_are_fixed_id_free_and_short() {
         crate::tools::scene_error(&errors[9]).to_json()["hint"],
         "notification key must be at most 256 UTF-8 bytes"
     );
+}
+
+/// A whole-number f32 is discovered as `integer lo..hi`; `2` and `2.0` are
+/// the same count, while a fraction, an out-of-range count and a string are
+/// refused with the integer bound in a short hint, changing nothing.
+#[tokio::test]
+async fn integer_counts_are_discovered_and_fractions_refused() {
+    let (server, _) = server();
+    {
+        let mut scene = server.scene.lock().await;
+        let level = scene
+            .widget_registry
+            .definitions
+            .get_mut("gauge")
+            .unwrap()
+            .parameter_schema
+            .iter_mut()
+            .find(|d| d.name == "level")
+            .unwrap();
+        level.constraints = Some(WidgetParamConstraints {
+            f32_min: Some(0.0),
+            f32_max: Some(12.0),
+            f32_integer: true,
+            ..Default::default()
+        });
+    }
+    let discovery = call(&server, "hud_surfaces", json!({})).await;
+    let gauge = discovery["surfaces"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["s"] == "widget:gauge")
+        .unwrap();
+    assert_eq!(gauge["params"]["level"], "integer 0..12");
+    for value in [json!(2), json!(2.0), json!(12)] {
+        call(
+            &server,
+            "hud_publish",
+            json!({"surface":"widget:gauge","params":{"level":value}}),
+        )
+        .await;
+    }
+    let before = server.scene.lock().await.widget_registry.instances["gauge"]
+        .current_params
+        .clone();
+    for value in [
+        json!(2.5),
+        json!(2.000_000_01),
+        json!(-1),
+        json!(13),
+        json!("3"),
+    ] {
+        let error = call_err(
+            &server,
+            "hud_publish",
+            json!({"surface":"widget:gauge","params":{"level":value}}),
+        )
+        .await;
+        assert_eq!(error["code"], "WIDGET_PARAMETER_INVALID", "{value}");
+        assert_eq!(
+            error["hint"], "gauge.level must be an integer in 0..12",
+            "{value}"
+        );
+        assert!(error.to_string().len() / 3 <= 60, "{error}");
+        assert_eq!(
+            server.scene.lock().await.widget_registry.instances["gauge"].current_params,
+            before
+        );
+    }
 }

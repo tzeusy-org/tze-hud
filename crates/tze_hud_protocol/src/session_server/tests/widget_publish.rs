@@ -39,6 +39,19 @@ async fn test_durable_widget_publish_receives_result() {
                 ),
                 constraints: None,
             });
+        def.parameter_schema
+            .push(tze_hud_scene::WidgetParameterDeclaration {
+                name: "count".into(),
+                audience: Default::default(),
+                param_type: tze_hud_scene::WidgetParamType::F32,
+                default_value: tze_hud_scene::WidgetParameterValue::F32(0.0),
+                constraints: Some(tze_hud_scene::WidgetParamConstraints {
+                    f32_min: Some(0.0),
+                    f32_max: Some(12.0),
+                    f32_integer: true,
+                    ..Default::default()
+                }),
+            });
         for (name, audience) in [
             ("fill_color", tze_hud_scene::WidgetParamAudience::Owner),
             ("theme", tze_hud_scene::WidgetParamAudience::Owner),
@@ -121,6 +134,12 @@ async fn test_durable_widget_publish_receives_result() {
             "ends_in_ms",
             Param::StringValue("300000".into()),
             "deadline<=24h",
+        ),
+        ("count", Param::F32Value(2.5), "must be an integer in 0..12"),
+        (
+            "count",
+            Param::F32Value(13.0),
+            "must be an integer in 0..12",
         ),
         ("level", Param::F32Value(f32::NAN), "finite"),
         ("level", Param::F32Value(f32::INFINITY), "finite"),

@@ -596,8 +596,28 @@ fn parse_parameter_schema(
             if !c.enum_allowed_values.is_empty() {
                 wc.enum_allowed_values = c.enum_allowed_values.clone();
             }
+            wc.f32_integer = c.f32_integer;
             wc
         });
+        if let Some(c) = raw_param.constraints.as_ref().filter(|c| c.f32_integer) {
+            let default = match &default_value {
+                tze_hud_scene::WidgetParameterValue::F32(v) => Some(f64::from(*v)),
+                _ => None,
+            };
+            let whole = |v: Option<f64>| v.is_none_or(|v| v.is_finite() && v.fract() == 0.0);
+            if param_type != WidgetParamType::F32
+                || !whole(c.f32_min)
+                || !whole(c.f32_max)
+                || !whole(default)
+            {
+                return Err(BundleError::InvalidManifest {
+                    path: path_str.to_string(),
+                    detail: format!(
+                        "bundle '{bundle_name}', parameter '{name}': f32_integer needs an f32 with whole bounds and default"
+                    ),
+                });
+            }
+        }
 
         let audience = match raw_param.audience.as_deref().unwrap_or("model") {
             "model" => tze_hud_scene::WidgetParamAudience::Model,
