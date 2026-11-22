@@ -303,12 +303,14 @@ these eight places. Each is deliberate; remove one only with its constraint.
   [shell/control_panel](../crates/tze_hud_runtime/src/shell/control_panel/mod.rs).
 - **Hand-rolled HTTP server.** One request per connection, no keep-alive or
   TLS, on loopback and tailnet addresses; that is smaller than adopting a
-  framework such as axum. Code: [http.rs](../crates/tze_hud_runtime/src/http.rs).
-- **Widget raster fast path.** Small SVG layers in a primitive subset skip the
-  XML parse and draw straight through `tiny-skia` (`ab_glyph` text), because
-  work must be proportional to change ([vision](vision.md)).
+  framework such as axum. Code: [http.rs](../crates/tze_hud_runtime/src/http.rs),
+  listeners in [mcp.rs](../crates/tze_hud_runtime/src/mcp.rs).
+- **Widget raster fast path.** SVG layers within a small primitive subset are
+  compiled once and redrawn straight through `tiny-skia` (`ab_glyph` text),
+  skipping the per-update XML parse; other layers keep the `resvg` path. Work
+  must be proportional to change ([vision](vision.md)).
   Code: [widget.rs](../crates/tze_hud_compositor/src/widget.rs).
-- **Durable widget assets, one resident cap.** Operator widget SVG assets are
+- **Durable widget assets, one resident ledger.** Operator widget SVG assets are
   re-indexed and budgeted at startup so they survive restart. Resources, widget
   sources, widget rasters and fonts share one resident-memory ledger with an
   aggregate cap and a cap per class.
