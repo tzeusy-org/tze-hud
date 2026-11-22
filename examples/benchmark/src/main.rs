@@ -20,6 +20,14 @@
 //! 3. **Upload** — texture upload: create and update texture-backed tiles
 //!    in rapid succession, measure throughput.
 //!
+//! ## Scenarios
+//!
+//! The timed sessions are the publish path agents use (see `publish.rs`): a
+//! notification, a widget parameter update, and a portal append, each one
+//! `hud_publish` per frame over the real MCP listener. A paced scene-lock
+//! contention session races resident publishes against the frame loop's
+//! `try_lock`.
+//!
 //! ## Output (--emit path)
 //!
 //! Emits a JSON object to the specified path containing:
@@ -36,6 +44,8 @@
 use serde::{Deserialize, Serialize};
 
 mod cpu_calibration;
+#[cfg(feature = "headless")]
+mod publish;
 
 use cpu_calibration::CpuCalibrationResult;
 use tze_hud_telemetry::{HardwareFactors, SessionSummary, ValidationReport};
@@ -187,7 +197,7 @@ pub struct BenchmarkOutput {
     pub calibration: CalibrationOutput,
     /// Per-scenario session summaries.
     pub sessions: Vec<ScenarioResult>,
-    /// Layer-3 validation report (runs against the steady-state session).
+    /// Layer-3 validation report (runs against the notification session).
     pub validation: ValidationReport,
     /// Present only when `--constrained-envelope` requests fail-closed proxy proof.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -202,7 +212,7 @@ mod headless_impl {
     use super::*;
     use std::path::PathBuf;
     use std::sync::Arc;
-    use std::sync::atomic::{AtomicBool, Ordering};
+
     use std::time::{Duration, Instant};
     use tokio::sync::{Mutex, oneshot};
     use tracing::{info, warn};
@@ -210,13 +220,10 @@ mod headless_impl {
     use tze_hud_telemetry::FrameTelemetry;
 
     use crate::cpu_calibration::calibrate as calibrate_cpu;
-    use tze_hud_input::{PointerEvent, PointerEventKind};
     use tze_hud_runtime::headless::{HeadlessConfig, HeadlessRuntime};
     use tze_hud_scene::graph::SceneGraph;
     use tze_hud_scene::mutation::{MutationBatch, SceneMutation};
-    use tze_hud_scene::types::{
-        HitRegionNode, Node, NodeData, Rect, Rgba, SceneId, SolidColorNode,
-    };
+    use tze_hud_scene::types::{Node, NodeData, Rect, Rgba, SceneId, SolidColorNode};
 
     // ── Budget constants ─────────────────────────────────────────────────────
 
@@ -238,8 +245,6 @@ mod headless_impl {
 
     /// Tiles per upload cycle.
     const UPLOAD_TILES_PER_CYCLE: usize = 10;
-    const SYNTHETIC_INPUT_X: f32 = 16.0;
-    const SYNTHETIC_INPUT_Y: f32 = 16.0;
 
     async fn scene_handle(runtime: &HeadlessRuntime) -> Arc<Mutex<SceneGraph>> {
         let state = runtime.state.lock().await;
@@ -428,79 +433,12 @@ mod headless_impl {
         }
     }
 
-    fn benchmark_hit_region() -> Node {
-        Node {
-            layout: Default::default(),
-            id: SceneId::new(),
-            children: vec![],
-            data: NodeData::HitRegion(HitRegionNode {
-                bounds: Rect::new(8.0, 8.0, 96.0, 96.0),
-                interaction_id: "benchmark-input-target".to_string(),
-                accepts_focus: true,
-                accepts_pointer: true,
-                ..Default::default()
-            }),
-        }
-    }
-
-    async fn record_synthetic_input_ack(
-        runtime: &mut HeadlessRuntime,
-        summary: &mut SessionSummary,
-        frame_idx: u64,
-    ) {
-        let scene_arc = scene_handle(runtime).await;
-        let mut scene = scene_arc.lock().await;
-        let kind = if frame_idx % 2 == 0 {
-            PointerEventKind::Down
-        } else {
-            PointerEventKind::Up
-        };
-        let result = runtime.input_processor.process(
-            &PointerEvent {
-                x: SYNTHETIC_INPUT_X,
-                y: SYNTHETIC_INPUT_Y,
-                kind,
-                device_id: 0,
-                timestamp: None,
-            },
-            &mut scene,
-        );
-        if result.hit.is_node_hit() {
-            summary.input_to_local_ack.record(result.local_ack_us);
-        }
-    }
-
-    /// Populate the per-frame correctness fields on a `FrameTelemetry` produced
-    /// by the headless runtime, so the benchmark emits a *genuinely computed*
-    /// signal for the CI-gated `invariant_violations` / `scene_lock_misses`
-    /// counters (/ PR #887) instead of leaving them at the implicit
-    /// `FrameTelemetry::new()` default.
-    ///
-    /// Why this is needed: `HeadlessRuntime::render_frame()` builds a fresh
-    /// `FrameTelemetry` but never writes `invariant_violations_this_frame` or
-    /// `scene_lock_miss_count` — the benchmark drives mutations directly via
-    /// `SceneGraph::apply_batch` *before* `render_frame()`, so the runtime's own
-    /// Stage-4 rejection counter (pipeline.rs) sees no pending batches. The
-    /// caller therefore computes the violation count from its own `apply_batch`
-    /// outcome and passes it here.
-    ///
-    /// # scene_lock_miss_count — honest zero, not a faked signal
-    ///
-    /// `scene_lock_miss_count` counts compositor-thread `scene.try_lock()` misses
-    /// caused by a concurrent gRPC/MCP handler holding the scene lock. The
-    /// headless benchmark harness is **single-threaded**: it `.lock().await`s the
-    /// scene directly and there are no concurrent scene-mutation handlers racing
-    /// the frame loop, so the lock is *never* contended and the genuine,
-    /// computed value is 0. We set it explicitly here to record that provenance
-    /// (a real measured zero) rather than relying on the struct default.
-    ///
-    /// The `scene_lock_miss_count` argument is the **running total** of real
-    /// compositor-thread `scene.try_lock()` misses observed so far (the same
-    /// running-total semantics the windowed runtime uses in `windowed.rs`). For
-    /// the single-threaded `.lock().await` scenarios this is always `0` (no
-    /// concurrent handler can contend the lock); the dedicated
-    /// `run_scene_lock_contention` scenario drives genuine
-    /// `try_lock` contention and passes a real non-zero count through here.
+    /// Set the per-frame correctness fields `HeadlessRuntime::render_frame()`
+    /// never writes, so the gated `invariant_violations` / `scene_lock_misses`
+    /// counters come from a real computation, not `FrameTelemetry::new()`'s
+    /// default. `invariant_violations` is the caller's own refused-work count
+    /// for the frame; `scene_lock_miss_count` is the running total of real
+    /// `scene.try_lock()` misses (the windowed loop's semantics).
     fn attach_frame_correctness(
         telemetry: &mut FrameTelemetry,
         invariant_violations: u32,
@@ -764,270 +702,6 @@ mod headless_impl {
 
     // ── Benchmark scenarios ───────────────────────────────────────────────────
 
-    /// Run the "steady-state render" scenario.
-    ///
-    /// Renders a multi-tile scene for `frame_count` frames and collects telemetry.
-    pub(crate) async fn run_steady_state_render(frame_count: u64) -> ScenarioResult {
-        info!(
-            "Running steady-state render scenario ({} frames)",
-            frame_count
-        );
-
-        let config = benchmark_config("benchmark");
-
-        let mut runtime = HeadlessRuntime::new(config)
-            .await
-            .expect("HeadlessRuntime::new failed — ensure the headless feature is enabled");
-
-        // Set up the benchmark scene: 10 tiles with solid colors
-        {
-            let scene_arc = scene_handle(&runtime).await;
-            let mut scene = scene_arc.lock().await;
-            let tab_id = scene.create_tab("bench", 0).expect("create_tab");
-            let lease_id = scene.grant_lease("bench", 300_000);
-            if let Some(lease) = scene.leases.get_mut(&lease_id) {
-                lease.resource_budget.max_tiles = 15;
-            }
-
-            for i in 0..10usize {
-                let col = i % 5;
-                let row = i / 5;
-                let bounds = Rect::new(col as f32 * 384.0, row as f32 * 540.0, 380.0, 536.0);
-                if let Ok(tile_id) =
-                    scene.create_tile(tab_id, "bench", lease_id, bounds, (i + 1) as u32)
-                {
-                    let root_id = SceneId::new();
-                    let node = Node {
-                        layout: Default::default(),
-                        id: root_id,
-                        children: vec![],
-                        data: NodeData::SolidColor(SolidColorNode {
-                            color: Rgba::new(i as f32 / 10.0, 0.5, 1.0 - i as f32 / 10.0, 1.0),
-                            bounds: Rect::new(0.0, 0.0, 380.0, 536.0),
-                            radius: None,
-                        }),
-                    };
-                    let _ = scene.set_tile_root(tile_id, node);
-                    if i == 0 {
-                        let _ =
-                            scene.add_node_to_tile(tile_id, Some(root_id), benchmark_hit_region());
-                    }
-                }
-            }
-        }
-
-        // Warmup: 5 frames (not included in summary)
-        for _ in 0..5 {
-            runtime.render_frame().await;
-        }
-
-        // Timed window
-        let session_start = Instant::now();
-        let mut summary = SessionSummary::new();
-
-        for frame_idx in 0..frame_count {
-            record_synthetic_input_ack(&mut runtime, &mut summary, frame_idx).await;
-            let mut telemetry = runtime.render_frame().await;
-            // Correctness signal: this scenario submits no per-frame
-            // mutation batches, so no batch can be rejected — the genuine,
-            // computed invariant-violation count for every frame here is 0.
-            // We still attach the correctness fields and call
-            // record_frame_correctness so the gated counters are emitted from a
-            // real per-frame computation, not left at FrameTelemetry::new()'s
-            // implicit default (headless render_frame() never touches them).
-            // scene_lock_miss_count == 0: single-threaded harness, no contention.
-            attach_frame_correctness(&mut telemetry, 0, 0);
-            summary.record_frame(telemetry.frame_time_us, telemetry.tile_count);
-            summary.record_frame_correctness(&telemetry);
-
-            // input_to_scene_commit: Stage 3 + Stage 4 (mutation intake + commit)
-            let scene_commit =
-                telemetry.stage3_mutation_intake_us + telemetry.stage4_scene_commit_us;
-            if scene_commit > 0 {
-                summary.input_to_scene_commit.record(scene_commit);
-            }
-            // input_to_next_present: full pipeline latency in headless mode
-            summary
-                .input_to_next_present
-                .record(telemetry.frame_time_us);
-        }
-
-        summary.elapsed_us = session_start.elapsed().as_micros() as u64;
-        summary.finalize();
-
-        ScenarioResult {
-            name: "steady_state_render".to_string(),
-            summary,
-        }
-    }
-
-    // ── high_mutation layout ──────────────────────────────────────────────────
-    //
-    // A 5×2 grid of tiles on the benchmark's 1920×1080 display. Tile size and
-    // pitch are chosen so that, even at the maximum per-frame jitter offset, the
-    // rightmost/bottom tiles stay fully inside the display area — keeping every
-    // UpdateTileBounds batch valid (no spurious `invariant_violations`)
-    // while still moving tiles every frame. Worst-case check:
-    //   col 4: x_max = 4*384 + 16 = 1552; 1552 + 360 = 1912 ≤ 1920 ✓
-    //   row 1: y_max = 1*540 + 16 = 556;  556 + 520 = 1076 ≤ 1080 ✓
-    const MUTATION_TILE_COUNT: usize = 10;
-    const MUTATION_COLS: usize = 5;
-    const MUTATION_COL_PITCH: f32 = 384.0;
-    const MUTATION_ROW_PITCH: f32 = 540.0;
-    const MUTATION_TILE_W: f32 = 360.0;
-    const MUTATION_TILE_H: f32 = 520.0;
-    /// Max jitter offset (px) added to a tile origin; kept small enough that the
-    /// grid above never leaves the display area.
-    const MUTATION_JITTER_PX: f32 = 16.0;
-
-    /// Compute the (x, y) origin for grid tile `idx` given a normalized jitter
-    /// value in `[0.0, 1.0]`. The jitter is added (never subtracted) so the
-    /// origin only ever moves toward the interior headroom we reserved above —
-    /// the resulting bounds are always within the 1920×1080 display area.
-    fn mutation_tile_origin(idx: usize, jitter01: f32) -> (f32, f32) {
-        let col = idx % MUTATION_COLS;
-        let row = idx / MUTATION_COLS;
-        let j = jitter01.clamp(0.0, 1.0) * MUTATION_JITTER_PX;
-        (
-            col as f32 * MUTATION_COL_PITCH + j,
-            row as f32 * MUTATION_ROW_PITCH + j,
-        )
-    }
-
-    /// Run the "high-mutation" scenario: apply bounds mutations every frame.
-    pub(crate) async fn run_high_mutation(frame_count: u64) -> ScenarioResult {
-        info!("Running high-mutation scenario ({} frames)", frame_count);
-
-        let config = benchmark_config("benchmark");
-
-        let mut runtime = HeadlessRuntime::new(config)
-            .await
-            .expect("HeadlessRuntime::new failed");
-
-        let tab_id;
-        let lease_id;
-        let mut tile_ids = Vec::new();
-
-        {
-            let scene_arc = scene_handle(&runtime).await;
-            let mut scene = scene_arc.lock().await;
-            tab_id = scene.create_tab("mutation_bench", 0).expect("create_tab");
-            lease_id = scene.grant_lease("mutation_bench", 300_000);
-            if let Some(lease) = scene.leases.get_mut(&lease_id) {
-                lease.resource_budget.max_tiles = 15;
-            }
-
-            for i in 0..MUTATION_TILE_COUNT {
-                let (x, y) = mutation_tile_origin(i, 0.0);
-                let bounds = Rect::new(x, y, MUTATION_TILE_W, MUTATION_TILE_H);
-                if let Ok(tile_id) =
-                    scene.create_tile(tab_id, "mutation_bench", lease_id, bounds, (i + 1) as u32)
-                {
-                    tile_ids.push(tile_id);
-                    if i == 0 {
-                        let root_id = SceneId::new();
-                        let node = Node {
-                            layout: Default::default(),
-                            id: root_id,
-                            children: vec![],
-                            data: NodeData::SolidColor(SolidColorNode {
-                                color: Rgba::new(0.25, 0.5, 0.75, 1.0),
-                                bounds: Rect::new(0.0, 0.0, MUTATION_TILE_W, MUTATION_TILE_H),
-                                radius: None,
-                            }),
-                        };
-                        let _ = scene.set_tile_root(tile_id, node);
-                        let _ =
-                            scene.add_node_to_tile(tile_id, Some(root_id), benchmark_hit_region());
-                    }
-                }
-            }
-        }
-
-        if tile_ids.is_empty() {
-            warn!("run_high_mutation: no tiles were created; cannot run mutation scenario");
-            return ScenarioResult {
-                name: "high_mutation".to_string(),
-                summary: SessionSummary::new(),
-            };
-        }
-
-        // Warmup
-        for _ in 0..5 {
-            runtime.render_frame().await;
-        }
-
-        let session_start = Instant::now();
-        let mut summary = SessionSummary::new();
-
-        for frame_idx in 0..frame_count {
-            record_synthetic_input_ack(&mut runtime, &mut summary, frame_idx).await;
-
-            // Apply bounds mutation to 3 tiles per frame. Capture the
-            // batch-rejection outcome so we can feed a *real* invariant-violation
-            // signal into the gated correctness counter: a rejected
-            // batch (applied == false) is exactly what the runtime pipeline
-            // counts as one invariant violation (see pipeline.rs Stage 4).
-            //
-            // The jittered bounds below are deliberately kept WITHIN the display
-            // area (see `mutation_tile_origin`), so every batch is valid and this
-            // counter is legitimately 0 across the run. The scenario still
-            // exercises real high-rate mutation (3 accepted UpdateTileBounds per
-            // frame); it just no longer models *invalid* load.
-            let mut invariant_violations_this_frame = 0u32;
-            {
-                let scene_arc = scene_handle(&runtime).await;
-                let mut scene = scene_arc.lock().await;
-                let mut mutations = Vec::new();
-                for offset in 0..3usize {
-                    let idx = ((frame_idx as usize) + offset) % tile_ids.len();
-                    // Continuous, bounded jitter in [0, 1] driven by the frame
-                    // index, so tiles visibly move every frame while their bounds
-                    // stay fully inside the display area.
-                    let jitter = ((frame_idx as f32) * 0.1).sin() * 0.5 + 0.5;
-                    let (x, y) = mutation_tile_origin(idx, jitter);
-                    mutations.push(SceneMutation::UpdateTileBounds {
-                        tile_id: tile_ids[idx],
-                        bounds: Rect::new(x, y, MUTATION_TILE_W, MUTATION_TILE_H),
-                    });
-                }
-                let batch = MutationBatch {
-                    batch_id: SceneId::new(),
-                    agent_namespace: "mutation_bench".to_string(),
-                    mutations,
-                    timing_hints: None,
-                    lease_id: None,
-                };
-                if !scene.apply_batch(&batch).applied {
-                    invariant_violations_this_frame += 1;
-                }
-            }
-
-            let mut telemetry = runtime.render_frame().await;
-            // scene_lock_miss_count == 0: single-threaded harness, no contention.
-            attach_frame_correctness(&mut telemetry, invariant_violations_this_frame, 0);
-            summary.record_frame(telemetry.frame_time_us, telemetry.tile_count);
-            summary.record_frame_correctness(&telemetry);
-
-            let scene_commit =
-                telemetry.stage3_mutation_intake_us + telemetry.stage4_scene_commit_us;
-            if scene_commit > 0 {
-                summary.input_to_scene_commit.record(scene_commit);
-            }
-            summary
-                .input_to_next_present
-                .record(telemetry.frame_time_us);
-        }
-
-        summary.elapsed_us = session_start.elapsed().as_micros() as u64;
-        summary.finalize();
-
-        ScenarioResult {
-            name: "high_mutation".to_string(),
-            summary,
-        }
-    }
-
     // ── Scene-lock contention scenario ────────────────────────────
 
     /// Number of concurrent background scene-mutation tasks to spawn for the
@@ -1057,14 +731,6 @@ mod headless_impl {
     const PRODUCTION_CONTENTION_FRAME_PHASES: [u64; CONTENTION_MUTATION_TASKS] = [5, 15, 25];
     const PRODUCTION_CONTENTION_FRAME_INTERVAL: Duration = Duration::from_micros(16_667);
     const PRODUCTION_CONTENTION_READY_TIMEOUT: Duration = Duration::from_millis(50);
-    const PACED_CONTENTION_COLS: usize = 3;
-    const PACED_CONTENTION_COL_PITCH: f32 = 384.0;
-    const PACED_CONTENTION_ROW_PITCH: f32 = 540.0;
-    pub(crate) const PACED_CONTENTION_TILE_W: f32 = 380.0;
-    pub(crate) const PACED_CONTENTION_TILE_H: f32 = 536.0;
-    pub(crate) const PACED_CONTENTION_DISPLAY_W: f32 = 1920.0;
-    pub(crate) const PACED_CONTENTION_DISPLAY_H: f32 = 1080.0;
-    const PACED_CONTENTION_JITTER_PX: f32 = 5.0;
 
     pub(crate) fn production_contention_task_index(frame_idx: u64) -> Option<usize> {
         let phase = frame_idx % PRODUCTION_CONTENTION_PERIOD_FRAMES;
@@ -1077,18 +743,6 @@ mod headless_impl {
         (0..frame_count)
             .filter(|frame_idx| production_contention_task_index(*frame_idx).is_some())
             .count() as u64
-    }
-
-    pub(crate) fn paced_contention_tile_origin(idx: usize, tick: u64) -> (f32, f32) {
-        let col = idx % PACED_CONTENTION_COLS;
-        let row = idx / PACED_CONTENTION_COLS;
-        let jitter = (tick as f32 * 0.13).sin() * PACED_CONTENTION_JITTER_PX;
-        let max_x = PACED_CONTENTION_DISPLAY_W - PACED_CONTENTION_TILE_W;
-        let max_y = PACED_CONTENTION_DISPLAY_H - PACED_CONTENTION_TILE_H;
-        (
-            (col as f32 * PACED_CONTENTION_COL_PITCH + jitter).clamp(0.0, max_x),
-            (row as f32 * PACED_CONTENTION_ROW_PITCH).clamp(0.0, max_y),
-        )
     }
 
     async fn wait_for_contention_ready(ready: oneshot::Receiver<()>, frame_idx: u64) {
@@ -1144,271 +798,44 @@ mod headless_impl {
         summary.scene_lock_misses
     }
 
+    /// One resident agent's publish: the handler takes the scene lock and
+    /// admits a status publish, then holds the lock for the contention window.
     fn spawn_paced_contention_holder(
         scene_arc: Arc<Mutex<SceneGraph>>,
-        tile_ids: Arc<[SceneId]>,
         task_idx: usize,
         tick: u64,
     ) -> (oneshot::Receiver<()>, tokio::task::JoinHandle<bool>) {
         let (ready_tx, ready_rx) = oneshot::channel();
         let handle = tokio::spawn(async move {
             let mut scene = scene_arc.lock().await;
-            let mut batch_applied = true;
-            if !tile_ids.is_empty() {
-                let idx = (tick as usize + task_idx) % tile_ids.len();
-                let (x, y) = paced_contention_tile_origin(idx, tick);
-                let batch = MutationBatch {
-                    batch_id: SceneId::new(),
-                    agent_namespace: "paced_contention_bench".to_string(),
-                    mutations: vec![SceneMutation::UpdateTileBounds {
-                        tile_id: tile_ids[idx],
-                        bounds: Rect::new(x, y, PACED_CONTENTION_TILE_W, PACED_CONTENTION_TILE_H),
-                    }],
-                    timing_hints: None,
-                    lease_id: None,
-                };
-                batch_applied = scene.apply_batch(&batch).applied;
-            }
+            let accepted = scene
+                .publish_to_zone(
+                    "status-bar",
+                    tze_hud_scene::types::ZoneContent::StatusBar(
+                        tze_hud_scene::types::StatusBarPayload {
+                            entries: std::collections::HashMap::from([(
+                                format!("agent-{task_idx}"),
+                                format!("tick {tick}"),
+                            )]),
+                        },
+                    ),
+                    &format!("paced-contention-{task_idx}"),
+                    Some(format!("agent-{task_idx}")),
+                    None,
+                    None,
+                )
+                .is_ok();
             let _ = ready_tx.send(());
             tokio::time::sleep(CONTENTION_HOLD).await;
-            batch_applied
+            accepted
         });
         (ready_rx, handle)
     }
 
-    /// Run the "scene-lock contention" scenario.
-    ///
-    /// This produces a
-    /// genuine, measured **non-zero** `scene_lock_misses` signal by reproducing
-    /// the exact production contention the windowed compositor frame loop
-    /// experiences, without needing a real GPU/winit window.
-    ///
-    /// # Why this is the real `try_lock` path, not a faked counter
-    ///
-    /// The windowed runtime (`crates/tze_hud_runtime/src/windowed/mod.rs`, Stage 5)
-    /// holds `compositor_scene: Arc<Mutex<SceneGraph>>` and acquires it with
-    /// `compositor_scene.try_lock()`. On a miss (the lock is held by a
-    /// concurrent gRPC/MCP scene-mutation handler) it does
-    /// `scene_lock_miss_count = scene_lock_miss_count.saturating_add(1)` and
-    /// snapshots that running total into `FrameTelemetry::scene_lock_miss_count`.
-    ///
-    /// This scenario uses the **same type and the same method**: it shares the
-    /// headless runtime's `Arc<Mutex<SceneGraph>>` scene handle, spawns
-    /// concurrent tasks that hold it via `.lock().await` (modelling the
-    /// handlers), and runs a frame loop that acquires it with the identical
-    /// `try_lock()` call — incrementing the identical running-total counter on a
-    /// miss. The only thing this omits versus production is the GPU render
-    /// between lock-acquire and lock-release, which is irrelevant to lock
-    /// *contention* accounting. No counter is poked directly: every increment
-    /// comes from a real `tokio::sync::Mutex::try_lock` returning `Err`.
-    ///
-    /// # Determinism (no flaky exact-count assertion)
-    ///
-    /// Pure timing races are flaky. To guarantee a non-zero result without
-    /// asserting an exact (flaky) number, each background task uses a
-    /// per-task handshake: it acquires the lock, sets a "holding" flag, holds
-    /// for `CONTENTION_HOLD`, then clears the flag. The frame loop, on every
-    /// frame, first waits until at least one task is in its holding window and
-    /// then performs its `try_lock` — so the contended frames deterministically
-    /// miss. We report the measured total; we never assert it equals a fixed
-    /// value (it floats with scheduling, but is guaranteed `> 0`).
-    pub(crate) async fn run_scene_lock_contention(frame_count: u64) -> ScenarioResult {
-        info!(
-            "Running scene-lock contention scenario ({} frames, {} mutation tasks)",
-            frame_count, CONTENTION_MUTATION_TASKS,
-        );
-
-        let config = benchmark_config("contention_bench");
-        let runtime = HeadlessRuntime::new(config)
-            .await
-            .expect("HeadlessRuntime::new failed");
-
-        // Build a small scene the background tasks can legally mutate.
-        let tab_id;
-        let lease_id;
-        let mut tile_ids = Vec::new();
-        {
-            let scene_arc = scene_handle(&runtime).await;
-            let mut scene = scene_arc.lock().await;
-            tab_id = scene.create_tab("contention_bench", 0).expect("create_tab");
-            lease_id = scene.grant_lease("contention_bench", 300_000);
-            if let Some(lease) = scene.leases.get_mut(&lease_id) {
-                lease.resource_budget.max_tiles = 15;
-            }
-            for i in 0..6usize {
-                let col = i % 3;
-                let row = i / 3;
-                let bounds = Rect::new(col as f32 * 384.0, row as f32 * 540.0, 380.0, 536.0);
-                if let Ok(tile_id) =
-                    scene.create_tile(tab_id, "contention_bench", lease_id, bounds, (i + 1) as u32)
-                {
-                    tile_ids.push(tile_id);
-                    if i == 0 {
-                        let root_id = SceneId::new();
-                        let node = Node {
-                            layout: Default::default(),
-                            id: root_id,
-                            children: vec![],
-                            data: NodeData::SolidColor(SolidColorNode {
-                                color: Rgba::new(0.25, 0.5, 0.75, 1.0),
-                                bounds: Rect::new(0.0, 0.0, 380.0, 536.0),
-                                radius: None,
-                            }),
-                        };
-                        let _ = scene.set_tile_root(tile_id, node);
-                        let _ =
-                            scene.add_node_to_tile(tile_id, Some(root_id), benchmark_hit_region());
-                    }
-                }
-            }
-        }
-
-        if tile_ids.is_empty() {
-            warn!("run_scene_lock_contention: no tiles created; cannot run scenario");
-            return ScenarioResult {
-                name: "scene_lock_contention".to_string(),
-                summary: SessionSummary::new(),
-            };
-        }
-
-        // The scene handle the frame loop will `try_lock` — the SAME
-        // Arc<Mutex<SceneGraph>> the background tasks `.lock().await`. This is
-        // the exact production sharing model (windowed.rs `compositor_scene`).
-        let scene_arc = scene_handle(&runtime).await;
-
-        // Shutdown flag for the background mutation tasks.
-        let stop = Arc::new(AtomicBool::new(false));
-        // Per-task "currently holding the scene lock" flags. The frame loop
-        // waits on the aggregate of these to make contention deterministic.
-        let holding: Vec<Arc<AtomicBool>> = (0..CONTENTION_MUTATION_TASKS)
-            .map(|_| Arc::new(AtomicBool::new(false)))
-            .collect();
-
-        // Spawn the concurrent scene-mutation handlers.
-        let mut task_handles = Vec::with_capacity(CONTENTION_MUTATION_TASKS);
-        for task_idx in 0..CONTENTION_MUTATION_TASKS {
-            let scene_arc = Arc::clone(&scene_arc);
-            let stop = Arc::clone(&stop);
-            let holding = Arc::clone(&holding[task_idx]);
-            let tile_ids = tile_ids.clone();
-            task_handles.push(tokio::spawn(async move {
-                let mut tick: u64 = 0;
-                while !stop.load(Ordering::Acquire) {
-                    {
-                        // Acquire the scene lock exactly as a real gRPC/MCP
-                        // handler would, then apply a real mutation batch.
-                        let mut scene = scene_arc.lock().await;
-                        holding.store(true, Ordering::Release);
-                        let idx = (tick as usize + task_idx) % tile_ids.len();
-                        let jitter = (tick as f32) * 0.13;
-                        let col = idx % 3;
-                        let row = idx / 3;
-                        let batch = MutationBatch {
-                            batch_id: SceneId::new(),
-                            agent_namespace: "contention_bench".to_string(),
-                            mutations: vec![SceneMutation::UpdateTileBounds {
-                                tile_id: tile_ids[idx],
-                                bounds: Rect::new(
-                                    col as f32 * 384.0 + jitter.sin() * 5.0,
-                                    row as f32 * 540.0,
-                                    380.0,
-                                    536.0,
-                                ),
-                            }],
-                            timing_hints: None,
-                            lease_id: None,
-                        };
-                        let _ = scene.apply_batch(&batch);
-                        // Hold the lock for the contention window so a racing
-                        // frame-loop try_lock deterministically misses.
-                        tokio::time::sleep(CONTENTION_HOLD).await;
-                        holding.store(false, Ordering::Release);
-                    }
-                    // Yield the lock between holds so the frame loop and other
-                    // tasks get a turn (and some frames can still succeed).
-                    tokio::time::sleep(CONTENTION_HOLD).await;
-                    tick = tick.wrapping_add(1);
-                }
-            }));
-        }
-
-        // Running total of REAL try_lock misses — identical semantics to the
-        // windowed runtime's `scene_lock_miss_count`.
-        let mut scene_lock_miss_count: u64 = 0;
-        let session_start = Instant::now();
-        let mut summary = SessionSummary::new();
-
-        for frame_idx in 0..frame_count {
-            // Deterministic handshake: wait until at least one mutation task is
-            // inside its hold window before attempting the frame's try_lock, so
-            // the contended frame reliably misses. Bounded spin so we never hang
-            // if every task happens to be between holds.
-            let any_holding = || holding.iter().any(|h| h.load(Ordering::Acquire));
-            let wait_start = Instant::now();
-            while !any_holding() && wait_start.elapsed() < CONTENTION_HOLD * 4 {
-                tokio::time::sleep(Duration::from_micros(50)).await;
-            }
-
-            // ── The real production acquisition path ──────────────────────
-            // Identical to windowed.rs Stage 4: try_lock the scene; on a miss
-            // (a concurrent handler holds it) bump the running miss total.
-            let frame_start = Instant::now();
-            let frame_time_us;
-            let tile_count;
-            match scene_arc.try_lock() {
-                Ok(scene) => {
-                    // Lock acquired: model the per-frame commit cost (snapshot
-                    // the tile count, the cheap part of Stage 4) then release.
-                    tile_count = scene.tiles.len() as u32;
-                    drop(scene);
-                    frame_time_us = frame_start.elapsed().as_micros() as u64;
-                }
-                Err(_) => {
-                    // Real try_lock miss — the contention signal we are after.
-                    scene_lock_miss_count = scene_lock_miss_count.saturating_add(1);
-                    tile_count = summary.peak_tile_count;
-                    frame_time_us = frame_start.elapsed().as_micros() as u64;
-                }
-            }
-
-            // Emit telemetry carrying the running miss total, exactly as the
-            // windowed loop does, and accumulate it into the session summary.
-            let mut telemetry = FrameTelemetry::new(frame_idx);
-            telemetry.frame_time_us = frame_time_us;
-            telemetry.tile_count = tile_count;
-            attach_frame_correctness(&mut telemetry, 0, scene_lock_miss_count);
-            summary.record_frame(telemetry.frame_time_us, telemetry.tile_count);
-            summary.record_frame_correctness(&telemetry);
-            summary
-                .input_to_next_present
-                .record(telemetry.frame_time_us);
-        }
-
-        // Tear down the background tasks.
-        stop.store(true, Ordering::Release);
-        for handle in task_handles {
-            let _ = handle.await;
-        }
-
-        summary.elapsed_us = session_start.elapsed().as_micros() as u64;
-        summary.finalize();
-
-        info!(
-            "  scene_lock_contention: total_frames={}, scene_lock_misses={} (real try_lock misses)",
-            summary.total_frames, summary.scene_lock_misses,
-        );
-
-        ScenarioResult {
-            name: "scene_lock_contention".to_string(),
-            summary,
-        }
-    }
-
     /// Run the gated, production-shaped scene-lock contention scenario.
     ///
-    /// Unlike `scene_lock_contention`, this does **not** force a lock hold on
-    /// every frame. It models a 60Hz frame loop with three resident
-    /// mutation-handler streams applying accepted scene batches at a bounded
+    /// It does **not** force a lock hold on every frame. It models a 60Hz frame
+    /// loop with three resident agents admitting zone publishes at a bounded
     /// aggregate cadence (three contended frames per 30-frame half-second).
     /// Each scheduled hold still races the real `tokio::sync::Mutex::try_lock`
     /// frame-loop path and rolls misses through `FrameTelemetry` into
@@ -1426,64 +853,11 @@ mod headless_impl {
             .await
             .expect("HeadlessRuntime::new failed");
 
-        let tab_id;
-        let lease_id;
-        let mut tile_ids = Vec::new();
         {
             let scene_arc = scene_handle(&runtime).await;
-            let mut scene = scene_arc.lock().await;
-            tab_id = scene
-                .create_tab("paced_contention_bench", 0)
-                .expect("create_tab");
-            lease_id = scene.grant_lease("paced_contention_bench", 300_000);
-            if let Some(lease) = scene.leases.get_mut(&lease_id) {
-                lease.resource_budget.max_tiles = 15;
-            }
-            for i in 0..6usize {
-                let (x, y) = paced_contention_tile_origin(i, 0);
-                let bounds = Rect::new(x, y, PACED_CONTENTION_TILE_W, PACED_CONTENTION_TILE_H);
-                if let Ok(tile_id) = scene.create_tile(
-                    tab_id,
-                    "paced_contention_bench",
-                    lease_id,
-                    bounds,
-                    (i + 1) as u32,
-                ) {
-                    tile_ids.push(tile_id);
-                    if i == 0 {
-                        let root_id = SceneId::new();
-                        let node = Node {
-                            layout: Default::default(),
-                            id: root_id,
-                            children: vec![],
-                            data: NodeData::SolidColor(SolidColorNode {
-                                color: Rgba::new(0.25, 0.5, 0.75, 1.0),
-                                bounds: Rect::new(
-                                    0.0,
-                                    0.0,
-                                    PACED_CONTENTION_TILE_W,
-                                    PACED_CONTENTION_TILE_H,
-                                ),
-                                radius: None,
-                            }),
-                        };
-                        let _ = scene.set_tile_root(tile_id, node);
-                        let _ =
-                            scene.add_node_to_tile(tile_id, Some(root_id), benchmark_hit_region());
-                    }
-                }
-            }
+            scene_arc.lock().await.zone_registry =
+                tze_hud_scene::types::ZoneRegistry::with_defaults();
         }
-
-        if tile_ids.is_empty() {
-            warn!("run_scene_lock_paced_contention: no tiles created; cannot run scenario");
-            return ScenarioResult {
-                name: "scene_lock_paced_contention".to_string(),
-                summary: SessionSummary::new(),
-            };
-        }
-
-        let tile_ids: Arc<[SceneId]> = tile_ids.into();
         let scene_arc = scene_handle(&runtime).await;
         let mut scene_lock_miss_count: u64 = 0;
         let session_start = Instant::now();
@@ -1491,12 +865,8 @@ mod headless_impl {
 
         for frame_idx in 0..frame_count {
             let holder = if let Some(task_idx) = production_contention_task_index(frame_idx) {
-                let (ready, handle) = spawn_paced_contention_holder(
-                    Arc::clone(&scene_arc),
-                    Arc::clone(&tile_ids),
-                    task_idx,
-                    frame_idx,
-                );
+                let (ready, handle) =
+                    spawn_paced_contention_holder(Arc::clone(&scene_arc), task_idx, frame_idx);
                 wait_for_contention_ready(ready, frame_idx).await;
                 Some(handle)
             } else {
@@ -1504,20 +874,10 @@ mod headless_impl {
             };
 
             let frame_start = Instant::now();
-            let frame_time_us;
-            let tile_count;
-            match scene_arc.try_lock() {
-                Ok(scene) => {
-                    tile_count = scene.tiles.len() as u32;
-                    drop(scene);
-                    frame_time_us = frame_start.elapsed().as_micros() as u64;
-                }
-                Err(_) => {
-                    scene_lock_miss_count = scene_lock_miss_count.saturating_add(1);
-                    tile_count = summary.peak_tile_count;
-                    frame_time_us = frame_start.elapsed().as_micros() as u64;
-                }
+            if scene_arc.try_lock().is_err() {
+                scene_lock_miss_count = scene_lock_miss_count.saturating_add(1);
             }
+            let frame_time_us = frame_start.elapsed().as_micros() as u64;
             let invariant_violations_this_frame = if let Some(handle) = holder {
                 match handle.await {
                     Ok(true) => 0,
@@ -1533,7 +893,6 @@ mod headless_impl {
 
             let mut telemetry = FrameTelemetry::new(frame_idx);
             telemetry.frame_time_us = frame_time_us;
-            telemetry.tile_count = tile_count;
             attach_frame_correctness(
                 &mut telemetry,
                 invariant_violations_this_frame,
@@ -1644,37 +1003,25 @@ mod headless_impl {
         // ── Phase 2: Benchmark scenarios ─────────────────────────────────────
         info!("Phase 2: Benchmark scenarios ({} frames each)", args.frames);
 
-        let steady_state = run_steady_state_render(args.frames).await;
-        info!(
-            "  steady_state_render: total_frames={}, fps={:.1}, p99_frame_time={}µs, peak={}µs",
-            steady_state.summary.total_frames,
-            steady_state.summary.fps,
-            steady_state.summary.frame_time.p99().unwrap_or(0),
-            steady_state.summary.peak_frame_time_us,
-        );
-
-        let high_mutation = run_high_mutation(args.frames).await;
-        info!(
-            "  high_mutation: total_frames={}, fps={:.1}, p99_frame_time={}µs, peak={}µs",
-            high_mutation.summary.total_frames,
-            high_mutation.summary.fps,
-            high_mutation.summary.frame_time.p99().unwrap_or(0),
-            high_mutation.summary.peak_frame_time_us,
-        );
-
-        // Scene-lock contention scenario: drives concurrent
-        // scene-mutation handlers racing a real `try_lock` frame loop so
-        // `scene_lock_misses` is genuinely non-zero. This is NOT one of the
-        // gate's REQUIRED_SESSIONS (steady_state_render / high_mutation), so its
-        // non-zero counter does not trip the zero-baseline gate — it exists to
-        // give that gate a measured, real ceiling to reason about. See
-        // about/craft-and-care/engineering-bar.md (scene_lock_misses note).
-        let scene_lock_contention = run_scene_lock_contention(args.frames).await;
-        info!(
-            "  scene_lock_contention: total_frames={}, scene_lock_misses={}",
-            scene_lock_contention.summary.total_frames,
-            scene_lock_contention.summary.scene_lock_misses,
-        );
+        // Publish-path scenarios: one agent call per frame over the real MCP
+        // listener (admission, scene commit, reply), then the frame it causes.
+        let mut publishes = Vec::new();
+        for publish in [
+            crate::publish::Publish::Notification,
+            crate::publish::Publish::WidgetParams,
+            crate::publish::Publish::PortalAppend,
+        ] {
+            let result = crate::publish::run(publish, args.frames).await;
+            info!(
+                "  {}: frames={}, p50_publish={}µs, p99_publish={}µs, p99_frame_time={}µs",
+                result.name,
+                result.summary.total_frames,
+                result.summary.input_to_scene_commit.p50().unwrap_or(0),
+                result.summary.input_to_scene_commit.p99().unwrap_or(0),
+                result.summary.frame_time.p99().unwrap_or(0),
+            );
+            publishes.push(result);
+        }
 
         // Production-shaped paced scene-lock contention: this is the gated
         // non-zero counter session. It uses the same real try_lock path as the
@@ -1692,7 +1039,7 @@ mod headless_impl {
         // ── Phase 3: Validation ───────────────────────────────────────────────
         info!("Phase 3: Layer-3 budget validation");
 
-        let validation = ValidationReport::run(&steady_state.summary, &factors);
+        let validation = ValidationReport::run(&publishes[0].summary, &factors);
         info!("  Verdict: {}", validation.verdict);
         for assertion in &validation.assertions {
             match assertion {
@@ -1744,12 +1091,10 @@ mod headless_impl {
                 upload: upload_result,
                 factors,
             },
-            sessions: vec![
-                steady_state,
-                high_mutation,
-                scene_lock_contention,
-                scene_lock_paced_contention,
-            ],
+            sessions: publishes
+                .into_iter()
+                .chain([scene_lock_paced_contention])
+                .collect(),
             validation,
             constrained_profile,
         };
@@ -2046,10 +1391,8 @@ mod contention_tests {
 #[cfg(all(test, feature = "headless"))]
 mod paced_contention_model_tests {
     use crate::headless_impl::{
-        PACED_CONTENTION_DISPLAY_H, PACED_CONTENTION_DISPLAY_W, PACED_CONTENTION_TILE_H,
-        PACED_CONTENTION_TILE_W, PRODUCTION_CONTENTION_CEILING_PER_180_FRAMES,
-        paced_contention_tile_origin, production_contention_target_frames,
-        production_contention_task_index, run_paced_contention_probe_for_test,
+        PRODUCTION_CONTENTION_CEILING_PER_180_FRAMES, production_contention_target_frames,
+        run_paced_contention_probe_for_test,
     };
 
     #[test]
@@ -2084,27 +1427,7 @@ mod paced_contention_model_tests {
         );
         assert!(
             observed < 180,
-            "paced contention must not saturate every frame like scene_lock_contention",
+            "paced contention must not saturate every frame",
         );
-    }
-
-    #[test]
-    fn paced_contention_holder_bounds_stay_inside_display() {
-        for frame_idx in 0..180 {
-            let Some(task_idx) = production_contention_task_index(frame_idx) else {
-                continue;
-            };
-            let idx = (frame_idx as usize + task_idx) % 6;
-            let (x, y) = paced_contention_tile_origin(idx, frame_idx);
-
-            assert!(
-                x >= 0.0 && x + PACED_CONTENTION_TILE_W <= PACED_CONTENTION_DISPLAY_W,
-                "frame {frame_idx} produced out-of-display x bounds: x={x}",
-            );
-            assert!(
-                y >= 0.0 && y + PACED_CONTENTION_TILE_H <= PACED_CONTENTION_DISPLAY_H,
-                "frame {frame_idx} produced out-of-display y bounds: y={y}",
-            );
-        }
     }
 }

@@ -24,9 +24,7 @@ WINDOWS_SPEC.loader.exec_module(windows_budgets)
 CALIBRATION_VECTOR_VERSION = "tze_hud.cpu-gpu-upload.v1"
 CANONICAL_VIEWPORT = (1920, 1080)
 EXPECTED_BENCHMARK_FRAMES = 180
-EXPECTED_SCENARIOS = windows_budgets.REQUIRED_COUNTER_SESSIONS + (
-    "scene_lock_contention",
-)
+EXPECTED_SCENARIOS = windows_budgets.REQUIRED_COUNTER_SESSIONS
 
 
 def _is_text(value: Any) -> bool:
