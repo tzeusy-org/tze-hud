@@ -53,7 +53,7 @@ class ConstrainedEnvelopeCheckerTests(unittest.TestCase):
                 "verified_software": True,
             },
             "viewport": {"width": 1920, "height": 1080},
-            "calibration_vector_version": "tze_hud.cpu-gpu-upload.v1",
+            "calibration_vector_version": "tze_hud.cpu-gpu-upload.v2",
         }
 
     @classmethod
