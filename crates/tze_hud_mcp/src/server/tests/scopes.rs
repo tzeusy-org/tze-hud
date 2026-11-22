@@ -203,6 +203,17 @@ async fn sessions_clear_and_hold_only_their_own_content() {
         scope_of(&server, &a).label().as_deref(),
         Some("release bot")
     );
+    // Its cards carry the label as their caption from that publish on.
+    let captions: Vec<_> = server
+        .scene
+        .lock()
+        .await
+        .zone_registry
+        .active_for_zone("notification-area")
+        .iter()
+        .map(|r| r.caption.clone())
+        .collect();
+    assert!(captions.contains(&Some("release bot".into())));
     let (err, is_error) = call_as(&server, &unscoped, "hud_publish", named).await;
     assert!(is_error);
     assert_eq!(err["code"], "INVALID_ARGUMENT");

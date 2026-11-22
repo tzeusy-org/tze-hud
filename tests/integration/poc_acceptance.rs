@@ -2840,3 +2840,126 @@ async fn poc_agents_see_the_same_with_the_panel_open_or_content_hidden() {
         .await;
     assert_eq!(answers(&mut poc, &mut agent).await, baseline, "Hide all");
 }
+
+/// One raw MCP HTTP exchange as a session-keeping client makes it: returns
+/// the status code, the `Mcp-Session-Id` response header and the body.
+async fn exchange(
+    addr: std::net::SocketAddr,
+    method: &'static str,
+    session: Option<String>,
+    body: String,
+) -> (u16, Option<String>, String) {
+    let mut stream = TcpStream::connect(addr).await.expect("connect to MCP");
+    let header = session.map_or(String::new(), |id| format!("Mcp-Session-Id: {id}\r\n"));
+    let request = format!(
+        "{method} /mcp HTTP/1.0\r\nAuthorization: Bearer {CLAUDE_PSK}\r\n{header}\
+         Content-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+        body.len()
+    );
+    stream.write_all(request.as_bytes()).await.expect("write");
+    let mut raw = String::new();
+    stream.read_to_string(&mut raw).await.expect("read");
+    let (head, body) = raw.split_once("\r\n\r\n").expect("HTTP response");
+    let status = head
+        .split(' ')
+        .nth(1)
+        .and_then(|s| s.parse().ok())
+        .expect("status");
+    let session = head.lines().find_map(|line| {
+        let (name, value) = line.split_once(':')?;
+        name.eq_ignore_ascii_case("mcp-session-id")
+            .then(|| value.trim().to_owned())
+    });
+    (status, session, body.to_owned())
+}
+
+impl Poc {
+    /// [`exchange`] while the event loop keeps turning.
+    async fn exchange(
+        &mut self,
+        method: &'static str,
+        session: Option<&str>,
+        body: Value,
+    ) -> (u16, Option<String>, String) {
+        let body = if body.is_null() {
+            String::new()
+        } else {
+            body.to_string()
+        };
+        let mut call = tokio::spawn(exchange(
+            self.hud.mcp_addr(),
+            method,
+            session.map(str::to_owned),
+            body,
+        ));
+        let deadline = Instant::now() + WAIT;
+        let reply = loop {
+            self.hud.tick();
+            tokio::select! {
+                biased;
+                done = &mut call => break done.expect("MCP call task"),
+                () = tokio::task::yield_now() => {}
+            }
+            assert!(Instant::now() < deadline, "{method} /mcp did not complete");
+        };
+        self.settle().await;
+        reply
+    }
+
+    /// Open a labeled MCP session as the stdio adapter does.
+    async fn open_session(&mut self, label: &str) -> String {
+        let (status, session, _) = self
+            .exchange(
+                "POST",
+                None,
+                json!({"jsonrpc": "2.0", "id": 0, "method": "initialize", "params": {
+                    "protocolVersion": "2025-06-18", "_meta": {"tze-hud/label": label}}}),
+            )
+            .await;
+        assert_eq!(status, 200);
+        session.expect("initialize issues Mcp-Session-Id")
+    }
+}
+
+/// Two Claude sessions share one pairing: a clean exit (DELETE) takes only
+/// that session's card down at once; a killed one sends nothing, so its card
+/// follows the ordinary TTL like any other.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn poc_sessions_on_one_pairing_end_independently() {
+    let mut poc = Poc::boot().await;
+    let mut sessions = Vec::new();
+    for label in ["repo-a", "repo-b", "repo-c"] {
+        let session = poc.open_session(label).await;
+        let publish = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {
+            "name": "hud_publish", "arguments": {
+                "surface": NOTIFICATION, "ttl_ms": 8_000,
+                "content": {"title": label, "body": "working"}}}});
+        let (status, _, body) = poc.exchange("POST", Some(&session), publish).await;
+        assert_eq!(status, 200);
+        assert!(!body.contains("\"isError\":true"), "{body}");
+        sessions.push(session);
+    }
+    assert_eq!(poc.shown(NOTIFICATION), 3);
+
+    // repo-a exits cleanly: its card is gone before the next frame; the
+    // others stay, and its id is now unknown.
+    let started = Instant::now();
+    let (status, _, _) = poc
+        .exchange("DELETE", Some(&sessions[0]), Value::Null)
+        .await;
+    assert_eq!(status, 202);
+    assert_eq!(poc.shown(NOTIFICATION), 2);
+    assert!(started.elapsed() < Duration::from_secs(1));
+    let ping = json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"});
+    let (status, _, _) = poc.exchange("POST", Some(&sessions[0]), ping.clone()).await;
+    assert_eq!(status, 404);
+    let (status, _, _) = poc.exchange("POST", Some(&sessions[1]), ping).await;
+    assert_eq!(status, 200);
+
+    // repo-c is killed: nothing arrives, so its card (and repo-b's) leaves
+    // only at its TTL.
+    poc.advance(7_999).await;
+    assert_eq!(poc.shown(NOTIFICATION), 2);
+    poc.advance(1).await;
+    assert_eq!(poc.shown(NOTIFICATION), 0);
+}

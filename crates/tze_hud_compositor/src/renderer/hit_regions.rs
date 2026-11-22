@@ -400,8 +400,13 @@ fn populate_notification_hit_regions_in(
 
             // ── Dismiss (×) button ────────────────────────────────────────
             // Top-right corner of the slot; same bounds the renderer draws.
-            let dismiss_bounds =
-                super::notification_style::dismiss_bounds(zone_name, &zone_tokens, policy, card);
+            let dismiss_bounds = super::notification_style::dismiss_bounds(
+                zone_name,
+                &zone_tokens,
+                policy,
+                card,
+                record.caption.as_deref(),
+            );
             let dismiss_id = notification_dismiss_interaction_id(zone_name, record);
             let action_rects = layouts
                 .borrow_mut()

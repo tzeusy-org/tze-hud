@@ -562,7 +562,8 @@ impl McpServer {
 
     /// Open a session for `agent`, releasing one first at the table bound.
     async fn open_scope(&self, agent: &str, label: Option<&str>) -> String {
-        let mut held = self.scene.lock().await.holding_namespaces();
+        let mut scene = self.scene.lock().await;
+        let mut held = scene.holding_namespaces();
         if let Some(portals) = &self.portals {
             let hub = portals.hub.lock().unwrap_or_else(|p| p.into_inner());
             hub.visit_holdings(|key, _, _| {
@@ -572,6 +573,9 @@ impl McpServer {
         let (scope, evicted) = self
             .scopes
             .open(agent, label, |s| !held.contains(&s.namespace));
+        // Its cards carry its label as a caption.
+        scene.set_session_label(&scope.namespace, scope.label());
+        drop(scene);
         if let Some(evicted) = evicted {
             self.release_scope(&evicted, "session limit").await;
         }

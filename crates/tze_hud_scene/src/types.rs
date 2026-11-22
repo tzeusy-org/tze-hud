@@ -2369,6 +2369,10 @@ pub struct ZonePublishRecord {
     /// Not part of snapshots or the wire; leased and MCP publications use None.
     #[serde(skip)]
     pub publication_origin: Option<SceneId>,
+    /// The publishing MCP session's label, fixed when the publication is
+    /// admitted; a card draws it as a caption. `None` (unscoped) draws none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub caption: Option<String>,
 }
 
 /// A zone instance — zone type bound to a specific tab.

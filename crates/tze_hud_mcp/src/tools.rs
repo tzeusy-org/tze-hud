@@ -856,6 +856,17 @@ async fn publish_zone<'a>(
     } else {
         None
     };
+    // The new label captions this card too; a refused publish restores it.
+    let previous_label = relabel.as_ref().map(|(scope, label)| {
+        scene.set_session_label(&ns, Some(label.clone()));
+        scope.label()
+    });
+    let refused = |scene: &mut SceneGraph, error: &ValidationError| {
+        if let Some(previous) = previous_label.clone() {
+            scene.set_session_label(&ns, previous);
+        }
+        scene_error(error)
+    };
     let now = now_us(&scene);
     let present_at = now.saturating_add(delay_ms.saturating_mul(1_000));
     let expires_at = (ttl_ms > 0).then(|| present_at.saturating_add(ttl_ms.saturating_mul(1_000)));
@@ -903,11 +914,11 @@ async fn publish_zone<'a>(
             .publish_notification_until_with_id(
                 zone, content, &ns, lease_id, p.key, expires_at, claim.id,
             )
-            .map_err(|error| scene_error(&error))?;
+            .map_err(|error| refused(&mut scene, &error))?;
     } else {
         scene
             .publish_to_zone_until_with_lease(zone, content, &ns, lease_id, p.key, expires_at)
-            .map_err(|error| scene_error(&error))?;
+            .map_err(|error| refused(&mut scene, &error))?;
     }
     if let Some((scope, label)) = relabel {
         scope.set_label(label);

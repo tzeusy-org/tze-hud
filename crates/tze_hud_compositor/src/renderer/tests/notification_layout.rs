@@ -1808,6 +1808,7 @@ fn test_update_publication_animations_seeds_fresh_state() {
         publication_id: SceneId::new(),
         lease_id: None,
         publication_origin: None,
+        caption: None,
         zone_name: "notification-area".to_string(),
         publisher_namespace: "agent-b".to_string(),
         content: ZoneContent::Notification(NotificationPayload {
@@ -1849,4 +1850,93 @@ fn test_update_publication_animations_seeds_fresh_state() {
         "hold preserves the captured profile"
     );
     assert_eq!(state.current_opacity(), 1.0);
+}
+
+/// A session's card draws its label as one secondary line above the title;
+/// the title, body and dismiss move down by that line and the slot grows by
+/// it. An unlabeled publisher's card is unchanged.
+#[tokio::test]
+async fn test_session_caption_takes_one_secondary_line_above_the_title() {
+    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
+    let mut scene = SceneGraph::new(1280.0, 720.0);
+    scene.register_zone(ZoneDefinition {
+        id: SceneId::new(),
+        name: "notification-area".to_owned(),
+        description: "caption test".to_owned(),
+        geometry_policy: GeometryPolicy::Relative {
+            x_pct: 0.0,
+            y_pct: 0.0,
+            width_pct: 0.5,
+            height_pct: 0.9,
+        },
+        accepted_media_types: vec![ZoneMediaType::ShortTextWithIcon],
+        rendering_policy: RenderingPolicy::default(),
+        contention_policy: ContentionPolicy::Stack { max_depth: 5 },
+        max_publishers: 8,
+        auto_clear_ms: None,
+        ephemeral: false,
+        layer_attachment: LayerAttachment::Chrome,
+    });
+    let card = |title: &str| {
+        ZoneContent::Notification(NotificationPayload {
+            title: title.to_owned(),
+            text: "Body".to_owned(),
+            icon: String::new(),
+            urgency: 1,
+            ttl_ms: None,
+            actions: vec![],
+        })
+    };
+    let session = tze_hud_scene::scope::scoped_namespace("claude", "s1");
+    scene.set_session_label(&session, Some("tze-hud".to_owned()));
+    scene
+        .publish_to_zone(
+            "notification-area",
+            card("Labeled"),
+            &session,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    let items = compositor.collect_text_items(&scene, 1280.0, 720.0);
+    let at = |text: &str| items.iter().find(|i| &*i.text == text).unwrap().clone();
+    let (caption, title, body) = (at("tze-hud"), at("Labeled"), at("Body"));
+    let style = crate::renderer::notification_style::NotificationStyle::resolve(
+        &HashMap::new(),
+        &RenderingPolicy::default(),
+    );
+    assert_eq!(caption.font_weight, style.body.weight);
+    assert_eq!(
+        caption.color, body.color,
+        "the caption takes the secondary role"
+    );
+    assert_eq!(caption.pixel_x, title.pixel_x, "one text column");
+    assert!(
+        (title.pixel_y - caption.pixel_y - style.body.line_height).abs() < 0.5,
+        "the title sits one body line below the caption"
+    );
+
+    // Unlabeled: the same card has no caption and starts a line higher.
+    let mut plain = SceneGraph::new(1280.0, 720.0);
+    plain.register_zone(scene.zone_registry.zones["notification-area"].clone());
+    plain
+        .publish_to_zone(
+            "notification-area",
+            card("Labeled"),
+            "claude",
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    let plain_items = compositor.collect_text_items(&plain, 1280.0, 720.0);
+    assert_eq!(plain_items.len(), 2, "no caption without a label");
+    let plain_title = plain_items.iter().find(|i| &*i.text == "Labeled").unwrap();
+    assert!((title.pixel_y - plain_title.pixel_y - style.body.line_height).abs() < 0.5);
+
+    // The label is fixed at publish: a later relabel leaves this card's caption.
+    scene.set_session_label(&session, Some("renamed".to_owned()));
+    let items = compositor.collect_text_items(&scene, 1280.0, 720.0);
+    assert!(items.iter().any(|i| &*i.text == "tze-hud"));
 }

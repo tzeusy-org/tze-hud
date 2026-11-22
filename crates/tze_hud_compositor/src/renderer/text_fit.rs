@@ -130,6 +130,7 @@ impl tze_hud_scene::TextFit for TextFitMeasurer {
             breakpoints: Vec::new(),
             lease_id: None,
             publication_origin: None,
+            caption: None,
         };
         let slots = Compositor::zone_slot_layout_with_tokens(
             &zone_tokens,
@@ -150,8 +151,17 @@ impl tze_hud_scene::TextFit for TextFitMeasurer {
         let actions = cards.resolve(&zone_tokens, zone, &record, policy, card.width);
         let agent_icon = super::icon::parse_notification_icon(&payload.icon)
             .is_some_and(|id| scene.registered_resources.contains_key(&id));
-        let text =
-            notification_text_layout(zone, &zone_tokens, policy, payload, card.width, agent_icon);
+        let text = notification_text_layout(
+            zone,
+            &zone_tokens,
+            policy,
+            payload,
+            // A session caption only adds a line above: the column width,
+            // and so every count below, is the same with or without it.
+            None,
+            card.width,
+            agent_icon,
+        );
         let fonts = cards.fallback_fonts(&zone_tokens);
         let text_family = text.font_family;
         let mut clipped = Vec::new();
@@ -293,6 +303,7 @@ impl tze_hud_scene::TextFit for TextFitMeasurer {
             breakpoints: Vec::new(),
             lease_id: None,
             publication_origin: None,
+            caption: None,
         };
         // A publish the scene would refuse has nothing to report.
         if tze_hud_scene::graph::apply_contention(
@@ -653,6 +664,7 @@ mod tests {
             breakpoints: Vec::new(),
             lease_id: None,
             publication_origin: None,
+            caption: None,
         };
         scene
             .zone_registry

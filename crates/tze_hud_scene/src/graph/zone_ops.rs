@@ -389,6 +389,7 @@ impl SceneGraph {
             breakpoints,
             lease_id,
             publication_origin: publication_origin.filter(|_| lease_id.is_none()),
+            caption: self.session_labels.get(publisher_namespace).cloned(),
         };
 
         let publishes = self

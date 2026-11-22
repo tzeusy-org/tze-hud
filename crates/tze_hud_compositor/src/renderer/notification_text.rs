@@ -9,7 +9,8 @@ use super::notification_style::NotificationStyle;
 
 /// One ellipsized text line band of a card.
 pub(super) struct NotificationTextBand<'a> {
-    /// The publish field this band draws (`"title"` or `"body"`).
+    /// The publish field this band draws (`"title"` or `"body"`), or
+    /// `"caption"`: the session label, which no publish field carries.
     pub(super) field: &'static str,
     pub(super) text: &'a str,
     /// Offset from the slot top.
@@ -33,12 +34,15 @@ pub(super) struct NotificationTextLayout<'a> {
 /// Lay out a card's (or alert banner's) title/body bands. `zone_tokens` is
 /// the zone's monitor-scaled token map; `agent_icon` says whether the
 /// publication's own icon is drawn. The icon column is reserved for it or for
-/// the banner's severity mark. Bands are ellipsized one-line text.
+/// the banner's severity mark. Bands are ellipsized one-line text. A
+/// `caption` (the publishing session's label) takes one secondary line above
+/// the title and moves the rest down unchanged.
 pub(super) fn notification_text_layout<'a>(
     zone_name: &str,
     zone_tokens: &HashMap<String, String>,
     policy: &RenderingPolicy,
     payload: &'a NotificationPayload,
+    caption: Option<&'a str>,
     card_w: f32,
     agent_icon: bool,
 ) -> NotificationTextLayout<'a> {
@@ -56,8 +60,12 @@ pub(super) fn notification_text_layout<'a>(
         font_weight: role.weight,
         line_multiplier: Some(role.multiplier()),
     };
-    let top = style.padding_v;
-    let bands = if payload.title.is_empty() {
+    let mut bands: Vec<_> = caption
+        .map(|label| band("caption", label, style.padding_v, style.body))
+        .into_iter()
+        .collect();
+    let top = style.padding_v + style.caption_height(caption);
+    bands.extend(if payload.title.is_empty() {
         // A lone line is the message: the body role on a card, the title
         // role on an alert banner.
         vec![band("body", &payload.text, top, style.lone)]
@@ -71,7 +79,7 @@ pub(super) fn notification_text_layout<'a>(
                 style.body,
             ),
         ]
-    };
+    });
     NotificationTextLayout {
         x: left,
         width,
