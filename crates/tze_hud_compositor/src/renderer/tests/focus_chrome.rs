@@ -85,7 +85,11 @@ async fn test_focused_hit_region_emits_focus_ring_in_overlay_mode() {
     // Every ring vertex must carry the token-driven focus-ring color with a
     // visible (non-zero) alpha — otherwise the ring would be invisible on the
     // transparent overlay.
-    let expected = compositor.gpu_color_raw(tze_hud_input::DEFAULT_FOCUS_RING_COLOR.to_array());
+    let expected = compositor.gpu_color_raw(
+        super::token_colors::parse_hex_color(tze_hud_scene::portal_defaults::FOCUS_RING_COLOR)
+            .unwrap()
+            .to_array(),
+    );
     assert!(
         expected[3] > 0.0,
         "focus ring default alpha must be visible"
@@ -379,7 +383,11 @@ async fn test_tile_level_focus_owner_emits_ring_in_overlay_mode() {
         "tile-level focus must emit a 4-edge ring (24 verts), got {}",
         verts.len()
     );
-    let expected = compositor.gpu_color_raw(tze_hud_input::DEFAULT_FOCUS_RING_COLOR.to_array());
+    let expected = compositor.gpu_color_raw(
+        super::token_colors::parse_hex_color(tze_hud_scene::portal_defaults::FOCUS_RING_COLOR)
+            .unwrap()
+            .to_array(),
+    );
     for v in &verts {
         for (actual, want) in v.color.iter().zip(expected.iter()) {
             assert!(

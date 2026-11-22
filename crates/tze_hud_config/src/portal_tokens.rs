@@ -402,12 +402,10 @@ pub const PORTAL_TOKEN_COMPOSER_PLACEHOLDER_COLOR: &str = "portal.composer.place
 
 // ── Focus-ring tokens (vd-focus-ring-outside-portal-tokens) ──────────────────
 //
-// The keyboard focus ring's color/width previously came only from
-// `tze_hud_input::DEFAULT_FOCUS_RING_*`, outside profile control. These portal
-// keys bring the ring under the portal token surface; the compositor already
-// resolves `portal.focus_ring.*` from its token map, and these defaults mirror the
-// `tze_hud_input` focus-ring blue (linear ≈ 0.2/0.5/1.0) at 2px so the visible
-// ring is unchanged by default.
+// These portal keys put the keyboard focus ring under the portal token
+// surface; the compositor resolves `portal.focus_ring.*` from its token map.
+// Their defaults in `tze_hud_scene::portal_defaults` are the one definition;
+// the compositor parses an unset color like any token value.
 
 /// Keyboard focus-ring stroke color (RGBA hex).
 pub const PORTAL_TOKEN_FOCUS_RING_COLOR: &str = "portal.focus_ring.color";
@@ -670,8 +668,7 @@ pub struct PortalPartTokens {
     pub composer_placeholder_color: Rgba,
 
     // Keyboard focus ring (vd-focus-ring-outside-portal-tokens).
-    /// Focus-ring stroke color — under portal profile control, no longer only
-    /// `tze_hud_input::DEFAULT_FOCUS_RING_COLOR`.
+    /// Focus-ring stroke color, under portal profile control.
     pub focus_ring_color: Rgba,
     /// Focus-ring stroke width in px.
     pub focus_ring_width_px: f32,

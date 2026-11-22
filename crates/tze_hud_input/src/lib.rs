@@ -20,7 +20,7 @@
 //! - [`pointer`] — rich pointer event types (PointerDownEvent, ClickEvent, etc.)
 //! - [`events`] — HitTestResult, RouteTarget, SceneLocalPatch, InputEnvelope, EventBatch
 //! - [`hit_test`] — headless-testable hit-test pipeline
-//! - `local_feedback` — `LocalFeedbackStyle`, `ResolvedFeedbackStyle`, rollback tracker
+//! - `local_feedback` — rollback tracker
 //! - `scroll` — `ScrollConfig`, `ScrollState`, scroll-local-first processing
 //! - `capture` — pointer capture manager
 //!
@@ -46,11 +46,7 @@ pub use events::{
     HitTestResult, LocalStateUpdate, RouteTarget, SceneLocalPatch, ScrollOffsetUpdate,
 };
 pub use hit_test::hit_test;
-pub use local_feedback::{
-    DEFAULT_FOCUS_RING_COLOR, DEFAULT_FOCUS_RING_WIDTH_PX, DEFAULT_HOVER_TINT,
-    DEFAULT_PRESS_DARKEN, LocalFeedbackStyle, ROLLBACK_ANIMATION_MS, ResolvedFeedbackStyle,
-    RollbackTracker,
-};
+pub use local_feedback::{ROLLBACK_ANIMATION_MS, RollbackTracker};
 pub use pointer::{
     CancelReason, ClickEvent, ContextMenuEvent, DoubleClickEvent, Modifiers, PointerButton,
     PointerCancelEvent, PointerDownEvent, PointerEnterEvent, PointerFields, PointerLeaveEvent,

@@ -460,11 +460,9 @@ pub(super) fn resolve_transcript_max_measure_px(token_map: &HashMap<String, Stri
 ///
 /// The keyboard focus ring is drawn by [`Compositor::render_node`] around the
 /// focused `HitRegionNode` so a keyboard-only viewer can always see where focus
-/// landed. Color and width are token-driven — never hardcoded in
-/// the compositor — with defaults mirrored from `tze_hud_input`'s
-/// [`DEFAULT_FOCUS_RING_COLOR`](tze_hud_input::DEFAULT_FOCUS_RING_COLOR) /
-/// [`DEFAULT_FOCUS_RING_WIDTH_PX`](tze_hud_input::DEFAULT_FOCUS_RING_WIDTH_PX)
-/// so both crates stay in sync.
+/// landed. Color and width are token-driven — never hardcoded in the
+/// compositor — and an unset token falls back to its default in
+/// `tze_hud_scene::portal_defaults`, parsed like a set token.
 #[derive(Clone, Copy, Debug)]
 pub(super) struct FocusRingTokens {
     /// Ring color as a linear-sRGB `[r, g, b, a]` array (ready for `gpu_color_raw`).
@@ -476,20 +474,19 @@ pub(super) struct FocusRingTokens {
 /// Resolve [`FocusRingTokens`] from the compositor token map.
 ///
 /// Keys follow the portal token namespace (`portal.focus_ring.*`). Falls back to
-/// the `tze_hud_input` focus-ring defaults for any missing/unparsable token.
+/// the `portal_defaults` focus-ring defaults for any missing/unparsable token.
 #[inline]
 pub(super) fn resolve_focus_ring_tokens(token_map: &HashMap<String, String>) -> FocusRingTokens {
-    let default_color = tze_hud_input::DEFAULT_FOCUS_RING_COLOR;
-
     let color = resolve_token_color(token_map, "portal.focus_ring.color")
-        .unwrap_or(default_color)
+        .or_else(|| parse_hex_color(portal_default::FOCUS_RING_COLOR))
+        .expect("the focus-ring token default is a hex color")
         .to_array();
 
     let width_px = token_map
         .get("portal.focus_ring.width_px")
         .and_then(|v| v.parse::<f32>().ok())
         .filter(|v| v.is_finite() && *v > 0.0)
-        .unwrap_or(tze_hud_input::DEFAULT_FOCUS_RING_WIDTH_PX)
+        .unwrap_or_else(|| portal_default::number(portal_default::FOCUS_RING_WIDTH_PX))
         * px_scale(token_map);
 
     FocusRingTokens { color, width_px }
@@ -1105,6 +1102,30 @@ mod tests {
             .iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect()
+    }
+
+    /// An unset focus-ring token draws exactly its default, parsed sRGB→linear
+    /// like a set token (≈ 0.033/0.216/1.0 at 2px).
+    #[test]
+    fn unset_focus_ring_equals_the_token_default() {
+        let unset = resolve_focus_ring_tokens(&token_map(&[]));
+        let set = resolve_focus_ring_tokens(&token_map(&[
+            ("portal.focus_ring.color", portal_default::FOCUS_RING_COLOR),
+            (
+                "portal.focus_ring.width_px",
+                portal_default::FOCUS_RING_WIDTH_PX,
+            ),
+        ]));
+        assert_eq!(unset.color, set.color);
+        assert_eq!(unset.width_px, set.width_px);
+        let [r, g, b, a] = unset.color;
+        assert!(
+            (r - 0.033).abs() < 1e-3 && (g - 0.216).abs() < 1e-3,
+            "{:?}",
+            unset.color
+        );
+        assert_eq!((b, a), (1.0, 1.0));
+        assert_eq!(unset.width_px, 2.0);
     }
 
     #[test]
