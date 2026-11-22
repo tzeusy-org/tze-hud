@@ -37,6 +37,15 @@ class SizeReportTest(unittest.TestCase):
         self.assertEqual(rows["crates/a"]["rust_test"], 7 + 2 + 2)
         self.assertEqual(rows["app/b"]["rust"], 1)
 
+    def test_all_test_cfg_is_test_but_any_test_is_shared(self):
+        text = (
+            "#[cfg(all(test, feature = \"headless\"))]\nmod a {\n}\n"
+            "#[cfg(any(test, feature = \"x\"))]\nmod b {\n}\n"
+        )
+        rows = size_report.count({"examples/c/src/main.rs": text})
+        self.assertEqual(rows["examples/c"]["rust_test"], 3)
+        self.assertEqual(rows["examples/c"]["rust"], 3)
+
     def test_python_and_markdown_surfaces(self):
         rows = size_report.count({
             "scripts/ci/tool.py": "a\nb\n",
