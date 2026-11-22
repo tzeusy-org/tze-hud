@@ -84,9 +84,10 @@ fn op() -> impl Strategy<Value = Op> {
             .prop_map(|(agent, portal, text)| Op::Reply { agent, portal, text }),
         5 => (agent.clone(), prop::collection::vec(0..12usize, 0..3), prop::option::of(0..4usize))
             .prop_map(|(agent, ack, max)| Op::Poll { agent, ack, max }),
-        1 => (agent.clone(), 0..4_000u64).prop_map(|(agent, remaining_us)| Op::BeginWait { agent, remaining_us }),
+        1 => (agent.clone(), 0..8u64).prop_map(|(agent, n)| Op::BeginWait { agent, remaining_us: n * 500 }),
         1 => (0..4usize).prop_map(|index| Op::EndWait { index }),
-        4 => (0..2_500u64).prop_map(|us| Op::Advance { us }),
+        // Steps of 500 µs, a divisor of every limit, land exactly on TTL and idle deadlines.
+        4 => (0..6u64).prop_map(|n| Op::Advance { us: n * 500 }),
         2 => Just(Op::Sweep),
         1 => (agent.clone(), portal.clone()).prop_map(|(agent, portal)| Op::Clear { agent, portal }),
         1 => (agent.clone(), portal.clone()).prop_map(|(agent, portal)| Op::Reclaim { agent, portal }),
@@ -392,7 +393,8 @@ proptest! {
 
 /// The rules the model encodes, pinned once by hand so a wrong model cannot
 /// pass silently: an unacked reply comes back on every poll with its id; an
-/// ack removes it; a queue full by count or by bytes refuses; the TTL drops it.
+/// ack removes it; a queue full by count or by bytes refuses; the TTL drops it exactly
+/// at expiry.
 #[test]
 fn the_model_encodes_redelivery_caps_and_ttl() {
     let mut hub = PortalHub::new(limits());
@@ -422,11 +424,9 @@ fn the_model_encodes_redelivery_caps_and_ttl() {
         hub.submit_reply(&k, "d".into(), 3),
         Err(PortalError::QueueFull)
     );
-    assert_eq!(
-        hub.poll_input("a", &[], None, 3 + limits().input_ttl_us)
-            .remaining,
-        0
-    );
+    let expires = 3 + limits().input_ttl_us;
+    assert_eq!(hub.poll_input("a", &[], None, expires - 1).items.len(), 3);
+    assert!(hub.poll_input("a", &[], None, expires).items.is_empty());
     let k = PortalKey::new("a", "p1");
     hub.publish(&k, Publish::default(), 0).unwrap();
     for text in ["abcdef", "abcde"] {
