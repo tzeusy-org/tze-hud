@@ -305,7 +305,10 @@ impl HeadlessRuntime {
             ),
             runtime_widget_store: runtime_widget_store.clone(),
             element_store: element_store_bootstrap.store,
-            element_store_path: Some(element_store_bootstrap.path),
+            element_store_file: Some(tze_hud_protocol::session::ElementStoreFile {
+                path: element_store_bootstrap.path,
+                write: crate::element_store::persist_element_store_to_path,
+            }),
             safe_mode_atomic: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             active_tab_mirror: Arc::new(std::sync::Mutex::new(None)),
             token_store: tze_hud_protocol::token::TokenStore::new(),

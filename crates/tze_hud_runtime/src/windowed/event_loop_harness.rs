@@ -232,7 +232,7 @@ impl SharedStateBuilder {
             ),
             runtime_widget_store: None,
             element_store: tze_hud_scene::element_store::ElementStore::default(),
-            element_store_path: None,
+            element_store_file: None,
             safe_mode_atomic,
             active_tab_mirror,
             token_store: tze_hud_protocol::token::TokenStore::new(),

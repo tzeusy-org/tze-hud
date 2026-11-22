@@ -65,7 +65,7 @@ pub(super) fn make_shared_state() -> Arc<TokioMutex<SharedState>> {
         ),
         runtime_widget_store: None,
         element_store: tze_hud_scene::element_store::ElementStore::default(),
-        element_store_path: None,
+        element_store_file: None,
         safe_mode_atomic: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         active_tab_mirror: Arc::new(std::sync::Mutex::new(None)),
         token_store: TokenStore::new(),
