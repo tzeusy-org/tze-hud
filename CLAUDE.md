@@ -16,9 +16,10 @@ The 2026-10-02 reset is complete (T0–T5 in `docs/scope.md`): the project was
 cut back from a much larger "agent presence engine" vision, and `docs/api.md`
 is the API reference. The old doctrine, RFCs, and
 OpenSpec specs live only at git tag `pre-reset-2026-10-02` — history, not
-requirements. Do not restore them or design against them. T6–T10 remain
-partially implemented or awaiting acceptance; `docs/scope.md` separates source
-evidence from the outstanding work and Windows owner checks.
+requirements. Do not restore them or design against them. T6–T14 remain
+partially implemented or awaiting acceptance; `docs/scope.md` is a one-screen
+status table plus the list of open Windows owner checks. Per-change evidence
+lives in PR descriptions and beads.
 
 ## Technology
 
