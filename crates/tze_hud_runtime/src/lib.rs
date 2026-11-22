@@ -13,7 +13,9 @@
 //!
 //! ## Threads
 //!
-//! Three fixed thread groups — no dynamic spawning after startup:
+//! Three long-lived thread groups (main, compositor, the Tokio pool);
+//! short-lived helper threads (font fallback, restart, update, link launch,
+//! watchers) start on demand:
 //!
 //! - **Main thread**: winit event loop, input drain, local feedback,
 //!   surface.present() when signalled by the frame-ready watch.
