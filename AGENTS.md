@@ -102,7 +102,10 @@ status entry, notification stream or portal.
   only with a session-unique `key` (it comes back on the item), or with an
   armed `wait_ms` whose `ttl_ms` is at most the wait (the card leaves when the
   wait ends); otherwise keep unique callback ids. Publish only when ready to
-  consume the answer.
+  consume the answer. For a question you can leave pending, run
+  `portal_client.py ask` as a background job and read its one JSON result on
+  exit. The job owns its notification and consumes its answer within its own
+  MCP session. See [Background HUD asks](.claude/skills/hud-projection/references/background-ask.md).
 - **Replies:** use a session-named portal when a short typed answer or compact
   ongoing exchange is useful and its presentation is accepted. The current
   default portal is owner-rejected (2026-11-04): drag makes it transparent
