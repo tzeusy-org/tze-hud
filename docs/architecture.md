@@ -291,6 +291,45 @@ keys come from EDID identity in
 live theme switching or full logical-DPI scaling from
 the presence of helper modules; their status is recorded in [scope.md](scope.md).
 
+## Constraints that make the code larger
+
+[Observed] A from-scratch build that knew only the API would be smaller in
+these eight places. Each is deliberate; remove one only with its constraint.
+
+- **Hand-drawn control panel.** The panel is drawn with the HUD's own
+  primitives and theme tokens, not a UI toolkit: the vision's non-goals
+  exclude a UI framework ([vision](vision.md), T11 in [scope](scope.md)).
+  Code: [renderer/control_panel.rs](../crates/tze_hud_compositor/src/renderer/control_panel.rs),
+  [shell/control_panel](../crates/tze_hud_runtime/src/shell/control_panel/mod.rs).
+- **Hand-rolled HTTP server.** One request per connection, no keep-alive or
+  TLS, on loopback and tailnet addresses; that is smaller than adopting a
+  framework such as axum. Code: [http.rs](../crates/tze_hud_runtime/src/http.rs),
+  listeners in [mcp.rs](../crates/tze_hud_runtime/src/mcp.rs).
+- **Widget raster fast path.** SVG layers within a small primitive subset are
+  compiled once and redrawn straight through `tiny-skia` (`ab_glyph` text),
+  skipping the per-update XML parse; other layers keep the `resvg` path. Work
+  must be proportional to change ([vision](vision.md)).
+  Code: [widget.rs](../crates/tze_hud_compositor/src/widget.rs).
+- **Durable widget assets, one resident ledger.** Operator widget SVG assets are
+  re-indexed and budgeted at startup so they survive restart. Resources, widget
+  sources, widget rasters and fonts share one resident-memory ledger with an
+  aggregate cap and a cap per class.
+  Code: [runtime_widget_store.rs](../crates/tze_hud_resource/src/runtime_widget_store.rs),
+  [resident_ledger.rs](../crates/tze_hud_resource/src/resident_ledger.rs).
+- **Dragged zone placement survives clear.** A zone moved by its grip keeps
+  that slot through clear, expiry and republish for the session
+  ([invariants §3](invariants.md#3-the-runtime-owns-the-screen-the-human-override-always-wins)).
+  Code: [zone_ops.rs](../crates/tze_hud_scene/src/graph/zone_ops.rs).
+- **Skill examples parse in a test.** The `hud-projection` and `th-hud-publish`
+  skills are installed outside this repository, so their documented calls go
+  through the production argument parser in CI (CLAUDE.md, user-scope install).
+  Code: [skill_examples.rs](../crates/tze_hud_mcp/tests/skill_examples.rs).
+- **Gesture harness, tiers L and W.** Owner-directed (T13 in
+  [scope](scope.md)): agents drive the real binary with real OS input.
+  Code: [hud_gestures.py](../scripts/ci/hud_gestures.py).
+- **glyphon pinned to 0.8.** glyphon 0.9+ needs wgpu 28+ and Rust 1.92+, so it
+  moves only with a wgpu and toolchain upgrade. Code: [Cargo.toml](../Cargo.toml).
+
 ## Verification and navigation
 
 [Observed] [README](../README.md) maps the local `just` commands to CI.
