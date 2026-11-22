@@ -1631,6 +1631,11 @@ fn safety_interval_ms(tokens: &DesignTokenMap, key: &str) -> u32 {
 /// `accelerate` -> `EaseInQuad`. Whole-zone transitions capture these curves.
 const MOTION_EASINGS: &[&str] = &["linear", "standard", "decelerate", "accelerate"];
 
+/// The canonical default of `key`: the one definition every fallback reads.
+pub fn canonical_default(key: &str) -> Option<&'static str> {
+    canonical_token(key).map(|token| token.default_value)
+}
+
 /// Look up a canonical token definition by key.
 pub(crate) fn canonical_token(key: &str) -> Option<&'static CanonicalToken> {
     CANONICAL_TOKENS.iter().find(|t| t.key == key)

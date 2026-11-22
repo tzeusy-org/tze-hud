@@ -15,9 +15,8 @@
 //! The indicator is fully token-driven. Every visual property (color, width,
 //! minimum thumb height) comes from `ScrollIndicatorTokens`, which the caller
 //! resolves from `PortalPartTokens`. No literal values are permitted in the
-//! geometry computation itself; `ScrollIndicatorTokens::default()` exists only
-//! as a fallback/test helper and its values must mirror the canonical defaults
-//! in `tze_hud_config::portal_tokens`.
+//! geometry computation itself; `ScrollIndicatorTokens::default()` reads the
+//! one definition of the portal defaults, `tze_hud_scene::portal_defaults`.
 //!
 //! ## Terminology
 //!
@@ -66,17 +65,15 @@ pub struct ScrollIndicatorTokens {
 
 impl Default for ScrollIndicatorTokens {
     fn default() -> Self {
-        // Must match `portal_tokens::defaults::SCROLL_INDICATOR_*`
-        // in tze_hud_config. No compile-time link; update both sides when
-        // changing defaults.
+        use tze_hud_scene::portal_defaults::{self as d, number, srgba};
+        let [color_r, color_g, color_b, color_a] = srgba(d::SCROLL_INDICATOR_COLOR);
         Self {
-            // #4A5568 with full opacity
-            color_r: 0x4A as f32 / 255.0,
-            color_g: 0x55 as f32 / 255.0,
-            color_b: 0x68 as f32 / 255.0,
-            color_a: 1.0,
-            width_px: 4.0,
-            min_thumb_height_px: 24.0,
+            color_r,
+            color_g,
+            color_b,
+            color_a,
+            width_px: number(d::SCROLL_INDICATOR_WIDTH_PX),
+            min_thumb_height_px: number(d::SCROLL_INDICATOR_MIN_HEIGHT_PX),
         }
     }
 }

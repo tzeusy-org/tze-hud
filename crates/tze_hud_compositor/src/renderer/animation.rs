@@ -175,18 +175,20 @@ impl Compositor {
         now: std::time::Instant,
     ) {
         // Resolve transition durations from design tokens (— no literals).
+        use tze_hud_scene::portal_defaults;
+        let default_ms = |v: &str| portal_defaults::number(v) as u32;
         let transition_in_ms: u32 = self
             .token_map
             .get("portal.transition.in_ms")
             .and_then(|v| v.parse::<u32>().ok())
             .filter(|&n| n > 0)
-            .unwrap_or(120); // matches PortalPartTokens::defaults::TRANSITION_IN_MS
+            .unwrap_or_else(|| default_ms(portal_defaults::TRANSITION_IN_MS));
         let transition_out_ms: u32 = self
             .token_map
             .get("portal.transition.out_ms")
             .and_then(|v| v.parse::<u32>().ok())
             .filter(|&n| n > 0)
-            .unwrap_or(80); // matches PortalPartTokens::defaults::TRANSITION_OUT_MS
+            .unwrap_or_else(|| default_ms(portal_defaults::TRANSITION_OUT_MS));
 
         // Build current content state for all scrollable tiles.
         let current: HashMap<SceneId, bool> = scene

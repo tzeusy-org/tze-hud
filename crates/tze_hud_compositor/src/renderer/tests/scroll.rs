@@ -323,6 +323,15 @@ async fn jump_to_latest_badge_gates_on_scroll_and_unread_count() {
         super::token_colors::resolve_jump_to_latest_tokens(&std::collections::HashMap::new());
     let si_tokens =
         super::token_colors::resolve_scroll_indicator_tokens(&std::collections::HashMap::new());
+    // The pill drawn and hit-tested below sits beside the indicator; both
+    // paths, and the input crate's geometry, read the one portal default.
+    assert_eq!(si_tokens, tze_hud_input::ScrollIndicatorTokens::default());
+    assert_eq!(
+        si_tokens.width_px,
+        tze_hud_scene::portal_defaults::number(
+            tze_hud_scene::portal_defaults::SCROLL_INDICATOR_WIDTH_PX
+        )
+    );
 
     let badge = |c: &Compositor, s: &SceneGraph| {
         let tile = s.tiles.get(&tile_id).unwrap();

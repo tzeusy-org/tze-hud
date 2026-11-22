@@ -2626,6 +2626,18 @@ mod tests {
         let display_w = 1920.0_f32;
         let display_h = 1080.0_f32;
         let tokens = PortalWindowTokens::default();
+        // Production hit testing builds its tokens from the resolved portal
+        // tokens; with nothing configured they are the input crate's default.
+        let part = tze_hud_config::resolve_portal_tokens(&Default::default());
+        assert_eq!(
+            tokens,
+            PortalWindowTokens {
+                min_width_px: part.window_min_width_px,
+                min_height_px: part.window_min_height_px,
+                resize_step_px: part.window_resize_step_px,
+                affordance_px: part.window_resize_affordance_px,
+            }
+        );
 
         let down_a = PointerEvent {
             x: 496.0,

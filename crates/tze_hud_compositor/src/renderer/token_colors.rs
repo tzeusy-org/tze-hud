@@ -138,15 +138,9 @@ pub(super) fn linear_to_srgb(c: f32) -> f32 {
     }
 }
 
-/// sRGB transfer: sRGB → linear.
-#[inline]
-pub(super) fn srgb_to_linear(c: f32) -> f32 {
-    if c <= 0.04045 {
-        c / 12.92
-    } else {
-        ((c + 0.055) / 1.055).powf(2.4)
-    }
-}
+/// sRGB transfer: sRGB → linear; the input crate's jump-to-latest default
+/// applies the same function.
+pub(super) use tze_hud_input::srgb_to_linear;
 
 /// Returns `true` if the zone name is an alert-banner zone.
 ///
@@ -237,9 +231,18 @@ pub(super) fn resolve_token_color(token_map: &HashMap<String, String>, key: &str
     token_map.get(key).and_then(|v| parse_hex_color(v))
 }
 
-/// Fallback for `opacity.ambient.max` (keep in sync with `tze_hud_config`'s
-/// `CANONICAL_TOKENS`).
-const AMBIENT_OPACITY_MAX_DEFAULT: f32 = 0.9;
+/// The canonical default of a numeric token in `tze_hud_config`'s
+/// `CANONICAL_TOKENS`, the one definition of every canonical default.
+fn canonical_number(key: &str) -> f32 {
+    tze_hud_config::tokens::canonical_default(key)
+        .and_then(|v| v.trim_end_matches("px").parse().ok())
+        .unwrap_or_else(|| panic!("{key} has no numeric canonical default"))
+}
+
+/// The canonical default of a color token, parsed like a token value.
+fn canonical_color(key: &str) -> Option<Rgba> {
+    tze_hud_config::tokens::canonical_default(key).and_then(parse_hex_color)
+}
 
 /// Ceiling on the opacity of a zone's own fill or image: `opacity.ambient.max`
 /// for `ambient-background`, whose full-display fill would otherwise hide the
@@ -252,7 +255,10 @@ pub(super) fn zone_opacity_ceiling(zone_name: &str, token_map: &HashMap<String, 
         .get("opacity.ambient.max")
         .and_then(|v| v.parse::<f32>().ok())
         .filter(|v| v.is_finite())
-        .map_or(AMBIENT_OPACITY_MAX_DEFAULT, |v| v.clamp(0.0, 1.0))
+        .map_or_else(
+            || canonical_number("opacity.ambient.max"),
+            |v| v.clamp(0.0, 1.0),
+        )
 }
 
 /// Resolve the `color.border.default` token from the map.
@@ -290,9 +296,9 @@ pub(super) fn resolve_tile_bg_token(
 /// Resolve `ScrollIndicatorTokens` from the compositor token map.
 ///
 /// Keys follow the portal token namespace (`portal.scroll_indicator.*`).
-/// Falls back to `ScrollIndicatorTokens::default()` for any missing or
-/// unparsable token — token defaults in both crates must stay in sync per
-/// the module-level contract in `tze_hud_input::scroll_indicator`.
+/// Falls back to `ScrollIndicatorTokens::default()`, which reads the one
+/// definition in `tze_hud_scene::portal_defaults`, for any missing or
+/// unparsable token.
 #[inline]
 pub(super) fn resolve_scroll_indicator_tokens(
     token_map: &HashMap<String, String>,
@@ -340,8 +346,7 @@ pub(super) fn resolve_scroll_indicator_tokens(
 ///
 /// Keys follow the portal token namespace (`portal.jump_to_latest.*`). Falls
 /// back to `JumpToLatestTokens::default()` for any missing or unparsable
-/// token — token defaults in both crates must stay in sync per the
-/// module-level contract in `tze_hud_input::jump_to_latest`.
+/// token.
 #[inline]
 pub(super) fn resolve_jump_to_latest_tokens(
     token_map: &HashMap<String, String>,
@@ -520,13 +525,7 @@ impl ResizeGripTokens {
     }
 }
 
-// Fallback resize-grip values — MUST stay in sync with `tze_hud_config`'s
-// `portal_tokens::defaults::WINDOW_RESIZE_GRIP_*`. The two crates are
-// intentionally independent (no compile-time link), so update both when a
-// default changes.
-const RESIZE_GRIP_DEFAULT_COLOR_HEX: &str = "#5A6373";
-const RESIZE_GRIP_DEFAULT_HOVER_HEX: &str = "#8A93A6";
-const RESIZE_GRIP_DEFAULT_SIZE_PX: f32 = 14.0;
+use tze_hud_scene::portal_defaults as portal_default;
 
 /// Resolve [`ResizeGripTokens`] from the compositor token map.
 ///
@@ -537,12 +536,12 @@ const RESIZE_GRIP_DEFAULT_SIZE_PX: f32 = 14.0;
 #[inline]
 pub(super) fn resolve_resize_grip_tokens(token_map: &HashMap<String, String>) -> ResizeGripTokens {
     let color = resolve_token_color(token_map, "portal.window.resize_grip.color")
-        .or_else(|| parse_hex_color(RESIZE_GRIP_DEFAULT_COLOR_HEX))
+        .or_else(|| parse_hex_color(portal_default::WINDOW_RESIZE_GRIP_COLOR))
         .unwrap_or(Rgba::WHITE)
         .to_array();
 
     let hover_color = resolve_token_color(token_map, "portal.window.resize_grip.hover_color")
-        .or_else(|| parse_hex_color(RESIZE_GRIP_DEFAULT_HOVER_HEX))
+        .or_else(|| parse_hex_color(portal_default::WINDOW_RESIZE_GRIP_HOVER_COLOR))
         .unwrap_or(Rgba::WHITE)
         .to_array();
 
@@ -550,7 +549,7 @@ pub(super) fn resolve_resize_grip_tokens(token_map: &HashMap<String, String>) ->
         .get("portal.window.resize_grip.size_px")
         .and_then(|v| v.parse::<f32>().ok())
         .filter(|v| v.is_finite() && *v > 0.0)
-        .unwrap_or(RESIZE_GRIP_DEFAULT_SIZE_PX)
+        .unwrap_or_else(|| portal_default::number(portal_default::WINDOW_RESIZE_GRIP_SIZE_PX))
         * px_scale(token_map);
 
     ResizeGripTokens {
@@ -588,47 +587,29 @@ impl DisconnectBadgeTokens {
 /// The label on an orphaned tile's strip.
 pub(super) const DISCONNECT_BADGE_LABEL: &str = "Disconnected";
 
-// Fallbacks MUST stay in sync with `tze_hud_config`'s `CANONICAL_TOKENS`
-// entries `tile.disconnect_badge.*` (the crates are intentionally unlinked).
-const DISCONNECT_BADGE_DEFAULT_COLOR_HEX: &str = "#FFB800";
-const DISCONNECT_BADGE_DEFAULT_WIDTH_PX: f32 = 4.0;
-const DISCONNECT_BADGE_DEFAULT_GAP_PX: f32 = 3.0;
-const DISCONNECT_BADGE_DEFAULT_LABEL_BACKGROUND_HEX: &str = "#000000B3";
-const DISCONNECT_BADGE_DEFAULT_LABEL_SIZE_PX: f32 = 18.0;
-const DISCONNECT_BADGE_DEFAULT_LABEL_WEIGHT: u16 = 600;
-const DISCONNECT_BADGE_DEFAULT_LABEL_PADDING_PX: f32 = 6.0;
-
 /// Resolve [`DisconnectBadgeTokens`] from `tile.disconnect_badge.*`.
 pub(super) fn resolve_disconnect_badge_tokens(
     token_map: &HashMap<String, String>,
 ) -> DisconnectBadgeTokens {
     let color = resolve_token_color(token_map, "tile.disconnect_badge.color")
-        .or_else(|| parse_hex_color(DISCONNECT_BADGE_DEFAULT_COLOR_HEX))
+        .or_else(|| canonical_color("tile.disconnect_badge.color"))
         .unwrap_or(Rgba::WHITE);
     let label_background = resolve_token_color(token_map, "tile.disconnect_badge.label_background")
-        .or_else(|| parse_hex_color(DISCONNECT_BADGE_DEFAULT_LABEL_BACKGROUND_HEX))
+        .or_else(|| canonical_color("tile.disconnect_badge.label_background"))
         .unwrap_or(Rgba::BLACK)
         .to_array();
-    let px = |key: &str, min: f32, default: f32| {
+    let px = |key: &str, min: f32| {
         token_map
             .get(key)
             .and_then(|v| v.parse::<f32>().ok())
             .filter(|v| v.is_finite() && *v >= min)
-            .unwrap_or(default)
+            .unwrap_or_else(|| canonical_number(key))
             * px_scale(token_map)
     };
     DisconnectBadgeTokens {
         color: color.to_array(),
-        width_px: px(
-            "tile.disconnect_badge.width_px",
-            f32::MIN_POSITIVE,
-            DISCONNECT_BADGE_DEFAULT_WIDTH_PX,
-        ),
-        gap_px: px(
-            "tile.disconnect_badge.gap_px",
-            0.0,
-            DISCONNECT_BADGE_DEFAULT_GAP_PX,
-        ),
+        width_px: px("tile.disconnect_badge.width_px", f32::MIN_POSITIVE),
+        gap_px: px("tile.disconnect_badge.gap_px", 0.0),
         label_background,
         label_color: crate::text::rgba_to_srgb_u8(
             resolve_token_color(token_map, "tile.disconnect_badge.label_color").unwrap_or(color),
@@ -637,17 +618,9 @@ pub(super) fn resolve_disconnect_badge_tokens(
             .get("tile.disconnect_badge.label_weight")
             .and_then(|v| v.parse::<u16>().ok())
             .filter(|w| (100..=900).contains(w))
-            .unwrap_or(DISCONNECT_BADGE_DEFAULT_LABEL_WEIGHT),
-        label_size_px: px(
-            "tile.disconnect_badge.label_size_px",
-            1.0,
-            DISCONNECT_BADGE_DEFAULT_LABEL_SIZE_PX,
-        ),
-        label_padding_px: px(
-            "tile.disconnect_badge.label_padding_px",
-            0.0,
-            DISCONNECT_BADGE_DEFAULT_LABEL_PADDING_PX,
-        ),
+            .unwrap_or_else(|| canonical_number("tile.disconnect_badge.label_weight") as u16),
+        label_size_px: px("tile.disconnect_badge.label_size_px", 1.0),
+        label_padding_px: px("tile.disconnect_badge.label_padding_px", 0.0),
     }
 }
 
@@ -731,18 +704,17 @@ pub(super) fn resolve_tile_spacing_tokens(
     }
 }
 
-/// Historical default for the inter-child vertical-flow gap, mirroring
-/// `tze_hud_config` `defaults::SPACING_SECTION_GAP_PX` ("8"). Kept as a literal
-/// so an absent token reproduces the shared portal-chrome default (the handshake
-/// `PortalPartTokens::section_gap_px`), matching how the other tile-spacing
-/// fallbacks mirror their config defaults.
-const SECTION_GAP_DEFAULT_PX: f32 = 8.0;
+/// Default inter-child vertical-flow gap: the portal default
+/// `SPACING_SECTION_GAP_PX`, also the handshake `PortalPartTokens::section_gap_px`.
+fn section_gap_default_px() -> f32 {
+    portal_default::number(portal_default::SPACING_SECTION_GAP_PX)
+}
 
 /// Resolve the inter-child vertical-flow gap (px) from the compositor token map
 /// the `portal.spacing.section_gap_px` handshake token
 /// (`PortalPartTokens::section_gap_px`), used as the gap between stacked
 /// `NodeLayout::VerticalFlow` children. Missing, unparseable, non-finite, or
-/// negative values fall back to [`SECTION_GAP_DEFAULT_PX`]. Unlike the
+/// negative values fall back to [`section_gap_default_px`]. Unlike the
 /// compositor-local `TileSpacingTokens`, this is a SHARED portal-chrome token, so
 /// it resolves directly from the token map rather than joining that struct.
 #[inline]
@@ -751,7 +723,7 @@ pub(super) fn resolve_section_gap_px(token_map: &HashMap<String, String>) -> f32
         .get("portal.spacing.section_gap_px")
         .and_then(|v| v.parse::<f32>().ok())
         .filter(|v| v.is_finite() && *v >= 0.0)
-        .unwrap_or(SECTION_GAP_DEFAULT_PX)
+        .unwrap_or_else(section_gap_default_px)
         * px_scale(token_map)
 }
 
@@ -789,34 +761,23 @@ pub(super) struct TileCloseTokens {
     pub(super) glyph_color: Rgba,
 }
 
-// Fallbacks MUST stay in sync with `tze_hud_config`'s `CANONICAL_TOKENS`
-// entries `tile.close_button.*` (the crates are intentionally unlinked).
-const TILE_CLOSE_DEFAULT_SIZE_PX: f32 = 22.0;
-const TILE_CLOSE_DEFAULT_MARGIN_PX: f32 = 6.0;
-const TILE_CLOSE_DEFAULT_BACKGROUND_HEX: &str = "#000000B3";
-const TILE_CLOSE_DEFAULT_GLYPH_HEX: &str = "#FFFFFF";
-
 pub(super) fn resolve_tile_close_tokens(token_map: &HashMap<String, String>) -> TileCloseTokens {
-    let px = |key: &str, default: f32, min: f32| {
+    let px = |key: &str, min: f32| {
         token_map
             .get(key)
             .and_then(|v| v.trim_end_matches("px").parse::<f32>().ok())
             .filter(|v| v.is_finite() && *v >= min)
-            .unwrap_or(default)
+            .unwrap_or_else(|| canonical_number(key))
             * px_scale(token_map)
     };
     TileCloseTokens {
-        size_px: px("tile.close_button.size_px", TILE_CLOSE_DEFAULT_SIZE_PX, 1.0),
-        margin_px: px(
-            "tile.close_button.margin_px",
-            TILE_CLOSE_DEFAULT_MARGIN_PX,
-            0.0,
-        ),
+        size_px: px("tile.close_button.size_px", 1.0),
+        margin_px: px("tile.close_button.margin_px", 0.0),
         background: resolve_token_color(token_map, "tile.close_button.background")
-            .or_else(|| parse_hex_color(TILE_CLOSE_DEFAULT_BACKGROUND_HEX))
+            .or_else(|| canonical_color("tile.close_button.background"))
             .unwrap_or(Rgba::WHITE),
         glyph_color: resolve_token_color(token_map, "tile.close_button.glyph_color")
-            .or_else(|| parse_hex_color(TILE_CLOSE_DEFAULT_GLYPH_HEX))
+            .or_else(|| canonical_color("tile.close_button.glyph_color"))
             .unwrap_or(Rgba::WHITE),
     }
 }
@@ -935,7 +896,7 @@ pub(super) struct ComposerOverlayTokens {
     /// (`composer_input_box` box padding, the caret-follow window width, the draft
     /// `pixel_x`/clip, and the viewer-echo zone width) all resolve their inset from
     /// here instead of a hardcoded literal. Defaults to
-    /// [`COMPOSER_OVERLAY_DEFAULT_CONTENT_INSET_PX`] (6.0), which reproduces the
+    /// [`composer_overlay_default_content_inset_px`] (6.0), which reproduces the
     /// previous `COMPOSER_TEXT_MARGIN` literal so the default profile is unchanged;
     /// caret-follow geometry keys off this value, so a profile that widens it shifts
     /// the caret origin in lockstep.
@@ -964,12 +925,11 @@ const COMPOSER_OVERLAY_DEFAULT_FONT_SIZE_PX: f32 = 16.0;
 const COMPOSER_OVERLAY_DEFAULT_MAX_LINES: u32 = 6;
 
 /// Default composer content inset in physical px, applied on every side between
-/// the composer region edge and the draft text. Sourced from
-/// `portal.spacing.content_inset_px`; this default mirrors the config-crate token
-/// default (`PortalPartTokens::content_inset_px` = 6) and the historical
-/// `COMPOSER_TEXT_MARGIN` literal, so an absent token reproduces the prior spacing
-/// exactly (no visual regression).
-const COMPOSER_OVERLAY_DEFAULT_CONTENT_INSET_PX: f32 = 6.0;
+/// the composer region edge and the draft text: the portal default
+/// `SPACING_CONTENT_INSET_PX` (`portal.spacing.content_inset_px`).
+fn composer_overlay_default_content_inset_px() -> f32 {
+    portal_default::number(portal_default::SPACING_CONTENT_INSET_PX)
+}
 
 /// Default composer caret quad width in physical px: a
 /// conventional thin text-caret stroke.
@@ -1086,7 +1046,7 @@ pub(super) fn resolve_composer_overlay_tokens(
         .get("portal.spacing.content_inset_px")
         .and_then(|v| v.parse::<f32>().ok())
         .filter(|&v| v.is_finite() && v >= 0.0)
-        .unwrap_or(COMPOSER_OVERLAY_DEFAULT_CONTENT_INSET_PX)
+        .unwrap_or_else(composer_overlay_default_content_inset_px)
         * px_scale(token_map);
 
     // Caret quad width (default 1.5px). Reject non-finite / non-positive
@@ -1153,7 +1113,7 @@ mod tests {
     fn resolve_section_gap_px_defaults_when_absent() {
         assert_eq!(
             resolve_section_gap_px(&token_map(&[])),
-            SECTION_GAP_DEFAULT_PX
+            section_gap_default_px()
         );
         assert_eq!(resolve_section_gap_px(&token_map(&[])), 8.0);
     }
@@ -1173,7 +1133,7 @@ mod tests {
             let tm = token_map(&[("portal.spacing.section_gap_px", bad)]);
             assert_eq!(
                 resolve_section_gap_px(&tm),
-                SECTION_GAP_DEFAULT_PX,
+                section_gap_default_px(),
                 "malformed/negative override {bad:?} must fall back to the default"
             );
         }
