@@ -46,7 +46,12 @@ PUBLISH_SESSIONS = ("notification_publish", "widget_param_update", "portal_appen
 REQUIRED_COUNTER_SESSIONS = PUBLISH_SESSIONS + ("scene_lock_paced_contention",)
 
 
-# Reference budgets for one `hud_publish` round trip (see PUBLISH_BUDGETS).
+# Absolute budgets for one `hud_publish` round trip (see PUBLISH_BUDGETS).
+# Baseline, perf-budget run 45035349087 (2026-11-22), slowest session:
+#   windows-latest, debug build: p50 896us, p99 1180us (notification)
+#   constrained lane, llvmpipe / 2 CPUs, release: p50 224us, p99 288us
+# Each budget keeps over 2x headroom on Windows and stays below 5 ms plus the
+# fastest call, so a 5 ms admission delay fails both.
 PUBLISH_CALL_P50_US = 2_000
 PUBLISH_CALL_P99_US = 4_000
 
