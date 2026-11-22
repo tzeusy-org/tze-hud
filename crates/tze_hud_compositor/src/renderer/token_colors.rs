@@ -233,14 +233,14 @@ pub(super) fn resolve_token_color(token_map: &HashMap<String, String>, key: &str
 
 /// The canonical default of a numeric token in `tze_hud_config`'s
 /// `CANONICAL_TOKENS`, the one definition of every canonical default.
-fn canonical_number(key: &str) -> f32 {
+pub(super) fn canonical_number(key: &str) -> f32 {
     tze_hud_config::tokens::canonical_default(key)
         .and_then(|v| v.trim_end_matches("px").parse().ok())
         .unwrap_or_else(|| panic!("{key} has no numeric canonical default"))
 }
 
 /// The canonical default of a color token, parsed like a token value.
-fn canonical_color(key: &str) -> Option<Rgba> {
+pub(super) fn canonical_color(key: &str) -> Option<Rgba> {
     tze_hud_config::tokens::canonical_default(key).and_then(parse_hex_color)
 }
 
@@ -917,8 +917,6 @@ pub(crate) enum ComposerVerticalAnchor {
     Bottom,
 }
 
-const COMPOSER_OVERLAY_DEFAULT_FONT_SIZE_PX: f32 = 16.0;
-
 /// Default composer max-line bound: the box grows to at most this many wrapped
 /// lines, then scrolls internally (design proposal default). A small
 /// bound so a tall draft cannot swallow the transcript pane.
@@ -1027,7 +1025,7 @@ pub(super) fn resolve_composer_overlay_tokens(
         .get("portal.composer.font_size")
         .and_then(|v| v.parse::<f32>().ok())
         .filter(|&v| v.is_finite() && v > 0.0)
-        .unwrap_or(COMPOSER_OVERLAY_DEFAULT_FONT_SIZE_PX)
+        .unwrap_or_else(|| portal_default::number(portal_default::COMPOSER_FONT_SIZE))
         * px_scale(token_map);
 
     // Max visible line count before internal scroll. Clamp to at least 1 so a
