@@ -368,6 +368,9 @@ impl ControlPanelHandle {
             guard.0 += 1;
             guard.1 = model;
             guard.2 = fields;
+            // Under the model lock: whoever reads this model also reads
+            // whether it is open (keys route only to an open panel).
+            self.shared.open.store(open, Ordering::Release);
         }
         if !open {
             *self
@@ -376,7 +379,6 @@ impl ControlPanelHandle {
                 .write()
                 .unwrap_or_else(|e| e.into_inner()) = None;
         }
-        self.shared.open.store(open, Ordering::Release);
         self.shared.render_wake.notify();
     }
 }
