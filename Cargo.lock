@@ -3762,7 +3762,6 @@ name = "tze_hud_protocol"
 version = "0.1.0"
 dependencies = [
  "blake3",
- "proptest",
  "prost",
  "prost-build",
  "protoc-bin-vendored",

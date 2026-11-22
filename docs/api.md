@@ -944,8 +944,7 @@ not establish external opt-in adoption or Windows owner acceptance.
 
 Composer editing is local to native portals. Only accepted submissions enter the
 portal input queue returned by `hud_input`; resident sessions receive no draft
-snapshots, submit or cancel events. `HitRegionNodeProto` field 7 and name
-`accepts_composer_input` are reserved. `InputEnvelope` fields 23–25 and names
+snapshots, submit or cancel events. `InputEnvelope` fields 23–25 and names
 `composer_draft_state`, `composer_draft_submit`, `composer_draft_cancel` are
 reserved; their three event messages are removed. Old wire fields are ignored
 and cannot enable the internal native composer flag.
@@ -981,11 +980,9 @@ and cannot enable the internal native composer flag.
   notification can restore an expiry. Held content remains subject to
   clearing, human override and lease/session-origin reclamation (invariant 4);
   Hold does not make a lease immortal. There is no atomic held mode on Publish.
-- **Runtime-internal mutations.** `MutationBatch` / `TimingHints` containers
-  and `MutationProto` fields 1, 2 and 6–12 remain internal scene contracts.
-  Portal-only fields 13–17 and their names are reserved; their messages and
-  converters are removed. No public session route dispatches internal mutations.
-  Native portal rendering uses checked direct scene methods in-process.
+- **No wire mutations.** The protocol defines no node, mutation or batch
+  message; scene mutations exist only in-process. Native portal rendering uses
+  checked direct scene methods.
 
 ## Configuration
 

@@ -305,8 +305,7 @@ impl SceneGraph {
     /// atomically.
     ///
     /// `node` is the root; `descendants` is the flat list of every node below it
-    /// (any depth, root excluded), as produced by
-    /// `convert::proto_node_tree_to_scene`. The root's `children` (and each
+    /// (any depth, root excluded). The root's `children` (and each
     /// descendant's `children`) reference the descendants by SceneId. The whole
     /// subtree is validated and inserted in a single call — the point being that
     /// a multi-node portal body arrives as ONE `SetTileRoot`/`PublishToTile`
