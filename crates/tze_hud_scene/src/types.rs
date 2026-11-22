@@ -2371,7 +2371,8 @@ pub struct ZonePublishRecord {
     pub publication_origin: Option<SceneId>,
     /// The publishing MCP session's label, fixed when the publication is
     /// admitted; a card draws it as a caption. `None` (unscoped) draws none.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Runtime-only, like the session itself: not part of snapshots.
+    #[serde(skip)]
     pub caption: Option<String>,
 }
 

@@ -186,6 +186,8 @@ struct Roles {
     icon: &'static str,
     /// A lone message line takes the title role (else the body role).
     lone_title: bool,
+    /// Draws a labeled session's caption (cards; never alert banners).
+    captioned: bool,
 }
 
 const CARD: Roles = Roles {
@@ -222,6 +224,7 @@ const CARD: Roles = Roles {
     body: BODY,
     icon: "space.xxl",
     lone_title: false,
+    captioned: true,
 };
 
 const ALERT: Roles = Roles {
@@ -258,6 +261,7 @@ const ALERT: Roles = Roles {
     body: ALERT_BODY,
     icon: "space.xl",
     lone_title: true,
+    captioned: false,
 };
 
 /// Resolved notification-card style, all sizes in physical px.
@@ -277,6 +281,7 @@ pub(super) struct NotificationStyle {
     /// A lone message line (no title): the body role on a card, the title
     /// role on a banner.
     pub(super) lone: TextRole,
+    captioned: bool,
     /// The dismiss button: a square as tall as the title line.
     pub(super) dismiss_size: f32,
     pub(super) dismiss_gap: f32,
@@ -410,6 +415,7 @@ impl NotificationStyle {
                 ..title
             },
             lone: if roles.lone_title { title } else { body },
+            captioned: roles.captioned,
             title,
             body,
             action_height: dp(tokens, "space.xxl"),
@@ -460,7 +466,12 @@ impl NotificationStyle {
     /// The session caption line above the title: the body role, so it never
     /// competes with the title; nothing for an unlabeled publication.
     pub(super) fn caption_height(&self, caption: Option<&str>) -> f32 {
-        caption.map_or(0.0, |_| self.body.line_height)
+        self.caption(caption).map_or(0.0, |_| self.body.line_height)
+    }
+
+    /// The caption this style draws: a card's, never a banner's.
+    pub(super) fn caption<'a>(&self, caption: Option<&'a str>) -> Option<&'a str> {
+        caption.filter(|_| self.captioned)
     }
 
     /// The severity mark of a publication at `urgency` (alert banners), when

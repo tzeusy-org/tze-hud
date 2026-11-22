@@ -60,7 +60,8 @@ pub(super) fn notification_text_layout<'a>(
         font_weight: role.weight,
         line_multiplier: Some(role.multiplier()),
     };
-    let mut bands: Vec<_> = caption
+    let mut bands: Vec<_> = style
+        .caption(caption)
         .map(|label| band("caption", label, style.padding_v, style.body))
         .into_iter()
         .collect();

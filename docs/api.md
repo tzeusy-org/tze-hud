@@ -645,7 +645,8 @@ agents until one is paired.
   as one ellipsized caption line above the title, in the body type role and
   secondary text colour; the card grows by that line and the text column,
   `clipped` counts and actions below are unchanged. A card keeps the label it
-  was published under; unscoped and unlabeled cards draw no caption. A
+  was published under; unscoped and unlabeled cards, and alert banners, draw
+  no caption. A
   session's portal header shows its label until a `display_name` names it,
   and `display_name` on a session's zone publish replaces its label for that
   card and later ones (unscoped zone and all widget publishes still refuse
