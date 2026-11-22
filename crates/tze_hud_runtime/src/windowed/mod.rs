@@ -1172,8 +1172,10 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
             }
             // A press guard ending under a still pointer brings back hover
             // and the hand without pointer motion.
-            if let Some(until) = self.state.press_guard.until_us() {
-                let remaining_us = until.saturating_sub(scene.now_monotonic_us());
+            if let Some(until) = self.state.press_guard.until_us()
+                && until > scene.now_monotonic_us()
+            {
+                let remaining_us = until - scene.now_monotonic_us();
                 deadlines.push(Deadline::new(
                     now + std::time::Duration::from_micros(remaining_us),
                     crate::idle_efficiency::RuntimeWakeupSource::AnimationDeadline,

@@ -415,6 +415,33 @@ fn edges_zero_reduced_motion_leaving_and_safe_mode() {
         "no wake"
     );
 
+    // S3 before a frame draws the departure: the guarded card leaving, or
+    // the guard expiring while the last frame still names a departed card,
+    // ends it and leaves no past wake behind.
+    let (mut harness, clock, _) = arrives_under_pointer(None);
+    harness.scene().clear_zone(ZONE).unwrap();
+    clock.advance(5_000);
+    harness.app.settle_press_guard();
+    assert!(!guarded(&harness));
+    assert!(
+        harness.app.state.press_guard.until_us().is_none(),
+        "no past wake"
+    );
+    let (mut harness, clock, _) = arrives_under_pointer(None);
+    {
+        let mut scene = harness.scene();
+        let mut departed = scene.overlay.notification_geometry[0].clone();
+        departed.publication_id = SceneId::new();
+        scene.overlay.notification_geometry.push(departed);
+    }
+    clock.advance(5_000);
+    harness.app.settle_press_guard();
+    assert!(!guarded(&harness), "expired while the frame is pending");
+    assert!(
+        harness.app.state.press_guard.until_us().is_none(),
+        "no past wake"
+    );
+
     // S4
     let (mut harness, clock, approve) = arrives_under_pointer(None);
     harness
@@ -453,5 +480,59 @@ fn a_guarded_destructive_press_starts_no_hold() {
     harness.tick();
     harness.app.enqueue_pointer_event(PointerEventKind::Up);
     harness.drain();
+    assert!(take_action_ids(&harness).is_empty());
+}
+
+/// R1.1 S4, trim: a publish that trims the oldest card out of a full stack
+/// shifts this card's button under the resting pointer; it is guarded.
+#[test]
+fn a_trim_shift_under_a_resting_pointer_is_guarded() {
+    // Older card from another agent, this card, and a depth-2 stack that a
+    // third publish trims.
+    let stack = |clock: &Clock| {
+        let mut harness = approve_reject_notification_harness_on(clock.clone());
+        let card = content(&harness);
+        let other = with_actions(card.clone(), |actions| actions.truncate(1));
+        {
+            let mut scene = harness.scene();
+            scene.clear_zone(ZONE).unwrap();
+            scene
+                .zone_registry
+                .zones
+                .get_mut(ZONE)
+                .unwrap()
+                .contention_policy = tze_hud_scene::ContentionPolicy::Stack { max_depth: 2 };
+        }
+        publish(&harness, other.clone(), "another-agent", None);
+        clock.advance(1);
+        publish(&harness, card, "notif-agent", None);
+        harness.tick();
+        (harness, other)
+    };
+    let trim = |harness: &mut HeadlessEventLoopHarness, other: ZoneContent| {
+        publish(harness, other, "third-agent", None);
+        harness.tick();
+        assert_eq!(
+            harness.zone_publication_count(ZONE),
+            2,
+            "the oldest was trimmed"
+        );
+    };
+    let clock = Arc::new(tze_hud_scene::TestClock::new(1_000));
+    let (mut dry, other) = stack(&clock);
+    let before = dry.notification_action_center("approve").unwrap();
+    trim(&mut dry, other);
+    let after = dry.notification_action_center("approve").unwrap();
+    assert_ne!(before, after, "the trim shifts this card");
+
+    let clock = Arc::new(tze_hud_scene::TestClock::new(1_000));
+    let (mut harness, other) = stack(&clock);
+    rest(&mut harness, after);
+    harness.tick();
+    assert!(!guarded(&harness));
+    trim(&mut harness, other);
+    assert!(guarded(&harness));
+    clock.advance(150);
+    press(&mut harness, after);
     assert!(take_action_ids(&harness).is_empty());
 }

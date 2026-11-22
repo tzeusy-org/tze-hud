@@ -109,22 +109,43 @@ impl PressGuard {
     ) -> Option<SceneId> {
         let now = scene.now_monotonic_us();
         let guard_ms = u64::from(tze_hud_config::tokens::notification_press_guard_ms(tokens));
+        // Expiry, the token turning it off, or the guarded card leaving end
+        // a guard even while the frame that shows the new stack is pending,
+        // so an expired guard never leaves a past wake behind.
+        let mut ended = None;
+        if let Some(g) = self.guarded {
+            let live = scene
+                .zone_registry
+                .active_publishes
+                .values()
+                .any(|records| records.iter().any(|r| r.publication_id == g.publication_id));
+            if !live {
+                self.guarded = None;
+            } else if now >= g.until_us || guard_ms == 0 {
+                self.guarded = None;
+                // Ended under a still pointer: its hover comes back.
+                ended = pointer
+                    .is_some_and(|(x, y)| {
+                        scene.overlay.notification_geometry.iter().any(|card| {
+                            card.publication_id == g.publication_id
+                                && card.bounds.contains_point(x, y)
+                        })
+                    })
+                    .then_some(g.publication_id);
+            }
+        }
         let Some(current) = controls(scene) else {
             self.mirror(scene);
-            return None;
+            return ended;
         };
-        let mut ended = None;
         if let Some(g) = self.guarded {
             let on_card = pointer.is_some_and(|(x, y)| {
                 current.iter().any(|c| {
                     c.publication_id == g.publication_id && c.card_bounds.contains_point(x, y)
                 })
             });
-            if !on_card || now >= g.until_us || guard_ms == 0 {
+            if !on_card {
                 self.guarded = None;
-                if on_card {
-                    ended = Some(g.publication_id);
-                }
             }
         }
         // The owner's own answer or × re-lays the stack out once its card
