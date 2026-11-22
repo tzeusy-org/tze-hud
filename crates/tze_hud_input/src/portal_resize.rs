@@ -146,14 +146,12 @@ pub struct PortalWindowTokens {
 
 impl Default for PortalWindowTokens {
     fn default() -> Self {
-        // These defaults must match `portal_tokens::defaults::WINDOW_*` in
-        // tze_hud_config. There is no compile-time link (the crates are
-        // intentionally independent); update both when changing a default.
+        use tze_hud_scene::portal_defaults::{self as d, number};
         Self {
-            min_width_px: 240.0,
-            min_height_px: 160.0,
-            resize_step_px: 32.0,
-            affordance_px: 8.0,
+            min_width_px: number(d::WINDOW_MIN_WIDTH_PX),
+            min_height_px: number(d::WINDOW_MIN_HEIGHT_PX),
+            resize_step_px: number(d::WINDOW_RESIZE_STEP_PX),
+            affordance_px: number(d::WINDOW_RESIZE_AFFORDANCE_PX),
         }
     }
 }

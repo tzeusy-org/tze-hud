@@ -13,6 +13,7 @@ pub mod error_codes;
 pub mod graph;
 pub mod mutation;
 pub mod perf_budget;
+pub mod portal_defaults;
 pub mod portal_reading;
 pub mod publication_defaults;
 pub mod render_wake;

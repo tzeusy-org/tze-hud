@@ -2,18 +2,13 @@
 //!
 //! While safe mode is active the runtime paints a full-surface dim plus a top
 //! banner bar above everything else, so the human can see the HUD is paused.
-//! Colors and sizes come from `safe_mode.*` design tokens; the fallbacks below
-//! MUST stay in sync with `tze_hud_config`'s `CANONICAL_TOKENS` (the crates are
-//! intentionally unlinked).
+//! Colors and sizes come from `safe_mode.*` design tokens, falling back to
+//! their canonical defaults in `tze_hud_config`.
 
 use std::collections::HashMap;
 
-use super::token_colors::{parse_hex_color, resolve_token_color};
+use super::token_colors::{canonical_color, canonical_number, resolve_token_color};
 use super::*;
-
-const DIM_DEFAULT_COLOR_HEX: &str = "#000000B3";
-const BANNER_DEFAULT_COLOR_HEX: &str = "#FFB800";
-const BANNER_DEFAULT_HEIGHT_PX: f32 = 8.0;
 
 /// One overlay rectangle in surface pixels with its straight-alpha color.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -31,9 +26,9 @@ pub(super) fn safe_mode_overlay_rects(
     w: f32,
     h: f32,
 ) -> Vec<OverlayRect> {
-    let color = |key: &str, fallback: &str| {
+    let color = |key: &str| {
         resolve_token_color(token_map, key)
-            .or_else(|| parse_hex_color(fallback))
+            .or_else(|| canonical_color(key))
             .unwrap_or(Rgba::WHITE)
             .to_array()
     };
@@ -41,7 +36,7 @@ pub(super) fn safe_mode_overlay_rects(
         .get("safe_mode.banner.height_px")
         .and_then(|v| v.parse::<f32>().ok())
         .filter(|v| v.is_finite() && *v > 0.0)
-        .unwrap_or(BANNER_DEFAULT_HEIGHT_PX);
+        .unwrap_or_else(|| canonical_number("safe_mode.banner.height_px"));
     let banner_h = (banner_dp * tze_hud_config::tokens::px_scale(token_map)).min(h);
     vec![
         OverlayRect {
@@ -49,14 +44,14 @@ pub(super) fn safe_mode_overlay_rects(
             y: 0.0,
             w,
             h,
-            color: color("safe_mode.overlay.color", DIM_DEFAULT_COLOR_HEX),
+            color: color("safe_mode.overlay.color"),
         },
         OverlayRect {
             x: 0.0,
             y: 0.0,
             w,
             h: banner_h,
-            color: color("safe_mode.banner.color", BANNER_DEFAULT_COLOR_HEX),
+            color: color("safe_mode.banner.color"),
         },
     ]
 }
@@ -98,7 +93,10 @@ mod tests {
             rects[0].color[3] > 0.5 && rects[0].color[3] < 1.0,
             "dim is translucent"
         );
-        assert_eq!((rects[1].w, rects[1].h), (1920.0, BANNER_DEFAULT_HEIGHT_PX));
+        assert_eq!(
+            (rects[1].w, rects[1].h),
+            (1920.0, canonical_number("safe_mode.banner.height_px"))
+        );
 
         let tokens = HashMap::from([
             ("safe_mode.overlay.color".to_string(), "#FF0000".to_string()),
