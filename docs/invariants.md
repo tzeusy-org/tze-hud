@@ -24,19 +24,18 @@ panel changes only affect later accepted publications, never existing cards.
 `hud_publish` and `hud_surfaces` report that stored lifetime, including delay.
 The setting itself neither polls nor wakes the renderer.
 
-Exception: a notification with actions that uses the owner's answer window
-(no explicit expiry) is not removed while a pointer press that began on one
-of its controls before its deadline is still down. The press's own activation
-on that control (its release, or a completed destructive hold) is accepted;
-any other ending — release elsewhere, cancel, or 5 s after the deadline —
-expires the card at once. Hover and keyboard focus never hold a card;
-explicit expiry, replace, clear and trim win immediately, and a later
-hud_hold retimes it as usual. Tests:
-answer_window_press_holds_card_until_release,
-press_hold_release_off_control_expires_card,
-hud_hold_retimes_a_press_held_card,
-armed_wait_returns_action_for_press_held_past_deadline,
-press_held_across_answer_window_deadline_answers_on_release.
+Exception: a notification with actions that uses the owner's answer window (no
+explicit expiry) is not removed while a pointer press that began on one of its
+controls before its deadline is still down. The press's own activation on that
+control (its release, or a completed destructive hold) is accepted; any other
+ending — release elsewhere, cancel, or 5 s after the deadline — expires the
+card at once. Hover and keyboard focus never hold a card; explicit expiry,
+replace, clear and trim win immediately, and a later `hud_hold` retimes it as
+usual. Tests: `answer_window_press_holds_card_until_release`,
+`press_hold_release_off_control_expires_card`,
+`hud_hold_retimes_a_press_held_card`,
+`armed_wait_returns_action_for_press_held_past_deadline`,
+`press_held_across_answer_window_deadline_answers_on_release`.
 
 Zone/widget Hold accepts the full unsigned 64-bit millisecond range using
 saturating duration and absolute-expiry arithmetic; positive TTLs cannot wrap to
