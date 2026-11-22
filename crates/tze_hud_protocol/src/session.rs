@@ -14,17 +14,6 @@ use tze_hud_scene::graph::SceneGraph;
 use crate::proto::session::ServerMessage;
 use crate::token::TokenStore;
 
-/// Shared state between the gRPC server and the compositor.
-///
-/// # Scene coherence
-///
-/// `scene` is an `Arc<Mutex<SceneGraph>>` shared across both the gRPC session
-/// server and the MCP server.  Callers that already hold the `SharedState`
-/// mutex should acquire the inner scene lock by calling
-/// `st.scene.lock().await`.  The compositor thread pre-clones the `Arc` at
-/// startup and locks it independently (never holding the outer `SharedState`
-/// lock while waiting for the inner lock) to avoid nested-lock priority
-/// inversion.
 /// The element-store file and its writer. The runtime owns the one writer and
 /// hands it in here, so the protocol crate never serializes the file itself.
 #[derive(Clone, Debug)]
@@ -40,6 +29,17 @@ impl ElementStoreFile {
     }
 }
 
+/// Shared state between the gRPC server and the compositor.
+///
+/// # Scene coherence
+///
+/// `scene` is an `Arc<Mutex<SceneGraph>>` shared across both the gRPC session
+/// server and the MCP server.  Callers that already hold the `SharedState`
+/// mutex should acquire the inner scene lock by calling
+/// `st.scene.lock().await`.  The compositor thread pre-clones the `Arc` at
+/// startup and locks it independently (never holding the outer `SharedState`
+/// lock while waiting for the inner lock) to avoid nested-lock priority
+/// inversion.
 pub struct SharedState {
     pub scene: Arc<Mutex<SceneGraph>>,
     pub sessions: SessionRegistry,
