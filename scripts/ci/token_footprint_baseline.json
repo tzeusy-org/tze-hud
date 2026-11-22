@@ -428,8 +428,8 @@
     }
   },
   "approval": {
-    "status": "pending_owner_review",
-    "decision_reference": "hud-ohgc9.6 AC6: tools/list advertises role?:destructive on notification actions, +18 model-visible bytes (2711->2729) and +5 tokens (622->627; wire 2813->2831 bytes, 659->664 tokens), as the signed spec measured. Pending owner acceptance at PR review. The prior approval (hud-ohgc9.14 AC5) is kept under previous_approval.",
+    "status": "owner_approved",
+    "decision_reference": "hud-ohgc9.6 AC6: the owner explicitly accepted tools/list 2,711->2,729 model-visible bytes / 622->627 tokens (wire 2,813->2,831 / 659->664) for PR1676 on 2026-11-21",
     "basis": "Source-bound calibration on 66dadc83 plus this change: only tools_list changes (+18 bytes, +5 tokens). Every other flow keeps byte-identical fingerprints and metrics. Ceilings, tokenizer, flow version 4 and accounting unchanged. Two byte-identical current-source measurements. No Windows acceptance is inferred."
   },
   "previous_approval": {

@@ -548,7 +548,7 @@ impl super::Compositor {
                                 && let Some(mut sweep) = self.card_control_cmd(
                                     b,
                                     state,
-                                    Some(style.hold_fill()),
+                                    Some(style.hold_fill(payload.urgency)),
                                     &style,
                                     opacity,
                                 )

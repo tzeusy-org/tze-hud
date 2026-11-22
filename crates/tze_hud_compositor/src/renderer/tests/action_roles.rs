@@ -75,6 +75,7 @@ fn theme_tokens(theme: &str) -> HashMap<String, String> {
 #[test]
 fn destructive_label_holds_contrast_on_every_tone_and_theme() {
     use crate::renderer::control_panel::{MIN_TEXT_CONTRAST, contrast};
+    use crate::renderer::notification_style::MIN_SWEEP_CONTRAST;
     for theme in tze_hud_config::themes::builtin_theme_names() {
         let tokens = theme_tokens(theme);
         let error = super::token_colors::parse_hex_color(&tokens["color.error"]).unwrap();
@@ -102,9 +103,20 @@ fn destructive_label_holds_contrast_on_every_tone_and_theme() {
                     assert_eq!(label, error, "{theme}: neutral cards draw color.error");
                 }
                 assert_eq!(style.destructive_outline(), error);
-                // The held label over the hold fill.
+                // The sweep stays visible on its card (error cards included)
+                // and the held label stays readable on the sweep.
+                let sweep = style.hold_fill(urgency);
+                let visible = contrast(sweep, fill);
+                assert!(
+                    visible >= MIN_SWEEP_CONTRAST,
+                    "{theme} {zone} urgency {urgency}: sweep {visible:.2}:1 against the card"
+                );
                 let held = style.action_label_color(&card, 1, true);
-                assert!(contrast(held, style.hold_fill()) >= MIN_TEXT_CONTRAST);
+                let readable = contrast(held, sweep);
+                assert!(
+                    readable >= MIN_TEXT_CONTRAST,
+                    "{theme} {zone} urgency {urgency}: held label {readable:.2}:1"
+                );
             }
         }
     }

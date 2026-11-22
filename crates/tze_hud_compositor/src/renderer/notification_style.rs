@@ -97,7 +97,16 @@ pub(super) struct NotificationTone {
     /// A destructive action's label: `color.error` on a neutral tone where
     /// it holds text contrast on the fill, else the tone's own text role.
     destructive: Rgba,
+    /// The hold sweep: `color.error.container`, or on a tone whose fill it
+    /// would vanish into (the error card) the inverted pair's
+    /// `color.on_error.container`.
+    hold_fill: Rgba,
+    /// The held label over [`Self::hold_fill`]: the other role of that pair.
+    held_label: Rgba,
 }
+
+/// Non-text contrast (WCAG 1.4.11) a hold sweep keeps against its card.
+pub(super) const MIN_SWEEP_CONTRAST: f32 = 3.0;
 
 /// One text line role (title, body or action label).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -288,8 +297,6 @@ pub(super) struct NotificationStyle {
     primary_container: Rgba,
     on_primary_container: Rgba,
     error: Rgba,
-    error_container: Rgba,
-    on_error_container: Rgba,
     focus: Rgba,
     tones: [NotificationTone; 4],
 }
@@ -342,6 +349,8 @@ impl NotificationStyle {
             .unwrap_or_else(|| number(tokens, roles.opacity))
             .clamp(0.0, 1.0);
         let error = color(tokens, "color.error");
+        let error_container = color(tokens, "color.error.container");
+        let on_error_container = color(tokens, "color.on_error.container");
         let tones = std::array::from_fn(|i| {
             let mut fill = color(tokens, roles.fills[i]);
             let title = color(tokens, roles.titles[i]);
@@ -354,6 +363,18 @@ impl NotificationStyle {
                 destructive: Some(error)
                     .filter(|e| i <= 1 && contrast(*e, opaque) >= MIN_TEXT_CONTRAST)
                     .unwrap_or(title),
+                // The same role pair either way round, so the held label
+                // keeps the pair's text contrast.
+                hold_fill: if contrast(error_container, opaque) >= MIN_SWEEP_CONTRAST {
+                    error_container
+                } else {
+                    on_error_container
+                },
+                held_label: if contrast(error_container, opaque) >= MIN_SWEEP_CONTRAST {
+                    on_error_container
+                } else {
+                    error_container
+                },
                 body: color(tokens, roles.bodies[i]),
                 mark: roles
                     .marks
@@ -405,8 +426,6 @@ impl NotificationStyle {
             primary_container: color(tokens, "color.primary.container"),
             on_primary_container: color(tokens, "color.on_primary.container"),
             error,
-            error_container: color(tokens, "color.error.container"),
-            on_error_container: color(tokens, "color.on_error.container"),
             focus: color(tokens, "color.primary"),
             tones,
         }
@@ -483,7 +502,7 @@ impl NotificationStyle {
     /// on-container role; a destructive one its tone's destructive label;
     /// the other transparent ones `color.primary` on a neutral card, else the
     /// tone's own text role (primary blue does not hold contrast on
-    /// caution/error containers). Over a hold fill, `color.on_error.container`.
+    /// caution/error containers). Over a hold fill, the tone's held label.
     pub(super) fn action_label_color(
         &self,
         payload: &NotificationPayload,
@@ -492,7 +511,7 @@ impl NotificationStyle {
     ) -> Rgba {
         let tone = self.tone(payload.urgency);
         if held {
-            self.on_error_container
+            tone.held_label
         } else if payload.primary_action() == Some(index) {
             self.on_primary_container
         } else if payload
@@ -513,9 +532,10 @@ impl NotificationStyle {
         self.error
     }
 
-    /// The fill that sweeps across a held destructive action.
-    pub(super) fn hold_fill(&self) -> Rgba {
-        self.error_container
+    /// The fill that sweeps across a held destructive action on a card of
+    /// `urgency`.
+    pub(super) fn hold_fill(&self, urgency: u32) -> Rgba {
+        self.tone(urgency).hold_fill
     }
 
     /// Focus ring colour of a control.

@@ -172,7 +172,10 @@ with the same cancellation and idle semantics as a `hud_input` wait.
   action activates only after a press (pointer, Enter/Space, or its chord
   digit) is held for `notification.action.hold.ms` (default 600, integer
   0–3000; 0 turns the hold off): a `color.error.container` fill sweeps across
-  the button (shown at once when Windows animations are off) and the action
+  the button (shown at once when Windows animations are off; on a card whose
+  fill it would not stand out from at 3:1, such as the error card, the pair
+  inverts to a `color.on_error.container` sweep under a
+  `color.error.container` label) and the action
   fires once when the hold completes, without waiting for release; an armed
   `wait_ms` returns it then. Releasing early, the pointer leaving the button,
   capture loss, key-up, Esc or another key, HUD keyboard-focus loss or safe
@@ -1746,7 +1749,8 @@ for PR1673 on 2026-11-21.
 Advertising `role?:destructive` on notification actions (`hud-ohgc9.6`) adds
 18 bytes and 5 tokens to `tools/list` (2,711 to 2,729 model-visible bytes, 622
 to 627 tokens; wire 659 to 664); every other flow keeps identical
-fingerprints, bytes and counts. This baseline is **pending owner review**.
+fingerprints, bytes and counts. The owner **accepted** these bytes for
+PR1676 on 2026-11-21.
 
 All nine measurements use canonical flow version 4 and `tiktoken-rs` 0.12.0,
 `o200k_base`. The discovery-audience change (`hud-ljhku.7`, source `177e1096`)
