@@ -275,9 +275,9 @@ pub(crate) async fn run(publish: Publish, frame_count: u64) -> ScenarioResult {
         if matches!(publish, Publish::Notification) {
             record_hover_ack(&mut runtime, &mut summary).await;
         }
+        // Calls are sequential, so nothing races the frame for the scene lock
+        // and `scene_lock_miss_count` stays at its real zero.
         telemetry.invariant_violations_this_frame = u32::from(!accepted);
-        // Calls are sequential: nothing races the frame for the scene lock.
-        telemetry.scene_lock_miss_count = 0;
         summary.record_frame(telemetry.frame_time_us, telemetry.tile_count);
         summary.record_frame_correctness(&telemetry);
     }

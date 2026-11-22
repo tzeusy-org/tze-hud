@@ -38,7 +38,8 @@ const BENCH_FRAME_COUNT: u64 = 200;
 
 /// p99 frame-time budget for headless CI (µs).
 ///
-/// The reference Windows locked budget is p99 ≤ 8.3 ms (high_mutation),
+/// The reference Windows locked frame budget is p99 ≤ 8.3 ms (every publish
+/// session),
 /// enforced by the CI gate (`scripts/ci/check_windows_perf_budgets.py`) on a
 /// `windows-latest` runner. On headless Linux CI the GPU is software-rasterized
 /// (llvmpipe) and frame times can be 8–12× slower than reference hardware.

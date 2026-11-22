@@ -834,9 +834,8 @@ mod headless_impl {
 
     /// Run the gated, production-shaped scene-lock contention scenario.
     ///
-    /// Unlike `scene_lock_contention`, this does **not** force a lock hold on
-    /// every frame. It models a 60Hz frame loop with three resident
-    /// mutation-handler streams applying accepted scene batches at a bounded
+    /// It does **not** force a lock hold on every frame. It models a 60Hz frame
+    /// loop with three resident agents admitting zone publishes at a bounded
     /// aggregate cadence (three contended frames per 30-frame half-second).
     /// Each scheduled hold still races the real `tokio::sync::Mutex::try_lock`
     /// frame-loop path and rolls misses through `FrameTelemetry` into

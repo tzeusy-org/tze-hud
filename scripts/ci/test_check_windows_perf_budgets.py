@@ -111,6 +111,11 @@ class WindowsPerfBudgetCheckerTests(unittest.TestCase):
                 f"expected {session}.publish_call_p50 to fail, got {failures!r}",
             )
 
+    def test_an_unknown_budget_factor_is_rejected(self) -> None:
+        with self.assertRaises(ValueError) as raised:
+            check_windows_perf_budgets.Budget("x_p99", "frame_time", 99.0, 1, "cpu ")
+        self.assertIn("unknown budget factor", str(raised.exception))
+
     def test_only_the_notification_session_has_a_pointer_budget(self) -> None:
         budgets = check_windows_perf_budgets.SESSION_BUDGETS
         self.assertEqual(set(budgets), set(check_windows_perf_budgets.PUBLISH_SESSIONS))

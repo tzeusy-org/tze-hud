@@ -56,6 +56,10 @@ PUBLISH_CALL_P50_US = 2_000
 PUBLISH_CALL_P99_US = 4_000
 
 
+# A budget's `factor` is a calibrated dimension, or UNSCALED for an absolute one.
+UNSCALED = "none"
+
+
 @dataclass(frozen=True)
 class Budget:
     metric: str
@@ -63,6 +67,10 @@ class Budget:
     percentile: float
     reference_budget_us: int
     factor: str
+
+    def __post_init__(self) -> None:
+        if self.factor != UNSCALED and self.factor not in REFERENCE_FACTORS:
+            raise ValueError(f"{self.metric}: unknown budget factor {self.factor!r}")
 
 
 # Budgets every publish session must meet. The publish-call budgets are the
@@ -75,8 +83,8 @@ class Budget:
 PUBLISH_BUDGETS = (
     Budget("frame_time_p99", "frame_time", 99.0, 8_300, "gpu"),
     Budget("frame_time_p99_9", "frame_time", 99.9, 16_600, "gpu"),
-    Budget("publish_call_p50", "input_to_scene_commit", 50.0, PUBLISH_CALL_P50_US, "none"),
-    Budget("publish_call_p99", "input_to_scene_commit", 99.0, PUBLISH_CALL_P99_US, "none"),
+    Budget("publish_call_p50", "input_to_scene_commit", 50.0, PUBLISH_CALL_P50_US, UNSCALED),
+    Budget("publish_call_p99", "input_to_scene_commit", 99.0, PUBLISH_CALL_P99_US, UNSCALED),
     Budget(
         "publish_to_next_present_p99",
         "input_to_next_present",
@@ -234,8 +242,11 @@ def validate_benchmark(artifact: dict[str, Any]) -> tuple[list[dict[str, Any]], 
             continue
 
         for budget in budgets:
-            factor = factors.get(budget.factor, 1.0)
-            reference_factor = REFERENCE_FACTORS.get(budget.factor, 1.0)
+            if budget.factor == UNSCALED:
+                factor = reference_factor = 1.0
+            else:
+                factor = factors[budget.factor]
+                reference_factor = REFERENCE_FACTORS[budget.factor]
             effective_budget = max(
                 1, math.ceil(budget.reference_budget_us * (factor / reference_factor))
             )
