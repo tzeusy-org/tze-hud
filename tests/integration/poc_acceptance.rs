@@ -818,9 +818,20 @@ async fn poc_portal_attach_stream_reply_detach() {
                 json!({"surface": PORTAL, "content": line, "expects_reply": true}),
             )
             .await;
+        // The first publish appends the only unit, so nothing was unread
+        // before it. The viewer may not have reached that line before the
+        // second publish lands: the native count then reports it.
+        let mut body = reply.body.clone();
+        let unread = body.as_object_mut().unwrap().remove("unread");
         assert_eq!(
-            reply.body,
+            body,
             json!({"ok": true, "reattached": false, "pending_input": 0})
+        );
+        let earlier = u64::from(line != "Running the test suite.");
+        assert!(
+            unread.is_none() || (earlier > 0 && unread == Some(json!(earlier))),
+            "{}",
+            reply.body
         );
         flow_tokens += reply.model_tokens;
     }
@@ -2762,7 +2773,10 @@ async fn poc_override_notifies_the_agent() {
 /// agent-visible answer (discovery, zone, widget and portal publishes, a
 /// resident tile claim's reply, and no unsolicited stream message before
 /// it) reads the same with the panel closed, open, with each surface class
-/// hidden, and with Hide all.
+/// hidden, and with Hide all. The one owner-approved exception is the
+/// portal's native `unread` count (owner decision 2026-11-22, see
+/// docs/invariants.md §3): output the viewer frame never reached stays
+/// unread, so the comparison leaves that one field out.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn poc_agents_see_the_same_with_the_panel_open_or_content_hidden() {
     use tze_hud_compositor::PanelControl;
@@ -2783,6 +2797,15 @@ async fn poc_agents_see_the_same_with_the_panel_open_or_content_hidden() {
         // Fresh each claim: the echoed sequence, the new ids and lease.
         // Everything else (granted, code, hint, TTL) must not move.
         published.seq = 0;
+        // The approved exception: the native unread count may differ.
+        for body in &mut bodies {
+            if let Some(o) = body.as_object_mut() {
+                o.remove("unread");
+            }
+            for entry in body["surfaces"].as_array_mut().into_iter().flatten() {
+                entry.as_object_mut().map(|o| o.remove("unread"));
+            }
+        }
         (bodies, published)
     };
     // The first publishes attach and create; compare from the second round.

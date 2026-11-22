@@ -404,7 +404,15 @@ Native unread counts accumulate new output units across render batches. Keyed
 replacements and viewer replies do not add unseen units. Reaching the measured
 OUTPUT tail acknowledges only the installed output ordinal for that attachment;
 a racing newer publish remains unread. Backscroll alone cannot restore a read
-count. Identical shaped content still reconciles a newer ordinal. Reading does
+count. Identical shaped content still reconciles a newer ordinal. MCP reports
+the same native count as `unread` (omitted at zero) on the portal's
+`hud_surfaces` entry and its publish replies; it never adds a second
+counter ([`portal_unread_is_reported_until_the_viewer_reaches_the_tail`](../crates/tze_hud_mcp/src/server/tests.rs)).
+This is the one owner-approved exception to "agents never see the panel"
+below and to §10 (hud-ljhku.5 R5.4 = B, owner 2026-11-22): output is read
+only when the viewer frame reaches the OUTPUT tail, so while the panel is
+open or the portal hidden the count keeps growing, and an agent can infer
+that its output was not presented. Reading does
 not renew agent liveness, and repeated reconciliation schedules no idle repaint.
 For a first-class portal, zero unread hides the jump badge's fill, label and hit
 target together. Scrolling through read output cannot leave an empty fill behind;
@@ -440,7 +448,8 @@ the pill and its hit targets; partial coverage preserves the full label placemen
   [`winit_routing_keys_and_pointer_reach_the_open_panel_only`](../crates/tze_hud_runtime/src/windowed/panel_input.rs),
   [`refused_focus_shows_a_notice_and_chords_still_work`](../crates/tze_hud_runtime/src/windowed/panel_input.rs),
   [`an_idle_open_panel_does_not_wake_on_refresh_ticks`](../crates/tze_hud_runtime/src/windowed/panel_input.rs);
-  agents never see the panel:
+  agents never see the panel (except through the portal's native `unread`
+  count, above):
   `tze_hud_compositor` [`panel_draws_over_the_frame_and_capture_leaves_it_out`](../crates/tze_hud_compositor/src/renderer/tests/control_panel.rs),
   [`capture_leaves_the_closed_notice_out`](../crates/tze_hud_compositor/src/renderer/tests/control_panel.rs),
   `integration` [`poc_agents_see_the_same_with_the_panel_open_or_content_hidden`](../tests/integration/poc_acceptance.rs)
@@ -708,7 +717,9 @@ refreshes once
 ([`elapsed_rasterizes_once_per_display_change_and_fits_its_longest_strings`](../crates/tze_hud_compositor/tests/widget_raster_count.rs)
 covers one raster per change).
 Leases, publications and agents are untouched and nothing tells an agent:
-publishes keep landing and draw, as they are now, when shown again. The set is
+publishes keep landing and draw, as they are now, when shown again. The one
+owner-approved exception is a hidden portal's native `unread` count (§3),
+which keeps growing until the portal is shown and its OUTPUT tail is reached. The set is
 runtime-only overlay state beside the scene model, never serialized and never
 in `CompositorDegradationPolicy` (§6); a restart shows everything. While
 anything is hidden and the panel is closed, a pill at the bottom right of the

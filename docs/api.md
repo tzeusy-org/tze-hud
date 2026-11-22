@@ -51,7 +51,7 @@ milliseconds, named `*_ms`, everywhere.
   {"s":"zone:subtitle","accepts":"text","one":true},
   {"s":"zone:notification-area","accepts":"notification","max":5,"held":true,"expires_in_ms":4200},
   {"s":"widget:gauge","params":{"level":"number 0..1","label":"string<=12"}},
-  {"s":"portal:claude-main","state":"attached","pending_input":1}
+  {"s":"portal:claude-main","state":"attached","pending_input":1,"unread":3}
 ]}
 ```
 
@@ -68,8 +68,10 @@ card trimmed. The rule is the same on MCP and gRPC admission. Regular
 notification stacks present unanswered questions first, newest-first within
 the question and other-card groups, so a retained question stays reachable
 during a burst. Answered, expired and URL-only cards have no question priority;
-alert banners keep their severity ordering. `busy:true` appears only when
-another agent currently occupies a single-occupant zone.
+alert banners keep their severity ordering. A portal entry carries
+`unread:N` when the viewer has N output units it has not yet scrolled to; it
+is omitted at zero. Check it before re-notifying. `busy:true` appears only
+when another agent currently occupies a single-occupant zone.
 MCP accepts lists omit `static_image`: resource upload is on gRPC. Strings with
 an explicit positive byte limit appear as `string<=N`; others as `string`. Numeric discovery hints use JSON `number` with the
 declared bounds (for example `number 0..1`); admission still enforces finite f32.
@@ -406,7 +408,9 @@ with the same cancellation and idle semantics as a `hud_input` wait.
 - Returns `{"ok":true,"expires_in_ms":8000}` when a TTL is set. Portal
   publishes also return `reattached` (true when this call replaces a
   runtime-reclaimed portal) and `pending_input` (queued replies). First attach,
-  live update, and attach after explicit clear report false. The response
+  live update, and attach after explicit clear report false. A portal publish
+  adds `unread:N` when N output units the viewer had not reached existed
+  before this publish; it is omitted at zero. The response
   describes the completed publish; it does not echo content.
 - `clipped` reports text the renderer would cut, measured at admission with
   the drawing shaper, current design tokens and display geometry, as an
@@ -1822,8 +1826,11 @@ The owner **accepted these concrete new baseline bytes** for PR1598 on
 only. The canonical gate still requires two byte-identical final-source
 measurements. Reply defaults `reattached`, `pending_input` and `remaining` stay
 byte-identical, including the unchanged full portal flow. The outcome receipts
-(`hud-ljhku.5`: `clipped` and displaced items) are omitted on every
-canonical flow, so the baseline bytes are unchanged. Reporting `clipped` as
+(`hud-ljhku.5`: `clipped`, `unread` and displaced items) are omitted on every
+canonical flow, so the baseline bytes are unchanged. `unread` stays out of the
+canonical portal flow because it publishes once and the count excludes the
+unit that publish appends. Only a reply that reports unread output grows, by
+the `"unread":N` field. Reporting `clipped` as
 drawn counts (`hud-ohgc9.2`) adds about one token per cut field to a clipped
 reply only; no canonical flow is clipped, so their bytes stay unchanged too.
 
@@ -1915,9 +1922,14 @@ Hover rectangles retain the normalized bounds check after token resolution.
    route is exposed.
 3. **Lease priority is dropped.** Chrome is structurally above agent
    content, and ties go to claim order.
-4. **Portal tile mutations are internal.** Accent, unread count, composer
-   interaction, and portal surface state stay inside the runtime; agents
-   drive the portal through `hud_publish`.
+4. **Portal tile mutations are internal.** Accent, composer interaction,
+   and portal surface state stay inside the runtime; agents drive the portal
+   through `hud_publish`. The one exception is the native unread count, which
+   agents read as `unread` on the portal's discovery entry and publish replies
+   (owner decision hud-ljhku.5 R5.4 = B, 2026-11-22). Because the count clears
+   only when the viewer frame reaches the OUTPUT tail, an agent can infer that
+   output was not presented, including while the panel is open or the portal
+   is hidden.
 
 
 Notification capture delivery (source proposal; Windows owner acceptance separate):
