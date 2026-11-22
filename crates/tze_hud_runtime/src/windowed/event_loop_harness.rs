@@ -7572,6 +7572,31 @@ mod tests {
             }
         }
 
+        // S1: Enter in the chord-focused composer sends the draft exactly once,
+        // and the composer keeps focus (a global chord is out of tier L's reach).
+        harness.enqueue(key_down("Enter", "Enter", 5_100));
+        harness.enqueue(key_up("Enter", "Enter", 5_200));
+        harness.drain();
+        {
+            let portals = harness.app.state.portal_projection_driver.portal_handle();
+            let hub = portals.hub.lock().unwrap();
+            let texts = |id: &str| -> Vec<String> {
+                let portal = hub.get(&PortalKey::new("ops", id)).unwrap();
+                portal
+                    .inputs
+                    .iter()
+                    .map(|input| input.text.clone())
+                    .collect()
+            };
+            assert_eq!(texts("b"), ["kept"], "the reply is sent once");
+            assert!(texts("a").is_empty(), "the other portal receives nothing");
+        }
+        assert_eq!(
+            focused(&harness).as_deref(),
+            Some("b"),
+            "a sent reply keeps focus"
+        );
+
         // S4: safe mode and hidden portals change nothing.
         let clear_focus = |harness: &mut HeadlessEventLoopHarness| {
             let tab = harness.scene().active_tab.unwrap();
