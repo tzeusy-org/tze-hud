@@ -1,3 +1,4 @@
+use crate::scope::owner_agent;
 use crate::types::{ContentionPolicy, WidgetPublishRecord, ZonePublishRecord};
 use crate::validation::ValidationError;
 
@@ -76,10 +77,12 @@ pub fn apply_contention<R: ContentionRecord>(
             *publishes = vec![record];
         }
         ContentionPolicy::Stack { max_depth } => {
-            // Check publisher count limit before accepting the record.
+            // Check publisher count limit before accepting the record. The
+            // limit is per agent: session scopes share their agent's budget.
+            let agent = owner_agent(record.record_publisher_namespace());
             let publisher_count = publishes
                 .iter()
-                .filter(|r| r.record_publisher_namespace() == record.record_publisher_namespace())
+                .filter(|r| owner_agent(r.record_publisher_namespace()) == agent)
                 .count() as u32;
             if publisher_count >= max_publishers {
                 return Err(make_max_publishers_err(max_publishers));

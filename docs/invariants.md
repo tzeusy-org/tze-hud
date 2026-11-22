@@ -75,7 +75,11 @@ ephemeral (pointer moves, hover and scroll notifications: droppable on lag).
 A transport or API change must not give one class another's delivery semantics.
 
 Accepted human notification events use a per-publisher FIFO and retained-until-ACK
-ids without oldest-first eviction. Destructive scene transfer has no cancellation
+ids without oldest-first eviction. A publisher is an agent plus its MCP session
+(unscoped calls and gRPC are the agent's own session): FIFO isolation and
+notification key slots are per session. Input is retained until ACK or until
+its session is released (`DELETE /mcp`, or the 64-session bound), when no
+consumer for it can exist any more; release is explicit, so §4 does not apply. Destructive scene transfer has no cancellation
 point before retained commit. Callback and runtime-authored human-X kinds remain
 distinct; coalesced readiness wakes carry no record ownership. These in-memory
 guarantees do not claim process-crash durability or add a gRPC action transport.
@@ -183,6 +187,12 @@ local scroll feedback does not wait on that lane.
   (latest queued request per frame); `integration`
   [`portal_scroll_lag_preserves_visible_window`](../tests/integration/text_stream_portal_surface.rs)
   (local viewport survives notification lag)
+
+Session scoping is tested by `tze_hud_mcp`
+[`input_reaches_only_the_session_that_asked`](../crates/tze_hud_mcp/src/server/tests/scopes.rs),
+[`ending_a_session_releases_everything_it_owns`](../crates/tze_hud_mcp/src/server/tests/scopes.rs)
+and `tze_hud_scene`
+[`release_scope_ends_only_that_session`](../crates/tze_hud_scene/src/graph/agents.rs).
 
 The ask-and-wait deadline is classified when the scene accepts an event, in
 its monotonic clock domain. An early answer retains its reservation until

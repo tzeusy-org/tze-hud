@@ -2922,7 +2922,7 @@ async fn publish_wait_reserves_only_its_exact_answer() {
     {
         let (server, _) = self::server();
         let identity = server.config.agents.load().resolve(&psk(), "").unwrap();
-        let tool_ctx = server.tool_context(&identity, None);
+        let tool_ctx = server.tool_context(&identity, None, None);
         let mut ask = Box::pin(tools::hud_publish(&tool_ctx, question(30000)));
         assert!(ask.as_mut().poll(&mut context).is_pending());
         activate_card(&server, latest_card(&server).await, false).await;
@@ -5789,3 +5789,5 @@ async fn elapsed_timer_runs_from_one_publish() {
     scene.apply_due_batches();
     assert_eq!(shown(&scene), "0:00");
 }
+
+mod scopes;

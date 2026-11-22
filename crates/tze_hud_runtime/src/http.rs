@@ -4,7 +4,8 @@
 //! a [`Request`] with a byte body, routed by `(method, path)` through
 //! [`route`], and answered with a [`Response`] carrying a byte body.
 //!
-//! Routes today: `POST /` and `POST /mcp` -> MCP; `GET /admin/status`,
+//! Routes today: `POST /` and `POST /mcp` -> MCP, `DELETE /` and `DELETE /mcp`
+//! -> end the `Mcp-Session-Id` session; `GET /admin/status`,
 //! `GET /admin/logs`, `GET /admin/screenshot`, `POST /admin/restart` and
 //! `POST /admin/update` -> operator endpoints (admin PSK only); `POST /pair` ->
 //! first-run pairing (no auth: the one-time code is the credential, and only
@@ -34,8 +35,13 @@ pub(crate) struct Request {
     pub query: String,
     /// Credentials of an `Authorization: Bearer` header.
     pub bearer: Option<String>,
+    /// The `Mcp-Session-Id` header: the MCP session the request acts in.
+    pub session_id: Option<String>,
     pub body: Vec<u8>,
 }
+
+/// The MCP session header, on requests and on an `initialize` response.
+pub(crate) const SESSION_HEADER: &str = "Mcp-Session-Id";
 
 /// An HTTP response with a byte body.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,6 +51,8 @@ pub struct Response {
     pub body: Vec<u8>,
     /// Value of the `Allow` header (405 responses).
     pub allow: Option<&'static str>,
+    /// An `Mcp-Session-Id` to hand back (an `initialize` that opened one).
+    pub session_id: Option<String>,
 }
 
 impl Response {
@@ -54,6 +62,7 @@ impl Response {
             content_type: "application/json",
             body: body.into(),
             allow: None,
+            session_id: None,
         }
     }
 
@@ -79,6 +88,7 @@ impl Response {
             content_type: "text/plain",
             body: Vec::new(),
             allow: None,
+            session_id: None,
         }
     }
 
@@ -92,6 +102,15 @@ impl Response {
 
     pub fn not_found() -> Self {
         Self::empty(404)
+    }
+
+    pub fn unauthorized() -> Self {
+        Self::empty(401)
+    }
+
+    /// `202 Accepted` with no body (an MCP notification or session end).
+    pub fn accepted() -> Self {
+        Self::empty(202)
     }
 
     pub fn method_not_allowed(allow: &'static str) -> Self {
@@ -108,6 +127,7 @@ impl Response {
             content_type: "application/json",
             body: serde_json::to_vec(err).unwrap_or_default(),
             allow: None,
+            session_id: None,
         }
     }
 
@@ -135,6 +155,9 @@ impl Response {
         );
         if let Some(allow) = self.allow {
             head.push_str(&format!("Allow: {allow}\r\n"));
+        }
+        if let Some(id) = &self.session_id {
+            head.push_str(&format!("{SESSION_HEADER}: {id}\r\n"));
         }
         head.push_str("\r\n");
         let mut out = head.into_bytes();
@@ -186,6 +209,8 @@ impl OperatorError {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Route {
     Mcp,
+    /// `DELETE /mcp`: end the request's MCP session.
+    McpEnd,
     /// `POST /pair`; needs no bearer.
     Pair,
     /// An operator endpoint; the caller must pass [`admin_guard`] first.
@@ -232,7 +257,8 @@ pub(crate) fn admin_guard(identity: Option<&AgentIdentity>) -> Result<(), Respon
 pub(crate) fn route(method: &str, path: &str) -> Route {
     match (method, path) {
         ("POST", "/" | "/mcp") => Route::Mcp,
-        (_, "/" | "/mcp") => Route::Respond(Response::method_not_allowed("POST")),
+        ("DELETE", "/" | "/mcp") => Route::McpEnd,
+        (_, "/" | "/mcp") => Route::Respond(Response::method_not_allowed("POST, DELETE")),
         ("POST", "/pair") => Route::Pair,
         (_, "/pair") => Route::Respond(Response::method_not_allowed("POST")),
         ("GET", "/admin/status") => Route::Admin(AdminRoute::Status),
@@ -332,6 +358,7 @@ async fn read_request_inner<R: AsyncRead + Unpin>(stream: &mut R) -> Result<Requ
     let mut content_length = None;
     let mut bearer = None;
     let mut saw_authorization = false;
+    let mut session_id = None;
     for line in lines {
         // No obs-fold, no bare-LF lines, no whitespace around the name.
         let Some((name, value)) = line.split_once(':') else {
@@ -362,6 +389,15 @@ async fn read_request_inner<R: AsyncRead + Unpin>(stream: &mut R) -> Result<Requ
             }
             // Overflow means far over MAX_REQUEST.
             content_length = Some(value.parse().unwrap_or(usize::MAX));
+        } else if name.eq_ignore_ascii_case(SESSION_HEADER) {
+            // Visible ASCII only (MCP); a repeat is ambiguous like auth.
+            if session_id.is_some()
+                || value.is_empty()
+                || !value.bytes().all(|b| b.is_ascii_graphic())
+            {
+                return Err(ReadError::Malformed);
+            }
+            session_id = Some(value.to_owned());
         } else if name.eq_ignore_ascii_case("authorization") {
             if std::mem::replace(&mut saw_authorization, true) {
                 return Err(ReadError::Malformed);
@@ -396,6 +432,7 @@ async fn read_request_inner<R: AsyncRead + Unpin>(stream: &mut R) -> Result<Requ
         path,
         query,
         bearer,
+        session_id,
         body,
     })
 }
@@ -409,9 +446,11 @@ mod tests {
     fn routes_by_method_and_path() {
         assert_eq!(route("POST", "/"), Route::Mcp);
         assert_eq!(route("POST", "/mcp"), Route::Mcp);
+        assert_eq!(route("DELETE", "/mcp"), Route::McpEnd);
+        assert_eq!(route("DELETE", "/"), Route::McpEnd);
         assert_eq!(
             route("GET", "/"),
-            Route::Respond(Response::method_not_allowed("POST"))
+            Route::Respond(Response::method_not_allowed("POST, DELETE"))
         );
         assert_eq!(route("GET", "/mcp"), route("GET", "/"));
         assert_eq!(route("POST", "/pair"), Route::Pair);
@@ -663,5 +702,30 @@ mod tests {
             read_request(&mut server, READ_TIMEOUT).await,
             Err(ReadError::Timeout)
         );
+    }
+
+    #[tokio::test]
+    async fn session_header_is_parsed_once_and_echoed_on_responses() {
+        let read = |raw: &'static [u8]| async move {
+            let (mut client, mut server) = tokio::io::duplex(1024);
+            client.write_all(raw).await.unwrap();
+            read_request(&mut server, READ_TIMEOUT).await
+        };
+        let req = read(b"DELETE /mcp HTTP/1.1\r\nmcp-session-id: ab12\r\n\r\n")
+            .await
+            .unwrap();
+        assert_eq!(req.session_id.as_deref(), Some("ab12"));
+        assert_eq!(req.method, "DELETE");
+        for bad in [
+            &b"POST / HTTP/1.1\r\nMcp-Session-Id: a\r\nMcp-Session-Id: b\r\n\r\n"[..],
+            b"POST / HTTP/1.1\r\nMcp-Session-Id: a b\r\n\r\n",
+            b"POST / HTTP/1.1\r\nMcp-Session-Id:\r\n\r\n",
+        ] {
+            assert_eq!(read(bad).await, Err(ReadError::Malformed));
+        }
+        let mut reply = Response::json("{}");
+        reply.session_id = Some("ab12".into());
+        let text = String::from_utf8(reply.to_bytes()).unwrap();
+        assert!(text.contains("Mcp-Session-Id: ab12\r\n"), "{text}");
     }
 }

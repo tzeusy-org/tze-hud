@@ -13,6 +13,14 @@
 //! newly paired agent works on its next call. With no agents every request is
 //! rejected. The PSK is never echoed.
 //!
+//! ## Sessions
+//!
+//! `initialize` opens a session scope ([`crate::scopes`]); the transport
+//! returns its id as `Mcp-Session-Id` and sends it back on later calls, which
+//! then own content, portals and input per session. An optional label rides
+//! in `initialize` `params._meta["tze-hud/label"]`, outside model context.
+//! Calls without an id are the agent's unscoped caller, as before sessions.
+//!
 //! ## Results
 //!
 //! A tool result is one text content block holding compact JSON. A failed
@@ -44,6 +52,8 @@ use crate::{
 pub struct CallerContext {
     /// PSK from the HTTP `Authorization: Bearer` header.
     pub bearer_token: Option<String>,
+    /// The HTTP `Mcp-Session-Id` header: the session scope to act within.
+    pub session_id: Option<String>,
 }
 
 impl CallerContext {
@@ -56,7 +66,14 @@ impl CallerContext {
     pub fn with_bearer(token: impl Into<String>) -> Self {
         Self {
             bearer_token: Some(token.into()),
+            session_id: None,
         }
+    }
+
+    /// The same caller acting within session `id`.
+    pub fn in_session(mut self, id: impl Into<String>) -> Self {
+        self.session_id = Some(id.into());
+        self
     }
 }
 
@@ -98,6 +115,31 @@ impl McpConfig {
         }
     }
 }
+
+/// One MCP request's transport-level outcome.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SessionReply {
+    /// The JSON-RPC response body (empty for a notification), and the id of
+    /// the session an `initialize` just opened.
+    Body {
+        body: String,
+        opened: Option<String>,
+    },
+    /// The request named a session that is not live (ended, released by the
+    /// table bound, or lost to a restart); nothing was dispatched.
+    UnknownSession,
+}
+
+/// What ending a session did.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SessionEnd {
+    Released,
+    Unknown,
+    Unauthenticated,
+}
+
+/// The `initialize` metadata key carrying the session label.
+pub const LABEL_META_KEY: &str = "tze-hud/label";
 
 /// A successful tool result: one text block of compact JSON.
 fn tool_result(value: &serde_json::Value) -> serde_json::Value {
@@ -248,6 +290,18 @@ impl InputNotifiers {
         Ok(Arc::clone(agents.entry(namespace.to_string()).or_default()))
     }
 
+    /// Wake every waiter of a released scope and drop its entry.
+    fn release(&self, namespace: &str) {
+        let removed = self
+            .agents
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(namespace);
+        if let Some(ready) = removed {
+            ready.notify_waiters();
+        }
+    }
+
     /// Wait-path acquisition must not block the request's absolute deadline.
     /// Producers retain for_agent's admission/routing behavior above.
     pub(crate) fn try_for_agent(&self, namespace: &str) -> Result<Arc<Notify>, McpError> {
@@ -349,6 +403,8 @@ pub struct McpServer {
     input_notifiers: InputNotifiers,
     /// Per-agent leases and unacked action presses.
     state: McpState,
+    /// Live MCP session scopes.
+    scopes: Arc<crate::scopes::Scopes>,
     /// Runtime safe-mode flag (shared with gRPC); false when standalone.
     safe_mode: Arc<AtomicBool>,
     /// The renderer's admission-time text measurement; `None` reports no
@@ -373,6 +429,7 @@ impl McpServer {
             portals: None,
             input_notifiers: InputNotifiers::default(),
             state: McpState::default(),
+            scopes: Default::default(),
             safe_mode: Arc::new(AtomicBool::new(false)),
             text_fit: None,
         }
@@ -434,9 +491,102 @@ impl McpServer {
         }
     }
 
+    /// Live session scopes (for `/admin/status` and tests).
+    pub fn scopes(&self) -> &Arc<crate::scopes::Scopes> {
+        &self.scopes
+    }
+
+    fn identity(&self, ctx: &CallerContext) -> Option<tze_hud_scene::config::AgentIdentity> {
+        ctx.bearer_token
+            .as_deref()
+            .and_then(|key| self.config.agents.load().resolve(key, "").ok())
+    }
+
+    /// End session `ctx.session_id` (HTTP `DELETE`): an explicit release.
+    pub async fn end_session(&self, ctx: &CallerContext) -> SessionEnd {
+        let Some(identity) = self.identity(ctx) else {
+            return SessionEnd::Unauthenticated;
+        };
+        let closed = ctx
+            .session_id
+            .as_deref()
+            .and_then(|id| self.scopes.close(&identity.agent_id, id));
+        match closed {
+            Some(scope) => {
+                self.release_scope(&scope, "ended").await;
+                SessionEnd::Released
+            }
+            None => SessionEnd::Unknown,
+        }
+    }
+
+    /// Clear everything a closed scope owns: zone and widget content,
+    /// delayed publishes, portals and un-ACKed input; end its armed waits.
+    async fn release_scope(&self, scope: &crate::scopes::Scope, reason: &'static str) {
+        let ns = scope.namespace.as_str();
+        let (cleared, wakes) = {
+            let mut scene = self.scene.lock().await;
+            let cleared = scene.release_scope(ns).cleared;
+            (cleared, scene.take_notification_wait_notifiers())
+        };
+        for wake in wakes {
+            wake.notify();
+        }
+        let portals = match &self.portals {
+            Some(portals) => {
+                let mut hub = portals.hub.lock().unwrap_or_else(|p| p.into_inner());
+                let ids: Vec<String> = hub.list(ns).into_iter().map(|p| p.id).collect();
+                for id in &ids {
+                    let _ = hub.clear(&PortalKey::new(ns, id.as_str()));
+                }
+                ids.len()
+            }
+            None => 0,
+        };
+        self.state.forget(ns);
+        self.input_notifiers.release(ns);
+        if portals > 0 {
+            self.portal_ingress_wake.notify();
+        }
+        self.render_wake.notify();
+        tracing::info!(
+            agent = %scope.agent,
+            label = scope.label().as_deref().unwrap_or(""),
+            reason,
+            zones = cleared.zones,
+            widgets = cleared.widgets,
+            portals,
+            "MCP session ended"
+        );
+    }
+
+    /// Open a session for `agent`, releasing one first at the table bound.
+    async fn open_scope(&self, agent: &str, label: Option<&str>) -> String {
+        let mut held = self.scene.lock().await.holding_namespaces();
+        if let Some(portals) = &self.portals {
+            let hub = portals.hub.lock().unwrap_or_else(|p| p.into_inner());
+            hub.visit_holdings(|key, _, _| {
+                held.insert(key.agent.clone());
+            });
+        }
+        let (scope, evicted) = self
+            .scopes
+            .open(agent, label, |s| !held.contains(&s.namespace));
+        if let Some(evicted) = evicted {
+            self.release_scope(&evicted, "session limit").await;
+        }
+        tracing::info!(
+            agent,
+            label = scope.label().as_deref().unwrap_or(""),
+            "MCP session started"
+        );
+        scope.id.clone()
+    }
+
     fn tool_context<'a>(
         &'a self,
         identity: &'a tze_hud_scene::config::AgentIdentity,
+        scope: Option<&'a crate::scopes::Scope>,
         #[cfg(any(test, feature = "test-harness"))] input_wait_probe: Option<
             &'a tokio::sync::watch::Sender<bool>,
         >,
@@ -452,6 +602,9 @@ impl McpServer {
             state: &self.state,
             safe_mode: &self.safe_mode,
             agent: identity,
+            owner: scope.map_or(identity.agent_id.as_str(), |s| s.namespace.as_str()),
+            scope,
+            scopes: &self.scopes,
             widget_transition_ms: self.config.widget_transition_ms,
             publication_defaults: &self.config.publication_defaults,
             text_fit: self.text_fit.as_deref(),
@@ -459,8 +612,39 @@ impl McpServer {
     }
 
     /// Dispatch one JSON-RPC 2.0 request body. Returns the response body, or
-    /// an empty string for a notification.
+    /// an empty string for a notification or an unknown session.
     pub async fn dispatch(&self, body: &str, ctx: &CallerContext) -> String {
+        match self.dispatch_session(body, ctx).await {
+            SessionReply::Body { body, .. } => body,
+            SessionReply::UnknownSession => String::new(),
+        }
+    }
+
+    /// Dispatch one request within its session. A named session that is not
+    /// live is refused before anything runs.
+    pub async fn dispatch_session(&self, body: &str, ctx: &CallerContext) -> SessionReply {
+        let identity = self.identity(ctx);
+        let scope = match (&identity, ctx.session_id.as_deref()) {
+            (Some(identity), Some(id)) => match self.scopes.touch(&identity.agent_id, id) {
+                Some(scope) => Some(scope),
+                None => return SessionReply::UnknownSession,
+            },
+            _ => None,
+        };
+        let mut opened = None;
+        let body = self
+            .dispatch_inner(body, identity, scope.as_deref(), &mut opened)
+            .await;
+        SessionReply::Body { body, opened }
+    }
+
+    async fn dispatch_inner(
+        &self,
+        body: &str,
+        identity: Option<tze_hud_scene::config::AgentIdentity>,
+        scope: Option<&crate::scopes::Scope>,
+        opened: &mut Option<String>,
+    ) -> String {
         let respond = |resp: McpResponse| serde_json::to_string(&resp).unwrap_or_default();
         let request: McpRequest = match serde_json::from_str(body) {
             Ok(r) => r,
@@ -474,17 +658,24 @@ impl McpServer {
             return respond(McpResponse::err(id, JsonRpcError::invalid_request()));
         }
 
-        let identity = ctx
-            .bearer_token
-            .as_deref()
-            .and_then(|key| self.config.agents.load().resolve(key, "").ok());
         let Some(identity) = identity else {
             warn!(method = %request.method, "MCP: authentication failed");
             return respond(McpResponse::err(id, JsonRpcError::unauthenticated()));
         };
 
         match request.method.as_str() {
-            "initialize" => respond(McpResponse::ok(id, crate::schema::initialize_result())),
+            "initialize" => {
+                // A session's own re-initialize keeps its scope.
+                if scope.is_none() {
+                    let label = request
+                        .params
+                        .pointer("/_meta")
+                        .and_then(|meta| meta.get(LABEL_META_KEY))
+                        .and_then(serde_json::Value::as_str);
+                    *opened = Some(self.open_scope(&identity.agent_id, label).await);
+                }
+                respond(McpResponse::ok(id, crate::schema::initialize_result()))
+            }
             // Notifications get no response.
             m if m.starts_with("notifications/") => String::new(),
             "ping" => respond(McpResponse::ok(id, serde_json::json!({}))),
@@ -533,13 +724,16 @@ impl McpServer {
                 }
                 #[cfg(any(test, feature = "test-harness"))]
                 let input_wait_probe = if matches!(name, "hud_input" | "hud_publish") {
-                    self.input_notifiers
-                        .claim_input_wait(&identity.agent_id, id.as_ref())
+                    self.input_notifiers.claim_input_wait(
+                        scope.map_or(identity.agent_id.as_str(), |s| s.namespace.as_str()),
+                        id.as_ref(),
+                    )
                 } else {
                     None
                 };
                 let tool_ctx = self.tool_context(
                     &identity,
+                    scope,
                     #[cfg(any(test, feature = "test-harness"))]
                     input_wait_probe.as_ref(),
                 );
