@@ -40,7 +40,8 @@ CITATION = re.compile(
 BEAD_ID = re.compile(r"\bhu[d]-[a-z0-9]{5}(?:\.[0-9]+)*\b")
 BEAD_SUFFIXES = (".rs", ".proto")
 INLINE_LINK = re.compile(r"!?\[[^\]]*\]\(\s*<?([^)\s>]+)>?(?:\s+\"[^\"]*\")?\s*\)")
-REFERENCE_LINK = re.compile(r"^\s{0,3}\[[^\]]+\]:\s*<?(\S+?)>?(?:\s.*)?$")
+REFERENCE_LINK = re.compile(r"^\s{0,3}\[(?!\^)[^\]]+\]:\s*<?(\S+?)>?(?:\s.*)?$")
+FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 INLINE_CODE = re.compile(r"`+[^`]*`+")
 EXTERNAL = re.compile(r"^(?:[a-z][a-z0-9+.-]*:|//|#)", re.IGNORECASE)
 SNAPSHOT = re.compile(
@@ -101,14 +102,17 @@ def scan_text(path: str, text: str) -> list[tuple[int, str]]:
 def link_targets(text: str) -> list[tuple[int, str]]:
     """Return (line, target) for each Markdown link outside code."""
     targets = []
-    fence = None
+    fence = None  # the opening run, e.g. "````"
     for number, line in enumerate(text.splitlines(), 1):
-        stripped = line.lstrip()
-        if stripped.startswith(("```", "~~~")):
-            marker = stripped[:3]
-            fence = None if fence == marker else (fence or marker)
+        opening = FENCE.match(line)
+        if fence is None and opening:
+            fence = opening[1]
             continue
-        if fence:
+        if fence is not None:
+            # Close only on the same character, at least as long, with no info string.
+            if opening and opening[1][0] == fence[0] and len(opening[1]) >= len(fence) \
+                    and not opening[2].strip():
+                fence = None
             continue
         prose = INLINE_CODE.sub("", line)
         found = [m[1] for m in INLINE_LINK.finditer(prose)]

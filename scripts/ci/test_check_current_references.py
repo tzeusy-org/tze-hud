@@ -124,6 +124,16 @@ class MarkdownLinks(unittest.TestCase):
         text = "```\n[a](missing.md)\n```\nuse `[b](missing.md)` literally"
         self.assertEqual(self.scan(text), [])
 
+    def test_a_fence_closes_only_on_its_own_run(self):
+        for text in ["````\n```\n````\n[a](missing.md)",
+                     "```\n```rust\n```\n[a](missing.md)",
+                     "~~~\n```\n~~~\n[a](missing.md)"]:
+            self.assertEqual(self.scan(text),
+                             [(4, "link target does not exist: missing.md")], text)
+
+    def test_footnote_definitions_are_not_links(self):
+        self.assertEqual(self.scan("text[^1]\n\n[^1]: a note, not a path"), [])
+
     def test_a_pinned_source_snapshot_is_flagged(self):
         for line in [j("Source snapsho", "t: `855f8397` (main)"),
                      j("This map was checked agains", "t `855f8397` on 2026-10-13.")]:
