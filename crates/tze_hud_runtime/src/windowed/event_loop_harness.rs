@@ -528,6 +528,13 @@ impl HeadlessEventLoopHarness {
             state.shutdown.clone(),
         ));
 
+        if let Some(panel) = &state.control_panel {
+            panel.set_answer(
+                state
+                    .answer_keyboard
+                    .tray_hook(state.wake.main_work_notifier()),
+            );
+        }
         let driver = crate::portal::PortalDriver::new(portals);
         state.portal_projection_driver = driver;
         state.global_tokens = global_tokens;
@@ -613,6 +620,7 @@ impl HeadlessEventLoopHarness {
         use crate::shell::control_panel::{PanelEvent, TrayCommand};
         let command = match action {
             "toggle_panel" => TrayCommand::TogglePanel,
+            "answer_next" => TrayCommand::AnswerNext,
             "open_panel" => TrayCommand::OpenPanel,
             "pause" => TrayCommand::Pause,
             "resume" => TrayCommand::Resume,
@@ -7474,6 +7482,305 @@ mod tests {
         }
     }
 
+    /// With no question, the answer chord's real
+    /// main-thread handoff puts the caret in the newest waiting portal.
+    #[test]
+    fn answer_chord_with_no_card_focuses_the_newest_waiting_portal() {
+        use tze_hud_portal::hub::{PortalKey, Publish};
+        fn request_answer(harness: &mut HeadlessEventLoopHarness) {
+            harness
+                .app
+                .state
+                .answer_keyboard
+                .requested
+                .store(true, std::sync::atomic::Ordering::Release);
+            harness.drain();
+        }
+        /// Publish `at` ms after the first publish, on the hub's own clock.
+        fn publish(harness: &mut HeadlessEventLoopHarness, id: &str, ask: bool, at: u64) {
+            static BASE: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+            let portals = harness.app.state.portal_projection_driver.portal_handle();
+            let at_us = BASE.get_or_init(|| portals.clock.now_us()) + at * 1_000;
+            portals
+                .hub
+                .lock()
+                .unwrap()
+                .publish(
+                    &PortalKey::new("ops", id),
+                    Publish {
+                        text: Some(format!("{id} at {at}")),
+                        expects_reply: ask,
+                        ..Default::default()
+                    },
+                    at_us,
+                )
+                .expect("publish accepted");
+            harness.tick();
+        }
+        /// The portal whose composer has keyboard focus, by id.
+        fn focused(harness: &HeadlessEventLoopHarness) -> Option<String> {
+            let scene = harness.scene();
+            let tab = scene.active_tab?;
+            let tile = harness
+                .app
+                .state
+                .focus_manager
+                .current_owner(tab)
+                .tile_id()?;
+            harness
+                .app
+                .state
+                .portal_projection_driver
+                .key_for_tile(tile)
+                .map(|key| key.id)
+        }
+
+        let mut harness = HeadlessEventLoopHarness::new();
+        // S4: no card and no waiting portal changes nothing.
+        publish(&mut harness, "a", false, 1);
+        request_answer(&mut harness);
+        assert_eq!(focused(&harness), None, "no portal is waiting");
+
+        // S3: of two waiting portals, the newer request wins.
+        publish(&mut harness, "a", true, 2);
+        publish(&mut harness, "b", true, 3);
+        request_answer(&mut harness);
+        assert_eq!(focused(&harness).as_deref(), Some("b"));
+        harness.enqueue(character("kept", 3_100));
+        harness.drain();
+        assert_eq!(harness.composer_draft().as_deref(), Some("kept"));
+        request_answer(&mut harness);
+        assert_eq!(focused(&harness).as_deref(), Some("b"), "again: a no-op");
+        assert_eq!(harness.composer_draft().as_deref(), Some("kept"));
+
+        // S1: a newer request elsewhere, then back; the draft is intact.
+        publish(&mut harness, "a", true, 4);
+        request_answer(&mut harness);
+        assert_eq!(focused(&harness).as_deref(), Some("a"));
+        publish(&mut harness, "b", true, 5);
+        request_answer(&mut harness);
+        assert_eq!(focused(&harness).as_deref(), Some("b"));
+        assert_eq!(harness.composer_draft().as_deref(), Some("kept"));
+
+        // S5: no agent receives anything from the focus move.
+        {
+            let portals = harness.app.state.portal_projection_driver.portal_handle();
+            let hub = portals.hub.lock().unwrap();
+            for id in ["a", "b"] {
+                let portal = hub.get(&PortalKey::new("ops", id)).unwrap();
+                assert!(portal.inputs.is_empty(), "{id}: no input queued");
+            }
+        }
+
+        // S1: Enter in the chord-focused composer sends the draft exactly once,
+        // and the composer keeps focus (a global chord is out of tier L's reach).
+        harness.enqueue(key_down("Enter", "Enter", 5_100));
+        harness.enqueue(key_up("Enter", "Enter", 5_200));
+        harness.drain();
+        {
+            let portals = harness.app.state.portal_projection_driver.portal_handle();
+            let hub = portals.hub.lock().unwrap();
+            let texts = |id: &str| -> Vec<String> {
+                let portal = hub.get(&PortalKey::new("ops", id)).unwrap();
+                portal
+                    .inputs
+                    .iter()
+                    .map(|input| input.text.clone())
+                    .collect()
+            };
+            assert_eq!(texts("b"), ["kept"], "the reply is sent once");
+            assert!(texts("a").is_empty(), "the other portal receives nothing");
+        }
+        assert_eq!(
+            focused(&harness).as_deref(),
+            Some("b"),
+            "a sent reply keeps focus"
+        );
+
+        // S4: safe mode and hidden portals change nothing.
+        let clear_focus = |harness: &mut HeadlessEventLoopHarness| {
+            let tab = harness.scene().active_tab.unwrap();
+            harness.app.state.focus_manager = tze_hud_input::FocusManager::new();
+            harness.app.state.focus_manager.add_tab(tab);
+        };
+        clear_focus(&mut harness);
+        harness
+            .app
+            .state
+            .safe_mode_atomic
+            .store(true, std::sync::atomic::Ordering::Release);
+        request_answer(&mut harness);
+        assert_eq!(focused(&harness), None, "paused");
+        harness
+            .app
+            .state
+            .safe_mode_atomic
+            .store(false, std::sync::atomic::Ordering::Release);
+        harness
+            .scene()
+            .set_owner_hidden(tze_hud_scene::graph::SurfaceClasses {
+                portals: true,
+                tiles: true,
+                ..Default::default()
+            });
+        request_answer(&mut harness);
+        assert_eq!(focused(&harness), None, "portals hidden");
+        harness
+            .scene()
+            .set_owner_hidden(tze_hud_scene::graph::SurfaceClasses::default());
+
+        // S4: a degraded portal is skipped; the other one still waits.
+        let degrade = |harness: &mut HeadlessEventLoopHarness, id: &str| {
+            let portals = harness.app.state.portal_projection_driver.portal_handle();
+            let now = portals.clock.now_us();
+            assert!(
+                portals
+                    .hub
+                    .lock()
+                    .unwrap()
+                    .degrade(&PortalKey::new("ops", id), now)
+            );
+            harness.tick();
+        };
+        degrade(&mut harness, "b");
+        request_answer(&mut harness);
+        assert_eq!(focused(&harness).as_deref(), Some("a"), "b is degraded");
+        clear_focus(&mut harness);
+        degrade(&mut harness, "a");
+        request_answer(&mut harness);
+        assert_eq!(focused(&harness), None, "both degraded");
+    }
+
+    /// A question card wins over a waiting portal.
+    #[test]
+    fn answer_chord_prefers_a_question_card_over_a_waiting_portal() {
+        let mut harness = approve_reject_notification_harness();
+        let portals = harness.app.state.portal_projection_driver.portal_handle();
+        portals
+            .hub
+            .lock()
+            .unwrap()
+            .publish(
+                &tze_hud_portal::hub::PortalKey::new("ops", "ask"),
+                tze_hud_portal::hub::Publish {
+                    text: Some("Reply?".into()),
+                    expects_reply: true,
+                    ..Default::default()
+                },
+                portals.clock.now_us(),
+            )
+            .expect("publish accepted");
+        assert!(harness.tick());
+        harness
+            .app
+            .state
+            .answer_keyboard
+            .requested
+            .store(true, std::sync::atomic::Ordering::Release);
+        harness.drain();
+        assert!(harness.app.state.answer_keyboard.focus.is_some());
+        assert!(!harness.app.state.input_processor.is_composer_active());
+    }
+
+    /// The tray's answer goes through the panel task to the
+    /// chord's main-thread path; a stale click opens the panel instead.
+    #[test]
+    fn tray_answer_focuses_the_question_or_opens_the_panel() {
+        use crate::shell::control_panel::{PanelEvent, TrayCommand};
+        use tze_hud_scene::config::ChordRole;
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let fixture =
+            runtime.block_on(async { super::super::panel_input::panel_task_tests::fixture() });
+        let panel = fixture.panel.clone();
+        let wait = |what: &str, done: &dyn Fn() -> bool| {
+            for _ in 0..400 {
+                if done() {
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            panic!("{what}");
+        };
+        let tray = |harness: &mut HeadlessEventLoopHarness, command| {
+            let requested = Arc::clone(&harness.app.state.answer_keyboard.tray_requested);
+            assert!(panel.send(PanelEvent::Tray(command)));
+            if command == TrayCommand::AnswerNext {
+                wait("the panel task ran the hook", &|| {
+                    requested.load(std::sync::atomic::Ordering::Acquire)
+                });
+                harness.drain();
+            }
+        };
+        let attach = |harness: &mut HeadlessEventLoopHarness| {
+            harness.app.state.control_panel = Some(panel.clone());
+            panel.set_answer(
+                harness
+                    .app
+                    .state
+                    .answer_keyboard
+                    .tray_hook(harness.app.state.wake.main_work_notifier()),
+            );
+        };
+
+        // S1: an open panel closes and the question takes the keys.
+        let mut harness = approve_reject_notification_harness();
+        attach(&mut harness);
+        panel.send(PanelEvent::Chord(ChordRole::Panel));
+        wait("panel opens", &|| panel.is_open());
+        harness.app.sync_panel_focus();
+        tray(&mut harness, TrayCommand::AnswerNext);
+        assert!(harness.app.state.answer_keyboard.focus.is_some());
+        wait("panel closes", &|| !panel.is_open());
+        harness.enqueue(key_down("Digit2", "2", 2_000));
+        harness.enqueue(key_up("Digit2", "2", 2_100));
+        harness.drain();
+        assert_eq!(take_action_ids(&harness), ["reject"], "2 answers once");
+
+        // S5: the question went before the click landed: the panel opens.
+        tray(&mut harness, TrayCommand::AnswerNext);
+        assert!(harness.app.state.answer_keyboard.focus.is_none());
+        wait("a stale click opens the panel", &|| panel.is_open());
+        tray(&mut harness, TrayCommand::AnswerNext);
+        wait("and leaves it open", &|| panel.is_open());
+        panel.send(PanelEvent::Chord(ChordRole::Panel));
+        wait("panel closes", &|| !panel.is_open());
+
+        // A paused HUD never takes card focus from the tray either.
+        let mut harness = approve_reject_notification_harness();
+        attach(&mut harness);
+        harness
+            .app
+            .state
+            .safe_mode_atomic
+            .store(true, std::sync::atomic::Ordering::Release);
+        tray(&mut harness, TrayCommand::AnswerNext);
+        assert!(harness.app.state.answer_keyboard.focus.is_none());
+        wait("paused: the panel opens", &|| panel.is_open());
+        harness
+            .app
+            .state
+            .safe_mode_atomic
+            .store(false, std::sync::atomic::Ordering::Release);
+        panel.send(PanelEvent::Chord(ChordRole::Panel));
+        wait("panel closes", &|| !panel.is_open());
+
+        // S4: with a question waiting, the panel stays reachable.
+        tray(&mut harness, TrayCommand::OpenPanel);
+        wait("Open panel opens it", &|| panel.is_open());
+        assert!(harness.app.state.answer_keyboard.focus.is_none());
+        panel.send(PanelEvent::Chord(ChordRole::Panel));
+        wait("the panel chord closes it", &|| !panel.is_open());
+        panel.send(PanelEvent::Chord(ChordRole::Panel));
+        wait("and opens it", &|| panel.is_open());
+        panel.send(PanelEvent::Chord(ChordRole::Panel));
+        wait("panel closes", &|| !panel.is_open());
+        panel.send(PanelEvent::Chord(ChordRole::Pause));
+        wait("the pause chord opens it", &|| panel.is_open());
+        panel.send(PanelEvent::Chord(ChordRole::Pause));
+        wait("and resumes", &|| !panel.is_open());
+        drop(fixture);
+    }
+
     #[test]
     fn notification_keyboard_cycle_activation_and_return_preserve_portal_editor() {
         fn press(harness: &mut HeadlessEventLoopHarness, code: &str, key: &str, reverse: bool) {
@@ -7674,7 +7981,8 @@ mod tests {
         }
 
         // The global answer chord transfers input from an open running panel.
-        // A request with no card keeps its search and panel completely intact.
+        // A request with no card and no waiting portal keeps its search and
+        // panel completely intact.
         {
             let runtime = tokio::runtime::Runtime::new().unwrap();
             let fixture =
@@ -7721,7 +8029,10 @@ mod tests {
             harness.app.sync_panel_focus();
             request_answer(&mut harness);
             assert!(harness.app.state.answer_keyboard.focus.is_none());
-            assert!(panel.is_open(), "no question must not close settings");
+            assert!(
+                panel.is_open(),
+                "no card and no waiting portal must not close settings"
+            );
             panel.send(PanelEvent::Chord(ChordRole::Panel));
             wait_open(false);
         }

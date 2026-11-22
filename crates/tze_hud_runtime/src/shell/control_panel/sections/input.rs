@@ -93,13 +93,16 @@ impl Section for InputSection {
                         ChordRole::Answer => (
                             "input.answer_chord",
                             "Answer chord",
-                            "Focuses the newest question; 1–4 or Enter answers, Esc returns",
+                            "Focuses the newest question, or the portal waiting for your \
+                             reply; 1–4 or Enter answers, Esc returns",
                             &[
                                 "hotkey",
                                 "shortcut",
                                 "answer_hotkey",
                                 "question",
                                 "notification",
+                                "portal",
+                                "reply",
                             ],
                         ),
                         ChordRole::Hide => (

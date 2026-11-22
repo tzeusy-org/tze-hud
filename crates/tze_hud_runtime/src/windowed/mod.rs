@@ -3246,6 +3246,7 @@ impl WindowedRuntime {
         {
             if let Some(panel) = &control_panel {
                 panel.set_quit(Arc::clone(&quit));
+                panel.set_answer(answer_keyboard.tray_hook(wake.main_work_notifier()));
             }
             let presence = shell_presence::native::Bridge::install(
                 control_panel.clone(),
