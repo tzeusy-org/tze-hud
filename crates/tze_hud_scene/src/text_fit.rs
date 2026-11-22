@@ -7,7 +7,7 @@
 //! (`docs/api.md` "clipped").
 
 use crate::graph::SceneGraph;
-use crate::types::{NotificationPayload, WidgetParameterValue};
+use crate::types::{NotificationPayload, StatusBarPayload, WidgetParameterValue};
 use std::collections::HashMap;
 
 /// Measures published text against the current tokens and geometry.
@@ -36,5 +36,18 @@ pub trait TextFit: Send + Sync + std::fmt::Debug {
         scene: &SceneGraph,
         widget: &str,
         params: &HashMap<String, WidgetParameterValue>,
+    ) -> Vec<(String, usize)>;
+
+    /// The entries set by `payload` on status-bar `zone` whose value would
+    /// be cut in the bar as it draws right after this publish under
+    /// `merge_key`, sorted by entry key, each with its drawn character
+    /// count: 0 when the bar does not draw the entry. Values that fit and
+    /// empty values (removals) are not reported.
+    fn status_bar(
+        &self,
+        scene: &SceneGraph,
+        zone: &str,
+        payload: &StatusBarPayload,
+        merge_key: Option<&str>,
     ) -> Vec<(String, usize)>;
 }

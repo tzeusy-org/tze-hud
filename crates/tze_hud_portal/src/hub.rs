@@ -168,7 +168,7 @@ impl Default for PortalLimits {
 }
 
 /// Longest portal id, display name, or coalesce key.
-const MAX_NAME_BYTES: usize = 128;
+pub const MAX_NAME_BYTES: usize = 128;
 
 /// Why a portal call was refused. The MCP layer maps each to the shared
 /// error set.

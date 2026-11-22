@@ -3292,24 +3292,69 @@ fn hub_portal(server: McpServer) -> (McpServer, Arc<std::sync::Mutex<PortalHub>>
     (server.with_portals(portals), hub)
 }
 
+/// R2.3: each portal argument refusal names its field and limit under its
+/// unchanged code, and attaches or publishes nothing.
 #[tokio::test]
-async fn portal_output_too_large_is_content_rejected() {
-    let (server, _) = server();
-    let (server, hub) = hub_portal(server);
-    let e = call_err(
-        &server,
-        "hud_publish",
-        json!({"surface": "portal:main", "content": "x".repeat(16 * 1024 + 1), "ttl_ms": 0}),
-    )
-    .await;
-    assert_eq!(e["code"], "CONTENT_REJECTED");
-    assert!(!e["hint"].as_str().unwrap().is_empty());
-    assert!(
-        hub.lock()
+async fn portal_refusals_name_the_field_and_its_limit() {
+    let long = "n".repeat(129);
+    let named = |extra: Value| {
+        let mut args = json!({"surface": "portal:main", "content": "hello"});
+        args.as_object_mut()
             .unwrap()
-            .get(&PortalKey::new(psk_agent(), "main"))
-            .is_none()
-    );
+            .extend(extra.as_object().unwrap().clone());
+        args
+    };
+    let cases = [
+        (
+            json!({"surface": format!("portal:{long}")}),
+            long.as_str(),
+            "INVALID_ARGUMENT",
+            "portal id is 1..128 bytes",
+        ),
+        (
+            named(json!({"display_name": ""})),
+            "main",
+            "INVALID_ARGUMENT",
+            "display_name is 1..128 bytes",
+        ),
+        (
+            named(json!({"display_name": long})),
+            "main",
+            "INVALID_ARGUMENT",
+            "display_name is 1..128 bytes",
+        ),
+        (
+            named(json!({"key": ""})),
+            "main",
+            "INVALID_ARGUMENT",
+            "portal key is 1..128 bytes; omit key to append",
+        ),
+        (
+            named(json!({"key": long})),
+            "main",
+            "INVALID_ARGUMENT",
+            "portal key is 1..128 bytes; omit key to append",
+        ),
+        (
+            named(json!({"content": "x".repeat(16 * 1024 + 1), "ttl_ms": 0})),
+            "main",
+            "CONTENT_REJECTED",
+            "portal publish is at most 16384 bytes; split it",
+        ),
+    ];
+    for (args, id, code, hint) in cases {
+        let (server, _) = server();
+        let (server, hub) = hub_portal(server);
+        let e = call_err(&server, "hud_publish", args.clone()).await;
+        assert_eq!(e, json!({"code": code, "hint": hint}), "{args}");
+        assert!(
+            hub.lock()
+                .unwrap()
+                .get(&PortalKey::new(psk_agent(), id))
+                .is_none(),
+            "nothing attached: {args}"
+        );
+    }
 }
 
 #[tokio::test]
@@ -5187,6 +5232,23 @@ impl tze_hud_scene::TextFit for MarkerFit {
         out.sort();
         out
     }
+
+    fn status_bar(
+        &self,
+        _: &SceneGraph,
+        _: &str,
+        payload: &tze_hud_scene::types::StatusBarPayload,
+        _: Option<&str>,
+    ) -> Vec<(String, usize)> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        let mut out: Vec<(String, usize)> = payload
+            .entries
+            .iter()
+            .filter_map(|(k, v)| marker_count(v).map(|c| (k.clone(), c)))
+            .collect();
+        out.sort();
+        out
+    }
 }
 
 fn fit_server() -> (McpServer, Arc<MarkerFit>) {
@@ -5277,6 +5339,36 @@ async fn widget_reply_counts_only_this_calls_cut_params() {
     assert!(other.get("clipped").is_none(), "{other}");
 }
 
+/// R2.2 S1/S3: a cut status value is reported under its entry key; a
+/// publish whose values fit, or that removes an entry, answers with the
+/// bytes a server without measurement gives.
+#[tokio::test]
+async fn status_reply_counts_cut_values_only() {
+    let (server, fit) = fit_server();
+    let cut = call(
+        &server,
+        "hud_publish",
+        json!({"surface":"zone:status-bar","content":{"entries":{"build":"passing on main LONG","mem":"ok"}},"key":"build"}),
+    )
+    .await;
+    assert_eq!(cut["clipped"], json!({"build": 16}), "{cut}");
+    assert_eq!(fit.calls.load(Ordering::SeqCst), 1);
+    let (plain, _) = self::server();
+    for args in [
+        json!({"surface":"zone:status-bar","content":{"entries":{"mem":"ok"}},"key":"mem"}),
+        json!({"surface":"zone:status-bar","content":{"entries":{"build":""}},"key":"build"}),
+    ] {
+        let body = json!({"jsonrpc":"2.0","id":1,"method":"tools/call",
+            "params":{"name":"hud_publish","arguments":args}})
+        .to_string();
+        assert_eq!(
+            server.dispatch(&body, &ctx()).await,
+            plain.dispatch(&body, &ctx()).await,
+            "{args}"
+        );
+    }
+}
+
 /// A question wait's final reply carries the admission-time report too.
 #[tokio::test(start_paused = true)]
 async fn question_wait_reply_keeps_the_clipped_report() {
@@ -5285,4 +5377,181 @@ async fn question_wait_reply_keeps_the_clipped_report() {
     args["content"]["title"] = json!("Question LONG");
     let reply = call(&server, "hud_publish", args).await;
     assert_eq!(reply["clipped"], json!({"title": 9}), "{reply}");
+}
+
+/// R2.4: a scene refusal's hint is its fixed sentence per code (the
+/// allowlisted `key` reasons verbatim), never carries an id, and stays within
+/// 60 tokens; mapped variants keep their own hints under the same bounds.
+#[test]
+fn scene_refusal_hints_are_fixed_id_free_and_short() {
+    use tze_hud_scene::types::ResourceId;
+    use tze_hud_scene::validation::ValidationError as V;
+    let id = SceneId::new();
+    let s = String::from;
+    let invalid = "request not accepted; call hud_surfaces and resend";
+    let lease = "retry hud_publish";
+    let held = "you hold nothing there; hud_publish first";
+    let budget = "too much content; hud_clear older content, then retry";
+    let rejected = "zone refused this publish; call hud_surfaces";
+    let key_reason = "notification key must be at most 256 UTF-8 bytes";
+    let errors = [
+        V::TabNotFound { id },
+        V::TileNotFound { id },
+        V::NodeNotFound { id },
+        V::InvalidPortalSurface {
+            tile_id: id,
+            reason: format!("bad {id}"),
+        },
+        V::PortalSurfaceNotFound { tile_id: id },
+        V::LeaseNotFound { id },
+        V::LeaseExpired { id },
+        V::DuplicateDisplayOrder { order: 3 },
+        V::DuplicateId { id },
+        V::InvalidField {
+            field: s("key"),
+            reason: s(key_reason),
+        },
+        V::InvalidField {
+            field: s("key"),
+            reason: s("keyed clear requires a notification zone"),
+        },
+        V::InvalidField {
+            field: s("lease"),
+            reason: format!("lease not found: {id}"),
+        },
+        V::InvalidField {
+            field: s("key"),
+            reason: format!("unknown key {id}"),
+        },
+        V::BoundsOutOfRange {
+            reason: format!("tile {id} out of range"),
+        },
+        V::BudgetExceeded {
+            resource: s("tiles"),
+        },
+        V::NodeCountExceeded {
+            tile_id: id,
+            current: 9,
+            limit: 8,
+        },
+        V::ResourceNotFound {
+            id: ResourceId::of(b"x"),
+        },
+        V::ZoneNotFound { name: s("z") },
+        V::ZonePublishTokenInvalid { zone: s("z") },
+        V::ZoneMediaTypeMismatch { zone: s("z") },
+        V::ZoneMaxPublishersReached {
+            zone: s("z"),
+            max: 1,
+        },
+        V::ZoneMaxKeysReached {
+            zone: s("z"),
+            max: 1,
+        },
+        V::NamespaceMismatch {
+            tile_id: id,
+            tile_namespace: s("a"),
+            agent_namespace: s("b"),
+        },
+        V::CycleDetected { node_id: id },
+        V::ZOrderConflict {
+            tile_a: id,
+            tile_b: id,
+            z_order: 1,
+        },
+        V::BatchSizeExceeded { max: 1, got: 2 },
+        V::ZonePublishLeaseNotFound { namespace: s("a") },
+        V::ZonePublishLeaseNotActive {
+            namespace: s("a"),
+            state: s("Revoked"),
+        },
+        V::ZonePublishSafeModeActive { namespace: s("a") },
+        V::ZonePublishLeaseOrphaned { namespace: s("a") },
+        V::WidgetNotFound { name: s("w") },
+        V::WidgetUnknownParameter {
+            widget: s("w"),
+            param: s("p"),
+        },
+        V::WidgetParameterTypeMismatch {
+            widget: s("w"),
+            param: s("p"),
+            expected: s("f32"),
+        },
+        V::WidgetParameterInvalidValue {
+            widget: s("w"),
+            param: s("p"),
+            reason: s("r"),
+        },
+        V::WidgetMaxPublishersReached {
+            widget: s("w"),
+            max: 1,
+        },
+    ];
+    // Exhaustive: a new variant must state its hint here.
+    let fixed = |e: &V| -> Option<String> {
+        match e {
+            V::ZoneNotFound { .. }
+            | V::ZoneMediaTypeMismatch { .. }
+            | V::ZoneMaxPublishersReached { .. }
+            | V::ZoneMaxKeysReached { .. }
+            | V::ZonePublishSafeModeActive { .. }
+            | V::WidgetNotFound { .. }
+            | V::WidgetUnknownParameter { .. }
+            | V::WidgetParameterTypeMismatch { .. }
+            | V::WidgetParameterInvalidValue { .. }
+            | V::WidgetMaxPublishersReached { .. } => None,
+            V::LeaseNotFound { .. }
+            | V::LeaseExpired { .. }
+            | V::ZonePublishLeaseNotFound { .. }
+            | V::ZonePublishLeaseNotActive { .. }
+            | V::ZonePublishLeaseOrphaned { .. } => Some(lease.to_owned()),
+            V::TileNotFound { .. } | V::NamespaceMismatch { .. } => Some(held.to_owned()),
+            V::BudgetExceeded { .. }
+            | V::NodeCountExceeded { .. }
+            | V::BatchSizeExceeded { .. } => Some(budget.to_owned()),
+            V::ZonePublishTokenInvalid { .. } => Some(rejected.to_owned()),
+            V::InvalidField { field, reason }
+                if field == "key"
+                    && [key_reason, "keyed clear requires a notification zone"]
+                        .contains(&reason.as_str()) =>
+            {
+                Some(reason.clone())
+            }
+            V::InvalidField { .. }
+            | V::TabNotFound { .. }
+            | V::NodeNotFound { .. }
+            | V::InvalidPortalSurface { .. }
+            | V::PortalSurfaceNotFound { .. }
+            | V::DuplicateDisplayOrder { .. }
+            | V::DuplicateId { .. }
+            | V::BoundsOutOfRange { .. }
+            | V::ResourceNotFound { .. }
+            | V::CycleDetected { .. }
+            | V::ZOrderConflict { .. } => Some(invalid.to_owned()),
+        }
+    };
+    let bpe = tiktoken_rs::o200k_base().expect("bundled o200k_base vocabulary");
+    let hex_run = |hint: &str| {
+        hint.split(|c: char| !c.is_ascii_hexdigit())
+            .any(|run| run.len() >= 8)
+    };
+    for e in &errors {
+        let json = crate::tools::scene_error(e).to_json();
+        let hint = json["hint"].as_str().unwrap();
+        assert_eq!(
+            json["code"],
+            tze_hud_scene::error_codes::validation_error_code(e),
+            "{e:?}"
+        );
+        if let Some(fixed) = fixed(e) {
+            assert_eq!(hint, fixed.as_str(), "{e:?}");
+        }
+        assert!(!hex_run(hint), "no id: {hint}");
+        let tokens = bpe.encode_with_special_tokens(hint).len();
+        assert!(tokens <= 60, "{tokens} tokens: {hint}");
+    }
+    assert_eq!(
+        crate::tools::scene_error(&errors[9]).to_json()["hint"],
+        "notification key must be at most 256 UTF-8 bytes"
+    );
 }

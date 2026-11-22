@@ -8,7 +8,7 @@ use crate::validation::ValidationError;
 /// so the single contention function can serve all three publish entry points.
 ///
 /// This trait is intentionally private to this module.
-pub(crate) trait ContentionRecord {
+pub trait ContentionRecord {
     fn record_publisher_namespace(&self) -> &str;
     fn record_merge_key(&self) -> Option<&str>;
 }
@@ -59,7 +59,7 @@ impl ContentionRecord for WidgetPublishRecord {
 ///
 /// Returns the records a `Stack` trim removed, oldest first; replacement and
 /// key eviction by the other policies are not trims.
-pub(crate) fn apply_contention<R: ContentionRecord>(
+pub fn apply_contention<R: ContentionRecord>(
     publishes: &mut Vec<R>,
     record: R,
     contention_policy: ContentionPolicy,

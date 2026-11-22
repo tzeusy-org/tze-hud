@@ -190,7 +190,7 @@ pub const ZONE_TILE_Z_MIN: u32 = 0x8000_0000;
 
 pub mod agents;
 pub mod contention;
-pub(crate) use contention::apply_contention;
+pub use contention::apply_contention;
 
 pub mod overlay;
 pub use agents::{AgentHoldings, AgentReclaim};

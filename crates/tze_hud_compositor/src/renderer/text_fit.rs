@@ -17,8 +17,8 @@ use glyphon::{Attrs, Family, Weight};
 use tze_hud_scene::SceneId;
 use tze_hud_scene::graph::SceneGraph;
 use tze_hud_scene::types::{
-    ContentionPolicy, FontFamily, NotificationPayload, WidgetBinding, WidgetParameterValue,
-    ZoneContent, ZonePublishRecord,
+    ContentionPolicy, FontFamily, NotificationPayload, Rect, StatusBarPayload, WidgetBinding,
+    WidgetParameterValue, ZoneContent, ZonePublishRecord,
 };
 
 use super::Compositor;
@@ -40,6 +40,8 @@ struct FitState {
     /// `None` until a compositor attaches: nothing is reported before then.
     tokens: Option<HashMap<String, String>>,
     layout: DisplayLayout,
+    /// The profile's `max_truncation_input_bytes`; `None` keeps the default.
+    max_input_bytes: Option<usize>,
     /// Token-resolved widget SVG sources keyed by (widget type, file).
     widget_svgs: HashMap<(String, String), String>,
     /// Action-row layouts and the shared fallback font database.
@@ -69,6 +71,11 @@ impl TextFitMeasurer {
     /// The display layout zones resolve against.
     pub fn set_display_layout(&self, layout: DisplayLayout) {
         self.state().layout = layout;
+    }
+
+    /// The text byte budget the status bar measures within.
+    pub fn set_max_truncation_input_bytes(&self, bytes: usize) {
+        self.state().max_input_bytes = Some(bytes);
     }
 
     /// A token-resolved widget SVG layer, as registered for drawing.
@@ -251,6 +258,89 @@ impl tze_hud_scene::TextFit for TextFitMeasurer {
             })
             .collect();
         crate::widget::clipped_text_params(&layers, &constraints, params)
+    }
+
+    fn status_bar(
+        &self,
+        scene: &SceneGraph,
+        zone: &str,
+        payload: &StatusBarPayload,
+        merge_key: Option<&str>,
+    ) -> Vec<(String, usize)> {
+        let state = self.state();
+        let Some(tokens) = &state.tokens else {
+            return Vec::new();
+        };
+        let Some(zone_def) = scene.zone_registry.zones.get(zone) else {
+            return Vec::new();
+        };
+        // The bar as merged right after this publish, as the scene applies it.
+        let mut records = scene
+            .zone_registry
+            .active_publishes
+            .get(zone)
+            .cloned()
+            .unwrap_or_default();
+        let record = ZonePublishRecord {
+            publication_id: SceneId::new(),
+            zone_name: zone.to_owned(),
+            publisher_namespace: String::new(),
+            content: ZoneContent::StatusBar(payload.clone()),
+            published_at_wall_us: 0,
+            merge_key: merge_key.map(str::to_owned),
+            expires_at_wall_us: None,
+            content_classification: None,
+            breakpoints: Vec::new(),
+            lease_id: None,
+            publication_origin: None,
+        };
+        // A publish the scene would refuse has nothing to report.
+        if tze_hud_scene::graph::apply_contention(
+            &mut records,
+            record,
+            zone_def.contention_policy,
+            zone_def.max_publishers,
+            |_| tze_hud_scene::ValidationError::ZoneMaxPublishersReached {
+                zone: zone.to_owned(),
+                max: zone_def.max_publishers,
+            },
+            |_| false,
+        )
+        .is_err()
+        {
+            return Vec::new();
+        }
+        let zone_tokens = tze_hud_config::tokens::for_zone(tokens, zone);
+        let policy = &zone_def.rendering_policy;
+        let (zx, zy, zw, zh) = super::zone_geometry_in(
+            &state.layout,
+            zone,
+            &scene.effective_zone_geometry(zone_def),
+            scene.display_area.width,
+            scene.display_area.height,
+        );
+        let display = state.layout.zone_display_rect(zone).unwrap_or_else(|| {
+            Rect::new(
+                0.0,
+                0.0,
+                scene.display_area.width,
+                scene.display_area.height,
+            )
+        });
+        let mut cards = state.cards.borrow_mut();
+        super::status_bar::clipped_values(
+            &records,
+            zone_def.contention_policy,
+            &payload.entries,
+            &policy.key_icon_map,
+            super::status_bar::StatusStyle::resolve(&zone_tokens, policy),
+            Rect::new(zx, zy, zw, zh),
+            display,
+            cards.fallback_fonts(&zone_tokens),
+            state
+                .max_input_bytes
+                .unwrap_or(crate::overflow::DEFAULT_MAX_TRUNCATION_INPUT_BYTES),
+        )
     }
 }
 
@@ -456,5 +546,130 @@ mod tests {
             &card("Build", "All tests passed.", &["Open", "Ok"]),
         );
         assert!(clipped.is_empty(), "{clipped:?}");
+    }
+
+    fn bar_scene() -> (TextFitMeasurer, SceneGraph) {
+        let (fit, mut scene) = measurer_and_scene();
+        scene.register_zone(ZoneRegistry::with_defaults().zones["status-bar"].clone());
+        (fit, scene)
+    }
+
+    fn status(entries: &[(&str, &str)]) -> StatusBarPayload {
+        StatusBarPayload {
+            entries: entries
+                .iter()
+                .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+                .collect(),
+        }
+    }
+
+    /// R2.2 S1: a cut status value reports the longest prefix its entry
+    /// draws whole, within the per-field layout bound.
+    #[test]
+    fn cut_status_value_counts_what_republishes_whole() {
+        let (fit, scene) = bar_scene();
+        let value = "deploying release candidate 42 to every production and staging region";
+        let measure = |v: &str| {
+            fit.status_bar(
+                &scene,
+                "status-bar",
+                &status(&[("build", v)]),
+                Some("build"),
+            )
+        };
+        PREFIX_PROBES.with(|p| p.set(0));
+        let clipped = measure(value);
+        let probes = PREFIX_PROBES.with(std::cell::Cell::get);
+        assert!(probes <= bound(value.chars().count()), "{probes} layouts");
+        let [(key, n)] = clipped.as_slice() else {
+            panic!("one cut entry: {clipped:?}");
+        };
+        assert_eq!(key, "build");
+        assert!(*n > 0 && *n < value.chars().count(), "{clipped:?}");
+        assert!(measure(char_prefix(value, *n)).is_empty(), "{n} fits");
+        assert_eq!(
+            measure(char_prefix(value, n + 1)),
+            [("build".to_owned(), *n)],
+            "one more character is cut"
+        );
+        assert!(measure("ok").is_empty(), "a value that fits");
+        assert!(measure("").is_empty(), "a removal");
+    }
+
+    /// R2.2 S2: an entry the full bar does not draw reports 0.
+    #[test]
+    fn status_entry_past_a_full_bar_counts_zero() {
+        let (fit, scene) = bar_scene();
+        let entries: Vec<(String, String)> = (0..12)
+            .map(|i| {
+                (
+                    format!("k{i:02}"),
+                    format!("value number {i} with plenty of words"),
+                )
+            })
+            .collect();
+        let pairs: Vec<(&str, &str)> = entries
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
+        let clipped = fit.status_bar(&scene, "status-bar", &status(&pairs), None);
+        assert_eq!(
+            clipped.last(),
+            Some(&("k11".to_owned(), 0)),
+            "the last entry is not drawn: {clipped:?}"
+        );
+        // Entries that fit report nothing; the last drawn one is cut, and
+        // every entry after it is not drawn.
+        let first_zero = clipped.iter().position(|(_, n)| *n == 0).expect("undrawn");
+        assert!(
+            first_zero > 0 && clipped[first_zero - 1].1 > 0,
+            "{clipped:?}"
+        );
+        assert!(
+            clipped[first_zero..].iter().all(|(_, n)| *n == 0),
+            "{clipped:?}"
+        );
+    }
+
+    /// The bar is merged with the scene's own contention rules: a Stack
+    /// status bar at full depth evicts its oldest record and draws only the
+    /// newest, and a zero-depth stack discards the publish, so nothing it
+    /// set is measured.
+    #[test]
+    fn status_fit_applies_the_scene_contention_rules() {
+        let (fit, mut scene) = bar_scene();
+        let value = "deploying release candidate 42 to every production and staging region";
+        let alone = fit.status_bar(&scene, "status-bar", &status(&[("build", value)]), None);
+        assert_eq!(alone.len(), 1, "{alone:?}");
+        let old = |key: &str| ZonePublishRecord {
+            publication_id: SceneId::new(),
+            zone_name: "status-bar".into(),
+            publisher_namespace: String::new(),
+            content: ZoneContent::StatusBar(status(&[(key, value)])),
+            published_at_wall_us: 0,
+            merge_key: None,
+            expires_at_wall_us: None,
+            content_classification: None,
+            breakpoints: Vec::new(),
+            lease_id: None,
+            publication_origin: None,
+        };
+        scene
+            .zone_registry
+            .active_publishes
+            .insert("status-bar".into(), vec![old("a"), old("b")]);
+        let zone = scene.zone_registry.zones.get_mut("status-bar").unwrap();
+        zone.contention_policy = ContentionPolicy::Stack { max_depth: 2 };
+        zone.max_publishers = 8;
+        let stacked = fit.status_bar(&scene, "status-bar", &status(&[("build", value)]), None);
+        assert_eq!(stacked, alone, "only the newest record draws");
+        scene
+            .zone_registry
+            .zones
+            .get_mut("status-bar")
+            .unwrap()
+            .contention_policy = ContentionPolicy::Stack { max_depth: 0 };
+        let discarded = fit.status_bar(&scene, "status-bar", &status(&[("build", value)]), None);
+        assert!(discarded.is_empty(), "{discarded:?}");
     }
 }

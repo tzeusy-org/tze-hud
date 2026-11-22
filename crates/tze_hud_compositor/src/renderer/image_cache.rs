@@ -547,6 +547,9 @@ impl super::Compositor {
     /// historical behaviour for configs that omit the override.
     pub fn set_max_truncation_input_bytes(&mut self, bytes: usize) {
         self.configured_max_truncation_input_bytes = Some(bytes);
+        if let Some(fit) = &self.text_fit {
+            fit.set_max_truncation_input_bytes(bytes);
+        }
         self.status_bar_layouts
             .borrow_mut()
             .set_max_input_bytes(bytes);
