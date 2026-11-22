@@ -818,21 +818,15 @@ async fn poc_portal_attach_stream_reply_detach() {
                 json!({"surface": PORTAL, "content": line, "expects_reply": true}),
             )
             .await;
-        // The first publish appends the only unit, so nothing was unread
-        // before it. The viewer may not have reached that line before the
-        // second publish lands: the native count then reports it.
-        let mut body = reply.body.clone();
-        let unread = body.as_object_mut().unwrap().remove("unread");
-        assert_eq!(
-            body,
-            json!({"ok": true, "reattached": false, "pending_input": 0})
-        );
-        let earlier = u64::from(line != "Running the test suite.");
-        assert!(
-            unread.is_none() || (earlier > 0 && unread == Some(json!(earlier))),
-            "{}",
-            reply.body
-        );
+        // This POC draws no frames, so the viewer never reaches the OUTPUT
+        // tail: the first publish appends the only unit (nothing unread
+        // before it), and the second reports that first line as unread.
+        let unread = u64::from(line != "Running the test suite.");
+        let mut expected = json!({"ok": true, "reattached": false, "pending_input": 0});
+        if unread > 0 {
+            expected["unread"] = json!(unread);
+        }
+        assert_eq!(reply.body, expected);
         flow_tokens += reply.model_tokens;
     }
     assert_eq!(poc.hud.tile_count(), 1, "the portal is on screen");
