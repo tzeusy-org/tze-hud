@@ -132,6 +132,9 @@ pub struct SceneGraph {
     /// Input readiness callbacks, invoked by the producer only after scene unlock.
     #[serde(skip, default)]
     pending_action_notifiers: HashMap<String, RenderWakeNotifier>,
+    /// Caption for each labeled MCP session's new publications, by namespace.
+    #[serde(skip, default)]
+    session_labels: HashMap<String, String>,
     #[serde(skip, default)]
     notification_waits: HashMap<SceneId, notification_wait::NotificationWait>,
     /// Readiness owed for displaced receipts; drained with the wait debt.
@@ -281,11 +284,21 @@ impl SceneGraph {
             publication_orphans: HashMap::new(),
             pending_actions: HashMap::new(),
             pending_action_notifiers: HashMap::new(),
+            session_labels: HashMap::new(),
             notification_waits: HashMap::new(),
             pending_input_wakes: Vec::new(),
             registered_resources: HashMap::new(),
             overlay: RuntimeOverlayState::default(),
         }
+    }
+
+    /// Caption `namespace`'s later publications with `label` (`None`: none).
+    /// Publications already shown keep theirs.
+    pub fn set_session_label(&mut self, namespace: &str, label: Option<String>) {
+        match label {
+            Some(label) => self.session_labels.insert(namespace.to_owned(), label),
+            None => self.session_labels.remove(namespace),
+        };
     }
 
     /// Register input readiness for a publisher before checking its pending queue.

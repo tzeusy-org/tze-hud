@@ -641,9 +641,15 @@ agents until one is paired.
   `params._meta["tze-hud/label"]`, outside model context: the runtime strips
   control characters, cuts it to 32 bytes on a character boundary (nothing
   left means no label) and suffixes a duplicate live label with the lowest
-  free ` (2)`, ` (3)`. A session's portal header shows its label until a
-  `display_name` names it, and `display_name` on a session's zone publish
-  replaces its label (unscoped zone and all widget publishes still refuse
+  free ` (2)`, ` (3)`. A labeled session's notification cards draw the label
+  as one ellipsized caption line above the title, in the body type role and
+  secondary text colour; the card grows by that line and the text column,
+  `clipped` counts and actions below are unchanged. A card keeps the label it
+  was published under; unscoped and unlabeled cards, and alert banners, draw
+  no caption. A
+  session's portal header shows its label until a `display_name` names it,
+  and `display_name` on a session's zone publish replaces its label for that
+  card and later ones (unscoped zone and all widget publishes still refuse
   `display_name`). `DELETE /mcp` with the header ends the session as an
   explicit release (`202`): its zone and widget content, delayed publishes
   and portals clear, its un-ACKed input is discarded, and its armed waits

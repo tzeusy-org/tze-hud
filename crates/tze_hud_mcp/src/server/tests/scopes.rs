@@ -203,6 +203,17 @@ async fn sessions_clear_and_hold_only_their_own_content() {
         scope_of(&server, &a).label().as_deref(),
         Some("release bot")
     );
+    // Its cards carry the label as their caption from that publish on.
+    let captions: Vec<_> = server
+        .scene
+        .lock()
+        .await
+        .zone_registry
+        .active_for_zone("notification-area")
+        .iter()
+        .map(|r| r.caption.clone())
+        .collect();
+    assert!(captions.contains(&Some("release bot".into())));
     let (err, is_error) = call_as(&server, &unscoped, "hud_publish", named).await;
     assert!(is_error);
     assert_eq!(err["code"], "INVALID_ARGUMENT");
@@ -469,4 +480,57 @@ async fn portal_unread_is_per_session() {
     )
     .await;
     assert_eq!(next["unread"], 1, "{next}");
+}
+
+/// A display_name publish the scene refuses (here the agent's publisher cap)
+/// changes neither the session label nor the caption of its later cards.
+#[tokio::test]
+async fn a_refused_relabel_leaves_the_caption_alone() {
+    let (server, _) = server();
+    let a = session(&server, "tze-hud").await;
+    let caption_of = |scene: &tze_hud_scene::graph::SceneGraph, ns: &str| {
+        scene
+            .zone_registry
+            .active_for_zone("notification-area")
+            .iter()
+            .rev()
+            .find(|r| r.publisher_namespace == ns)
+            .and_then(|r| r.caption.clone())
+    };
+    let ns = scope_of(&server, &a).namespace.clone();
+    // The agent's one allowed card is already up.
+    ok(&server, &a, "hud_publish", question("first")).await;
+    server
+        .scene
+        .lock()
+        .await
+        .zone_registry
+        .zones
+        .get_mut("notification-area")
+        .unwrap()
+        .max_publishers = 1;
+    let mut named = question("named");
+    named["display_name"] = json!("release bot");
+    named["key"] = json!("another"); // a keyed replacement is never capped
+    let (err, is_error) = call_as(&server, &a, "hud_publish", named).await;
+    assert!(is_error, "{err}");
+    assert_ne!(
+        err["code"], "INVALID_ARGUMENT",
+        "refused by the scene: {err}"
+    );
+    assert_eq!(scope_of(&server, &a).label().as_deref(), Some("tze-hud"));
+
+    // With room again, an ordinary card carries the previous label.
+    {
+        let mut scene = server.scene.lock().await;
+        scene
+            .zone_registry
+            .zones
+            .get_mut("notification-area")
+            .unwrap()
+            .max_publishers = 8;
+    }
+    ok(&server, &a, "hud_publish", question("plain")).await;
+    let scene = server.scene.lock().await;
+    assert_eq!(caption_of(&scene, &ns).as_deref(), Some("tze-hud"));
 }

@@ -186,6 +186,8 @@ struct Roles {
     icon: &'static str,
     /// A lone message line takes the title role (else the body role).
     lone_title: bool,
+    /// Draws a labeled session's caption (cards; never alert banners).
+    captioned: bool,
 }
 
 const CARD: Roles = Roles {
@@ -222,6 +224,7 @@ const CARD: Roles = Roles {
     body: BODY,
     icon: "space.xxl",
     lone_title: false,
+    captioned: true,
 };
 
 const ALERT: Roles = Roles {
@@ -258,6 +261,7 @@ const ALERT: Roles = Roles {
     body: ALERT_BODY,
     icon: "space.xl",
     lone_title: true,
+    captioned: false,
 };
 
 /// Resolved notification-card style, all sizes in physical px.
@@ -277,6 +281,7 @@ pub(super) struct NotificationStyle {
     /// A lone message line (no title): the body role on a card, the title
     /// role on a banner.
     pub(super) lone: TextRole,
+    captioned: bool,
     /// The dismiss button: a square as tall as the title line.
     pub(super) dismiss_size: f32,
     pub(super) dismiss_gap: f32,
@@ -410,6 +415,7 @@ impl NotificationStyle {
                 ..title
             },
             lone: if roles.lone_title { title } else { body },
+            captioned: roles.captioned,
             title,
             body,
             action_height: dp(tokens, "space.xxl"),
@@ -457,6 +463,17 @@ impl NotificationStyle {
             }
     }
 
+    /// The session caption line above the title: the body role, so it never
+    /// competes with the title; nothing for an unlabeled publication.
+    pub(super) fn caption_height(&self, caption: Option<&str>) -> f32 {
+        self.caption(caption).map_or(0.0, |_| self.body.line_height)
+    }
+
+    /// The caption this style draws: a card's, never a banner's.
+    pub(super) fn caption<'a>(&self, caption: Option<&'a str>) -> Option<&'a str> {
+        caption.filter(|_| self.captioned)
+    }
+
     /// The severity mark of a publication at `urgency` (alert banners), when
     /// no agent icon takes the icon column.
     pub(super) fn mark(&self, urgency: u32, agent_icon: bool) -> Option<Rgba> {
@@ -464,17 +481,19 @@ impl NotificationStyle {
     }
 
     /// Bounds of the icon column's square (agent icon or severity mark) in a
-    /// card at (`x`, `slot_y`): at the padding, centred on the text block.
+    /// card at (`x`, `slot_y`): at the padding, centred on the text block
+    /// below any caption.
     pub(super) fn icon_bounds(
         &self,
         x: f32,
         slot_y: f32,
         has_title: bool,
+        caption: Option<&str>,
     ) -> tze_hud_scene::types::Rect {
         let text_h = self.text_block_height(has_title);
         tze_hud_scene::types::Rect::new(
             x + self.padding_h,
-            slot_y + (text_h - self.icon_size).max(0.0) * 0.5,
+            slot_y + self.caption_height(caption) + (text_h - self.icon_size).max(0.0) * 0.5,
             self.icon_size,
             self.icon_size,
         )
@@ -551,10 +570,12 @@ pub(super) fn dismiss_bounds(
     tokens: &HashMap<String, String>,
     policy: &RenderingPolicy,
     card: tze_hud_scene::types::Rect,
+    caption: Option<&str>,
 ) -> tze_hud_scene::types::Rect {
     let style = NotificationStyle::for_zone(zone_name, tokens, policy);
     let size = style.dismiss_size;
-    let top = style.padding_v.min((card.height - 1.0).max(0.0));
+    // In the title row, below any caption.
+    let top = (style.padding_v + style.caption_height(caption)).min((card.height - 1.0).max(0.0));
     tze_hud_scene::types::Rect::new(
         card.x + card.width - style.padding_h - size,
         card.y + top,

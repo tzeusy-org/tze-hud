@@ -263,7 +263,12 @@ impl Compositor {
                                     // (cards and banners alike).
                                     let icon =
                                         NotificationStyle::for_zone(zone_name, zone_tokens, policy)
-                                            .icon_bounds(x, slot_y, !payload.title.is_empty());
+                                            .icon_bounds(
+                                                x,
+                                                slot_y,
+                                                !payload.title.is_empty(),
+                                                record.caption.as_deref(),
+                                            );
                                     let (icon_x, icon_y, size) = (icon.x, icon.y, icon.width);
                                     textured_cmds.push(TexturedDrawCmd {
                                         resource_id: icon_id,
@@ -674,6 +679,7 @@ impl Compositor {
             .map(|record| match &record.content {
                 ZoneContent::Notification(n) => {
                     style.text_block_height(!n.title.is_empty())
+                        + style.caption_height(record.caption.as_deref())
                         + layouts
                             .borrow_mut()
                             .resolve(token_map, zone_name, record, policy, card_w)

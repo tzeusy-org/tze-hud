@@ -414,6 +414,7 @@ impl super::Compositor {
                                         zone_tokens,
                                         policy,
                                         payload,
+                                        record.caption.as_deref(),
                                         card.width,
                                         agent_icon,
                                     );
@@ -441,12 +442,14 @@ impl super::Compositor {
                                     )
                                 };
                                 for band in &text_layout.bands {
-                                    let band_color =
-                                        if band.field == "body" && !payload.title.is_empty() {
-                                            tone_color(tone.body)
-                                        } else {
-                                            tone_color(tone.title)
-                                        };
+                                    // A caption is secondary, like a body under a title.
+                                    let band_color = if band.field == "caption"
+                                        || (band.field == "body" && !payload.title.is_empty())
+                                    {
+                                        tone_color(tone.body)
+                                    } else {
+                                        tone_color(tone.title)
+                                    };
                                     let mut item = Self::make_zone_text_item(
                                         Arc::from(band.text),
                                         card.x + text_layout.x,
@@ -479,6 +482,7 @@ impl super::Compositor {
                                         card.x,
                                         card.y,
                                         !payload.title.is_empty(),
+                                        record.caption.as_deref(),
                                     );
                                     let glyph = style.title;
                                     let mut item = Self::make_zone_text_item(
@@ -648,7 +652,13 @@ impl super::Compositor {
                                     }
                                 }
 
-                                let dismiss = dismiss_bounds(zone_name, zone_tokens, policy, card);
+                                let dismiss = dismiss_bounds(
+                                    zone_name,
+                                    zone_tokens,
+                                    policy,
+                                    card,
+                                    record.caption.as_deref(),
+                                );
                                 let glyph = style.dismiss_glyph;
                                 static DISMISS_LABEL: std::sync::OnceLock<Arc<str>> =
                                     std::sync::OnceLock::new();

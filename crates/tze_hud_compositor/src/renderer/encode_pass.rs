@@ -492,7 +492,12 @@ impl super::Compositor {
                             .is_some_and(|id| self.image_texture_cache.contains_key(&id));
                         if let Some(mut mark) = style.mark(payload.urgency, agent_icon) {
                             mark.a *= opacity;
-                            let icon = style.icon_bounds(slot.x, slot.y, !payload.title.is_empty());
+                            let icon = style.icon_bounds(
+                                slot.x,
+                                slot.y,
+                                !payload.title.is_empty(),
+                                record.caption.as_deref(),
+                            );
                             out.push(self.border_only_cmd(
                                 icon,
                                 icon.width * 0.5,
@@ -502,7 +507,13 @@ impl super::Compositor {
                         }
                         // Dismiss: a borderless × that takes a state layer.
                         if pushed {
-                            let b = dismiss_bounds(zone_name, zone_tokens, policy, slot);
+                            let b = dismiss_bounds(
+                                zone_name,
+                                zone_tokens,
+                                policy,
+                                slot,
+                                record.caption.as_deref(),
+                            );
                             let state = chrome_state(notification_dismiss_interaction_id(
                                 zone_name, record,
                             ));

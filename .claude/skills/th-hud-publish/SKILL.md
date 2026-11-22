@@ -132,7 +132,9 @@ Route by surface **and** the current callback identity, handle once, then send
 `hud_input {"ack":["<handled-id>"]}`. Unacked input repeats with stable ids;
 ACKs are idempotent. Input covers every surface this MCP session holds:
 another session on the pairing never receives or ACKs your answers, and a
-keyless clear removes only your cards. `wait_ms` defaults to 0 and caps at
+keyless clear removes only your cards. Through the stdio adapter your cards
+carry a caption with your folder name; `display_name` on a zone publish
+renames it. `wait_ms` defaults to 0 and caps at
 30000; a CLI/network timeout does not establish a user's answer.
 
 Unanswered questions appear before other cards in a regular notification stack;

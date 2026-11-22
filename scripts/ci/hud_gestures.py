@@ -40,7 +40,9 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.error
 import urllib.parse
+import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -1046,6 +1048,87 @@ def scenario_foreign_publisher(run: Run) -> None:
     take_card_answer(run, key, f"{key}-first")
     if items := foreign_inputs(run):
         raise ScenarioFailed("A's answer reaches no other agent", {"items": items})
+
+
+class SessionSmoke(Smoke):
+    """A Smoke that keeps the `Mcp-Session-Id` its `initialize` was issued,
+    as the stdio adapter does: one Claude session on a shared pairing."""
+
+    def __init__(self, url: str, psk: str, label: str) -> None:
+        super().__init__(url, psk)
+        self.session: str | None = None
+        self.rpc("initialize", {"protocolVersion": "2025-06-18", "_meta": {"tze-hud/label": label}})
+        if not self.session:
+            raise ScenarioFailed("initialize issues Mcp-Session-Id", {"label": label})
+
+    def _open(self, request, timeout_s: float):
+        if self.session:
+            request.add_header("Mcp-Session-Id", self.session)
+        resp = super()._open(request, timeout_s)
+        self.session = self.session or resp.headers.get("Mcp-Session-Id")
+        return resp
+
+    def end(self) -> int:
+        """DELETE the session, as the adapter does on a clean exit."""
+        request = urllib.request.Request(self.url, method="DELETE", headers={
+            "Authorization": f"Bearer {self.psk}", "Mcp-Session-Id": self.session or ""})
+        try:
+            with urllib.request.urlopen(request, timeout=5) as resp:
+                return resp.status
+        except urllib.error.HTTPError as err:
+            return err.code
+
+
+def entry_held(surfaces: dict, surface: str) -> bool:
+    return any(e.get("s") == surface and e.get("held") for e in surfaces.get("surfaces") or [])
+
+
+def scenario_sessions(run: Run) -> None:
+    """Tier L: two labeled sessions on one pairing each publish a
+    card; pressing B's answers only B (not A, not the unscoped caller), both
+    are listed in /admin/status, and B's clean exit takes only its card."""
+    zone, url = "zone:notification-area", run.smoke.url
+    a, b = SessionSmoke(url, run.psk, "gesture-a"), SessionSmoke(url, run.psk, "gesture-b")
+    try:
+        run.glide(1, 1)  # a card arriving under a resting pointer is press-guarded
+        # Two captioned cards outgrow tier L's 180 px zone, so B's newer card
+        # covers A's slot; A's card is retained and draws again once B exits.
+        for who, name in ((a, "a"), (b, "b")):
+            run.mark()
+            key = f"gesture-session-{name}"
+            is_error, reply = who.call("hud_publish", {"surface": zone, "key": key, "ttl_ms": 0, "content": {
+                "body": "Session gesture check", "actions": [{"label": name.upper(), "callback_id": f"{key}-pick"}]}})
+            if is_error:
+                raise ScenarioFailed(f"session {name} publish refused", {"code": reply.get("code"), "hint": reply.get("hint")})
+            run.step(f"session {name} publish {zone} key={key}")
+            run.expect(f"session {name} card drawn", lambda st, key=key: bool(
+                (c := notification_entry(st, key)) and c["state"] != "exiting"))
+        # The harness's own initialize opened an unlabeled session it never uses.
+        labels = sorted(s["label"] for s in run.status().get("sessions") or [] if s.get("label"))
+        if labels != ["gesture-a", "gesture-b"]:
+            raise ScenarioFailed("/admin/status lists both sessions", {"labels": labels})
+        run.settle()
+        run.click(f"{zone}/gesture-session-b/0")
+        _, got = b.call("hud_input", {"wait_ms": int(SETTLE_S * 1000)})
+        items = got.get("items") or []
+        if [i.get("action") for i in items] != ["gesture-session-b-pick"]:
+            raise ScenarioFailed("B's press answers B", {"items": items})
+        b.call("hud_input", {"ack": [i["id"] for i in items]})
+        _, other = a.call("hud_input", {})
+        if other.get("items") or run.inputs():
+            raise ScenarioFailed("B's answer reaches neither A nor the unscoped caller",
+                                 {"a": other.get("items"), "unscoped": run.inputs()})
+        run.mark()
+        if (status := b.end()) != 202:
+            raise ScenarioFailed("B's DELETE releases it", {"status": status})
+        run.step("session b DELETE")
+        run.expect("B's exit takes only its card", lambda st: notification_entry(st, "gesture-session-b") is None
+                   and notification_entry(st, "gesture-session-a") is not None, timeout_s=1.0)
+        if not entry_held(a.ok("hud_surfaces"), zone):
+            raise ScenarioFailed("A still holds its card", {})
+    finally:
+        for who in (a, b):
+            who.end()
 
 
 def held_press_on_retired_card(run: Run, key: str, retire: Callable[[], None], what: str) -> None:
@@ -2246,6 +2329,7 @@ SCENARIOS: dict[str, Callable[[Run], None]] = {
     "press-guard": scenario_press_guard,
     "card-dismiss": scenario_card_dismiss,
     "foreign-publisher": scenario_foreign_publisher,
+    "sessions": scenario_sessions,
     "held-press": scenario_held_press,
     "card-link": scenario_card_link,
     "stack-trim": scenario_stack_trim,

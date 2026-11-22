@@ -169,6 +169,7 @@ impl SceneGraph {
         let reclaim = self.reclaim_where(|ns| ns == namespace);
         self.pending_actions.remove(namespace);
         self.pending_action_notifiers.remove(namespace);
+        self.session_labels.remove(namespace);
         reclaim
     }
 
@@ -550,5 +551,42 @@ mod tests {
         assert_eq!(scene.take_pending_actions("claude").len(), 1);
         let left: Vec<_> = cards(&scene).into_iter().map(|c| c.0).collect();
         assert_eq!(left, [b.clone(), "claude".to_string()]);
+    }
+
+    /// A labeled session's publications carry its label as their caption,
+    /// fixed at publish; unscoped ones and a released session's carry none.
+    #[test]
+    fn session_labels_caption_new_publications() {
+        let mut scene = SceneGraph::new(1920.0, 1080.0);
+        scene.zone_registry = ZoneRegistry::with_defaults();
+        let a = crate::scope::scoped_namespace("claude", "a");
+        let caption = |scene: &mut SceneGraph, ns: &str| {
+            scene
+                .publish_to_zone("notification-area", note(ns), ns, None, None, None)
+                .unwrap();
+            scene
+                .zone_registry
+                .active_for_zone("notification-area")
+                .last()
+                .unwrap()
+                .caption
+                .clone()
+        };
+        scene.set_session_label(&a, Some("tze-hud".into()));
+        assert_eq!(caption(&mut scene, &a).as_deref(), Some("tze-hud"));
+        assert_eq!(caption(&mut scene, "claude"), None);
+        scene.set_session_label(&a, Some("renamed".into()));
+        let shown = scene.zone_registry.active_for_zone("notification-area");
+        assert_eq!(
+            shown[0].caption.as_deref(),
+            Some("tze-hud"),
+            "fixed at publish"
+        );
+        scene.release_scope(&a);
+        assert_eq!(
+            caption(&mut scene, &a),
+            None,
+            "a released session's label is gone"
+        );
     }
 }

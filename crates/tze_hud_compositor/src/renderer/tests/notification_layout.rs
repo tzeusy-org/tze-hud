@@ -1808,6 +1808,7 @@ fn test_update_publication_animations_seeds_fresh_state() {
         publication_id: SceneId::new(),
         lease_id: None,
         publication_origin: None,
+        caption: None,
         zone_name: "notification-area".to_string(),
         publisher_namespace: "agent-b".to_string(),
         content: ZoneContent::Notification(NotificationPayload {
@@ -1849,4 +1850,233 @@ fn test_update_publication_animations_seeds_fresh_state() {
         "hold preserves the captured profile"
     );
     assert_eq!(state.current_opacity(), 1.0);
+}
+
+/// A session's card draws its label as one secondary line above the title;
+/// the title, body and dismiss move down by that line and the slot grows by
+/// it. An unlabeled publisher's card is unchanged.
+#[tokio::test]
+async fn test_session_caption_takes_one_secondary_line_above_the_title() {
+    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
+    let mut scene = SceneGraph::new(1280.0, 720.0);
+    scene.register_zone(ZoneDefinition {
+        id: SceneId::new(),
+        name: "notification-area".to_owned(),
+        description: "caption test".to_owned(),
+        geometry_policy: GeometryPolicy::Relative {
+            x_pct: 0.0,
+            y_pct: 0.0,
+            width_pct: 0.5,
+            height_pct: 0.9,
+        },
+        accepted_media_types: vec![ZoneMediaType::ShortTextWithIcon],
+        rendering_policy: RenderingPolicy::default(),
+        contention_policy: ContentionPolicy::Stack { max_depth: 5 },
+        max_publishers: 8,
+        auto_clear_ms: None,
+        ephemeral: false,
+        layer_attachment: LayerAttachment::Chrome,
+    });
+    let card = |title: &str| {
+        ZoneContent::Notification(NotificationPayload {
+            title: title.to_owned(),
+            text: "Body".to_owned(),
+            icon: String::new(),
+            urgency: 1,
+            ttl_ms: None,
+            actions: vec![],
+        })
+    };
+    let session = tze_hud_scene::scope::scoped_namespace("claude", "s1");
+    scene.set_session_label(&session, Some("tze-hud".to_owned()));
+    scene
+        .publish_to_zone(
+            "notification-area",
+            card("Labeled"),
+            &session,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    let items = compositor.collect_text_items(&scene, 1280.0, 720.0);
+    let at = |text: &str| items.iter().find(|i| &*i.text == text).unwrap().clone();
+    let (caption, title, body) = (at("tze-hud"), at("Labeled"), at("Body"));
+    let style = crate::renderer::notification_style::NotificationStyle::resolve(
+        &HashMap::new(),
+        &RenderingPolicy::default(),
+    );
+    assert_eq!(caption.font_weight, style.body.weight);
+    assert_eq!(
+        caption.color, body.color,
+        "the caption takes the secondary role"
+    );
+    assert_eq!(caption.pixel_x, title.pixel_x, "one text column");
+    assert!(
+        (title.pixel_y - caption.pixel_y - style.body.line_height).abs() < 0.5,
+        "the title sits one body line below the caption"
+    );
+
+    // Unlabeled: the same card has no caption and starts a line higher.
+    let mut plain = SceneGraph::new(1280.0, 720.0);
+    plain.register_zone(scene.zone_registry.zones["notification-area"].clone());
+    plain
+        .publish_to_zone(
+            "notification-area",
+            card("Labeled"),
+            "claude",
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    let plain_items = compositor.collect_text_items(&plain, 1280.0, 720.0);
+    assert_eq!(plain_items.len(), 2, "no caption without a label");
+    let plain_title = plain_items.iter().find(|i| &*i.text == "Labeled").unwrap();
+    assert!((title.pixel_y - plain_title.pixel_y - style.body.line_height).abs() < 0.5);
+
+    // The label is fixed at publish: a later relabel leaves this card's caption.
+    scene.set_session_label(&session, Some("renamed".to_owned()));
+    let items = compositor.collect_text_items(&scene, 1280.0, 720.0);
+    assert!(items.iter().any(|i| &*i.text == "tze-hud"));
+}
+
+/// A caption longer than the column ellipsizes on its one line; the title,
+/// × and action row move down by exactly that line at unchanged widths. A
+/// labeled session's alert banner draws no caption.
+#[tokio::test]
+async fn test_long_session_caption_ellipsizes_and_moves_the_card_by_one_line() {
+    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
+    let label = "W".repeat(32);
+    let session = tze_hud_scene::scope::scoped_namespace("claude", "s1");
+    let scene_for = |caption: Option<&str>| {
+        let mut scene = SceneGraph::new(1280.0, 720.0);
+        scene.register_zone(ZoneDefinition {
+            id: SceneId::new(),
+            name: "notification-area".to_owned(),
+            description: "long caption test".to_owned(),
+            geometry_policy: GeometryPolicy::Relative {
+                x_pct: 0.0,
+                y_pct: 0.0,
+                width_pct: 0.2,
+                height_pct: 0.9,
+            },
+            accepted_media_types: vec![ZoneMediaType::ShortTextWithIcon],
+            rendering_policy: RenderingPolicy::default(),
+            contention_policy: ContentionPolicy::Stack { max_depth: 5 },
+            max_publishers: 8,
+            auto_clear_ms: None,
+            ephemeral: false,
+            layer_attachment: LayerAttachment::Chrome,
+        });
+        scene.set_session_label(&session, caption.map(str::to_owned));
+        scene
+            .publish_to_zone(
+                "notification-area",
+                ZoneContent::Notification(NotificationPayload {
+                    title: "Title".to_owned(),
+                    text: "Body".to_owned(),
+                    icon: String::new(),
+                    urgency: 1,
+                    ttl_ms: None,
+                    actions: vec![NotificationAction {
+                        label: "Go".to_owned(),
+                        callback_id: Some("go".to_owned()),
+                        ..Default::default()
+                    }],
+                }),
+                &session,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        scene
+    };
+    let style = crate::renderer::notification_style::NotificationStyle::resolve(
+        &HashMap::new(),
+        &RenderingPolicy::default(),
+    );
+    let line = style.body.line_height;
+    let (labeled, plain) = (scene_for(Some(&label)), scene_for(None));
+    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+    compositor.prime_truncation_cache(&labeled);
+    let items = compositor.collect_text_items(&labeled, 1280.0, 720.0);
+    let plain_items = compositor.collect_text_items(&plain, 1280.0, 720.0);
+    let find = |items: &[crate::text::TextItem], text: &str| {
+        items.iter().find(|i| &*i.text == text).unwrap().clone()
+    };
+    let caption = find(&items, &label);
+    let key = crate::text::effective_truncation_key(&caption).expect("the caption ellipsizes");
+    let rasterizer = compositor.text_rasterizer.as_mut().unwrap();
+    let cut = rasterizer
+        .truncation_cache
+        .get_by_key(&key)
+        .expect("primed")
+        .clone();
+    assert!(
+        cut.was_truncated && cut.text.ends_with(crate::overflow::ELLIPSIS),
+        "{}",
+        cut.text
+    );
+    let drawn = rasterizer.measure_single_line(
+        &cut.text,
+        caption.font_size_px,
+        caption.font_family,
+        caption.font_weight,
+    );
+    assert!(
+        drawn <= caption.bounds_width + 0.5,
+        "{drawn} > {}",
+        caption.bounds_width
+    );
+    let title = find(&items, "Title");
+    assert_eq!(caption.bounds_width, title.bounds_width, "one text column");
+    assert!((title.pixel_y - caption.pixel_y - line).abs() < 0.5);
+    for text in [
+        "Title",
+        "Body",
+        "Go",
+        crate::renderer::notification_style::DISMISS_GLYPH,
+    ] {
+        let (moved, before) = (find(&items, text), find(&plain_items, text));
+        assert!(
+            (moved.pixel_y - before.pixel_y - line).abs() < 0.5,
+            "{text} moves one line"
+        );
+        assert_eq!(
+            moved.bounds_width, before.bounds_width,
+            "{text} keeps its width"
+        );
+        assert_eq!(moved.pixel_x, before.pixel_x, "{text} keeps its x");
+    }
+
+    // Alert banners are not cards: no caption.
+    let mut banner = SceneGraph::new(1280.0, 720.0);
+    banner.zone_registry = ZoneRegistry::with_defaults();
+    banner.set_session_label(&session, Some("tze-hud".to_owned()));
+    banner
+        .publish_to_zone(
+            "alert-banner",
+            ZoneContent::Notification(NotificationPayload {
+                title: "Alert".to_owned(),
+                text: "Banner".to_owned(),
+                urgency: 2,
+                ..Default::default()
+            }),
+            &session,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    let items = compositor.collect_text_items(&banner, 1280.0, 720.0);
+    assert!(
+        items.iter().any(|i| &*i.text == "Alert"),
+        "the banner draws"
+    );
+    assert!(
+        !items.iter().any(|i| &*i.text == "tze-hud"),
+        "a banner draws no caption"
+    );
 }
