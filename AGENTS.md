@@ -32,6 +32,7 @@ just test-integration # integration headless suites
 just test-python     # pure-Python suites (pytest + scripts/ci unittest)
 just token-footprint # deterministic LLM-facing token-footprint gate
 just current-references # reject retired design citations in current source
+just size-report     # lines per surface, production and test (report only)
 just idle-efficiency-checker # fail-closed idle artifact contract tests
 just production-boot # vertical_slice production config boot
 just canonical-app-boot # canonical app production config boot
