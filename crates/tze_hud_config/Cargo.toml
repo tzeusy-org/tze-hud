@@ -1,6 +1,6 @@
 [package]
 name = "tze_hud_config"
-description = "TOML configuration loading and validation for tze_hud — implements ConfigLoader trait"
+description = "TOML configuration loading and validation for tze_hud"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

@@ -1465,11 +1465,10 @@ mod tests {
         assert!(!m("Arial (TrueType)", ""));
     }
 
+    // Not on Windows: the real-registry test installs lookups process-wide.
+    #[cfg(not(windows))]
     #[test]
     fn system_lookup_is_noop_without_os_lookups() {
-        if OS_FONT_LOOKUPS.get().is_some() {
-            return;
-        }
         let mut db = fontdb::Database::new();
         assert_eq!(system::load_family(&mut db, "Segoe UI"), 0);
         assert_eq!(db.len(), 0);

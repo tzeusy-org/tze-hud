@@ -46,7 +46,9 @@ proptest = { workspace = true }
 tze_hud_widget = { path = "../tze_hud_widget", version = "0.1.0" }
 
 # The Windows font test reads the real registry through the runtime's
-# platform lookups (`tze_hud_runtime::os_fonts`).
+# platform lookups (`tze_hud_runtime::os_fonts`). Never call
+# `os_fonts::install()` from a compositor test: it fills the runtime's other
+# compositor copy; install into `crate::fonts` directly.
 [target.'cfg(windows)'.dev-dependencies]
 tze_hud_runtime = { path = "../tze_hud_runtime", version = "0.1.0" }
 
