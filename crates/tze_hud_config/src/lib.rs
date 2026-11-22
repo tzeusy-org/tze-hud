@@ -2,8 +2,8 @@
 //!
 //! TOML configuration loading and validation for tze_hud.
 //!
-//! This crate provides `TzeHudConfig`, the concrete implementation of the
-//! `ConfigLoader` trait defined in `tze_hud_scene::config`.
+//! This crate provides `TzeHudConfig`, which parses, validates and freezes a
+//! configuration into `tze_hud_scene::config::ResolvedConfig`.
 //!
 //! Covers TOML parsing and validation, file resolution, the built-in display
 //! profiles (`full-display`, `headless`), display zone assignments, widget

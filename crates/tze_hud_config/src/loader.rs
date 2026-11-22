@@ -1,4 +1,4 @@
-//! `TzeHudConfig` — concrete implementation of `ConfigLoader`.
+//! `TzeHudConfig`: parse, validate and freeze a configuration.
 //!
 //! Validation collects every error before reporting. Rejected-by-design keys
 //! (`includes`, `[agents]`, `[display_profile]`) fail with a hint.
@@ -6,8 +6,8 @@
 use std::collections::HashMap;
 
 use tze_hud_scene::config::{
-    ChordRole, ConfigError, ConfigErrorCode, ConfigLoader, DisplayProfile, Hotkey, HudChords,
-    ParseError, ResolvedConfig,
+    ChordRole, ConfigError, ConfigErrorCode, DisplayProfile, Hotkey, HudChords, ParseError,
+    ResolvedConfig,
 };
 
 use crate::raw::RawConfig;
@@ -30,20 +30,19 @@ pub const MAX_SUPPORTED_CONFIG_SCHEMA_VERSION: u32 = 1;
 
 // ─── TzeHudConfig ─────────────────────────────────────────────────────────────
 
-/// Concrete implementation of `ConfigLoader` for tze_hud.
+/// A parsed tze_hud configuration.
 ///
-/// Created via `TzeHudConfig::parse(toml_src)`.
+/// Created via `TzeHudConfig::parse(toml_src)`. Validation collects every
+/// error before reporting; `freeze` normalizes, validates and resolves.
 pub struct TzeHudConfig {
     pub(crate) raw: RawConfig,
 }
 
-impl ConfigLoader for TzeHudConfig {
+impl TzeHudConfig {
     // ── parse ─────────────────────────────────────────────────────────────────
 
-    fn parse(toml_src: &str) -> Result<Self, ParseError>
-    where
-        Self: Sized,
-    {
+    /// Parse a TOML configuration string; a parse error carries line and column.
+    pub fn parse(toml_src: &str) -> Result<Self, ParseError> {
         toml::from_str::<RawConfig>(toml_src)
             .map(|raw| TzeHudConfig { raw })
             .map_err(|e| {
@@ -63,7 +62,8 @@ impl ConfigLoader for TzeHudConfig {
 
     // ── normalize ─────────────────────────────────────────────────────────────
 
-    fn normalize(&mut self) {
+    /// Apply normalisation rules (resolve profile, fill defaults).
+    pub fn normalize(&mut self) {
         // Ensure `runtime` is present (even if empty) so downstream code can
         // rely on `self.raw.runtime.as_ref()` without repeated Option handling.
         if self.raw.runtime.is_none() {
@@ -73,7 +73,8 @@ impl ConfigLoader for TzeHudConfig {
 
     // ── validate ──────────────────────────────────────────────────────────────
 
-    fn validate(&self) -> Vec<ConfigError> {
+    /// Validate all fields. Returns ALL validation errors (never stops at first).
+    pub fn validate(&self) -> Vec<ConfigError> {
         let mut errors: Vec<ConfigError> = Vec::new();
 
         // ── (0) schema_version gate (precedes field-level validation) ─────────
@@ -216,7 +217,8 @@ impl ConfigLoader for TzeHudConfig {
 
     // ── freeze ────────────────────────────────────────────────────────────────
 
-    fn freeze(mut self) -> Result<ResolvedConfig, Vec<ConfigError>> {
+    /// Freeze the validated config into a `ResolvedConfig`, or return all errors.
+    pub fn freeze(mut self) -> Result<ResolvedConfig, Vec<ConfigError>> {
         self.normalize();
         let errors = self.validate();
         if !errors.is_empty() {
@@ -269,10 +271,9 @@ impl ConfigLoader for TzeHudConfig {
 
     // ── resolve_config_path ───────────────────────────────────────────────────
 
-    fn resolve_config_path(cli_path: Option<&str>) -> Result<String, Vec<String>>
-    where
-        Self: Sized,
-    {
+    /// Resolve the config file path: (1) `cli_path`, (2) `$TZE_HUD_CONFIG`,
+    /// (3) `./tze_hud.toml`, (4) XDG config. `Err` lists the paths tried.
+    pub fn resolve_config_path(cli_path: Option<&str>) -> Result<String, Vec<String>> {
         resolver::resolve_config_path(cli_path)
     }
 }

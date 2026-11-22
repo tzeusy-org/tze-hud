@@ -31,7 +31,7 @@
 use std::sync::Arc;
 
 use tze_hud_config::TzeHudConfig;
-use tze_hud_scene::config::{ConfigLoader, DisplayProfile, HudChords, ResolvedConfig};
+use tze_hud_scene::config::{DisplayProfile, HudChords, ResolvedConfig};
 use tze_hud_scene::types::ResourceBudget;
 
 use crate::mutation_budget_bridge::DEFAULT_MAX_GUEST_SESSIONS;

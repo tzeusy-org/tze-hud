@@ -3,7 +3,7 @@
 //! Each test checks parsing, resolution, or validation through the config loader.
 
 use crate::loader::TzeHudConfig;
-use tze_hud_scene::config::{ChordRole, ConfigErrorCode, ConfigLoader, Hotkey, ParseError};
+use tze_hud_scene::config::{ChordRole, ConfigErrorCode, Hotkey, ParseError};
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

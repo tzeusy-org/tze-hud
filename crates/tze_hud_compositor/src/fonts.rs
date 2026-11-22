@@ -425,20 +425,28 @@ pub(crate) fn normalize_locale(tag: &str) -> String {
     }
 }
 
-/// The Windows user default locale name, e.g. `ja-JP`.
-#[cfg(windows)]
-fn user_default_locale() -> Option<String> {
-    use windows::Win32::Globalization::GetUserDefaultLocaleName;
-    // LOCALE_NAME_MAX_LENGTH is 85 UTF-16 units including the terminator.
-    let mut buf = [0u16; 85];
-    // SAFETY: the slice is live and its length is passed by the binding.
-    let len = unsafe { GetUserDefaultLocaleName(&mut buf) };
-    (len > 1).then(|| String::from_utf16_lossy(&buf[..(len - 1) as usize]))
+/// The two OS lookups font loading needs. Platform code installs them once
+/// with [`install_os_font_lookups`] (the runtime does on Windows); without
+/// them the locale comes from `LANG` or `en-US`, and no system face loads.
+#[derive(Clone, Copy, Debug)]
+pub struct OsFontLookups {
+    /// The user default locale name, e.g. `ja-JP`.
+    pub user_locale: fn() -> Option<String>,
+    /// The system font table as `(value name, file)` pairs, machine fonts
+    /// first: a file is relative to `%WINDIR%\Fonts` or absolute.
+    pub font_entries: fn() -> Vec<(String, String)>,
 }
 
-#[cfg(not(windows))]
+static OS_FONT_LOOKUPS: OnceLock<OsFontLookups> = OnceLock::new();
+
+/// Install the OS lookups; the first installation wins.
+pub fn install_os_font_lookups(lookups: OsFontLookups) {
+    let _ = OS_FONT_LOOKUPS.set(lookups);
+}
+
+/// The user default locale name, if platform code installed the lookup.
 fn user_default_locale() -> Option<String> {
-    None
+    OS_FONT_LOOKUPS.get().and_then(|l| (l.user_locale)())
 }
 
 fn is_font_file(path: &Path) -> bool {
@@ -787,27 +795,58 @@ fn share_file_data(db: &mut fontdb::Database) {
 
 /// On-demand system font lookup by family name.
 ///
-/// Windows: reads the value names of
-/// `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts` (machine fonts,
-/// relative file names under `%WINDIR%\Fonts`) and the same key under `HKCU`
-/// (per-user fonts, absolute paths under `%LOCALAPPDATA%\Microsoft\Windows\Fonts`).
-/// A value name such as `"Segoe UI Semibold (TrueType)"` or
+/// Reads the system font table that platform code installed
+/// ([`OsFontLookups::font_entries`]; on Windows the runtime reads the `Fonts`
+/// registry key). A value name such as `"Segoe UI Semibold (TrueType)"` or
 /// `"Cambria & Cambria Math (TrueType)"` names the families in its file; only
 /// files whose value name matches the requested family are loaded.
 ///
-/// Other platforms: a no-op (Linux builds are headless CI only).
+/// Without installed lookups (Linux headless CI, tools) it loads nothing.
 pub(crate) mod system {
     use glyphon::fontdb;
+    use std::path::{Path, PathBuf};
 
     /// Load the system font files for `family` into `db`; returns how many
     /// files were loaded.  Never scans a directory.
     pub(crate) fn load_family(db: &mut fontdb::Database, family: &str) -> usize {
-        imp::load_family(db, family)
+        let Some(lookups) = super::OS_FONT_LOOKUPS.get() else {
+            return 0;
+        };
+        let windir = std::env::var_os("WINDIR")
+            .or_else(|| std::env::var_os("SystemRoot"))
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("C:\\Windows"));
+        let fonts_dir = windir.join("Fonts");
+        let mut files: Vec<PathBuf> = Vec::new();
+        for (name, data) in (lookups.font_entries)() {
+            if registry_name_matches(&name, family) {
+                let path = Path::new(&data);
+                let path = if path.is_absolute() {
+                    path.to_path_buf()
+                } else {
+                    fonts_dir.join(path)
+                };
+                if !files.contains(&path) {
+                    files.push(path);
+                }
+            }
+        }
+        let mut loaded = 0;
+        for path in files.iter().take(MAX_FILES_PER_FAMILY) {
+            match db.load_font_file(path) {
+                Ok(()) => loaded += 1,
+                Err(e) => tracing::debug!(
+                    file = %path.display(),
+                    error = %e,
+                    "system font file unreadable; skipped"
+                ),
+            }
+        }
+        loaded
     }
 
     /// Upper bound on files loaded for one name; `"Arial"` style prefixes can
     /// match a large family (Arial, Arial Black, Arial Nova, …).
-    #[cfg_attr(not(windows), allow(dead_code))] // used by the Windows impl only
     pub(crate) const MAX_FILES_PER_FAMILY: usize = 64;
 
     /// Does registry value name `value_name` describe a file containing
@@ -815,7 +854,6 @@ pub(crate) mod system {
     /// on `" & "`, and accepts an exact match or the family followed by a style
     /// word (`"Segoe UI Semibold"` matches `"Segoe UI"`).  Over-matching only
     /// loads an extra file; the caller re-checks real family names after loading.
-    #[cfg_attr(not(windows), allow(dead_code))] // Windows impl + unit tests
     pub(crate) fn registry_name_matches(value_name: &str, family: &str) -> bool {
         let base = match value_name.rfind(" (") {
             Some(i) if value_name.ends_with(')') => &value_name[..i],
@@ -832,128 +870,6 @@ pub(crate) mod system {
                 && part[..family.len()].eq_ignore_ascii_case(family)
                 && (part.len() == family.len() || part.as_bytes()[family.len()] == b' ')
         })
-    }
-
-    #[cfg(windows)]
-    mod imp {
-        use super::{MAX_FILES_PER_FAMILY, registry_name_matches};
-        use glyphon::fontdb;
-        use std::ffi::OsString;
-        use std::os::windows::ffi::OsStringExt;
-        use std::path::{Path, PathBuf};
-        use windows::Win32::Foundation::ERROR_NO_MORE_ITEMS;
-        use windows::Win32::System::Registry::{
-            HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, REG_EXPAND_SZ, REG_SZ,
-            REG_VALUE_TYPE, RegCloseKey, RegEnumValueW, RegOpenKeyExW,
-        };
-        use windows::core::{PCWSTR, PWSTR, w};
-
-        const FONTS_KEY: PCWSTR = w!("SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Fonts");
-
-        pub(super) fn load_family(db: &mut fontdb::Database, family: &str) -> usize {
-            let windir = std::env::var_os("WINDIR")
-                .or_else(|| std::env::var_os("SystemRoot"))
-                .map(PathBuf::from)
-                .unwrap_or_else(|| PathBuf::from("C:\\Windows"));
-            let fonts_dir = windir.join("Fonts");
-            let mut files: Vec<PathBuf> = Vec::new();
-            for root in [HKEY_LOCAL_MACHINE, HKEY_CURRENT_USER] {
-                for (name, data) in font_values(root) {
-                    if registry_name_matches(&name, family) {
-                        let path = Path::new(&data);
-                        let path = if path.is_absolute() {
-                            path.to_path_buf()
-                        } else {
-                            fonts_dir.join(path)
-                        };
-                        if !files.contains(&path) {
-                            files.push(path);
-                        }
-                    }
-                }
-            }
-            let mut loaded = 0;
-            for path in files.iter().take(MAX_FILES_PER_FAMILY) {
-                match db.load_font_file(path) {
-                    Ok(()) => loaded += 1,
-                    Err(e) => tracing::debug!(
-                        file = %path.display(),
-                        error = %e,
-                        "system font file unreadable; skipped"
-                    ),
-                }
-            }
-            loaded
-        }
-
-        /// `(value name, string data)` pairs of the `Fonts` key under `root`.
-        fn font_values(root: HKEY) -> Vec<(String, String)> {
-            let mut out = Vec::new();
-            let mut key = HKEY::default();
-            // SAFETY: FONTS_KEY is a static NUL-terminated wide string; `key`
-            // is written by the call and closed below.
-            if unsafe { RegOpenKeyExW(root, FONTS_KEY, 0, KEY_READ, &mut key) }.is_err() {
-                return out;
-            }
-            let mut name_buf = vec![0u16; 1024];
-            let mut data_buf = vec![0u8; 2048];
-            // Bounded: the walk ends at ERROR_NO_MORE_ITEMS long before this.
-            for index in 0..100_000 {
-                let mut name_len = name_buf.len() as u32;
-                let mut data_len = data_buf.len() as u32;
-                let mut kind = 0u32;
-                // SAFETY: buffers are live and their lengths are passed in
-                // elements (name) / bytes (data) as the API requires.
-                let rc = unsafe {
-                    RegEnumValueW(
-                        key,
-                        index,
-                        PWSTR(name_buf.as_mut_ptr()),
-                        &mut name_len,
-                        None,
-                        Some(&mut kind),
-                        Some(data_buf.as_mut_ptr()),
-                        Some(&mut data_len),
-                    )
-                };
-                if rc == ERROR_NO_MORE_ITEMS {
-                    break;
-                }
-                if rc.is_err() {
-                    // e.g. ERROR_MORE_DATA: a value larger than the buffers
-                    // is not a font entry we can use; skip it.
-                    continue;
-                }
-                let kind = REG_VALUE_TYPE(kind);
-                if kind != REG_SZ && kind != REG_EXPAND_SZ {
-                    continue;
-                }
-                let name = OsString::from_wide(&name_buf[..name_len as usize])
-                    .to_string_lossy()
-                    .into_owned();
-                let wide: Vec<u16> = data_buf[..data_len as usize]
-                    .chunks_exact(2)
-                    .map(|c| u16::from_le_bytes([c[0], c[1]]))
-                    .take_while(|&u| u != 0)
-                    .collect();
-                let data = OsString::from_wide(&wide).to_string_lossy().into_owned();
-                out.push((name, data));
-            }
-            // SAFETY: `key` was opened above and is closed exactly once.
-            unsafe {
-                let _ = RegCloseKey(key);
-            }
-            out
-        }
-    }
-
-    #[cfg(not(windows))]
-    mod imp {
-        use glyphon::fontdb;
-
-        pub(super) fn load_family(_db: &mut fontdb::Database, _family: &str) -> usize {
-            0
-        }
     }
 }
 
@@ -1204,6 +1120,10 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn windows_system_fallback_draws_real_faces() {
+        install_os_font_lookups(OsFontLookups {
+            user_locale: tze_hud_runtime::os_fonts::user_locale,
+            font_entries: tze_hud_runtime::os_fonts::font_entries,
+        });
         for (locale, han) in [("en-US", "Microsoft YaHei UI"), ("ja", "Yu Gothic")] {
             let (mut fs, _) =
                 build_font_system_with_locale(&FontConfig::default(), locale.to_owned());
@@ -1545,11 +1465,10 @@ mod tests {
         assert!(!m("Arial (TrueType)", ""));
     }
 
+    // Not on Windows: the real-registry test installs lookups process-wide.
+    #[cfg(not(windows))]
     #[test]
-    fn system_lookup_is_noop_off_windows() {
-        if cfg!(windows) {
-            return;
-        }
+    fn system_lookup_is_noop_without_os_lookups() {
         let mut db = fontdb::Database::new();
         assert_eq!(system::load_family(&mut db, "Segoe UI"), 0);
         assert_eq!(db.len(), 0);

@@ -3697,13 +3697,13 @@ dependencies = [
  "tze_hud_mcp",
  "tze_hud_portal",
  "tze_hud_resource",
+ "tze_hud_runtime",
  "tze_hud_scene",
  "tze_hud_telemetry",
  "tze_hud_widget",
  "unicode-script",
  "unicode-segmentation",
  "wgpu",
- "windows",
  "winit",
 ]
 

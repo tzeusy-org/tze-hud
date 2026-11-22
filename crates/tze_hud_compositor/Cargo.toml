@@ -34,10 +34,6 @@ tiny-skia = { workspace = true }
 ab_glyph = { workspace = true }
 rayon = { workspace = true }
 
-# Named system-font lookup reads the Windows font registry (fonts::system).
-[target.'cfg(windows)'.dependencies]
-windows = { workspace = true }
-
 [dev-dependencies]
 tze_hud_portal = { path = "../tze_hud_portal", version = "0.1.0" }
 tracing-subscriber = { workspace = true }
@@ -48,6 +44,13 @@ tze_hud_scene = { path = "../tze_hud_scene", version = "0.1.0", features = ["tes
 tokio = { workspace = true }
 proptest = { workspace = true }
 tze_hud_widget = { path = "../tze_hud_widget", version = "0.1.0" }
+
+# The Windows font test reads the real registry through the runtime's
+# platform lookups (`tze_hud_runtime::os_fonts`). Never call
+# `os_fonts::install()` from a compositor test: it fills the runtime's other
+# compositor copy; install into `crate::fonts` directly.
+[target.'cfg(windows)'.dev-dependencies]
+tze_hud_runtime = { path = "../tze_hud_runtime", version = "0.1.0" }
 
 [[test]]
 name = "it"

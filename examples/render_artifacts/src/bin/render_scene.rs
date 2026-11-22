@@ -20,7 +20,6 @@ use tze_hud_config::tokens::{CANONICAL_TOKENS, parse_color_hex};
 use tze_hud_mcp::{CallerContext, McpConfig, McpServer};
 use tze_hud_runtime::operator::screenshot::encode_png;
 use tze_hud_runtime::run_scene_startup;
-use tze_hud_scene::config::ConfigLoader;
 use tze_hud_scene::graph::SceneGraph;
 use tze_hud_scene::types::WidgetInstance;
 use tze_hud_widget::loader::{BundleScanResult, LoadedBundle, load_bundle_dir_with_tokens};
