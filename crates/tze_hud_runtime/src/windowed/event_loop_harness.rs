@@ -993,7 +993,8 @@ impl HeadlessEventLoopHarness {
 
     /// Run the real main-thread settle followed by the production frame turn.
     /// A missing renderer is explicit and never acknowledges a successful frame.
-    /// Returns false on lock contention or deferred settle work.
+    /// Returns false on lock contention or deferred settle work, including
+    /// input retained behind a busy scene lock.
     pub fn tick(&mut self) -> bool {
         self.last_turn_submitted = false;
         self.app.sync_design_tokens();
@@ -1002,7 +1003,10 @@ impl HeadlessEventLoopHarness {
         } else {
             self.app.sync_zone_assignments();
         }
-        let settled = !self.app.settle_scene_work().is_deferred();
+        // Settled as the production loop judges it: retained input still
+        // waiting on the scene lock is unfinished work.
+        let drain = self.app.settle_scene_work();
+        let settled = !self.app.has_deferred_scene_work(&drain);
         let (width, height) = (
             self.app.state.config.window.width,
             self.app.state.config.window.height,
@@ -3965,21 +3969,17 @@ mod tests {
                 assert_eq!(harness.app.state.pending_pointer_buttons.len(), 4);
                 drop(held);
                 let deadline = std::time::Instant::now() + SCENE_WAIT;
-                loop {
-                    // Tick completion covers scene/portal work, not delivery of
-                    // every retained edge: a transient lock miss can leave the
-                    // pointer FIFO queued while later settle phases complete.
-                    let settled = harness.tick();
+                // A settled tick has replayed every retained edge: input
+                // still queued behind a transient lock miss counts as unsettled.
+                while !harness.tick() {
                     let pending = harness.app.state.pending_pointer_buttons.len();
-                    if settled && pending == 0 {
-                        break;
-                    }
                     assert!(
                         std::time::Instant::now() < deadline,
-                        "retained notification delivery stalled: {pending} edges; settled={settled}"
+                        "retained notification delivery stalled: {pending} edges"
                     );
                     std::thread::yield_now();
                 }
+                assert!(harness.app.state.pending_pointer_buttons.is_empty());
                 let actions = take_action_ids(&harness);
                 if actions != ["reject"] {
                     failures.push(format!(

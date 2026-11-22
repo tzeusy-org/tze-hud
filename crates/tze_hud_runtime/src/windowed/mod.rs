@@ -884,6 +884,25 @@ impl WinitApp {
 }
 
 impl WinitApp {
+    /// Whether this turn left scene work for a later one: a deferred drain,
+    /// input retained because the scene lock was busy, or link feedback not
+    /// yet drawn. Settling can
+    /// complete while retained input still waits on a lock that another
+    /// thread (such as an availability waiter) briefly holds.
+    fn has_deferred_scene_work(&self, drain: &PortalProjectionDrain) -> bool {
+        drain.is_deferred()
+            || !self.state.pending_keyboard_events.is_empty()
+            || !self.state.pending_scroll.is_empty()
+            || self.state.pending_pointer_move
+            || !self.state.pending_pointer_buttons.is_empty()
+            || self.state.link_feedback.as_ref().is_some_and(|f| !f.drawn)
+            || self
+                .state
+                .primary_drag_gesture
+                .as_ref()
+                .is_some_and(|gesture| gesture.terminal.is_some())
+    }
+
     /// Settle the scene-side main-thread work for one event-loop turn: flush
     /// the composer draft, retry deferred keystrokes, dispatch MCP portal ops,
     /// and drain the portal projection into the scene. Needs no window or
@@ -1180,17 +1199,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         if let Some(listen) = self.sync_cursor_entry_listening() {
             event_loop.listen_device_events(listen);
         }
-        let has_deferred_scene_work = portal_drain.is_deferred()
-            || !self.state.pending_keyboard_events.is_empty()
-            || !self.state.pending_scroll.is_empty()
-            || self.state.pending_pointer_move
-            || !self.state.pending_pointer_buttons.is_empty()
-            || self.state.link_feedback.as_ref().is_some_and(|f| !f.drawn)
-            || self
-                .state
-                .primary_drag_gesture
-                .as_ref()
-                .is_some_and(|gesture| gesture.terminal.is_some());
+        let has_deferred_scene_work = self.has_deferred_scene_work(&portal_drain);
         if !inspected_scene_deadlines || has_deferred_scene_work {
             // Lock contention is not a deadline. Install one coalesced waiter
             // that wakes the main loop only after the shared scene is actually
