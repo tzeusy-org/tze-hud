@@ -1539,3 +1539,40 @@ def test_a_crashed_adapters_record_is_not_joined(hud):
                    capture_output=True, text=True, env=env, timeout=10)
     polls = [r for r in FakeHud.requests if r["body"].get("params", {}).get("name") == "hud_input"]
     assert polls and all(r["session"] is None for r in polls)
+
+
+def test_a_failed_reinitialize_never_leaves_the_adapter_unscoped(hud):
+    """After a 404 whose re-initialize fails (the HUD is still restarting),
+    a later call never reaches the HUD without a session id: it waits on a
+    fresh re-initialize and goes out on the new session."""
+    host, home = hud
+    pair(host, home)
+    with AdapterProcess(home) as adapter:
+        adapter.ready()
+        FakeHud.sessions.clear()  # the HUD restarted
+        FakeHud.modes["tze-hud-reinitialize"] = "hold"  # ...and is slow to answer
+        adapter.send("ping", "lost")
+        response = adapter.receive(timeout=6)
+        assert response["id"] == "lost" and response["error"]["message"].startswith("HUD session ended")
+        del FakeHud.modes["tze-hud-reinitialize"]
+        FakeHud.release.set()
+        adapter.send("ping", "later")
+        assert adapter.receive(timeout=6) == {"jsonrpc": "2.0", "id": "later", "result": {}}
+        later = [r["session"] for r in FakeHud.requests if r["body"].get("id") == "later"]
+        assert later and None not in later, later
+        assert all(r["session"] is not None for r in FakeHud.requests
+                   if r["body"].get("method") not in ("initialize",)), "no call went out unscoped"
+
+
+def test_a_loose_sessions_directory_is_made_private(hud):
+    """A pre-existing group/world-readable sessions directory is tightened to
+    0700 before the record is written, so helpers can read it."""
+    host, home = hud
+    pair(host, home)
+    directory = home / ".config" / "tze-hud" / "sessions"
+    directory.mkdir(mode=0o755)
+    directory.chmod(0o755)
+    with AdapterProcess(home) as adapter:
+        adapter.ready()
+        assert directory.stat().st_mode & 0o777 == 0o700
+        assert (directory / f"{os.getpid()}.json").exists()

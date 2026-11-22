@@ -19,7 +19,9 @@ with a 1 s deadline, even with calls in flight, releasing the session. A 404
 (the HUD restarted or released the session) re-initializes once, single-flight
 across concurrent calls and replaying the client's initialize, and retries
 each refused call once; the client never sees a second initialize result.
-A stopping adapter never re-initializes. The live session id is also kept in
+A stopping adapter never re-initializes, and once a session has existed
+no call goes out without one: after a failed re-initialize the next call
+waits on a fresh one. The live session id is also kept in
 `~/.config/tze-hud/sessions/<client-pid>.json` (mode 0600, removed on a
 clean stop) so a helper the client starts, such as portal_client.py's
 background waiter, joins this session instead of running unscoped.
@@ -191,6 +193,7 @@ class Adapter:
     reinitializing = False
     ending = None
     owner = None  # The client process whose helpers may join this session.
+    had_session = False  # Once true, no call ever goes out unscoped.
 
     def __init__(self, endpoint):
         self.endpoint = endpoint
@@ -293,6 +296,14 @@ class Adapter:
             self.retry.append((request, deadline if deadline is not None else time.monotonic() + REQUEST_SECONDS,
                                retried))
             return
+        if (self.had_session and self.session is None and not internal
+                and method != "initialize" and not self.stop):
+            # A failed re-initialize left no session: never fall back to the
+            # agent's unscoped caller; queue behind a fresh one.
+            self.retry.append((request, deadline if deadline is not None else time.monotonic() + REQUEST_SECONDS,
+                               retried))
+            self.reinitialize()
+            return
         if has_id and any("id" in t.request and t.request["id"] == request_id for t in self.tasks):
             self.queue(failure(request_id, "Request ID is already pending"))
             return
@@ -372,6 +383,7 @@ class Adapter:
         """Adopt `session` and record it privately for helpers the client
         starts (portal_client.py's background waiter joins it)."""
         self.session = session
+        self.had_session = self.had_session or session is not None
         if self.owner is None:
             return
         try:

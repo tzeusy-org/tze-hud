@@ -252,6 +252,11 @@ def write_session(owner: int, endpoint: dict, session: str) -> None:
     nonsecret endpoint, never a key."""
     path = session_path(owner)
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    directory = path.parent.lstat()
+    if not stat.S_ISDIR(directory.st_mode) or directory.st_uid != os.getuid():
+        raise PermissionError("the HUD sessions directory is not this user's own")
+    if directory.st_mode & 0o077:
+        path.parent.chmod(0o700)  # Readers reject a loose directory.
     record = {"schema": 1, "host": endpoint["host"], "url": endpoint["url"],
               "session": session, "adapter": os.getpid()}
     temp = path.with_name(f".{owner}.{os.getpid()}.tmp")
