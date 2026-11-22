@@ -1564,3 +1564,147 @@ async fn countdown_kpi_and_stepper_render_their_shipped_contracts() {
     );
     assert_eq!(clock.now_us(), scene.now_wall_us());
 }
+
+/// The elapsed timer rasterizes once per display change and never between
+/// (per second, then per minute), and its longest strings fit the card.
+#[tokio::test]
+async fn elapsed_rasterizes_once_per_display_change_and_fits_its_longest_strings() {
+    use std::sync::Arc;
+    use tze_hud_scene::{TestClock, WidgetDeadline};
+    let require_gpu = std::env::var("TZE_HUD_REQUIRE_GPU").is_ok_and(|v| v.trim() == "1");
+    if std::env::var("TZE_HUD_SKIP_GPU_TESTS").is_ok_and(|v| v.trim() == "1") {
+        assert!(!require_gpu, "required GPU bundle proof cannot skip");
+        return;
+    }
+    let mut compositor = match crate::common::new_headless_serialized(360, 124).await {
+        Ok(compositor) => compositor,
+        Err(CompositorError::NoAdapter) if !require_gpu => return,
+        Err(error) => panic!("bundle compositor: {error}"),
+    };
+    compositor.init_widget_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+    let mut surface = HeadlessSurface::new(&compositor.device, 360, 124);
+    let clock = Arc::new(TestClock::new(1_000));
+    let mut scene = SceneGraph::new_with_clock(360.0, 124.0, clock.clone());
+    let tab = scene.create_tab("Bundles", 0).unwrap();
+    let BundleScanResult::Ok(bundle) = bundle!("elapsed", ["card.svg"]) else {
+        panic!("shipped bundle must load")
+    };
+    for (file, bytes) in bundle.svg_contents {
+        compositor
+            .widget_renderer_mut()
+            .unwrap()
+            .register_svg("elapsed", &file, bytes);
+    }
+    scene.widget_registry.register_instance(WidgetInstance {
+        id: SceneId::new(),
+        widget_type_name: "elapsed".into(),
+        tab_id: tab,
+        geometry_override: Some(GeometryPolicy::Relative {
+            x_pct: 0.0,
+            y_pct: 0.0,
+            width_pct: 1.0,
+            height_pct: 1.0,
+        }),
+        contention_override: None,
+        instance_name: "elapsed".into(),
+        current_params: bundle
+            .definition
+            .parameter_schema
+            .iter()
+            .map(|p| (p.name.clone(), p.default_value.clone()))
+            .collect(),
+        auto_clear_ms: None,
+    });
+    scene.widget_registry.register_definition(bundle.definition);
+    let start = |scene: &mut SceneGraph, ago_ms: i64| {
+        scene
+            .publish_to_widget(
+                "elapsed",
+                HashMap::from([
+                    (
+                        "started_ms_ago".into(),
+                        WidgetParameterValue::Deadline(WidgetDeadline::relative(ago_ms)),
+                    ),
+                    ("label".into(), WidgetParameterValue::String("Tests".into())),
+                ]),
+                "agent",
+                None,
+                0,
+                None,
+            )
+            .unwrap();
+    };
+    let count = |c: &Compositor| c.widget_renderer().unwrap().raster_count("elapsed");
+    let shown = |c: &Compositor| {
+        c.widget_renderer()
+            .unwrap()
+            .texture_entry("elapsed")
+            .unwrap()
+            .last_rendered_params["started_ms_ago"]
+            .clone()
+    };
+    let text = |s: &str| WidgetParameterValue::String(s.into());
+    start(&mut scene, 0);
+    render(&mut compositor, &mut scene, &mut surface);
+    let first = count(&compositor);
+    assert_eq!(shown(&compositor), text("0:00"));
+    assert!(!compositor.has_inflight_animation(&scene));
+    // Per second under two minutes: nothing between, one raster at the change.
+    clock.advance(999);
+    assert!(!compositor.widget_deadline_needs_render(&scene));
+    render(&mut compositor, &mut scene, &mut surface);
+    assert_eq!(count(&compositor), first);
+    clock.advance(1);
+    assert!(compositor.widget_deadline_needs_render(&scene));
+    render(&mut compositor, &mut scene, &mut surface);
+    assert_eq!(
+        (count(&compositor), shown(&compositor)),
+        (first + 1, text("0:01"))
+    );
+    // Per minute past two minutes.
+    start(&mut scene, 180_000);
+    render(&mut compositor, &mut scene, &mut surface);
+    let three = count(&compositor);
+    assert_eq!(shown(&compositor), text("3 min"));
+    clock.advance(59_999);
+    assert!(!compositor.widget_deadline_needs_render(&scene));
+    render(&mut compositor, &mut scene, &mut surface);
+    assert_eq!(count(&compositor), three);
+    clock.advance(1);
+    render(&mut compositor, &mut scene, &mut surface);
+    assert_eq!(
+        (count(&compositor), shown(&compositor)),
+        (three + 1, text("4 min"))
+    );
+    // The longest strings stay inside the card with its 16 px inset.
+    for (ago_ms, expected) in [(86_340_000, "23 h 59"), (86_400_000, "1 d 00 h")] {
+        start(&mut scene, ago_ms);
+        render(&mut compositor, &mut scene, &mut surface);
+        assert_eq!(shown(&compositor), text(expected));
+    }
+    clock.advance(99 * 24 * 3_600_000);
+    render(&mut compositor, &mut scene, &mut surface);
+    assert_eq!(shown(&compositor), text("99 d 23 h"));
+    assert_eq!(
+        compositor.next_widget_deadline_wall_us(&scene),
+        None,
+        "held"
+    );
+    let pixels = surface.read_pixels(&compositor.device);
+    let primary = token_rgb("color.primary");
+    let ink = |x: u32| {
+        widget_region(&pixels, 360, (0, 0), (x, 40, 1, 24))
+            .iter()
+            .any(|p| (0..3).all(|c| p[c].abs_diff(primary[c]) <= 40))
+    };
+    let columns: Vec<u32> = (0..360).filter(|x| ink(*x)).collect();
+    let (left, right) = (columns[0], *columns.last().unwrap());
+    assert!(
+        left >= 16 && right < 360 - 16,
+        "value ink spans {left}..={right}"
+    );
+    assert!(
+        right - left > 40,
+        "the whole string is drawn: {left}..={right}"
+    );
+}

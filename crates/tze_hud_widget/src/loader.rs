@@ -597,8 +597,22 @@ fn parse_parameter_schema(
                 wc.enum_allowed_values = c.enum_allowed_values.clone();
             }
             wc.f32_integer = c.f32_integer;
+            wc.deadline_counts_up = c.deadline_counts.as_deref() == Some("up");
             wc
         });
+        if let Some(counts) = raw_param
+            .constraints
+            .as_ref()
+            .and_then(|c| c.deadline_counts.as_deref())
+            && (param_type != WidgetParamType::Deadline || !matches!(counts, "up" | "down"))
+        {
+            return Err(BundleError::InvalidManifest {
+                path: path_str.to_string(),
+                detail: format!(
+                    "bundle '{bundle_name}', parameter '{name}': deadline_counts must be \"up\" or \"down\" on a deadline"
+                ),
+            });
+        }
         if let Some(c) = raw_param.constraints.as_ref().filter(|c| c.f32_integer) {
             let default = match &default_value {
                 tze_hud_scene::WidgetParameterValue::F32(v) => Some(f64::from(*v)),

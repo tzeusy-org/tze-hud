@@ -274,10 +274,11 @@ with the same cancellation and idle semantics as a `hud_input` wait.
   exit duration/curve without extending authoritative expiry.
   Shipped bundles also include `countdown` (`ends_in_ms`, `label<=24`,
   `severity`), `kpi` (`value<=12`, `label<=24`, `trend=up|down|flat`,
-  `severity`), and `stepper` (integer `step` 0..12, integer `total` 1..12,
-  `state=active|blocked|done`, `label<=24`). Production config instantiates
-  only `main-countdown` from these additions; KPI and stepper are available
-  for owner configuration. A fractional count is rejected; a step above total
+  `severity`), `elapsed` (`started_ms_ago`, `label<=24`, `severity`: the
+  countdown's card, counting up), and `stepper` (integer `step` 0..12,
+  integer `total` 1..12, `state=active|blocked|done`, `label<=24`). Production
+  config instantiates only `main-countdown` from these additions; elapsed, KPI
+  and stepper are available for owner configuration. A fractional count is rejected; a step above total
   fills every dot; the current dot uses primary/caution/success for active/blocked/done.
 
   `deadline` appears in discovery as `deadline<=24h`. Send integer relative
@@ -288,10 +289,25 @@ with the same cancellation and idle semantics as a `hud_input` wait.
   presents, including a late delayed drain. A label-only republish under the
   same publisher/key preserves it; explicitly resending the duration resets it.
   Remaining time rounds up: `125 min` → `2 h 05`, `30 min` → `30 min`,
-  `90 s` → `1:30`. Only a visible published countdown schedules its next
-  display change: minute granularity above two minutes, second granularity
-  in the last two minutes. At `0:00` it retains severity and stops waking.
-  Hidden, cleared, absent and safe-mode countdowns schedule no countdown wake.
+  `90 s` → `1:30`.
+
+  A deadline declared `deadline_counts = "up"` appears as `elapsed<=24h`: the
+  same integer milliseconds 0..86400000 (gRPC `deadline_ms`), read as "started
+  this long ago", with the same snapshot, republish and reset rules and that
+  bound in every refusal. One publish such as
+  `{"surface":"widget:<instance>","params":{"started_ms_ago":0,"label":"Tests"}}`
+  keeps running with no further call. Elapsed time rounds down, so it never
+  shows time not yet passed: `0:00`…`1:59` (each second), `2 min`…`59 min`,
+  `1 h 00`…`23 h 59` (each minute), then `1 d 00 h` onward (each hour); at
+  `99 d 23 h` it holds and stops waking, and a backwards clock step shows
+  `0:00`.
+
+  Only a visible published countdown or elapsed timer schedules its next
+  display change: for a countdown, minute granularity above two minutes and
+  second granularity in the last two minutes; at `0:00` it retains severity
+  and stops waking. Hidden, cleared, absent and safe-mode countdowns and
+  elapsed timers schedule no wake; showing or resuming draws the current
+  time once.
   Safe mode freezes widget publication TTL and the owner's auto-clear allowance,
   while the absolute countdown keeps passing; resume displays current wall time.
   An already accepted delayed widget stays pending through safe mode, without

@@ -2249,6 +2249,110 @@ fn widget_deadline_presentation_retention_cadence_and_safe_mode() {
     assert_eq!(scene.next_widget_deadline_wall_us(), None);
 }
 
+/// The count-up twin: admission copies the direction from the declaration
+/// (a transport cannot set it), the start is snapshotted at presentation,
+/// label-only republishes keep it and resending the value restarts it. It
+/// wakes only for a visible display change, never while hidden or paused,
+/// and stops waking once cleared.
+#[test]
+fn widget_elapsed_presentation_retention_cadence_and_safe_mode() {
+    use crate::{Clock, WidgetDeadline};
+    let (mut scene, _, clock) = scene_with_gauge_and_clock(ContentionPolicy::LatestWins);
+    scene
+        .widget_registry
+        .definitions
+        .get_mut("gauge")
+        .unwrap()
+        .parameter_schema
+        .push(crate::WidgetParameterDeclaration {
+            name: "started_ms_ago".into(),
+            audience: Default::default(),
+            param_type: crate::WidgetParamType::Deadline,
+            default_value: WidgetParameterValue::Deadline(WidgetDeadline::relative(0)),
+            constraints: Some(crate::WidgetParamConstraints {
+                deadline_counts_up: true,
+                ..Default::default()
+            }),
+        });
+    let elapsed = |scene: &SceneGraph| {
+        let WidgetParameterValue::Deadline(d) =
+            &scene.widget_registry.instances["gauge"].current_params["started_ms_ago"]
+        else {
+            panic!("deadline")
+        };
+        d.clone()
+    };
+    let publish = |scene: &mut SceneGraph, name: &str, value: WidgetParameterValue| {
+        scene
+            .publish_to_widget(
+                "gauge",
+                HashMap::from([(name.to_string(), value)]),
+                "a",
+                None,
+                0,
+                None,
+            )
+            .unwrap();
+        scene.refresh_widget_current_params("gauge");
+    };
+    assert_eq!(
+        scene.next_widget_deadline_wall_us(),
+        None,
+        "never published"
+    );
+    // A transport-supplied direction is ignored; the declaration decides.
+    publish(
+        &mut scene,
+        "started_ms_ago",
+        WidgetParameterValue::Deadline(WidgetDeadline::relative(600_000)),
+    );
+    let started = elapsed(&scene);
+    assert!(started.counts_up);
+    assert_eq!(started.display_at(clock.now_us()), "10 min");
+    assert_eq!(
+        scene.next_widget_deadline_wall_us(),
+        Some(clock.now_us() + 60_000_000),
+        "one wake per minute past two minutes"
+    );
+    clock.advance(90_000);
+    publish(
+        &mut scene,
+        "label",
+        WidgetParameterValue::String("renamed".into()),
+    );
+    assert_eq!(elapsed(&scene), started, "a label-only republish keeps it");
+    assert_eq!(elapsed(&scene).display_at(clock.now_us()), "11 min");
+    publish(
+        &mut scene,
+        "started_ms_ago",
+        WidgetParameterValue::Deadline(WidgetDeadline::relative(0)),
+    );
+    assert_eq!(
+        elapsed(&scene).display_at(clock.now_us()),
+        "0:00",
+        "resent restarts"
+    );
+    assert_eq!(
+        scene.next_widget_deadline_wall_us(),
+        Some(clock.now_us() + 1_000_000)
+    );
+    scene.pause_widget_ttls();
+    assert_eq!(scene.next_widget_deadline_wall_us(), None, "paused");
+    clock.advance(42_000);
+    scene.resume_widget_ttls();
+    assert_eq!(
+        elapsed(&scene).display_at(clock.now_us()),
+        "0:42",
+        "the clock kept going"
+    );
+    scene.overlay.owner_hidden.widgets = true;
+    assert_eq!(scene.next_widget_deadline_wall_us(), None, "hidden");
+    scene.overlay.owner_hidden.widgets = false;
+    assert!(scene.next_widget_deadline_wall_us().is_some());
+    scene.clear_widget_for_publisher("gauge", "a").unwrap();
+    assert_eq!(scene.next_widget_deadline_wall_us(), None, "cleared");
+}
+
 #[test]
 fn scheduled_widget_snapshots_at_late_apply_and_clear_cancels_only_its_publisher() {
     use crate::mutation::{MutationBatch, SceneMutation};

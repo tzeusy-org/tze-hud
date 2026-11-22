@@ -1,5 +1,7 @@
 //! Relative widget deadlines become wall time only when a publication presents.
 //! Formatting and the next visible change share the same rounded time units.
+//! A count-up value (an elapsed timer) is "started this long ago" and rounds
+//! down, so it never shows time that has not yet passed.
 
 use crate::{SceneGraph, WidgetParameterValue};
 use serde::{Deserialize, Serialize};
@@ -12,7 +14,19 @@ pub struct WidgetDeadline {
     /// Runtime snapshot; transports accept only the relative duration.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub at_wall_us: Option<u64>,
+    /// Counts up from a start `ends_in_ms` before presentation; then
+    /// `at_wall_us` is the presentation instant. Set by shared admission
+    /// from the declaration, never by a transport.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub counts_up: bool,
 }
+
+const SECOND_US: u64 = 1_000_000;
+const MINUTE_US: u64 = 60 * SECOND_US;
+const HOUR_US: u64 = 60 * MINUTE_US;
+const DAY_US: u64 = 24 * HOUR_US;
+/// An elapsed timer holds `99 d 23 h` from here and stops waking.
+const ELAPSED_HOLD_US: u64 = 100 * DAY_US - HOUR_US;
 
 /// Resolve only presentation values; authoritative deadlines remain absolute.
 /// Passing the scene clock here also makes cached text equality time-aware.
@@ -111,6 +125,7 @@ impl WidgetDeadline {
         Self {
             ends_in_ms,
             at_wall_us: None,
+            counts_up: false,
         }
     }
 
@@ -121,7 +136,51 @@ impl WidgetDeadline {
     /// Call only after admission, at presentation (including delayed publishes).
     pub fn snapshot(&mut self, now_wall_us: u64) {
         debug_assert!(self.valid());
-        self.at_wall_us = Some(now_wall_us.saturating_add(self.ends_in_ms as u64 * 1_000));
+        self.at_wall_us = Some(if self.counts_up {
+            now_wall_us
+        } else {
+            now_wall_us.saturating_add(self.ends_in_ms as u64 * 1_000)
+        });
+    }
+
+    /// Time since the start, floored at zero (a backwards clock step).
+    fn elapsed_us(&self, now_wall_us: u64) -> u64 {
+        let ago = self.ends_in_ms.max(0) as u64 * 1_000;
+        let at = self.at_wall_us.unwrap_or(now_wall_us);
+        if now_wall_us >= at {
+            ago.saturating_add(now_wall_us - at)
+        } else {
+            ago.saturating_sub(at - now_wall_us)
+        }
+    }
+
+    fn elapsed_display(elapsed_us: u64) -> String {
+        let e = elapsed_us.min(ELAPSED_HOLD_US);
+        if e < 2 * MINUTE_US {
+            let s = e / SECOND_US;
+            format!("{}:{:02}", s / 60, s % 60)
+        } else if e < HOUR_US {
+            format!("{} min", e / MINUTE_US)
+        } else if e < DAY_US {
+            format!("{} h {:02}", e / HOUR_US, e % HOUR_US / MINUTE_US)
+        } else {
+            format!("{} d {:02} h", e / DAY_US, e % DAY_US / HOUR_US)
+        }
+    }
+
+    /// The next elapsed time at which the display changes, if any.
+    fn elapsed_next_change(elapsed_us: u64) -> Option<u64> {
+        if elapsed_us >= ELAPSED_HOLD_US {
+            return None;
+        }
+        let quantum = if elapsed_us < 2 * MINUTE_US {
+            SECOND_US
+        } else if elapsed_us < DAY_US {
+            MINUTE_US
+        } else {
+            HOUR_US
+        };
+        Some((elapsed_us / quantum + 1) * quantum)
     }
 
     fn remaining_us(&self, now_wall_us: u64) -> u64 {
@@ -130,6 +189,9 @@ impl WidgetDeadline {
     }
 
     pub fn display_at(&self, now_wall_us: u64) -> String {
+        if self.counts_up {
+            return Self::elapsed_display(self.elapsed_us(now_wall_us));
+        }
         let seconds = self.remaining_us(now_wall_us).div_ceil(1_000_000);
         if seconds < 120 {
             return format!("{}:{:02}", seconds / 60, seconds % 60);
@@ -145,6 +207,11 @@ impl WidgetDeadline {
     /// The first wall instant at which `display_at` changes. Never a periodic
     /// retry, and never due now: expiry has a stable zero display and no wake.
     pub fn next_change_wall_us(&self, now_wall_us: u64) -> Option<u64> {
+        if self.counts_up {
+            let elapsed = self.elapsed_us(now_wall_us);
+            let next = Self::elapsed_next_change(elapsed)?;
+            return Some(now_wall_us.saturating_add(next - elapsed));
+        }
         let remaining = self.remaining_us(now_wall_us);
         if remaining == 0 {
             return None;
@@ -182,6 +249,7 @@ mod tests {
             let deadline = WidgetDeadline {
                 ends_in_ms: 0,
                 at_wall_us: Some(remaining),
+                counts_up: false,
             };
             assert_eq!(deadline.display_at(0), label);
             if let Some(next) = deadline.next_change_wall_us(0) {
@@ -201,5 +269,62 @@ mod tests {
         // Rewinding the injected clock does not mutate or rebase the deadline.
         assert_eq!(deadline.display_at(u64::MAX), "0:00");
         assert_eq!(deadline.display_at(u64::MAX - 2), "0:01");
+    }
+
+    /// Elapsed time rounds down; format and next change share the
+    /// boundaries at 2 min, 60 min, 24 h and the 100-day hold.
+    #[test]
+    fn elapsed_format_and_next_change_share_floored_boundaries() {
+        let up = |ago_ms: i64| {
+            let mut d = WidgetDeadline {
+                counts_up: true,
+                ..WidgetDeadline::relative(ago_ms)
+            };
+            d.snapshot(1_000_000_000);
+            d
+        };
+        let start = up(0);
+        let at = |elapsed: u64| 1_000_000_000 + elapsed;
+        for (elapsed, label) in [
+            (0, "0:00"),
+            (999_999, "0:00"),
+            (42 * SECOND_US, "0:42"),
+            (2 * MINUTE_US - 1, "1:59"),
+            (2 * MINUTE_US, "2 min"),
+            (12 * MINUTE_US + 30 * SECOND_US, "12 min"),
+            (HOUR_US - 1, "59 min"),
+            (HOUR_US, "1 h 00"),
+            (65 * MINUTE_US, "1 h 05"),
+            (DAY_US - 1, "23 h 59"),
+            (DAY_US, "1 d 00 h"),
+            (26 * HOUR_US, "1 d 02 h"),
+            (ELAPSED_HOLD_US - 1, "99 d 22 h"),
+            (ELAPSED_HOLD_US, "99 d 23 h"),
+            (300 * DAY_US, "99 d 23 h"),
+        ] {
+            assert_eq!(start.display_at(at(elapsed)), label, "{elapsed}");
+            match start.next_change_wall_us(at(elapsed)) {
+                Some(next) => {
+                    assert!(next > at(elapsed));
+                    assert_eq!(start.display_at(next - 1), label, "{elapsed}");
+                    assert_ne!(start.display_at(next), label, "{elapsed}");
+                }
+                None => assert!(elapsed >= ELAPSED_HOLD_US, "{elapsed}"),
+            }
+        }
+        // One wake per display change: per second, then per minute, then per hour.
+        assert_eq!(start.next_change_wall_us(at(0)), Some(at(SECOND_US)));
+        assert_eq!(
+            start.next_change_wall_us(at(3 * MINUTE_US)),
+            Some(at(4 * MINUTE_US))
+        );
+        assert_eq!(
+            start.next_change_wall_us(at(DAY_US + 1)),
+            Some(at(DAY_US + HOUR_US))
+        );
+        // Started ten minutes ago; a backwards clock step shows 0:00.
+        assert_eq!(up(600_000).display_at(at(0)), "10 min");
+        assert_eq!(up(1_000).display_at(at(0) - 5 * SECOND_US), "0:00");
+        assert_eq!(start.display_at(0), "0:00");
     }
 }

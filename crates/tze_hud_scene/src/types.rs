@@ -2462,6 +2462,10 @@ pub struct WidgetParamConstraints {
     /// refused, never floored. Bounds and default must be whole too.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub f32_integer: bool,
+    /// Deadline parameters only: the value counts up ("started this long
+    /// ago", an elapsed timer) instead of down.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub deadline_counts_up: bool,
     /// Maximum UTF-8 byte length for string parameters. 0 / None = default 1024.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub string_max_bytes: Option<u32>,
@@ -2493,10 +2497,22 @@ pub struct WidgetParameterDeclaration {
 }
 
 impl WidgetParameterDeclaration {
+    /// A deadline that counts up (an elapsed timer).
+    pub fn deadline_counts_up(&self) -> bool {
+        self.param_type == WidgetParamType::Deadline
+            && self
+                .constraints
+                .as_ref()
+                .is_some_and(|c| c.deadline_counts_up)
+    }
+
     /// Expected value for actionable transport errors; discovery uses its compact notation.
     pub fn value_hint(&self) -> std::string::String {
         let constraints = self.constraints.as_ref();
         match self.param_type {
+            WidgetParamType::Deadline if self.deadline_counts_up() => {
+                "elapsed<=24h (integer milliseconds 0..86400000)".into()
+            }
             WidgetParamType::Deadline => "deadline<=24h (integer milliseconds 0..86400000)".into(),
             WidgetParamType::F32 => {
                 let min = constraints.and_then(|c| c.f32_min);

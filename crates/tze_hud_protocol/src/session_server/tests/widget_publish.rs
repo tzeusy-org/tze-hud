@@ -41,6 +41,19 @@ async fn test_durable_widget_publish_receives_result() {
             });
         def.parameter_schema
             .push(tze_hud_scene::WidgetParameterDeclaration {
+                name: "started_ms_ago".into(),
+                audience: Default::default(),
+                param_type: tze_hud_scene::WidgetParamType::Deadline,
+                default_value: tze_hud_scene::WidgetParameterValue::Deadline(
+                    tze_hud_scene::WidgetDeadline::relative(0),
+                ),
+                constraints: Some(tze_hud_scene::WidgetParamConstraints {
+                    deadline_counts_up: true,
+                    ..Default::default()
+                }),
+            });
+        def.parameter_schema
+            .push(tze_hud_scene::WidgetParameterDeclaration {
                 name: "count".into(),
                 audience: Default::default(),
                 param_type: tze_hud_scene::WidgetParamType::F32,
@@ -136,6 +149,13 @@ async fn test_durable_widget_publish_receives_result() {
             "deadline<=24h",
         ),
         ("count", Param::F32Value(2.5), "must be an integer in 0..12"),
+        ("started_ms_ago", Param::DeadlineMs(-1), "elapsed<=24h"),
+        (
+            "started_ms_ago",
+            Param::DeadlineMs(86400001),
+            "elapsed<=24h",
+        ),
+        ("started_ms_ago", Param::F32Value(1.5), "elapsed<=24h"),
         (
             "count",
             Param::F32Value(13.0),

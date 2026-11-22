@@ -5634,3 +5634,93 @@ async fn integer_counts_are_discovered_and_fractions_refused() {
         );
     }
 }
+
+/// One publish shows a running elapsed time with no further call: the start
+/// is snapshotted when the widget appears (also after `delay_ms`), and the
+/// value refuses anything but integer ms 0..86400000 with the
+/// `elapsed<=24h` hint.
+#[tokio::test]
+async fn elapsed_timer_runs_from_one_publish() {
+    let (server, clock) = server();
+    {
+        let mut scene = server.scene.lock().await;
+        let gauge = scene.widget_registry.definitions.get_mut("gauge").unwrap();
+        gauge.parameter_schema.push(WidgetParameterDeclaration {
+            name: "started_ms_ago".into(),
+            audience: Default::default(),
+            param_type: WidgetParamType::Deadline,
+            default_value: WidgetParameterValue::Deadline(tze_hud_scene::WidgetDeadline::relative(
+                0,
+            )),
+            constraints: Some(WidgetParamConstraints {
+                deadline_counts_up: true,
+                ..Default::default()
+            }),
+        });
+    }
+    let discovery = call(&server, "hud_surfaces", json!({})).await;
+    let gauge = discovery["surfaces"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["s"] == "widget:gauge")
+        .unwrap();
+    assert_eq!(gauge["params"]["started_ms_ago"], "elapsed<=24h");
+    let shown = |scene: &SceneGraph| {
+        let WidgetParameterValue::Deadline(d) =
+            &scene.widget_registry.instances["gauge"].current_params["started_ms_ago"]
+        else {
+            panic!("deadline")
+        };
+        d.display_at(scene.now_wall_us())
+    };
+    let v = call(
+        &server,
+        "hud_publish",
+        json!({"surface":"widget:gauge","params":{"started_ms_ago":0,"label":"Tests"}}),
+    )
+    .await;
+    assert_eq!(v, json!({"ok": true}));
+    for (advance_ms, label) in [
+        (0, "0:00"),
+        (42_000, "0:42"),
+        (708_000, "12 min"),
+        (3_150_000, "1 h 05"),
+        (89_700_000, "1 d 02 h"),
+    ] {
+        clock.advance(advance_ms);
+        assert_eq!(shown(&*server.scene.lock().await), label);
+    }
+    call(
+        &server,
+        "hud_publish",
+        json!({"surface":"widget:gauge","params":{"started_ms_ago":600000}}),
+    )
+    .await;
+    assert_eq!(shown(&*server.scene.lock().await), "10 min");
+    for value in [json!(-1), json!(1.5), json!(86_400_001), json!("1000")] {
+        let error = call_err(
+            &server,
+            "hud_publish",
+            json!({"surface":"widget:gauge","params":{"started_ms_ago":value}}),
+        )
+        .await;
+        assert_eq!(error["code"], "WIDGET_PARAMETER_INVALID", "{value}");
+        assert!(
+            error["hint"].as_str().unwrap().contains("elapsed<=24h"),
+            "{error}"
+        );
+        assert!(error.to_string().len() / 3 <= 60, "{error}");
+    }
+    // A delayed publish counts from when it appears.
+    call(
+        &server,
+        "hud_publish",
+        json!({"surface":"widget:gauge","delay_ms":5000,"params":{"started_ms_ago":0}}),
+    )
+    .await;
+    clock.advance(5_000);
+    let mut scene = server.scene.lock().await;
+    scene.apply_due_batches();
+    assert_eq!(shown(&scene), "0:00");
+}

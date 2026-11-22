@@ -222,6 +222,16 @@ fn shipped_bundles_load_and_bind() {
             ],
         ),
         (
+            "elapsed",
+            &["label", "started_ms_ago", "severity", "tooltip_visible"],
+            &["card.svg"],
+            &[
+                ("started_ms_ago", "value", "text-content"),
+                ("severity", "value", "fill"),
+                ("tooltip_visible", "tooltip", "opacity"),
+            ],
+        ),
+        (
             "kpi",
             &["label", "value", "trend", "severity", "tooltip_visible"],
             &["card.svg"],
@@ -284,6 +294,7 @@ fn shipped_bundles_need_their_tokens() {
         "progress-bar",
         "status-indicator",
         "countdown",
+        "elapsed",
         "kpi",
         "stepper",
     ] {
@@ -300,6 +311,7 @@ fn shipped_hover_tooltips_share_the_gauge_delay() {
         "progress-bar",
         "status-indicator",
         "countdown",
+        "elapsed",
         "kpi",
         "stepper",
     ] {
@@ -493,6 +505,7 @@ fn shipped_bundles_have_no_hardcoded_colors_or_restyled_opacity() {
         ),
         ("status-indicator", &["indicator.svg", "widget.toml"][..]),
         ("countdown", &["card.svg", "widget.toml"][..]),
+        ("elapsed", &["card.svg", "widget.toml"][..]),
         ("kpi", &["card.svg", "widget.toml"][..]),
         ("stepper", &["card.svg", "widget.toml"][..]),
     ] {
@@ -1076,6 +1089,45 @@ fn integer_constraint_needs_whole_bounds_and_default() {
                 );
             }
             other => panic!("{kind} {default} {bounds}: {other:?}"),
+        }
+    }
+}
+
+/// The elapsed bundle's start counts up; `deadline_counts` accepts only
+/// "up" or "down", and only on a deadline.
+#[test]
+fn elapsed_counts_up_and_deadline_counts_is_checked() {
+    use tze_hud_scene::WidgetParamType;
+    let bundle = load_shipped("elapsed");
+    let started = bundle
+        .definition
+        .parameter_schema
+        .iter()
+        .find(|p| p.name == "started_ms_ago")
+        .unwrap();
+    assert_eq!(started.param_type, WidgetParamType::Deadline);
+    assert!(started.deadline_counts_up());
+    assert!(started.value_hint().starts_with("elapsed<=24h"));
+    for (kind, default, counts, accepted) in [
+        ("deadline", "0", "up", true),
+        ("deadline", "0", "down", true),
+        ("deadline", "0", "sideways", false),
+        ("f32", "0.0", "up", false),
+    ] {
+        let source = manifest(
+            "timer",
+            &format!(
+                "[[parameter_schema]]\nname = \"since\"\ntype = \"{kind}\"\ndefault = {default}\n[parameter_schema.constraints]\ndeadline_counts = \"{counts}\"\n"
+            ),
+        );
+        let result = load_files(&[("widget.toml", &source)], &HashMap::new());
+        assert_eq!(
+            matches!(result, BundleScanResult::Ok(_)),
+            accepted,
+            "{source}: {result:?}"
+        );
+        if let BundleScanResult::Err(error) = result {
+            assert!(error.to_string().contains("'since'"), "{error}");
         }
     }
 }

@@ -291,6 +291,7 @@ fn widget_params(scene: &SceneGraph, instance: &str) -> Value {
         }
         let c = d.constraints.as_ref();
         let ty = match d.param_type {
+            WidgetParamType::Deadline if d.deadline_counts_up() => "elapsed<=24h".into(),
             WidgetParamType::Deadline => "deadline<=24h".into(),
             WidgetParamType::F32 => match (c.and_then(|c| c.f32_min), c.and_then(|c| c.f32_max)) {
                 (Some(lo), Some(hi)) if c.is_some_and(|c| c.f32_integer) => {

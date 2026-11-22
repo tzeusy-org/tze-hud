@@ -527,9 +527,10 @@ Output updates are rejected, never buffered for replay. Input TTL, finite poll
 ownership, prior orphan grace and the maximum scene suspension still expire.
 Blocked render/cue work stays pending until resume without periodic retries.
 Widget publication TTLs and owner auto-clear allowances also pause, without
-moving their original publication timestamp. Countdown parameter deadlines are
-absolute wall time: they keep passing, retain their last pixels without retries
-while paused, and refresh to current remaining time on resume.
+moving their original publication timestamp. Countdown and elapsed parameter
+deadlines are absolute wall time: they keep passing, retain their last pixels
+without retries while paused, and refresh to the current time on resume
+([`widget_elapsed_presentation_retention_cadence_and_safe_mode`](../crates/tze_hud_scene/src/graph/widget_tests.rs)).
 Already accepted widget-containing scheduled batches wait atomically through
 pause, without an overdue wake or materializing under a suspended lease. On
 resume their deadline and relative TTL start at actual presentation; new incoming
@@ -633,7 +634,7 @@ Refusals name the field and limit to fix, and no hint carries an internal id.
 
 ## 9. Time is injected
 
-Anything with a deadline (TTL, grace periods, degradation windows, expiry, widget countdowns)
+Anything with a deadline (TTL, grace periods, degradation windows, expiry, widget countdowns and elapsed timers)
 reads time from an injectable clock (`TestClock`, or `*_at(now)` methods), so
 its tests are deterministic and never sleep. Runtime composition shares one
 clock object between scene, MCP, portal driver and pause control before cloning
@@ -645,7 +646,9 @@ wall-time/`Instant` observation, carried across scene unlock; it never resamples
 host wall time for that conversion.
 
 - `tze_hud_scene` [`countdown_format_and_next_change_share_rounded_boundaries`](../crates/tze_hud_scene/src/widget_deadline.rs),
+  [`elapsed_format_and_next_change_share_floored_boundaries`](../crates/tze_hud_scene/src/widget_deadline.rs),
   [`widget_deadline_presentation_retention_cadence_and_safe_mode`](../crates/tze_hud_scene/src/graph/widget_tests.rs),
+  [`widget_elapsed_presentation_retention_cadence_and_safe_mode`](../crates/tze_hud_scene/src/graph/widget_tests.rs),
   [`scheduled_widget_snapshots_at_late_apply_and_clear_cancels_only_its_publisher`](../crates/tze_hud_scene/src/graph/widget_tests.rs)
 - `tze_hud_runtime` [`portal_liveness_paused_during_safe_mode`](../crates/tze_hud_runtime/src/windowed/panel_input.rs),
   [`earliest_future_deadline_selects_wait_until`](../crates/tze_hud_runtime/src/windowed/wake.rs),
@@ -688,8 +691,11 @@ From the control panel the owner can hide portals, zones, widgets, or all of the
 screen, or turn on Hide from screen capture). Hidden content is not drawn, catches no pointer input, holds no
 keyboard focus (a focused composer blurs), and costs no raster or upload work;
 its fades, reveals and scroll catch-up schedule no frames, and widgets shown
-again draw their newest values directly. Hidden countdowns keep their absolute
-wall deadline but schedule no display-change wake; showing them refreshes once.
+again draw their newest values directly. Hidden countdowns and elapsed timers
+keep their absolute wall time but schedule no display-change wake; showing them
+refreshes once
+([`elapsed_rasterizes_once_per_display_change_and_fits_its_longest_strings`](../crates/tze_hud_compositor/tests/widget_raster_count.rs)
+covers one raster per change).
 Leases, publications and agents are untouched and nothing tells an agent:
 publishes keep landing and draw, as they are now, when shown again. The set is
 runtime-only overlay state beside the scene model, never serialized and never
