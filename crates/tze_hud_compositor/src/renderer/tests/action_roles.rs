@@ -111,11 +111,19 @@ fn destructive_label_holds_contrast_on_every_tone_and_theme() {
                     visible >= MIN_SWEEP_CONTRAST,
                     "{theme} {zone} urgency {urgency}: sweep {visible:.2}:1 against the card"
                 );
+                // A held label splits at the sweep edge: the swept part on
+                // the sweep, the unswept part (also at hold start and through
+                // the drain) in its resting colour on the card.
                 let held = style.action_label_color(&card, 1, true);
                 let readable = contrast(held, sweep);
                 assert!(
                     readable >= MIN_TEXT_CONTRAST,
-                    "{theme} {zone} urgency {urgency}: held label {readable:.2}:1"
+                    "{theme} {zone} urgency {urgency}: swept label {readable:.2}:1"
+                );
+                let unswept = contrast(label, fill);
+                assert!(
+                    unswept >= MIN_TEXT_CONTRAST,
+                    "{theme} {zone} urgency {urgency}: unswept label {unswept:.2}:1"
                 );
             }
         }
@@ -277,4 +285,81 @@ async fn early_release_drains_over_state_motion() {
     clock.advance(50);
     assert_eq!(sweep(&compositor, &scene), None);
     assert!(!compositor.has_inflight_animation(&scene));
+}
+
+/// The held label splits at the sweep edge on every tone: the swept part in
+/// the held label, the unswept part in the resting destructive colour, so an
+/// inverting tone (whose held label matches its card) never draws the label
+/// on its own colour. The drain splits the same way; with no fill the label
+/// is whole and resting.
+#[tokio::test]
+async fn held_label_splits_at_the_sweep_edge() {
+    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
+    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+    for urgency in 0..=3 {
+        let clock = Arc::new(TestClock::new(1_000));
+        let mut scene = role_scene(&clock, urgency, &[("Keep", false), ("Delete", true)]);
+        compositor.populate_zone_hit_regions(&mut scene, 1280.0, 720.0);
+        compositor.prime_markdown_cache(&scene);
+        compositor.prime_truncation_cache(&scene);
+        let region = action_region(&scene, 1);
+        let b = region.bounds;
+        let style = style(&compositor, &scene);
+        let card = payload(urgency, &[("Keep", false), ("Delete", true)]);
+        let srgb = |c| crate::text::rgba_to_srgb_u8(c);
+        let (resting, held) = (
+            srgb(style.action_label_color(&card, 1, false)),
+            srgb(style.action_label_color(&card, 1, true)),
+        );
+        let parts = |scene: &SceneGraph| {
+            let mut parts: Vec<_> = compositor
+                .collect_text_items(scene, 1280.0, 720.0)
+                .into_iter()
+                .filter(|i| &*i.text == "Delete")
+                .map(|i| {
+                    (
+                        i.clip_pixel_x,
+                        i.clip_pixel_x + i.clip_bounds_width,
+                        i.color,
+                    )
+                })
+                .collect();
+            parts.sort_by(|a, b| a.0.total_cmp(&b.0));
+            parts
+        };
+        let whole = parts(&scene);
+        assert_eq!(whole.len(), 1);
+        assert_eq!(whole[0].2[..3], resting[..3], "urgency {urgency}: at rest");
+        let (left, right) = (whole[0].0, whole[0].1);
+        let mut straddled = 0;
+        // Hold start: nothing swept, the whole label rests.
+        scene.begin_notification_hold(region.clone(), None);
+        assert_eq!(parts(&scene)[..], whole[..], "urgency {urgency}: start");
+        for (advance, cancel) in [(300, false), (0, true), (50, false)] {
+            clock.advance(advance);
+            if cancel {
+                scene.cancel_notification_hold(600, 100);
+            }
+            let edge = b.x + b.width * if cancel || advance == 300 { 0.5 } else { 0.25 };
+            let split = parts(&scene);
+            if (left..right).contains(&edge) {
+                straddled += 1;
+                assert_eq!(split.len(), 2, "urgency {urgency}: {split:?}");
+                assert_eq!(split[0].2[..3], held[..3]);
+                assert_eq!(split[1].2[..3], resting[..3]);
+                assert!((split[0].0 - left).abs() < 1e-3 && (split[1].1 - right).abs() < 1e-3);
+                assert!((split[0].1 - edge).abs() < 1e-3 && (split[1].0 - edge).abs() < 1e-3);
+            } else {
+                assert!(
+                    split
+                        .iter()
+                        .all(|p| p.2[..3] == if edge >= right { held } else { resting }[..3])
+                );
+            }
+        }
+        assert_eq!(
+            straddled, 3,
+            "urgency {urgency}: every edge crosses the label"
+        );
+    }
 }

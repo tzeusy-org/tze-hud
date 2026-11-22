@@ -175,7 +175,8 @@ with the same cancellation and idle semantics as a `hud_input` wait.
   the button (shown at once when Windows animations are off; on a card whose
   fill it would not stand out from at 3:1, such as the error card, the pair
   inverts to a `color.on_error.container` sweep under a
-  `color.error.container` label) and the action
+  `color.error.container` label; only the swept part of the label takes the
+  sweep's label colour, the rest keeps its resting colour) and the action
   fires once when the hold completes, without waiting for release; an armed
   `wait_ms` returns it then. Releasing early, the pointer leaving the button,
   capture loss, key-up, Esc or another key, HUD keyboard-focus loss or safe
