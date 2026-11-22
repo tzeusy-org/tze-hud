@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0btypes.proto\x12\x13tze_hud.protocol.v1\"\x1d\n\x0cSceneIdProto\x12\r\n\x05\x62ytes\x18\x01 \x01(\x0c\" \n\x0fResourceIdProto\x12\r\n\x05\x62ytes\x18\x01 \x01(\x0c\"2\n\x04Rgba\x12\t\n\x01r\x18\x01 \x01(\x02\x12\t\n\x01g\x18\x02 \x01(\x02\x12\t\n\x01\x62\x18\x03 \x01(\x02\x12\t\n\x01\x61\x18\x04 \x01(\x02\"J\n\x17NotificationActionProto\x12\r\n\x05label\x18\x01 \x01(\t\x12\x13\n\x0b\x63\x61llback_id\x18\x02 \x01(\t\x12\x0b\n\x03url\x18\x03 \x01(\t\"\x90\x01\n\x13NotificationPayload\x12\x0c\n\x04text\x18\x01 \x01(\t\x12\x0c\n\x04icon\x18\x02 \x01(\t\x12\x0f\n\x07urgency\x18\x03 \x01(\r\x12\r\n\x05title\x18\x04 \x01(\t\x12=\n\x07\x61\x63tions\x18\x05 \x03(\x0b\x32,.tze_hud.protocol.v1.NotificationActionProto\"\x87\x01\n\x10StatusBarPayload\x12\x43\n\x07\x65ntries\x18\x01 \x03(\x0b\x32\x32.tze_hud.protocol.v1.StatusBarPayload.EntriesEntry\x1a.\n\x0c\x45ntriesEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\"%\n\x0eStaticImageRef\x12\x13\n\x0bresource_id\x18\x01 \x01(\x0c\"\xa7\x02\n\x0bZoneContent\x12\x15\n\x0bstream_text\x18\x01 \x01(\tH\x00\x12@\n\x0cnotification\x18\x02 \x01(\x0b\x32(.tze_hud.protocol.v1.NotificationPayloadH\x00\x12;\n\nstatus_bar\x18\x03 \x01(\x0b\x32%.tze_hud.protocol.v1.StatusBarPayloadH\x00\x12\x30\n\x0bsolid_color\x18\x04 \x01(\x0b\x32\x19.tze_hud.protocol.v1.RgbaH\x00\x12?\n\x10static_image_ref\x18\x05 \x01(\x0b\x32#.tze_hud.protocol.v1.StaticImageRefH\x00\x42\t\n\x07payloadJ\x04\x08\x06\x10\x07\"]\n\x16RelativeGeometryPolicy\x12\r\n\x05x_pct\x18\x01 \x01(\x02\x12\r\n\x05y_pct\x18\x02 \x01(\x02\x12\x11\n\twidth_pct\x18\x03 \x01(\x02\x12\x12\n\nheight_pct\x18\x04 \x01(\x02\"\x86\x01\n\x1a\x45\x64geAnchoredGeometryPolicy\x12.\n\x04\x65\x64ge\x18\x01 \x01(\x0e\x32 .tze_hud.protocol.v1.DisplayEdge\x12\x12\n\nheight_pct\x18\x02 \x01(\x02\x12\x11\n\twidth_pct\x18\x03 \x01(\x02\x12\x11\n\tmargin_px\x18\x04 \x01(\x02\"\xaa\x01\n\x13GeometryPolicyProto\x12?\n\x08relative\x18\x01 \x01(\x0b\x32+.tze_hud.protocol.v1.RelativeGeometryPolicyH\x00\x12H\n\redge_anchored\x18\x02 \x01(\x0b\x32/.tze_hud.protocol.v1.EdgeAnchoredGeometryPolicyH\x00\x42\x08\n\x06policy\"\xc4\x01\n\x19WidgetParameterValueProto\x12\x12\n\nparam_name\x18\x01 \x01(\t\x12\x13\n\tf32_value\x18\x02 \x01(\x02H\x00\x12\x16\n\x0cstring_value\x18\x03 \x01(\tH\x00\x12\x30\n\x0b\x63olor_value\x18\x04 \x01(\x0b\x32\x19.tze_hud.protocol.v1.RgbaH\x00\x12\x14\n\nenum_value\x18\x05 \x01(\tH\x00\x12\x15\n\x0b\x64\x65\x61\x64line_ms\x18\x06 \x01(\x03H\x00\x42\x07\n\x05value*\x89\x01\n\x0b\x44isplayEdge\x12\x1c\n\x18\x44ISPLAY_EDGE_UNSPECIFIED\x10\x00\x12\x14\n\x10\x44ISPLAY_EDGE_TOP\x10\x01\x12\x17\n\x13\x44ISPLAY_EDGE_BOTTOM\x10\x02\x12\x15\n\x11\x44ISPLAY_EDGE_LEFT\x10\x03\x12\x16\n\x12\x44ISPLAY_EDGE_RIGHT\x10\x04\x62\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0btypes.proto\x12\x13tze_hud.protocol.v1\" \n\x0fResourceIdProto\x12\r\n\x05\x62ytes\x18\x01 \x01(\x0c\"2\n\x04Rgba\x12\t\n\x01r\x18\x01 \x01(\x02\x12\t\n\x01g\x18\x02 \x01(\x02\x12\t\n\x01\x62\x18\x03 \x01(\x02\x12\t\n\x01\x61\x18\x04 \x01(\x02\"J\n\x17NotificationActionProto\x12\r\n\x05label\x18\x01 \x01(\t\x12\x13\n\x0b\x63\x61llback_id\x18\x02 \x01(\t\x12\x0b\n\x03url\x18\x03 \x01(\t\"\x90\x01\n\x13NotificationPayload\x12\x0c\n\x04text\x18\x01 \x01(\t\x12\x0c\n\x04icon\x18\x02 \x01(\t\x12\x0f\n\x07urgency\x18\x03 \x01(\r\x12\r\n\x05title\x18\x04 \x01(\t\x12=\n\x07\x61\x63tions\x18\x05 \x03(\x0b\x32,.tze_hud.protocol.v1.NotificationActionProto\"\x87\x01\n\x10StatusBarPayload\x12\x43\n\x07\x65ntries\x18\x01 \x03(\x0b\x32\x32.tze_hud.protocol.v1.StatusBarPayload.EntriesEntry\x1a.\n\x0c\x45ntriesEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\"%\n\x0eStaticImageRef\x12\x13\n\x0bresource_id\x18\x01 \x01(\x0c\"\xa7\x02\n\x0bZoneContent\x12\x15\n\x0bstream_text\x18\x01 \x01(\tH\x00\x12@\n\x0cnotification\x18\x02 \x01(\x0b\x32(.tze_hud.protocol.v1.NotificationPayloadH\x00\x12;\n\nstatus_bar\x18\x03 \x01(\x0b\x32%.tze_hud.protocol.v1.StatusBarPayloadH\x00\x12\x30\n\x0bsolid_color\x18\x04 \x01(\x0b\x32\x19.tze_hud.protocol.v1.RgbaH\x00\x12?\n\x10static_image_ref\x18\x05 \x01(\x0b\x32#.tze_hud.protocol.v1.StaticImageRefH\x00\x42\t\n\x07payloadJ\x04\x08\x06\x10\x07\"]\n\x16RelativeGeometryPolicy\x12\r\n\x05x_pct\x18\x01 \x01(\x02\x12\r\n\x05y_pct\x18\x02 \x01(\x02\x12\x11\n\twidth_pct\x18\x03 \x01(\x02\x12\x12\n\nheight_pct\x18\x04 \x01(\x02\"\x86\x01\n\x1a\x45\x64geAnchoredGeometryPolicy\x12.\n\x04\x65\x64ge\x18\x01 \x01(\x0e\x32 .tze_hud.protocol.v1.DisplayEdge\x12\x12\n\nheight_pct\x18\x02 \x01(\x02\x12\x11\n\twidth_pct\x18\x03 \x01(\x02\x12\x11\n\tmargin_px\x18\x04 \x01(\x02\"\xaa\x01\n\x13GeometryPolicyProto\x12?\n\x08relative\x18\x01 \x01(\x0b\x32+.tze_hud.protocol.v1.RelativeGeometryPolicyH\x00\x12H\n\redge_anchored\x18\x02 \x01(\x0b\x32/.tze_hud.protocol.v1.EdgeAnchoredGeometryPolicyH\x00\x42\x08\n\x06policy\"\xc4\x01\n\x19WidgetParameterValueProto\x12\x12\n\nparam_name\x18\x01 \x01(\t\x12\x13\n\tf32_value\x18\x02 \x01(\x02H\x00\x12\x16\n\x0cstring_value\x18\x03 \x01(\tH\x00\x12\x30\n\x0b\x63olor_value\x18\x04 \x01(\x0b\x32\x19.tze_hud.protocol.v1.RgbaH\x00\x12\x14\n\nenum_value\x18\x05 \x01(\tH\x00\x12\x15\n\x0b\x64\x65\x61\x64line_ms\x18\x06 \x01(\x03H\x00\x42\x07\n\x05value*\x89\x01\n\x0b\x44isplayEdge\x12\x1c\n\x18\x44ISPLAY_EDGE_UNSPECIFIED\x10\x00\x12\x14\n\x10\x44ISPLAY_EDGE_TOP\x10\x01\x12\x17\n\x13\x44ISPLAY_EDGE_BOTTOM\x10\x02\x12\x15\n\x11\x44ISPLAY_EDGE_LEFT\x10\x03\x12\x16\n\x12\x44ISPLAY_EDGE_RIGHT\x10\x04\x62\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -33,32 +33,30 @@ if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
   _globals['_STATUSBARPAYLOAD_ENTRIESENTRY']._loaded_options = None
   _globals['_STATUSBARPAYLOAD_ENTRIESENTRY']._serialized_options = b'8\001'
-  _globals['_DISPLAYEDGE']._serialized_start=1456
-  _globals['_DISPLAYEDGE']._serialized_end=1593
-  _globals['_SCENEIDPROTO']._serialized_start=36
-  _globals['_SCENEIDPROTO']._serialized_end=65
-  _globals['_RESOURCEIDPROTO']._serialized_start=67
-  _globals['_RESOURCEIDPROTO']._serialized_end=99
-  _globals['_RGBA']._serialized_start=101
-  _globals['_RGBA']._serialized_end=151
-  _globals['_NOTIFICATIONACTIONPROTO']._serialized_start=153
-  _globals['_NOTIFICATIONACTIONPROTO']._serialized_end=227
-  _globals['_NOTIFICATIONPAYLOAD']._serialized_start=230
-  _globals['_NOTIFICATIONPAYLOAD']._serialized_end=374
-  _globals['_STATUSBARPAYLOAD']._serialized_start=377
-  _globals['_STATUSBARPAYLOAD']._serialized_end=512
-  _globals['_STATUSBARPAYLOAD_ENTRIESENTRY']._serialized_start=466
-  _globals['_STATUSBARPAYLOAD_ENTRIESENTRY']._serialized_end=512
-  _globals['_STATICIMAGEREF']._serialized_start=514
-  _globals['_STATICIMAGEREF']._serialized_end=551
-  _globals['_ZONECONTENT']._serialized_start=554
-  _globals['_ZONECONTENT']._serialized_end=849
-  _globals['_RELATIVEGEOMETRYPOLICY']._serialized_start=851
-  _globals['_RELATIVEGEOMETRYPOLICY']._serialized_end=944
-  _globals['_EDGEANCHOREDGEOMETRYPOLICY']._serialized_start=947
-  _globals['_EDGEANCHOREDGEOMETRYPOLICY']._serialized_end=1081
-  _globals['_GEOMETRYPOLICYPROTO']._serialized_start=1084
-  _globals['_GEOMETRYPOLICYPROTO']._serialized_end=1254
-  _globals['_WIDGETPARAMETERVALUEPROTO']._serialized_start=1257
-  _globals['_WIDGETPARAMETERVALUEPROTO']._serialized_end=1453
+  _globals['_DISPLAYEDGE']._serialized_start=1425
+  _globals['_DISPLAYEDGE']._serialized_end=1562
+  _globals['_RESOURCEIDPROTO']._serialized_start=36
+  _globals['_RESOURCEIDPROTO']._serialized_end=68
+  _globals['_RGBA']._serialized_start=70
+  _globals['_RGBA']._serialized_end=120
+  _globals['_NOTIFICATIONACTIONPROTO']._serialized_start=122
+  _globals['_NOTIFICATIONACTIONPROTO']._serialized_end=196
+  _globals['_NOTIFICATIONPAYLOAD']._serialized_start=199
+  _globals['_NOTIFICATIONPAYLOAD']._serialized_end=343
+  _globals['_STATUSBARPAYLOAD']._serialized_start=346
+  _globals['_STATUSBARPAYLOAD']._serialized_end=481
+  _globals['_STATUSBARPAYLOAD_ENTRIESENTRY']._serialized_start=435
+  _globals['_STATUSBARPAYLOAD_ENTRIESENTRY']._serialized_end=481
+  _globals['_STATICIMAGEREF']._serialized_start=483
+  _globals['_STATICIMAGEREF']._serialized_end=520
+  _globals['_ZONECONTENT']._serialized_start=523
+  _globals['_ZONECONTENT']._serialized_end=818
+  _globals['_RELATIVEGEOMETRYPOLICY']._serialized_start=820
+  _globals['_RELATIVEGEOMETRYPOLICY']._serialized_end=913
+  _globals['_EDGEANCHOREDGEOMETRYPOLICY']._serialized_start=916
+  _globals['_EDGEANCHOREDGEOMETRYPOLICY']._serialized_end=1050
+  _globals['_GEOMETRYPOLICYPROTO']._serialized_start=1053
+  _globals['_GEOMETRYPOLICYPROTO']._serialized_end=1223
+  _globals['_WIDGETPARAMETERVALUEPROTO']._serialized_start=1226
+  _globals['_WIDGETPARAMETERVALUEPROTO']._serialized_end=1422
 # @@protoc_insertion_point(module_scope)
