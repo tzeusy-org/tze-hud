@@ -1,39 +1,11 @@
 //! Event structures for the dispatch pipeline.
 //!
 //! Implements:
-//! - `HitTestResult`: outcome of hit-testing a display-space point
 //! - `RouteTarget`: event routing decision from the event router
 //! - `SceneLocalPatch`: local-state updates from Stage 2 (compositor-applied)
 
 use serde::{Deserialize, Serialize};
 use tze_hud_scene::SceneId;
-
-// ─── Hit-test result ─────────────────────────────────────────────────────────
-
-/// The outcome of hitting a display-space point against the scene graph.
-///
-/// Hit-test traversal order:
-/// 1. Chrome layer first (always wins)
-/// 2. Content tiles by z-order descending
-/// 3. Within a tile, nodes in reverse tree order (last child first)
-/// 4. First HitRegionNode whose bounds contain the point wins
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub enum HitTestResult {
-    /// A HitRegionNode was hit. Routes to that tile's lease owner.
-    NodeHit { tile_id: SceneId, node_id: SceneId },
-    /// A tile was hit but no HitRegionNode was hit within it.
-    /// Routes to the tile's lease owner with a null node_id.
-    TileHit { tile_id: SceneId },
-    /// A chrome element was hit. Handled locally; no agent notification.
-    ChromeHit {
-        /// Opaque identifier for the chrome element (e.g., tab bar item ID).
-        element_id: String,
-    },
-    /// No tile (or a passthrough tile) was hit.
-    /// In overlay mode: passes through to the desktop.
-    /// In fullscreen mode: discarded.
-    Passthrough,
-}
 
 // ─── Route target ─────────────────────────────────────────────────────────────
 

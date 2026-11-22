@@ -1,17 +1,9 @@
 [package]
 name = "render_artifacts"
-description = "Headless readback binaries that render runtime scenes to PNG"
+description = "The render-scene authoring binary: renders a runtime scene to PNG"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-
-[[bin]]
-name = "cooperative-projection-readback"
-path = "src/bin/cooperative_projection_readback.rs"
-
-[[bin]]
-name = "vertical-flow-readback"
-path = "src/bin/vertical_flow_readback.rs"
 
 [[bin]]
 name = "render-scene"
