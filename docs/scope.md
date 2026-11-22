@@ -52,8 +52,10 @@ Windows run never closes an owner check.
 Each runs on the owner's Windows host and is never a merge gate; automated and
 tier-W results narrow them but do not close them.
 
-- **Acceptance session.** `hud-aovax` (2026-11-14 packet, plan A): the
-  owner-only list stays owner-run.
+- **Acceptance session and daily use.** `hud-aovax` (2026-11-14 packet,
+  plan A): the owner-only list stays owner-run; generic daily use with 4–12
+  main sessions (`hud-b5zr9`); hook-driven session mirroring live acceptance
+  and the owner's open A/B idle-status choice (`hud-x38zn.1`).
 - **Delivery, network and install (T6).** Tailnet firewall UX (`hud-lgb6c.3`);
   overnight overlay visibility after monitor sleep/resume (`hud-jm8nq.26`,
   repair `hud-jm8nq.25`); live smoke against the paired HUD (`hud-51ujj.7`);
@@ -61,14 +63,16 @@ tier-W results narrow them but do not close them.
   card transition.
 - **Portal (T7).** The eleven-check rebuilt-portal check (`hud-lirh2.12`, partial)
   and final reconciliation (`hud-lirh2.13`); physical typing, local echo, drag
-  and held-release; the last original zone-grip clause (`hud-3to0a`).
+  and held-release; the last original zone-grip clause (`hud-3to0a`); portal
+  OUTPUT reading: links, selection/copy, code ranges, cursors (`hud-ljhku.2`).
 - **Monitors (T9).** Display keys survive replug, cable swap and reboot
   (`hud-avr7s.4`); mixed-DPI and `WM_DPICHANGED` on the owner rig (`hud-670ds`);
   three 4K monitors at 150%, NVIDIA and DWM transparency; Windows scanout and
   multi-monitor presentation of the frame turn (`hud-ximtf.10`).
 - **Visuals (T10).** Restyled zone elements, subtitle, status bar and move
   handles (`hud-h51u7.4.6`); restyled widgets and runtime chrome
-  (`hud-h51u7.8.6`); theme, density, motion, reply cue, markdown and timestamps.
+  (`hud-h51u7.8.6`); the BEFORE capture for the pairing-card restyle (#1630,
+  `hud-h51u7.8.3` AC3); theme, density, motion, reply cue, markdown, timestamps.
 - **Control panel (T11).** Windows interaction and focus; restart timing.
 - **Choice cards (T12).** Hook and combined live Claude AskUserQuestion
   acceptance (`hud-bz9bv`).
@@ -100,7 +104,8 @@ tier-W results narrow them but do not close them.
     five-tool cross-repo discovery check; MCP adapter acceptance.
 - **Time-based.** Sleep/wake, hot-plug and overnight leases.
 - **Measurement holds.** Publish-to-present on the Windows host
-  (`hud-ddm2g`); merge-group 6-minute target misses (`hud-4k3b2`); the
+  (`hud-ddm2g`); merge-group 6-minute target misses (`hud-4k3b2`) and the
+  owner merge of the #1648 merge-budget proposal (`hud-rnad7`); the
   delayed-subtitle witness (`hud-rnq52`, `hud-q26ya`).
 
 ## Where the rest lives

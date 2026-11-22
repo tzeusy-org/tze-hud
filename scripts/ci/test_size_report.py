@@ -53,7 +53,7 @@ class SizeReportTest(unittest.TestCase):
             ".claude/skills/x/SKILL.md": "a\nb\nc\n",
             ".claude/skills/x/tests/helper.py": "a\n",
             "docs/api.md": "a\n",
-            "docs/evidence/run.md": "a\n",
+            ".beads/issues.md": "a\n",
             "README.md": "a\n",
         })
         self.assertEqual(rows["scripts"], {**rows["scripts"], "python": 2, "python_test": 1})
@@ -61,6 +61,7 @@ class SizeReportTest(unittest.TestCase):
         self.assertEqual(rows[".claude/skills"]["python_test"], 1)
         self.assertEqual(rows["docs"]["markdown"], 1)
         self.assertEqual(rows["(root)"]["markdown"], 1)
+        self.assertNotIn(".beads", rows)
 
     def test_rust_total_matches_wc_over_tracked_files(self):
         wc = subprocess.run(
