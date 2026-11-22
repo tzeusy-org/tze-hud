@@ -4,13 +4,6 @@ package tze_hud.protocol.v1;
 
 // ─── Identity Types ───────────────────────────────────────────────────────────
 
-// A scene-object identifier: 16-byte little-endian UUIDv7.
-// All-zero bytes represent the null/absent sentinel.
-// Wire format: raw 16 bytes (little-endian UUID byte order).
-message SceneIdProto {
-  bytes bytes = 1;  // exactly 16 bytes
-}
-
 // A content-addressed resource identifier: raw 32-byte BLAKE3 hash.
 // Wire format: raw 32 bytes — never hex-encoded.
 message ResourceIdProto {

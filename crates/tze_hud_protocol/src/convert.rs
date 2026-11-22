@@ -3,22 +3,7 @@
 use crate::proto;
 use tze_hud_scene::*;
 
-// ─── Identity round-trips ─────────────────────────────────────────────────────
-
-/// Encode a `SceneId` as a `SceneIdProto` (16 bytes, little-endian).
-#[cfg(test)]
-fn scene_id_to_proto(id: SceneId) -> proto::SceneIdProto {
-    proto::SceneIdProto {
-        bytes: id.to_bytes_le().to_vec(),
-    }
-}
-
-/// Decode a `SceneIdProto` back to a `SceneId`.
-///
-/// Returns `None` if the `bytes` field is not exactly 16 bytes.
-pub fn proto_to_scene_id(p: &proto::SceneIdProto) -> Option<SceneId> {
-    SceneId::from_bytes_le(&p.bytes)
-}
+// ─── Resource identity ─────────────────────────────────────────────────────
 
 /// Encode a `ResourceId` as a `ResourceIdProto` (32 raw bytes, never hex).
 #[cfg(test)]
@@ -154,33 +139,7 @@ pub fn proto_to_widget_param_value(
 mod tests {
     use super::*;
 
-    // ── SceneId / ResourceId proto round-trips ───────────────────────────────
-
-    #[test]
-    fn scene_id_proto_round_trip() {
-        let id = SceneId::new();
-        let proto = scene_id_to_proto(id);
-        assert_eq!(proto.bytes.len(), 16, "SceneId proto must be 16 bytes");
-        let restored = proto_to_scene_id(&proto).expect("must decode 16 bytes");
-        assert_eq!(id, restored, "SceneId proto round-trip must be lossless");
-    }
-
-    #[test]
-    fn scene_id_null_proto_round_trip() {
-        let null = SceneId::null();
-        let proto = scene_id_to_proto(null);
-        assert_eq!(proto.bytes, vec![0u8; 16]);
-        let restored = proto_to_scene_id(&proto).unwrap();
-        assert!(restored.is_null());
-    }
-
-    #[test]
-    fn scene_id_proto_rejects_wrong_length() {
-        let bad = crate::proto::SceneIdProto {
-            bytes: vec![0u8; 15],
-        };
-        assert!(proto_to_scene_id(&bad).is_none());
-    }
+    // ── ResourceId proto round-trips ───────────────────────────────
 
     #[test]
     fn resource_id_proto_round_trip() {
