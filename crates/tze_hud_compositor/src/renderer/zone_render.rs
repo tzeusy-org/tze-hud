@@ -1,11 +1,5 @@
 //! Zone rendering and zone layout methods for the compositor.
 //!
-//! Moved from `renderer/mod.rs` (the "Zone rendering" and "Zone layout"
-//! clusters, formerly ~L6381–7083 at plan date) by Step R-7 of the renderer
-//! module split. No logic was changed; only visibility modifiers
-//! were added where Rust's module-privacy rules require them (listed in the
-//! PR body).
-//!
 //! ## Methods in this file
 //!
 //! **Zone rendering**:

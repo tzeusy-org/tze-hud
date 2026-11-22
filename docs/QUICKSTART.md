@@ -18,7 +18,7 @@ and starts the overlay. No administrator rights are needed for installation.
 An existing config and paired agents are preserved on upgrades.
 
 If you are building from source in WSL instead, run this from the repo root
-with the [build dependencies](../README.md#1-build-on-linux--windows) installed:
+with the [build dependencies](../README.md#build-from-source) installed:
 
 ```bash
 just build-windows

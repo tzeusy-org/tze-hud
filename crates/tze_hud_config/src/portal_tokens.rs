@@ -1,4 +1,4 @@
-//! Portal part inventory and token mapping for the text-stream portal pilot.
+//! Portal part inventory and the design tokens each part reads.
 //!
 //! - Portal part inventory (frame, header, composer, transcript body, divider,
 //!   collapsed card)
@@ -9,18 +9,13 @@
 //! - Window geometry bounds (min size, resize step, affordance size)
 //! - Scroll-position indicator styling
 //!
-//! **Pre-promotion rule:** the exemplar adapter MUST source every published visual
-//! value from the runtime's resolved token set (via `PortalPartTokens`) rather than
-//! literal values. A profile/token change MUST reskin the portal end-to-end without
-//! touching adapter logic.
+//! The portal renderer takes every visual value from `PortalPartTokens`, so a
+//! theme or token change reskins the portal without touching portal logic.
 //!
-//! ## Canonical portal token keys (profile-scoped, pre-promotion)
+//! ## Portal token keys
 //!
-//! These keys are **portal-scoped**: they are prefixed with `portal.` to avoid
-//! colliding with canonical component-shape-language keys. They are resolvable
-//! via profile-scoped overrides and fall back to the canonical token defaults.
-//! At promotion time they will be canonicalized in the `text-portal` component
-//! type contract via a separate component-shape-language delta.
+//! Keys are prefixed with `portal.` and fall back to the canonical token
+//! defaults; `[design_tokens]` and themes override them.
 //!
 //! | Key | Part | Property |
 //! |-----|------|----------|

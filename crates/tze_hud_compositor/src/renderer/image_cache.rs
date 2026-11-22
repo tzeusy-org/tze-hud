@@ -1,11 +1,5 @@
 //! Image texture cache, local composer state, and font/image loading methods
 //! for the compositor.
-//!
-//! Moved from `renderer/mod.rs` banner 6 (`// ─── Image texture cache ──`)
-//! and the font/image loading method cluster (formerly ~L1338–1735 pre-split),
-//! by Step R-2 of the renderer module split. No logic was changed;
-//! only visibility modifiers were added where Rust's module-privacy rules
-//! require them (listed in the PR body).
 
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex as StdMutex};

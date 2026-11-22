@@ -1,10 +1,4 @@
 //! Text-collection methods for the compositor.
-//!
-//! Moved from `renderer/mod.rs` text-collection cluster (formerly ~L3546–4287
-//! pre-split), plus `collect_ellipsis_text_items_from_node` from the
-//! module-level helpers section, by Step R-4 of the renderer module split.
-//! No logic was changed; only visibility modifiers were added
-//! where Rust's module-privacy rules require them (listed in the PR body).
 
 use std::collections::HashMap;
 use std::sync::Arc;

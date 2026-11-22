@@ -1,11 +1,5 @@
 //! GPU encode-pass methods and rounded-rect helpers for the compositor.
 //!
-//! Moved from `renderer/mod.rs` (the "Color helpers + encode passes" and
-//! "Rounded rect" clusters, formerly ~L5850–6380 at plan date) by Step R-6 of
-//! the renderer module split. No logic was changed; only
-//! visibility modifiers were added where Rust's module-privacy rules require
-//! them (listed in the PR body).
-//!
 //! ## Methods in this file
 //!
 //! **Color helpers** (used by many encode methods):
