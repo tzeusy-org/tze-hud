@@ -79,7 +79,8 @@ untracked-evidence:
 host-identifiers:
     python3 scripts/ci/check_host_identifiers.py
 
-# Reject retired design citations while preserving historical measurement data.
+# Reject retired design citations, unresolved doc links to repository paths and
+# pinned source snapshots, while preserving historical measurement data.
 current-references:
     python3 scripts/ci/check_current_references.py
 

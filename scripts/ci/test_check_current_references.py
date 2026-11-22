@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -80,6 +81,70 @@ class Exemptions(unittest.TestCase):
 
     def test_ordinary_source_is_scanned(self):
         self.assertFalse(chk.is_exempt("crates/tze_hud_runtime/src/portal.rs"))
+
+
+class MarkdownLinks(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        (self.root / "docs").mkdir()
+        (self.root / "crates/x/src").mkdir(parents=True)
+        (self.root / "crates/x/src/lib.rs").write_text("fn a() {}\n")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def scan(self, text: str, path: str = "docs/a.md"):
+        return chk.scan_markdown(self.root, path, text)
+
+    def test_resolving_links_pass(self):
+        text = "\n".join([
+            "[lib](../crates/x/src/lib.rs)",
+            "[line](../crates/x/src/lib.rs#L1)",
+            "[range](../crates/x/src/lib.rs#L1-L9)",
+            "[dir](../crates/x/)",
+            "[rooted](/crates/x/src/lib.rs)",
+            "[ref]: ../crates/x/src/lib.rs",
+            '[titled](../crates/x/src/lib.rs "the lib")',
+        ])
+        self.assertEqual(self.scan(text), [])
+
+    def test_external_and_anchor_links_are_not_checked(self):
+        text = "[a](https://example.com/x.md) [b](http://h/) [c](#section) [d](mailto:a@b)"
+        self.assertEqual(self.scan(text), [])
+
+    def test_a_missing_target_names_its_line_and_target(self):
+        text = "intro\nsee [lib](../crates/x/src/renamed.rs#L3) here\n[r]: gone.md"
+        self.assertEqual(self.scan(text), [
+            (2, "link target does not exist: ../crates/x/src/renamed.rs#L3"),
+            (3, "link target does not exist: gone.md"),
+        ])
+
+    def test_links_in_code_are_not_checked(self):
+        text = "```\n[a](missing.md)\n```\nuse `[b](missing.md)` literally"
+        self.assertEqual(self.scan(text), [])
+
+    def test_a_fence_closes_only_on_its_own_run(self):
+        for text in ["````\n```\n````\n[a](missing.md)",
+                     "```\n```rust\n```\n[a](missing.md)",
+                     "~~~\n```\n~~~\n[a](missing.md)"]:
+            self.assertEqual(self.scan(text),
+                             [(4, "link target does not exist: missing.md")], text)
+
+    def test_footnote_definitions_are_not_links(self):
+        self.assertEqual(self.scan("text[^1]\n\n[^1]: a note, not a path"), [])
+
+    def test_a_pinned_source_snapshot_is_flagged(self):
+        for line in [j("Source snapsho", "t: `855f8397` (main)"),
+                     j("This map was checked agains", "t `855f8397` on 2026-10-13.")]:
+            self.assertEqual(self.scan(line), [(1, "pinned source snapshot")], line)
+
+    def test_renaming_a_linked_file_fails_the_check(self):
+        doc = self.root / "docs/a.md"
+        doc.write_text("[lib](../crates/x/src/lib.rs)\n")
+        self.assertEqual(self.scan(doc.read_text()), [])
+        (self.root / "crates/x/src/lib.rs").rename(self.root / "crates/x/src/core.rs")
+        self.assertEqual(len(self.scan(doc.read_text())), 1)
 
 
 class Repository(unittest.TestCase):

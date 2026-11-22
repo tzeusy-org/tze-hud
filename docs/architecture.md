@@ -6,8 +6,8 @@ input and rendering. Agents send intent; they do not run the frame loop.
 The three surfaces and their contracts are in [api.md](api.md); current
 implementation gaps are in [scope.md](scope.md).
 
-[Observed] This map was checked against `855f8397` on 2026-10-13. Links point
-to interface owners rather than a full call graph. Update affected rows and
+[Observed] Links point to interface owners rather than a full call graph;
+`just ci` fails when one no longer resolves. Update affected rows and
 flows when ownership or observable behavior changes. Planned behavior belongs
 in scope; historical designs at `pre-reset-2026-10-02` are not requirements.
 

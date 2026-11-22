@@ -9,7 +9,6 @@ visual design, an in-HUD control panel, choice cards, autonomous
 mechanical validation, and the Windows experience pursuit.
 Each tranche must still build, pass tests, and boot the overlay.
 
-Source snapshot: `855f8397` (latest `origin/main` fetched on 2026-10-13).
 The tranche descriptions below retain the approved direction; the status and
 [evidence](#current-implementation-evidence) distinguish implemented pieces
 from outstanding work. [Observed] means inspected source or tracker state,
