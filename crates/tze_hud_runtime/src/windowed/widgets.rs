@@ -643,7 +643,7 @@ impl WinitApp {
     /// No-op if the element has no user override.
     fn perform_reset_element_geometry(&mut self, element_id: tze_hud_scene::SceneId) {
         // Collect previous override, fallback geometry, and optional persist path.
-        let (previous_override, fallback_geometry, store_snapshot, persist_path) = {
+        let (previous_override, fallback_geometry, store_snapshot, persist_file) = {
             let Ok(mut state) = self.state.shared_state.try_lock() else {
                 tracing::warn!("perform_reset_element_geometry: could not acquire shared state");
                 return;
@@ -707,17 +707,15 @@ impl WinitApp {
                     .unwrap_or(tze_hud_scene::ZERO_GEOMETRY_POLICY)
             };
             let store_snapshot = state.element_store.clone();
-            let persist_path = state.element_store_path.clone();
-            (previous, fallback, store_snapshot, persist_path)
+            let persist_file = state.element_store_file.clone();
+            (previous, fallback, store_snapshot, persist_file)
         };
 
         // Persist the updated store on a background thread to avoid blocking the
         // Winit event loop with sync disk I/O (atomic write + fsync).
-        if let Some(path) = persist_path {
+        if let Some(file) = persist_file {
             std::thread::spawn(move || {
-                if let Err(e) =
-                    crate::element_store::persist_element_store_to_path(&store_snapshot, &path)
-                {
+                if let Err(e) = file.save(&store_snapshot) {
                     tracing::warn!(error = %e, "perform_reset_element_geometry: persist failed");
                 }
             });

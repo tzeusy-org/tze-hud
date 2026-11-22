@@ -1,7 +1,7 @@
 //! Agent session management — authentication, capabilities, session state.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use tokio::sync::{Mutex, mpsc};
@@ -25,6 +25,21 @@ use crate::token::TokenStore;
 /// startup and locks it independently (never holding the outer `SharedState`
 /// lock while waiting for the inner lock) to avoid nested-lock priority
 /// inversion.
+/// The element-store file and its writer. The runtime owns the one writer and
+/// hands it in here, so the protocol crate never serializes the file itself.
+#[derive(Clone, Debug)]
+pub struct ElementStoreFile {
+    pub path: PathBuf,
+    pub write: fn(&ElementStore, &Path) -> std::io::Result<()>,
+}
+
+impl ElementStoreFile {
+    /// Save `store` to this file with the runtime's writer.
+    pub fn save(&self, store: &ElementStore) -> std::io::Result<()> {
+        (self.write)(store, &self.path)
+    }
+}
+
 pub struct SharedState {
     pub scene: Arc<Mutex<SceneGraph>>,
     pub sessions: SessionRegistry,
@@ -34,8 +49,8 @@ pub struct SharedState {
     pub runtime_widget_store: Option<RuntimeWidgetStore>,
     /// Persistent element identity store (zone/widget/tile Scene IDs).
     pub element_store: ElementStore,
-    /// On-disk path for `element_store.toml`. When `None`, persistence is disabled.
-    pub element_store_path: Option<PathBuf>,
+    /// Where `element_store.toml` is saved. When `None`, persistence is disabled.
+    pub element_store_file: Option<ElementStoreFile>,
     /// Whether the runtime is currently in safe mode.
     ///
     /// This is the **single source of truth** for the runtime-global safe-mode
