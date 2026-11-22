@@ -1096,6 +1096,31 @@ def scenario_held_press(run: Run) -> None:
     held_press_on_retired_card(run, cleared, clear, "a keyed clear")
 
 
+def scenario_card_hold(run: Run) -> None:
+    """A destructive action ignores a tap and fires once when held past
+    `notification.action.hold.ms` (default 600 ms)."""
+    key = "gesture-card-hold"
+    open_card(run, key, actions=[{"label": "Delete", "callback_id": f"{key}-delete", "role": "destructive"},
+                                 {"label": "Keep", "callback_id": f"{key}-keep"}])
+    target = f"zone:notification-area/{key}/0"
+    run.click(target)
+    run.observe_for("a tap on a destructive action chooses nothing",
+                    lambda st: (card := notification_entry(st, key)) is not None and card.get("chosen") is None, 1.0)
+    if items := run.inputs(wait_ms=500):
+        raise ScenarioFailed("a tap on a destructive action sends nothing", {"items": items, "status": run.status()})
+    run.point(target)
+    run.mark()
+    run.inj.button(True)
+    run.step("button down (held)")
+    try:
+        time.sleep(1.0)
+    finally:
+        run.mark()
+        run.inj.button(False)
+        run.step("button up")
+    take_card_answer(run, key, f"{key}-delete")
+
+
 def scenario_card_keyboard(run: Run) -> None:
     """R14.2 S2: composer focus wraps with Tab to action two; Enter answers once."""
     key, surface = "gesture-card-keys", "portal:gesture-card-keys"
@@ -2122,6 +2147,7 @@ SCENARIOS: dict[str, Callable[[Run], None]] = {
     "keyboard": scenario_keyboard,                    # 7
     "card-click": scenario_card_click,
     "card-keyboard": scenario_card_keyboard,
+    "card-hold": scenario_card_hold,
     "card-dismiss": scenario_card_dismiss,
     "foreign-publisher": scenario_foreign_publisher,
     "held-press": scenario_held_press,

@@ -846,6 +846,11 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         description: "How long a pressed link shows Opened or Couldn't open (ms)",
         default_value: "1500",
     },
+    CanonicalToken {
+        key: NOTIFICATION_ACTION_HOLD_MS_KEY,
+        description: "How long a destructive notification action must be held (ms, 0-3000; 0 = no hold)",
+        default_value: "600",
+    },
     // Runtime system card / toast (pairing code, update notices); never agent-visible.
     CanonicalToken {
         key: "system_card.background",
@@ -1571,6 +1576,34 @@ pub fn resolve_motion_duration_ms(tokens: &DesignTokenMap, key: &str) -> u32 {
     duration(canonical.default_value).expect("canonical motion duration must be valid")
 }
 
+/// How long a destructive notification action must be held before it fires
+/// (ms). `0` turns the hold off.
+pub const NOTIFICATION_ACTION_HOLD_MS_KEY: &str = "notification.action.hold.ms";
+
+/// The longest hold [`NOTIFICATION_ACTION_HOLD_MS_KEY`] may ask for.
+pub const MAX_NOTIFICATION_ACTION_HOLD_MS: u32 = 3_000;
+
+fn parse_hold_ms(value: &str) -> Option<u32> {
+    value
+        .trim()
+        .parse::<u32>()
+        .ok()
+        .filter(|ms| *ms <= MAX_NOTIFICATION_ACTION_HOLD_MS)
+}
+
+/// The destructive-action hold in ms ([`NOTIFICATION_ACTION_HOLD_MS_KEY`]);
+/// the canonical default when unset or invalid.
+pub fn notification_action_hold_ms(tokens: &DesignTokenMap) -> u32 {
+    tokens
+        .get(NOTIFICATION_ACTION_HOLD_MS_KEY)
+        .and_then(|v| parse_hold_ms(v))
+        .unwrap_or_else(|| {
+            canonical_token(NOTIFICATION_ACTION_HOLD_MS_KEY)
+                .and_then(|token| parse_hold_ms(token.default_value))
+                .expect("canonical hold duration must be valid")
+        })
+}
+
 /// Easing curve names accepted by `motion.*.easing` tokens.
 ///
 /// The compositor's curves (`renderer/easing.rs`) map as: `linear` ->
@@ -1611,6 +1644,11 @@ pub(crate) fn validate_canonical_value(key: &str, value: &str) -> Result<(), Str
         (
             parse_color_hex(value).is_some(),
             "a color #RRGGBB or #RRGGBBAA".into(),
+        )
+    } else if key == NOTIFICATION_ACTION_HOLD_MS_KEY {
+        (
+            parse_hold_ms(value).is_some(),
+            format!("a whole number of ms from 0 to {MAX_NOTIFICATION_ACTION_HOLD_MS}"),
         )
     } else if key == UI_SCALE_KEY {
         let (lo, hi) = UI_SCALE_RANGE;
@@ -1948,7 +1986,7 @@ pub(crate) fn validate_design_tokens(raw: &RawConfig, errors: &mut Vec<ConfigErr
             });
             continue;
         }
-        if key == UI_SCALE_KEY
+        if (key == UI_SCALE_KEY || key == NOTIFICATION_ACTION_HOLD_MS_KEY)
             && let Err(expected) = validate_canonical_value(key, &tokens.0[key])
         {
             errors.push(ConfigError {
@@ -1956,7 +1994,11 @@ pub(crate) fn validate_design_tokens(raw: &RawConfig, errors: &mut Vec<ConfigErr
                 field_path: format!("design_tokens.{key}"),
                 expected,
                 got: tokens.0[key].clone(),
-                hint: "e.g. \"ui.scale\" = \"1.25\" makes everything a quarter bigger".into(),
+                hint: if key == UI_SCALE_KEY {
+                    "e.g. \"ui.scale\" = \"1.25\" makes everything a quarter bigger".into()
+                } else {
+                    "e.g. \"notification.action.hold.ms\" = \"800\"".into()
+                },
             });
             continue;
         }
@@ -2263,6 +2305,24 @@ mod tests {
             assert_eq!(errors.len(), 1, "{bad}");
             assert_eq!(errors[0].code, ConfigErrorCode::TokenValueParseError);
         }
+        for good in ["0", "600", "3000"] {
+            assert!(check(&[(NOTIFICATION_ACTION_HOLD_MS_KEY, good)]).is_empty());
+            let tokens = DesignTokenMap::from([(
+                NOTIFICATION_ACTION_HOLD_MS_KEY.to_owned(),
+                good.to_owned(),
+            )]);
+            assert_eq!(
+                notification_action_hold_ms(&tokens).to_string(),
+                good,
+                "hold {good}"
+            );
+        }
+        for bad in ["-1", "3001", "0.5", "long"] {
+            let errors = check(&[(NOTIFICATION_ACTION_HOLD_MS_KEY, bad)]);
+            assert_eq!(errors.len(), 1, "{bad}");
+            assert_eq!(errors[0].code, ConfigErrorCode::TokenValueParseError);
+        }
+        assert_eq!(notification_action_hold_ms(&DesignTokenMap::new()), 600);
         for key in [PX_SCALE_KEY, "runtime.px_scale@subtitle"] {
             let errors = check(&[(key, "2")]);
             assert_eq!(errors[0].code, ConfigErrorCode::InvalidTokenKey);

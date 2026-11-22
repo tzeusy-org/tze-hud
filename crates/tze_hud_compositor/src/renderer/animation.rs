@@ -826,6 +826,57 @@ impl Compositor {
         fade_starts.chain(caret_toggle).chain(widget_tick).min()
     }
 
+    /// Fraction (0..=1) of notification action `interaction_id` covered by
+    /// the hold fill, or `None` when it has none. A hold sweeps across over
+    /// `notification.action.hold.ms`; a hold released early drains back over
+    /// `motion.state.ms`. Under reduced motion a hold shows the full fill at
+    /// once and a release removes it. Computed from scene time alone.
+    pub(super) fn notification_hold_fill(
+        &self,
+        scene: &SceneGraph,
+        interaction_id: &str,
+    ) -> Option<f32> {
+        use tze_hud_config::tokens;
+        use tze_hud_scene::graph::zone_ops::hold_progress;
+        let reduced = tokens::os_reduce_motion(&self.token_map);
+        let now = scene.now_monotonic_us();
+        if let Some(hold) = &scene.overlay.notification_hold {
+            if hold.region.interaction_id == interaction_id {
+                let hold_ms = tokens::notification_action_hold_ms(&self.token_map);
+                return Some(if reduced {
+                    1.0
+                } else {
+                    hold_progress(hold.started_mono_us, now, hold_ms)
+                });
+            }
+        }
+        let drain = scene
+            .overlay
+            .notification_hold_drain
+            .as_ref()
+            .filter(|d| !reduced && d.interaction_id == interaction_id)?;
+        let drain_ms = tokens::resolve_motion_duration_ms(&self.token_map, "motion.state.ms");
+        let left = drain.progress * (1.0 - hold_progress(drain.released_mono_us, now, drain_ms));
+        (left > 0.0).then_some(left)
+    }
+
+    /// Whether a hold is still sweeping (it stops at full, and under reduced
+    /// motion) or a drain still draining.
+    fn notification_hold_animating(&self, scene: &SceneGraph) -> bool {
+        let fill = |id: &str| self.notification_hold_fill(scene, id);
+        let overlay = &scene.overlay;
+        let sweeping = overlay
+            .notification_hold
+            .as_ref()
+            .and_then(|h| fill(&h.region.interaction_id))
+            .is_some_and(|f| f < 1.0);
+        let draining = overlay
+            .notification_hold_drain
+            .as_ref()
+            .is_some_and(|d| fill(&d.interaction_id).is_some());
+        sweeping || draining
+    }
+
     /// Whether any per-frame animation, fade, reveal, or scroll smoothing is
     /// still in flight — i.e. the next presented frame's pixels would differ
     /// from the last even though `scene.version` is unchanged.
@@ -908,6 +959,13 @@ impl Compositor {
                 .values()
                 .any(|zone| zone.values().any(|s| s.is_fading_at(now)))
         {
+            return true;
+        }
+
+        // A destructive action's hold sweep or its early-release drain. A
+        // waiting destructive card, a swept-full hold awaiting completion and
+        // reduced motion's static fill all cost no frames.
+        if zones_shown && self.notification_hold_animating(scene) {
             return true;
         }
 

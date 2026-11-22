@@ -507,6 +507,7 @@ async fn notification_actions_layout_matches_hit_regions() {
                                 label: (*label).into(),
                                 callback_id: (i % 2 == 0).then(|| i.to_string()),
                                 url: (i % 2 == 1).then(|| format!("https://example.com/{i}")),
+                                role: None,
                             })
                             .collect(),
                         ..Default::default()
@@ -525,6 +526,9 @@ async fn notification_actions_layout_matches_hit_regions() {
         let descriptor =
             compositor.notification_action_layout("notification-area", record, policy, 552.0);
         let publication_id = record.publication_id;
+        let ZoneContent::Notification(payload) = record.content.clone() else {
+            unreachable!()
+        };
         assert_eq!(descriptor.stacked, stacked);
         let shapes = compositor.notification_layouts.borrow().shapes;
         let regions = scene.overlay.zone_hit_regions.clone();
@@ -565,7 +569,7 @@ async fn notification_actions_layout_matches_hit_regions() {
                 .get(&region.interaction_id)
                 .copied()
                 .unwrap_or_default();
-            let fill = style.control_fill(state, style.action_fill(index));
+            let fill = style.control_fill(state, style.action_fill(&payload, index));
             let drawn: Vec<_> = commands
                 .iter()
                 .filter(|c| {
@@ -787,6 +791,7 @@ async fn check_notification_action_row(margin: Option<f32>) {
         label: label.to_owned(),
         callback_id: Some(label.to_lowercase()),
         url: None,
+        role: None,
     };
     let payload = |title: &str, text: &str, labels: &[&str]| NotificationPayload {
         text: text.to_owned(),
@@ -1046,6 +1051,7 @@ async fn notification_action_button_is_visible_and_hover_brightens_it() {
                     label: "Approve".to_owned(),
                     callback_id: Some("approve".to_owned()),
                     url: None,
+                    role: None,
                 }],
             }),
             "test",
@@ -1668,6 +1674,7 @@ async fn test_notification_card_border_is_an_sdf_border() {
                         label: "Act".into(),
                         callback_id: Some("act".into()),
                         url: None,
+                        role: None,
                     }],
                     ..Default::default()
                 })

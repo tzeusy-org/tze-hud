@@ -514,11 +514,13 @@ mod tests {
                             label: "Reply".into(),
                             callback_id: Some("answer".into()),
                             url: None,
+                            role: None,
                         },
                         NotificationAction {
                             label: "Read".into(),
                             callback_id: None,
                             url: Some("https://example.invalid/?secret=value".into()),
+                            role: None,
                         },
                     ],
                 }),

@@ -517,9 +517,46 @@ impl super::Compositor {
                                     ))
                                     .enumerate()
                                 {
-                                    let label_color = tone_color(
-                                        style.action_label_color(index, payload.urgency),
-                                    );
+                                    // The label splits at the sweep edge: the swept
+                                    // part takes the held label (readable on the
+                                    // sweep), the rest keeps its resting colour
+                                    // (readable on the card). An inverting tone's
+                                    // held label matches its card fill.
+                                    let sweep_edge = self
+                                        .notification_hold_fill(
+                                            scene,
+                                            &super::hit_regions::notification_action_interaction_id(
+                                                zone_name, record, index,
+                                            ),
+                                        )
+                                        .map(|fill| b.x + b.width * fill);
+                                    let label_color =
+                                        tone_color(style.action_label_color(payload, index, false));
+                                    let held_color =
+                                        tone_color(style.action_label_color(payload, index, true));
+                                    let mut push_label = |item: crate::text::TextItem| {
+                                        let Some(edge) = sweep_edge else {
+                                            items.push(item);
+                                            return;
+                                        };
+                                        let (left, right) = (
+                                            item.clip_pixel_x,
+                                            item.clip_pixel_x + item.clip_bounds_width,
+                                        );
+                                        let edge = edge.clamp(left, right);
+                                        if edge > left {
+                                            let mut swept = item.clone();
+                                            swept.color = held_color;
+                                            swept.clip_bounds_width = edge - left;
+                                            items.push(swept);
+                                        }
+                                        if edge < right {
+                                            let mut rest = item;
+                                            rest.clip_pixel_x = edge;
+                                            rest.clip_bounds_width = right - edge;
+                                            items.push(rest);
+                                        }
+                                    };
                                     let available =
                                         (b.width - action_layout.padding * 2.0).max(1.0);
                                     let hint_width = action_layout.hint_width.min(available);
@@ -578,7 +615,7 @@ impl super::Compositor {
                                     if scene.overlay.notification_answer
                                         == Some(record.publication_id)
                                     {
-                                        items.push(label(
+                                        push_label(label(
                                             Arc::from((index + 1).to_string()),
                                             b.x + action_layout.padding,
                                             hint_width,
@@ -597,9 +634,12 @@ impl super::Compositor {
                                     if let Some(color) = error_color {
                                         text.color = color;
                                     }
-                                    items.push(text);
+                                    // Only callback actions can be destructive (held),
+                                    // only url actions show link feedback; the split
+                                    // composes either way.
+                                    push_label(text);
                                     if let Some((mark, _)) = mark {
-                                        items.push(label(
+                                        push_label(label(
                                             Arc::from(mark.as_str()),
                                             b.x + b.width - action_layout.padding - mark_width,
                                             mark_width,

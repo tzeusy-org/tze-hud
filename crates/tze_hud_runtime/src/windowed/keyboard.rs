@@ -1582,6 +1582,10 @@ impl WinitApp {
                 self.state.input_processor.clear_chrome_feedback(&mut scene);
             }
             scene.prune_notification_feedback();
+            // Another key (Esc included) ends a key hold; a repeat does not.
+            if !raw.repeat && self.state.answer_keyboard.hold_key.take().is_some() {
+                super::notification_hold::cancel_hold(&mut scene, &self.state.global_tokens);
+            }
             if let Some(focus) = self.state.answer_keyboard.focus {
                 if !self
                     .state
@@ -1597,6 +1601,7 @@ impl WinitApp {
                     wake = outcome.activation;
                     answer_exit = outcome.exit;
                     return_focus = outcome.return_focus;
+                    self.state.answer_keyboard.hold_key = outcome.hold_key;
                 }
                 true
             } else {
@@ -1677,12 +1682,19 @@ impl WinitApp {
                     {
                         // The pending-keyboard drain bypasses the outer FIFO guard;
                         // a key queued before pause must not activate a card afterward.
-                        let duration = super::lifecycle::notification_exit_ms(
-                            &scene,
-                            &control.zone_name,
-                            &self.state.global_tokens,
-                        );
-                        wake = scene.activate_notification(control, duration);
+                        let tokens = &self.state.global_tokens;
+                        if super::notification_hold::needs_hold(&scene, control, tokens) {
+                            let key = keyboard_key_identity(&raw.key_code, &raw.key);
+                            scene.begin_notification_hold(control.clone(), Some(key.clone()));
+                            self.state.answer_keyboard.hold_key = Some(key);
+                        } else {
+                            let duration = super::lifecycle::notification_exit_ms(
+                                &scene,
+                                &control.zone_name,
+                                tokens,
+                            );
+                            wake = scene.activate_notification(control, duration);
+                        }
                         return_focus = matches!(
                             wake,
                             Some(tze_hud_scene::graph::NotificationActivation::Callback(_))
@@ -1736,6 +1748,7 @@ impl WinitApp {
             self.state
                 .notification_keydowns
                 .remove(&keyboard_key_identity(&raw.key_code, &raw.key));
+            self.state.answer_keyboard.hold_key = None;
             tracing::debug!(
                 key = %str_preview(&raw.key),
                 "safe-mode capture: KeyUp dropped (safe mode active — chrome layer owns input)"
@@ -1772,6 +1785,10 @@ impl WinitApp {
         active_tab: Option<tze_hud_scene::SceneId>,
     ) {
         let key_identity = keyboard_key_identity(&raw.key_code, &raw.key);
+        // Releasing a held key ends its hold this turn (settle cancels it).
+        if self.state.answer_keyboard.hold_key.as_ref() == Some(&key_identity) {
+            self.state.answer_keyboard.hold_key = None;
+        }
         if self.state.answer_keyboard.return_key.as_ref() == Some(&key_identity) {
             self.state.answer_keyboard.return_key = None;
             self.state.notification_keydowns.remove(&key_identity);

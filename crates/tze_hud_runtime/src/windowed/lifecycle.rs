@@ -2682,6 +2682,8 @@ impl WinitApp {
             self.panel_window_focus(focused);
         }
         if !focused {
+            // A key hold ends when the HUD loses keyboard focus.
+            self.state.answer_keyboard.hold_key = None;
             let window = match secondary {
                 Some(index) => self.state.secondaries.get(index).map(|d| d.window.id()),
                 None => self.state.window.as_ref().map(|w| w.id()),
@@ -3327,6 +3329,19 @@ impl WinitApp {
                 // affordance, so a release that lands elsewhere (the cursor
                 // moved, or a press that started off the button) never fires
                 // an action the user did not press.
+                // A pointer hold ends when the pointer leaves its button.
+                if scene
+                    .overlay
+                    .notification_hold
+                    .as_ref()
+                    .is_some_and(|hold| {
+                        hold.key.is_none()
+                            && !matches!(&result.hit, HitResult::ZoneInteraction { interaction_id, .. }
+                                if *interaction_id == hold.region.interaction_id)
+                    })
+                {
+                    super::notification_hold::cancel_hold(&mut scene, &self.state.global_tokens);
+                }
                 if pointer_event.kind == PointerEventKind::Down {
                     scene.focus_notification(None);
                     self.state.zone_press = match &result.hit {
@@ -3345,9 +3360,40 @@ impl WinitApp {
                         }
                         _ => None,
                     };
+                    // A destructive action starts a hold instead of firing on Up.
+                    let held = self.state.zone_press.as_ref().and_then(|id| {
+                        scene
+                            .overlay
+                            .zone_hit_regions
+                            .iter()
+                            .find(|region| region.interaction_id == *id)
+                            .filter(|region| {
+                                super::notification_hold::needs_hold(
+                                    &scene,
+                                    region,
+                                    &self.state.global_tokens,
+                                )
+                            })
+                            .cloned()
+                    });
+                    if let Some(region) = held {
+                        scene.begin_notification_hold(region, None);
+                    }
                 }
                 if pointer_event.kind == PointerEventKind::Up {
                     let pressed = self.state.zone_press.take();
+                    // Releasing before the hold completes fires nothing.
+                    if scene
+                        .overlay
+                        .notification_hold
+                        .as_ref()
+                        .is_some_and(|hold| hold.key.is_none())
+                    {
+                        super::notification_hold::cancel_hold(
+                            &mut scene,
+                            &self.state.global_tokens,
+                        );
+                    }
                     if let HitResult::ZoneInteraction {
                         ref zone_name,
                         published_at_wall_us,
@@ -3375,7 +3421,13 @@ impl WinitApp {
                                             && region.publisher_namespace == *publisher_namespace
                                     })
                                     .cloned();
-                                if let Some(region) = region {
+                                if let Some(region) = region.filter(|region| {
+                                    !super::notification_hold::needs_hold(
+                                        &scene,
+                                        region,
+                                        &self.state.global_tokens,
+                                    )
+                                }) {
                                     let exit_ms = notification_exit_ms(
                                         &scene,
                                         zone_name,

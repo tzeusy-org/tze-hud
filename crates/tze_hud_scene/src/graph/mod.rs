@@ -194,7 +194,7 @@ pub(crate) use contention::apply_contention;
 
 pub mod overlay;
 pub use agents::{AgentHoldings, AgentReclaim};
-pub use overlay::RuntimeOverlayState;
+pub use overlay::{NotificationHold, NotificationHoldDrain, RuntimeOverlayState};
 
 pub mod budget;
 pub mod holdings;

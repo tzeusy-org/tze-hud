@@ -60,6 +60,7 @@ fn question(text: &str) -> ZoneContent {
             label: "Yes".into(),
             callback_id: Some(format!("{text}-yes")),
             url: None,
+            role: None,
         }],
     )
 }
@@ -71,6 +72,7 @@ fn link(text: &str) -> ZoneContent {
             label: "Open".into(),
             callback_id: None,
             url: Some("https://example.com/report".into()),
+            role: None,
         }],
     )
 }
