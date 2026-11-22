@@ -3342,9 +3342,49 @@ impl WinitApp {
                 {
                     super::notification_hold::cancel_hold(&mut scene, &self.state.global_tokens);
                 }
+                // A card an agent just put under a resting pointer ignores
+                // presses on its controls; the keyboard never passes here.
+                let guard_ended = self.state.press_guard.observe(
+                    &mut scene,
+                    (!self.state.cursor_left_window).then_some((pointer_event.x, pointer_event.y)),
+                    &self.state.global_tokens,
+                );
+                super::press_guard::show_hover_after_guard(
+                    &mut self.state.input_processor,
+                    &mut scene,
+                    (pointer_event.x, pointer_event.y),
+                    guard_ended,
+                );
+                let guarded_press = pointer_event.kind == PointerEventKind::Down
+                    && match &result.hit {
+                        HitResult::ZoneInteraction {
+                            interaction_id,
+                            kind: ZoneInteractionKind::Dismiss | ZoneInteractionKind::Action { .. },
+                            ..
+                        } => scene
+                            .overlay
+                            .zone_hit_regions
+                            .iter()
+                            .find(|r| r.interaction_id == *interaction_id)
+                            .is_some_and(|r| {
+                                self.state.press_guard.drop_press(
+                                    &scene,
+                                    r.publication_id,
+                                    &self.state.global_tokens,
+                                )
+                            }),
+                        _ => false,
+                    };
+                if guarded_press
+                    && let HitResult::ZoneInteraction { interaction_id, .. } = &result.hit
+                {
+                    scene.set_chrome_pressed(interaction_id, false);
+                    tracing::debug!("press guard: dropped a press on a card that just arrived");
+                }
                 if pointer_event.kind == PointerEventKind::Down {
                     scene.focus_notification(None);
                     self.state.zone_press = match &result.hit {
+                        _ if guarded_press => None,
                         HitResult::ZoneInteraction {
                             interaction_id,
                             kind,

@@ -182,7 +182,23 @@ with the same cancellation and idle semantics as a `hud_input` wait.
   capture loss, key-up, Esc or another key, HUD keyboard-focus loss or safe
   mode ends the hold with no callback and the fill drains over
   `motion.state.ms`; hide-all, or the card being replaced, cleared or
-  expiring, ends it with no callback and no drain. Key repeat is ignored. Frames are drawn only during a hold or its drain. Runtime identity
+  expiring, ends it with no callback and no drain. Key repeat is ignored. Frames are drawn only during a hold or its drain.
+  A card an agent puts under a resting pointer (published there, shifted
+  there by another card's publish, trim or expiry, or replaced by key with
+  different action labels) ignores pointer presses on its actions and × for
+  `notification.press_guard.ms` (default 400, integer 0–3000; 0 turns it
+  off; Windows animations off leave it unchanged) and until its enter motion
+  ends: no pressed fill, answer, dismiss, link launch, hold or queued item,
+  and nothing tells the agent. While guarded its controls show no hover fill
+  and the cursor stays the arrow; when the guard ends under a still pointer
+  one wake brings both back. A dropped press restarts the interval, but a
+  guard never lasts more than five intervals (2 s at the default) from when
+  it began. Each agent-caused shift starts a fresh guard, so in a busy stack
+  a card under a resting pointer can be re-guarded; moving the pointer off
+  the card ends a guard, and the keyboard (answer chord, Tab, Enter/Space) is
+  never guarded. A pointer that moved onto a card, the re-layout after the
+  owner's own answer or ×, and a same-key update that keeps the action
+  labels start no guard. Runtime identity
   keeps same-tick publications and replacements independent without changing
   their wall-clock timestamps or TTLs. The chosen button keeps its pressed fill during the finite `motion.exit.ms` fade
   (`motion.exit.easing`); zero exit duration removes it instantly. Explicit
@@ -683,7 +699,8 @@ agents until one is paired.
   A notification entry has `s` (`zone:<name>`), `key` (or `null`), `rect`,
   `display`, `actions` (`{label, kind, rect}`, with `kind` `callback` or `url`),
   `close` rect, `focus` (action index, `"close"`, or `null`), `chosen` (action
-  index or `null`) and `state` (`entering`, `shown`, `exiting`). Entries follow
+  index or `null`), `state` (`entering`, `shown`, `exiting`) and `guarded`
+  (presses on it are ignored by the fresh-card press guard). Entries follow
   drawn stack order; chosen cards retain their bounds during their exit even
   after their input targets disappear. Card bodies and link URLs are omitted.
   A widget entry has `s` (`widget:<instance>`), its snapped drawn `rect`,
@@ -1544,7 +1561,7 @@ color overrides still take precedence.
 | Gauge ring | `gauge.{width,height,edge.*,ring.*,caption.y,hover.delay_ms}`, `type.gauge.readout.size` (centred percent; family and weight follow `type.readout`) |
 | Progress card | `progress.{width,height,edge.*,content.x,text.y,label.width,track.*,readout.*,hover.delay_ms}`, `type.label.m`, `type.readout.family` |
 | Status pill | `status.{width,height,pill.*,edge.*,marker.*,name.x,text.*,separator.*,reason.*,tooltip.*,hover.*}`, `type.body.m`, `type.label.m` |
-| Choice actions | `notification.action.link_mark`, `link.feedback.ms` (how long "Opened" or "Couldn't open" shows; default 1500), `notification.action.hold.ms` (destructive hold, integer ms 0–3000, default 600; 0 = no hold) |
+| Choice actions | `notification.action.link_mark`, `link.feedback.ms` (how long "Opened" or "Couldn't open" shows; default 1500), `notification.action.hold.ms` (destructive hold, integer ms 0–3000, default 600; 0 = no hold), `notification.press_guard.ms` (fresh-card press guard, integer ms 0–3000, default 400; 0 = off; not zeroed when Windows animations are off) |
 | Motion | `motion.{enter,exit,state}.ms`, `motion.{enter,exit}.easing` (`linear`, `standard`, `decelerate`, `accelerate`) |
 | Shape | `shape.{xs,s,m,l,xl,full}` (corner radius) |
 | Spacing | `space.{xs,s,m,l,xl,xxl}` (4 px grid) |

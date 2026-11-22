@@ -155,8 +155,8 @@ pub(super) fn combined_overlay_hit_regions(
 }
 
 /// Bounds of the HUD controls a primary press would act on: card actions and
-/// ×, unless the card is answered or safe mode is on, and each portal's × and
-/// unread badge. Drag handles are not presses.
+/// ×, unless the card is answered, press-guarded or safe mode is on, and each
+/// portal's × and unread badge. Drag handles are not presses.
 pub(super) fn pressable_control_regions(scene: &SceneGraph, safe_mode: bool) -> Vec<HitRegion> {
     use tze_hud_scene::types::ZoneInteractionKind as Kind;
     scene
@@ -166,6 +166,7 @@ pub(super) fn pressable_control_regions(scene: &SceneGraph, safe_mode: bool) -> 
         .filter(|r| match r.kind {
             Kind::Dismiss | Kind::Action { .. } => {
                 !safe_mode
+                    && scene.overlay.notification_press_guard != Some(r.publication_id)
                     && !scene
                         .overlay
                         .notification_choices

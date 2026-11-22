@@ -851,6 +851,11 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         description: "How long a destructive notification action must be held (ms, 0-3000; 0 = no hold)",
         default_value: "600",
     },
+    CanonicalToken {
+        key: NOTIFICATION_PRESS_GUARD_MS_KEY,
+        description: "How long a card that arrives under a resting pointer ignores pointer presses (ms, 0-3000; 0 = no guard)",
+        default_value: "400",
+    },
     // Runtime system card / toast (pairing code, update notices); never agent-visible.
     CanonicalToken {
         key: "system_card.background",
@@ -1594,13 +1599,28 @@ fn parse_hold_ms(value: &str) -> Option<u32> {
 /// The destructive-action hold in ms ([`NOTIFICATION_ACTION_HOLD_MS_KEY`]);
 /// the canonical default when unset or invalid.
 pub fn notification_action_hold_ms(tokens: &DesignTokenMap) -> u32 {
+    safety_interval_ms(tokens, NOTIFICATION_ACTION_HOLD_MS_KEY)
+}
+
+/// A card that an agent puts under a resting pointer ignores pointer presses
+/// on its controls for this long (ms). `0` turns the guard off. A safety
+/// interval, not motion: the OS animation preference leaves it alone.
+pub const NOTIFICATION_PRESS_GUARD_MS_KEY: &str = "notification.press_guard.ms";
+
+/// The fresh-card press guard in ms ([`NOTIFICATION_PRESS_GUARD_MS_KEY`]);
+/// the canonical default when unset or invalid.
+pub fn notification_press_guard_ms(tokens: &DesignTokenMap) -> u32 {
+    safety_interval_ms(tokens, NOTIFICATION_PRESS_GUARD_MS_KEY)
+}
+
+fn safety_interval_ms(tokens: &DesignTokenMap, key: &str) -> u32 {
     tokens
-        .get(NOTIFICATION_ACTION_HOLD_MS_KEY)
+        .get(key)
         .and_then(|v| parse_hold_ms(v))
         .unwrap_or_else(|| {
-            canonical_token(NOTIFICATION_ACTION_HOLD_MS_KEY)
+            canonical_token(key)
                 .and_then(|token| parse_hold_ms(token.default_value))
-                .expect("canonical hold duration must be valid")
+                .expect("canonical safety interval must be valid")
         })
 }
 
@@ -1645,7 +1665,7 @@ pub(crate) fn validate_canonical_value(key: &str, value: &str) -> Result<(), Str
             parse_color_hex(value).is_some(),
             "a color #RRGGBB or #RRGGBBAA".into(),
         )
-    } else if key == NOTIFICATION_ACTION_HOLD_MS_KEY {
+    } else if key == NOTIFICATION_ACTION_HOLD_MS_KEY || key == NOTIFICATION_PRESS_GUARD_MS_KEY {
         (
             parse_hold_ms(value).is_some(),
             format!("a whole number of ms from 0 to {MAX_NOTIFICATION_ACTION_HOLD_MS}"),
@@ -1986,7 +2006,9 @@ pub(crate) fn validate_design_tokens(raw: &RawConfig, errors: &mut Vec<ConfigErr
             });
             continue;
         }
-        if (key == UI_SCALE_KEY || key == NOTIFICATION_ACTION_HOLD_MS_KEY)
+        if (key == UI_SCALE_KEY
+            || key == NOTIFICATION_ACTION_HOLD_MS_KEY
+            || key == NOTIFICATION_PRESS_GUARD_MS_KEY)
             && let Err(expected) = validate_canonical_value(key, &tokens.0[key])
         {
             errors.push(ConfigError {
@@ -1997,7 +2019,7 @@ pub(crate) fn validate_design_tokens(raw: &RawConfig, errors: &mut Vec<ConfigErr
                 hint: if key == UI_SCALE_KEY {
                     "e.g. \"ui.scale\" = \"1.25\" makes everything a quarter bigger".into()
                 } else {
-                    "e.g. \"notification.action.hold.ms\" = \"800\"".into()
+                    format!("e.g. \"{key}\" = \"800\"")
                 },
             });
             continue;
@@ -2323,12 +2345,35 @@ mod tests {
             assert_eq!(errors[0].code, ConfigErrorCode::TokenValueParseError);
         }
         assert_eq!(notification_action_hold_ms(&DesignTokenMap::new()), 600);
+        assert_eq!(notification_press_guard_ms(&DesignTokenMap::new()), 400);
+        for (value, ms) in [("0", 0), ("250", 250), ("3000", 3000), ("3001", 400)] {
+            let tokens = DesignTokenMap::from([(
+                NOTIFICATION_PRESS_GUARD_MS_KEY.to_owned(),
+                value.to_owned(),
+            )]);
+            assert_eq!(notification_press_guard_ms(&tokens), ms, "guard {value}");
+            assert_eq!(
+                check(&[(NOTIFICATION_PRESS_GUARD_MS_KEY, value)]).is_empty(),
+                value != "3001"
+            );
+        }
         for key in [PX_SCALE_KEY, "runtime.px_scale@subtitle"] {
             let errors = check(&[(key, "2")]);
             assert_eq!(errors[0].code, ConfigErrorCode::InvalidTokenKey);
             assert!(errors[0].hint.contains("ui.scale"), "{}", errors[0].hint);
         }
         assert!(crate::themes::parse_theme("\"ui.scale\" = \"1.25\"").is_err());
+    }
+
+    /// The press guard is a safety interval: turning Windows animations off
+    /// zeroes motion durations but leaves it unchanged.
+    #[test]
+    fn press_guard_is_not_zeroed_by_os_motion() {
+        assert!(!OS_MOTION_ZEROED_KEYS.contains(&NOTIFICATION_PRESS_GUARD_MS_KEY));
+        let mut resolved = crate::themes::resolve_config_tokens(&DesignTokenMap::new());
+        apply_os_motion_layer(&mut resolved, &DesignTokenMap::new(), false);
+        assert_eq!(resolved["motion.enter.ms"], "0");
+        assert_eq!(notification_press_guard_ms(&resolved), 400);
     }
 
     #[test]

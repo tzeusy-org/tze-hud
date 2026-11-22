@@ -951,7 +951,12 @@ def scenario_keyboard(run: Run) -> None:
 
 
 def open_card(run: Run, key: str, *, actions: list[dict] | None = None) -> dict:
-    """Publish through MCP, then wait for the actual drawn card, never its estimate."""
+    """Publish through MCP, then wait for the actual drawn card, never its estimate.
+
+    The pointer is parked first: a card that arrives under a resting pointer
+    ignores presses for `notification.press_guard.ms` (scenario press-guard).
+    """
+    run.glide(1, 1)
     run.publish("zone:notification-area", key=key, ttl_ms=0,
                 content={"body": "Owned gesture check", "actions": actions or [
                     {"label": "First", "callback_id": f"{key}-first"},
@@ -1119,6 +1124,34 @@ def scenario_card_hold(run: Run) -> None:
         run.inj.button(False)
         run.step("button up")
     take_card_answer(run, key, f"{key}-delete")
+
+
+def scenario_press_guard(run: Run) -> None:
+    """A keyed card that arrives under a resting pointer ignores a click for
+    `notification.press_guard.ms` (default 400 ms); once `guarded` clears, a
+    click at the same spot answers."""
+    key = "gesture-press-guard"
+    open_card(run, key)
+    target = f"zone:notification-area/{key}/0"
+    run.point(target)
+    run.smoke.ok("hud_clear", {"surface": "zone:notification-area", "key": key})
+    run.expect(f"card {key} gone", lambda st: notification_entry(st, key) is None)
+    run.settle()
+    # The pointer rests where the card will draw again.
+    run.publish("zone:notification-area", key=key, ttl_ms=0,
+                content={"body": "Owned gesture check", "actions": [
+                    {"label": "First", "callback_id": f"{key}-first"},
+                    {"label": "Second", "callback_id": f"{key}-second"}]})
+    run.expect(f"card {key} guarded", lambda st: bool((card := notification_entry(st, key)) and card.get("guarded")),
+               interval_s=0.01)
+    run.click()
+    if items := run.inputs(wait_ms=500):
+        raise ScenarioFailed("a click on an arriving card sends nothing", {"items": items, "status": run.status()})
+    run.expect(f"card {key} no longer guarded",
+               lambda st: (card := notification_entry(st, key)) is not None and not card.get("guarded"))
+    run.expect("the hand returns without motion", lambda st: st.get("cursor") == "hand")
+    run.click()
+    take_card_answer(run, key, f"{key}-first")
 
 
 def scenario_card_keyboard(run: Run) -> None:
@@ -2148,6 +2181,7 @@ SCENARIOS: dict[str, Callable[[Run], None]] = {
     "card-click": scenario_card_click,
     "card-keyboard": scenario_card_keyboard,
     "card-hold": scenario_card_hold,
+    "press-guard": scenario_press_guard,
     "card-dismiss": scenario_card_dismiss,
     "foreign-publisher": scenario_foreign_publisher,
     "held-press": scenario_held_press,

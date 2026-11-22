@@ -121,6 +121,15 @@ pub struct RuntimeOverlayState {
     /// A hold released early, draining its fill over `motion.state.ms`.
     #[serde(skip, default)]
     pub notification_hold_drain: Option<NotificationHoldDrain>,
+    /// The card whose controls ignore pointer presses because an agent put
+    /// it under a resting pointer (`notification.press_guard.ms`). The
+    /// runtime owns the guard; this mirrors it for drawing and status.
+    #[serde(skip, default)]
+    pub notification_press_guard: Option<SceneId>,
+    /// The card the owner last answered or dismissed: the re-layout its
+    /// leaving causes is the owner's own and starts no press guard.
+    #[serde(skip, default)]
+    pub notification_owner_activated: Option<SceneId>,
     /// Set of element_ids that are currently being actively dragged.
     ///
     /// Written by the input processor on DragActivated and cleared on

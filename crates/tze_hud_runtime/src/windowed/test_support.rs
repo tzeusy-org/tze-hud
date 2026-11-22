@@ -318,6 +318,7 @@ pub(super) fn make_windowed_keyboard_test_app(
         overlay_refits: Default::default(),
         press_window: None,
         zone_press: None,
+        press_guard: Default::default(),
         notification_link_opener: Default::default(),
         link_feedback: None,
         context_menu_press: None,
