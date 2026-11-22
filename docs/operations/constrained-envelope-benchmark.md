@@ -79,6 +79,6 @@ Do not raise or duplicate a ceiling to make this lane green. Diagnose changes
 in the raw samples, calibration factors, adapter selection, and execution
 identity first. A temporary infrastructure waiver must identify the unavailable
 runner or renderer and preserve the failed artifact; it cannot be represented
-as a passing performance result. Changes to the reference budgets follow the
-approval and evidence rules in
-[`about/craft-and-care/engineering-bar.md`](../../about/craft-and-care/engineering-bar.md).
+as a passing performance result. A change to a reference budget records the
+measured baseline that justifies it beside the constant in
+[`check_windows_perf_budgets.py`](../../scripts/ci/check_windows_perf_budgets.py).
