@@ -670,7 +670,10 @@ added occupancy (target: combined gesture step at most four minutes). Native
 failures remain failures in these artifacts. Scenario 11 (`overlay-pointer`)
 and `tray` are in the step's `GESTURES_REQUIRED`
 list, so their failure, or a setup failure, fails `windows-build` in its last
-step and withholds the `dev` prerelease; merges are unaffected. This checks hosted software-rendered mechanics; owner GPU,
+step and withholds the `dev` prerelease; merges are unaffected. The overlay run
+also carries the informational `tray-answer` (a real tray left click with a
+question waiting, then Esc and a keystroke that must reach Notepad); an icon
+in overflow leaves it a limited proof. This checks hosted software-rendered mechanics; owner GPU,
 DWM transparency, multiple monitors and DPI acceptance remain separate.
 An original scenario failure is preserved if its failure screenshot also
 fails (`diagnostic_error`). Desktop captures check GDI results and release

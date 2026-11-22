@@ -13,6 +13,8 @@ use super::lifecycle::{INTERACTION_LOCK_BUDGET, spin_acquire};
 #[derive(Default)]
 pub(super) struct AnswerKeyboardState {
     pub requested: Arc<AtomicBool>,
+    /// A tray click: questions only, and a stale click opens the panel.
+    pub tray_requested: Arc<AtomicBool>,
     pub focus: Option<AnswerFocus>,
     pub return_key: Option<String>,
     /// The key holding a destructive action; its release ends the hold.
@@ -139,44 +141,167 @@ pub(super) fn route_answer_key(
     outcome
 }
 
+/// The shown, live portal on `tab_id` whose latest output expects a reply,
+/// newest by that output's time.
+fn newest_waiting_portal(
+    scene: &tze_hud_scene::graph::SceneGraph,
+    tab_id: tze_hud_scene::SceneId,
+    driver: &crate::portal::PortalDriver,
+) -> Option<tze_hud_scene::SceneId> {
+    let handle = driver.portal_handle();
+    let hub = handle.hub.lock().ok()?;
+    let visible_bytes = hub.limits().visible_bytes;
+    scene
+        .tiles
+        .iter()
+        .filter(|(_, tile)| {
+            tile.tab_id == tab_id
+                && tile.namespace == crate::portal::PORTAL_DRIVER_NAMESPACE
+                && scene.tile_shown(tile)
+        })
+        .filter_map(|(tile_id, _)| {
+            let portal = hub.get(&driver.key_for_tile(*tile_id)?)?;
+            let latest = portal.visible_transcript(visible_bytes).last()?;
+            let waiting = portal.degraded_since_us.is_none() && latest.expects_reply;
+            waiting.then_some((latest.at_us, *tile_id))
+        })
+        .max_by_key(|(at_us, tile_id)| (*at_us, tile_id.to_bytes_le()))
+        .map(|(_, tile_id)| tile_id)
+}
+
+impl AnswerKeyboardState {
+    /// The tray's answer handoff: the chord's main-thread path, marked as a
+    /// tray visit.
+    #[cfg(any(target_os = "windows", test, feature = "test-harness"))]
+    pub(super) fn tray_hook(
+        &self,
+        wake: tze_hud_scene::render_wake::RenderWakeNotifier,
+    ) -> crate::shell::control_panel::AnswerHook {
+        let requested = Arc::clone(&self.tray_requested);
+        Arc::new(move || {
+            requested.store(true, Ordering::Release);
+            wake.notify();
+        })
+    }
+}
+
 impl WinitApp {
     pub(super) fn sync_answer_focus(&mut self) {
-        if !self
-            .state
-            .answer_keyboard
-            .requested
-            .swap(false, Ordering::AcqRel)
-        {
+        let keyboard = &self.state.answer_keyboard;
+        let chord = keyboard.requested.swap(false, Ordering::AcqRel);
+        let tray = keyboard.tray_requested.swap(false, Ordering::AcqRel);
+        if !chord && !tray {
             return;
         }
-        if self.state.safe_mode_atomic.load(Ordering::Acquire) {
-            return;
-        }
+        let paused = self.state.safe_mode_atomic.load(Ordering::Acquire);
         let panel_open = self
             .state
             .control_panel
             .as_ref()
             .is_some_and(|panel| panel.is_open());
-        match self.focus_newest_question(super::lifecycle::hud_owns_foreground() && !panel_open) {
-            Ok(true) if panel_open => {
-                // This explicit owner handoff closes settings only after a
-                // question was found. Its close edge must not restore focus
-                // underneath the new card visit.
-                if let Some(panel) = &self.state.control_panel {
+        let found = if paused {
+            Ok(false)
+        } else {
+            self.focus_newest_question(super::lifecycle::hud_owns_foreground() && !panel_open)
+        };
+        // Cards win; with none, only the chord falls through to a portal.
+        let found = match found {
+            Ok(false) if chord && !tray && !paused => self.focus_waiting_portal(),
+            found => found,
+        };
+        match found {
+            Ok(true) => {
+                if tray {
+                    // Only cards answer a tray click. The tray took the
+                    // foreground; return to the app that was behind it.
+                    super::lifecycle::return_to_tray_click_origin();
+                }
+                if panel_open && let Some(panel) = &self.state.control_panel {
+                    // This explicit owner handoff closes settings only after a
+                    // question was found. Its close edge must not restore focus
+                    // underneath the new card visit.
                     panel.send(crate::shell::control_panel::PanelEvent::Chord(
                         tze_hud_scene::config::ChordRole::Answer,
                     ));
                 }
             }
+            #[cfg(any(target_os = "windows", test, feature = "test-harness"))]
+            Ok(false) if tray => {
+                // The question went between click and focus: a click is never dead.
+                if let Some(panel) = &self.state.control_panel {
+                    use crate::shell::control_panel::{PanelEvent, TrayCommand};
+                    panel.send(PanelEvent::Tray(TrayCommand::OpenPanel));
+                }
+            }
             Err(()) => {
-                self.state
-                    .answer_keyboard
-                    .requested
-                    .store(true, Ordering::Release);
+                let keyboard = &self.state.answer_keyboard;
+                keyboard.requested.fetch_or(chord, Ordering::AcqRel);
+                keyboard.tray_requested.fetch_or(tray, Ordering::AcqRel);
                 self.schedule_shared_scene_availability_wake();
             }
-            _ => {}
+            Ok(false) => {}
         }
+    }
+
+    /// With no question, the chord puts the caret in the composer of the
+    /// newest shown, live portal whose latest output expects a reply, exactly
+    /// as a click there would. No agent sees the move.
+    fn focus_waiting_portal(&mut self) -> Result<bool, ()> {
+        let (transition, bounds) = {
+            let state = spin_acquire(&self.state.shared_state, INTERACTION_LOCK_BUDGET).ok_or(())?;
+            let mut scene = spin_acquire(&state.scene, INTERACTION_LOCK_BUDGET).ok_or(())?;
+            let Some(tab_id) = scene.active_tab else {
+                return Ok(false);
+            };
+            let Some(tile_id) =
+                newest_waiting_portal(&scene, tab_id, &self.state.portal_projection_driver)
+            else {
+                return Ok(false);
+            };
+            let tile = &scene.tiles[&tile_id];
+            let bounds = tile.bounds;
+            let Some(composer) = tze_hud_input::find_composer_node(tile.root_node, &scene.nodes)
+            else {
+                return Ok(false);
+            };
+            let transition = self.state.input_processor.recover_composer_focus(
+                &mut self.state.focus_manager,
+                &mut scene,
+                tab_id,
+                tile_id,
+                composer,
+            );
+            (transition, bounds)
+        };
+        let composer_focus_lost = transition.lost.is_some();
+        super::input_dispatch::dispatch_focus_event(&self.state.input_event_tx, transition);
+        if composer_focus_lost {
+            self.clear_local_composer_echo();
+        }
+        self.focus_native_window_at(
+            bounds.x + bounds.width * 0.5,
+            bounds.y + bounds.height * 0.5,
+        );
+        Ok(true)
+    }
+
+    /// Take OS keyboard focus on the window that shows scene point (x, y).
+    fn focus_native_window_at(&mut self, x: f32, y: f32) {
+        let secondary = self.state.primary_monitor.as_ref().and_then(|primary| {
+            self.state
+                .secondaries
+                .iter()
+                .find(|display| display.spec.scene_rect(primary).contains_point(x, y))
+        });
+        let window = secondary
+            .map(|display| &display.window)
+            .or(self.state.window.as_ref());
+        if let Some(window) = window {
+            super::lifecycle::focus_window_for_text_input(window);
+        }
+        self.state
+            .wake
+            .mark_main_work_pending(crate::idle_efficiency::RuntimeWakeupSource::SceneChange);
     }
 
     /// `already_foreground` comes from the OS, not a stale scene focus owner.
@@ -273,23 +398,10 @@ impl WinitApp {
         self.state.notification_keydowns.clear();
         self.state.answer_keyboard.return_key = None;
         self.state.answer_keyboard.focus = Some(focus);
-        let x = bounds.x + bounds.width * 0.5;
-        let y = bounds.y + bounds.height * 0.5;
-        let secondary = self.state.primary_monitor.as_ref().and_then(|primary| {
-            self.state
-                .secondaries
-                .iter()
-                .find(|display| display.spec.scene_rect(primary).contains_point(x, y))
-        });
-        let window = secondary
-            .map(|display| &display.window)
-            .or(self.state.window.as_ref());
-        if let Some(window) = window {
-            super::lifecycle::focus_window_for_text_input(window);
-        }
-        self.state
-            .wake
-            .mark_main_work_pending(crate::idle_efficiency::RuntimeWakeupSource::SceneChange);
+        self.focus_native_window_at(
+            bounds.x + bounds.width * 0.5,
+            bounds.y + bounds.height * 0.5,
+        );
         Ok(true)
     }
 

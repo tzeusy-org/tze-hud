@@ -2359,7 +2359,7 @@ fn node_composer_placeholder(scene: &SceneGraph, node_id: SceneId) -> Option<Str
 ///
 /// Used by [`InputProcessor::classify_portal_focus`] to find a control's sibling
 /// composer as the typing-recovery target (hud-2v8br).
-fn find_composer_node(
+pub fn find_composer_node(
     root: Option<SceneId>,
     nodes: &std::collections::HashMap<SceneId, tze_hud_scene::types::Node>,
 ) -> Option<SceneId> {

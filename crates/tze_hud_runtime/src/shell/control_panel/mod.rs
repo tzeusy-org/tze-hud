@@ -73,6 +73,9 @@ use state::{Effect, Nav, Open, PanelChange, SectionRows, ViewContext};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TrayCommand {
     TogglePanel,
+    /// Focus the newest question as the answer chord does; with none left,
+    /// open the panel.
+    AnswerNext,
     OpenPanel,
     Pause,
     Resume,
@@ -81,21 +84,32 @@ pub(crate) enum TrayCommand {
     Quit,
 }
 
+/// Runs the answer chord's main-thread handoff for a tray visit.
+#[cfg(any(target_os = "windows", test, feature = "test-harness"))]
+pub(crate) type AnswerHook = Arc<dyn Fn() + Send + Sync>;
+
 #[cfg(any(target_os = "windows", test))]
 impl TrayCommand {
-    pub(crate) fn from_menu_id(
-        id: u32,
-        view: &crate::windowed::shell_presence::Presentation,
-    ) -> Option<Self> {
-        Some(match id {
-            1 => Self::OpenPanel,
-            2 if view.glyph == crate::windowed::shell_presence::GlyphState::Paused => Self::Resume,
-            2 => Self::Pause,
-            3 if view.all_hidden => Self::ShowAll,
-            3 => Self::HideAll,
-            4 => Self::Quit,
-            _ => return None,
-        })
+    /// Menu ids name commands, not positions; 0 is "dismissed".
+    const MENU: [Self; 7] = [
+        Self::AnswerNext,
+        Self::OpenPanel,
+        Self::Pause,
+        Self::Resume,
+        Self::HideAll,
+        Self::ShowAll,
+        Self::Quit,
+    ];
+
+    pub(crate) fn menu_id(self) -> usize {
+        Self::MENU
+            .iter()
+            .position(|c| *c == self)
+            .map_or(0, |i| i + 1)
+    }
+
+    pub(crate) fn from_menu_id(id: u32) -> Option<Self> {
+        Self::MENU.get((id as usize).checked_sub(1)?).copied()
     }
 }
 
@@ -154,6 +168,8 @@ struct Shared {
     clipboard_sequence: AtomicU64,
     #[cfg(any(target_os = "windows", test, feature = "test-harness"))]
     quit: RwLock<Option<crate::operator::handoff::Quit>>,
+    #[cfg(any(target_os = "windows", test, feature = "test-harness"))]
+    answer: RwLock<Option<AnswerHook>>,
     render_wake: RenderWakeNotifier,
     /// Wakes the winit loop when new geometry arrives, so the overlay's
     /// click-through state follows the panel's drawn rect.
@@ -181,6 +197,15 @@ impl ControlPanelHandle {
     #[cfg(any(target_os = "windows", test))]
     pub(crate) fn set_quit(&self, quit: crate::operator::handoff::Quit) {
         *self.shared.quit.write().unwrap_or_else(|e| e.into_inner()) = Some(quit);
+    }
+
+    #[cfg(any(target_os = "windows", test, feature = "test-harness"))]
+    pub(crate) fn set_answer(&self, answer: AnswerHook) {
+        *self
+            .shared
+            .answer
+            .write()
+            .unwrap_or_else(|e| e.into_inner()) = Some(answer);
     }
 
     /// Only actual fields/search take native focus on a pointer press.
@@ -464,6 +489,8 @@ pub(crate) fn spawn_control_panel(
             clipboard_sequence: AtomicU64::new(0),
             #[cfg(any(target_os = "windows", test, feature = "test-harness"))]
             quit: RwLock::new(None),
+            #[cfg(any(target_os = "windows", test, feature = "test-harness"))]
+            answer: RwLock::new(None),
             render_wake: deps.render_wake.clone(),
             main_wake: deps.main_wake.clone(),
             #[cfg(test)]
@@ -774,6 +801,22 @@ impl PanelTask {
     async fn on_tray(&mut self, command: TrayCommand) {
         match command {
             TrayCommand::TogglePanel => self.on_chord(ChordRole::Panel).await,
+            TrayCommand::AnswerNext => {
+                let answer = self
+                    .handle
+                    .shared
+                    .answer
+                    .read()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .clone();
+                match answer {
+                    // The main thread focuses the card, or opens the panel
+                    // when the question has gone.
+                    Some(answer) => answer(),
+                    None if self.open.is_none() => self.on_chord(ChordRole::Panel).await,
+                    None => {}
+                }
+            }
             TrayCommand::OpenPanel => {
                 if self.open.is_none() {
                     self.on_chord(ChordRole::Panel).await;

@@ -1056,14 +1056,23 @@ with an `error` naming both keys; set `hide_hotkey` to bind one):
 | Ctrl+Shift+F12 | `safe_mode_hotkey` | Pause agents and open the control panel; pressed again, resume and close |
 | Ctrl+Shift+F11 | `panel_hotkey` | Open or close the control panel with agents running |
 | Ctrl+Shift+F10 | `pairing_hotkey` | Open the control panel at Connect an agent, agents running |
-| Ctrl+Shift+F9 | `answer_hotkey` | Focus the newest unanswered question with callback actions |
+| Ctrl+Shift+F9 | `answer_hotkey` | Focus the newest unanswered question with callback actions, or else the composer of the portal waiting for a reply |
 | Ctrl+Shift+F8 | `hide_hotkey` | Hide all, or show all when everything is hidden, from any app; the panel and pause stay as they are |
 
 Windows also has one notification-area **tray icon**, even when no agent
-content is showing. Click it, or select it with Win+B and Enter, to toggle
-the control panel. Its native context menu offers **Open panel** (default),
-**Pause agents** / **Resume agents**, **Hide all** / **Show all**, and **Quit**.
-Every item supports keyboard navigation. Pause opens the panel and suspends
+content is showing. Click it, or select it with Win+B and Enter: while a
+question card is drawn, agents are running and zones are shown, this focuses
+the newest question (as the answer chord does) and afterwards returns focus to
+the app that was in front; otherwise it toggles the control panel. If the
+question goes before the click lands, the panel opens. The app in front is one
+look at the click: the first window, top to bottom, that is visible, not
+minimised or cloaked, not topmost, not a tool window, unowned, not the HUD's
+and not the taskbar or desktop; with none, Windows keeps focus. Its native
+context menu offers **Answer next question** (default) while a click would
+answer, then **Open panel** (otherwise the default), **Pause agents** /
+**Resume agents**, **Hide all** / **Show all**, and **Quit**; each item shows
+its chord, when one is bound, beside it. Every item supports keyboard
+navigation. Pause opens the panel and suspends
 agents; Resume closes it and resumes them. These commands run on the network
 runtime like global chords, independently of the window event loop or agents.
 Quit uses the normal clean shutdown path, without confirmation; relaunch
@@ -1072,13 +1081,14 @@ through Win+R `tze_hud` when installed, or its executable.
 The glyph shows paused, hidden, questions waiting, or normal, in that priority.
 Its contrast follows the Windows taskbar's light/dark setting rather than the
 HUD theme. The two-line tooltip reports question count (or Paused / Everything
-hidden) and the names of agents connected or showing something, as in the
+hidden), followed by " · click to answer" while a left click would answer, and the names of agents connected or showing something, as in the
 panel header. Long names are ellipsized within the shell's UTF-16 limit.
 Windows 11 initially places new icons in overflow; pin this one through
 **Settings > Personalization > Taskbar > Other system tray icons**.
 
 `/admin/status` reports `tray` with `registered`, `glyph`, `tooltip`,
-`all_hidden`, `hidden_notice` (the pill's text, or null when no pill shows)
+`click` (`answer` or `panel`: what a left click does now), `all_hidden`,
+`hidden_notice` (the pill's text, or null when no pill shows)
 and native test identity, plus `session_locked`. `tray` is null
 and `session_locked` false off Windows. Failed watcher creation leaves
 `registered` and `session_locked` false; a missing icon can therefore be
@@ -1131,14 +1141,20 @@ search/edit field) or starting a portal OUTPUT selection takes focus
 explicitly, so Ctrl+C reaches the HUD. The same rule applies to every
 monitor. Publication never takes focus. When the HUD takes focus, it remembers
 the external app that was active; nested HUD focus takes preserve that origin.
+A tray-started visit remembers the app sampled at the click instead, since the
+taskbar was active.
 A keyboard card answer or the outer Esc returns to it only while a HUD window
 still holds the foreground. Closing that app, or switching to a third app,
 never causes another window to be raised. Sending a portal reply keeps focus
 in its composer.
 
 The answer chord targets the newest visible unanswered card with callback
-actions. With no such card it changes nothing. It transfers input from an open
-running settings panel to the card; it does nothing in safe mode. Tab/Shift+Tab
+actions. With no such card it focuses the composer of the newest portal
+waiting for a reply (shown, not degraded, its latest output published with
+`expects_reply: true`; newest by that output's time), exactly as a click there
+would: the draft and caret are kept and the origin app is remembered. With
+neither it changes nothing. It transfers input from an open running settings
+panel to the card or composer; it does nothing in safe mode. Tab/Shift+Tab
 and arrows move among that card's actions, starting on the primary action (the
 first that is not destructive, else the first); Enter/Space activates the
 focused action, so chord then Enter takes the primary (a `url` primary opens

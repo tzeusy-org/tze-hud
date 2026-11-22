@@ -1785,8 +1785,23 @@ def overlay_focus_etiquette(run: Run, notepad_pid: int, surface: str) -> None:
     wait_until(lambda: (WIN.edit_text(notepad_pid) == expected, WIN.edit_text(notepad_pid)),
                what="next physical keystroke after answer reaches Notepad", timeout_s=SETTLE_S)
     run.expect("answer keys never edit the composer", on(surface, lambda p: p["input"]["draft_chars"] == 0))
+    # hud-ohgc9.5 R5.2: with no card, the chord reaches the portal whose latest
+    # output still asks for a reply; its outer Esc returns to Notepad.
     run.key("ctrl+shift+F9")
-    run.observe_for("no question means no foreground change",
+    run.expect("no card: the chord focuses the waiting portal's composer",
+               on(surface, lambda p: p["focus"] == "composer"))
+    foreground_is(run.pid, "the chord takes keyboard focus for the composer")
+    run.key("Escape")
+    foreground_is(notepad_pid, "composer Esc returns to the prior app")
+    run.type(" portal")
+    expected += " portal"
+    wait_until(lambda: (WIN.edit_text(notepad_pid) == expected, WIN.edit_text(notepad_pid)),
+               what="next key after the portal visit reaches Notepad", timeout_s=SETTLE_S)
+    run.publish(surface, content="\nno reply needed")
+    run.expect("the portal no longer waits for a reply", on(
+        surface, lambda p: (p["output"]["last_visible_line"] or "").startswith("no reply needed")))
+    run.key("ctrl+shift+F9")
+    run.observe_for("no card and no waiting portal means no foreground change",
                     lambda _: WIN.foreground_pid() == notepad_pid, 0.25)
 
     third = subprocess.Popen(["notepad.exe"])
@@ -2072,6 +2087,53 @@ def scenario_tray(run: Run) -> None:
     run.step("ok exposed tray: real right-click and keyboard Hide all / Show all")
 
 
+def scenario_tray_answer(run: Run) -> None:
+    """Tray left click with a question waiting focuses it; Esc returns keys to Notepad (informational)."""
+    run.expect("tray registered", lambda st: st.get("tray", {}).get("registered") is True)
+    notepad = subprocess.Popen(["notepad.exe"])
+    run.helper_pids.append(notepad.pid)
+    try:
+        def foreground():
+            if WIN.foreground_pid() != notepad.pid:
+                WIN.bring_to_front(notepad.pid)  # a window request, not injected input
+            return WIN.foreground_pid() == notepad.pid, WIN.foreground_pid()
+        wait_until(foreground, what="owned Notepad foreground", timeout_s=15, interval_s=0.2)
+        key = "gesture-tray-answer"
+        open_card(run, key)
+        status = run.expect("a left click would answer", lambda st: st["tray"].get("click") == "answer")
+        tray = status["tray"]
+        if not tray["tooltip"].splitlines()[0].endswith(" · click to answer"):
+            raise ScenarioFailed("the tooltip announces what a click does", tray)
+        probe = {}
+        try:
+            rect = WIN.tray_rect(tray["hwnd"], tray["icon_id"], run.pid,
+                                 expected_tooltip=tray["tooltip"], diagnostics=probe)
+        finally:
+            run.step(f"owned tray visibility probe {json.dumps(probe)}")
+        if rect is None:
+            run.step("limited tray-answer proof: click rule and tooltip passed; icon in overflow, no click injected")
+            return
+        wait_until(foreground, what="owned Notepad foreground before the tray click", timeout_s=15, interval_s=0.2)
+        run.inj.move_abs((rect[0] + rect[2]) // 2, (rect[1] + rect[3]) // 2)
+        run.inj.click()
+        run.expect("tray click focuses the question's first action", lambda st: bool(
+            (card := notification_entry(st, key)) and card["focus"] == 0
+            and WIN.foreground_pid() == run.pid))
+        run.key("Escape")
+        wait_until(lambda: (WIN.foreground_pid() == notepad.pid, WIN.foreground_pid()),
+                   what="Esc returns to the app that was in front", timeout_s=SETTLE_S)
+        run.expect("Esc leaves the card unanswered", lambda st: bool(
+            (card := notification_entry(st, key)) and card["focus"] is None and card["chosen"] is None))
+        run.type("after tray")
+        wait_until(lambda: (WIN.edit_text(notepad.pid) == "after tray", WIN.edit_text(notepad.pid)),
+                   what="the next keystroke reaches Notepad", timeout_s=SETTLE_S)
+        run.step("ok real tray click answers; Esc returns keys to Notepad")
+    finally:
+        kill_pid(notepad.pid)
+        notepad.wait(10)
+        run.helper_pids.remove(notepad.pid)
+
+
 CAPTURE_RGB = (255, 0, 255)  # magenta: nothing else on a CI desktop is this colour
 
 
@@ -2168,7 +2230,7 @@ def scenario_capture_exclusion(run: Run) -> None:
 
 
 # Windows only: they need Win32 foreground/edit-control access or global hotkeys.
-TIER_W_ONLY = {"no-focus-steal", "safe-mode", "overlay-pointer", "tray", "capture-exclusion"}
+TIER_W_ONLY = {"no-focus-steal", "safe-mode", "overlay-pointer", "tray", "tray-answer", "capture-exclusion"}
 
 SCENARIOS: dict[str, Callable[[Run], None]] = {
     "output-anchor": scenario_output_anchor,          # 1
@@ -2198,6 +2260,7 @@ SCENARIOS: dict[str, Callable[[Run], None]] = {
     "unicode-typing": scenario_unicode_typing,
     "no-focus-steal": scenario_no_focus_steal,        # 10 (tier W)
     "tray": scenario_tray,                            # tier W, overlay only
+    "tray-answer": scenario_tray_answer,              # tier W, overlay only, informational
     "overlay-pointer": scenario_overlay_pointer,      # 11 (tier W, overlay only)
     "safe-mode": scenario_safe_mode,                  # 12 (tier W)
     "capture-exclusion": scenario_capture_exclusion,  # tier W, informational (restarts the HUD twice)
@@ -2299,9 +2362,10 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(f"{', '.join(sorted(TIER_W_ONLY))} run only with --injector sendinput")
     if args.window_mode == "overlay" and not tier_w:
         parser.error("overlay gestures require --injector sendinput")
-    overlay_names = {"overlay-pointer", "tray"}
+    overlay_names = {"overlay-pointer", "tray", "tray-answer"}
     if args.scenarios and any((n in overlay_names) != (args.window_mode == "overlay") for n in args.scenarios):
-        parser.error("overlay-pointer and tray require --window-mode overlay; other scenarios require fullscreen")
+        parser.error("overlay-pointer, tray and tray-answer require --window-mode overlay; "
+                     "other scenarios require fullscreen")
     names = args.scenarios or [n for n in SCENARIOS
                                if (tier_w or n not in TIER_W_ONLY)
                                and ((n in overlay_names) == (args.window_mode == "overlay"))]

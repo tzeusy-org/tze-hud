@@ -371,9 +371,10 @@ class WindowsGuardTests(unittest.TestCase):
                     selected = scenarios.call_args.args[1]
                     self.assertEqual("overlay-pointer" in selected, mode == "overlay")
                     self.assertEqual("tray" in selected, mode == "overlay")
+                    self.assertEqual("tray-answer" in selected, mode == "overlay")
                     # 25: hud-ljhku.5 added "stack-trim"; hud-ljhku.2 added "portal-reading";
                     # 29: the fresh-card "press-guard".
-                    self.assertEqual(len(selected), 2 if mode == "overlay" else 29)
+                    self.assertEqual(len(selected), 3 if mode == "overlay" else 29)
                     # Real link handoffs can foreground a browser late, so they run
                     # after every other injecting scenario; MCP-only restart stays last.
                     self.assertEqual(selected[-3:] == ["portal-reading", "card-link", "restart"],
@@ -469,7 +470,7 @@ class RequiredGateTests(unittest.TestCase):
             self.assertEqual(overlay.main(["--exe", "x.exe", "--out", directory, "--required", "tray"]), 0)
             argv = scenarios.call_args.args[0]
             self.assertEqual(argv[argv.index("--required") + 1], "tray")
-            self.assertEqual(argv[-2:], ["overlay-pointer", "tray"])
+            self.assertEqual(argv[-3:], ["overlay-pointer", "tray", "tray-answer"])
 
 
 class OverlayInstallerTests(unittest.TestCase):

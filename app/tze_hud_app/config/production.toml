@@ -35,6 +35,11 @@ safe_mode_hotkey = "Ctrl+Shift+F12"
 panel_hotkey = "Ctrl+Shift+F11"
 # Show the pairing code.
 pairing_hotkey = "Ctrl+Shift+F10"
+# Focus the newest question, or else the portal waiting for your reply.
+# answer_hotkey = "Ctrl+Shift+F9"
+# Hide all, or show all when everything is hidden. Left unset on purpose: an
+# unset hide key yields to another key already on Ctrl+Shift+F8.
+# hide_hotkey = "Ctrl+Shift+F8"
 # Launch settings the control panel edits (flags and env vars win over these):
 # mcp_port = 9090      # 0 disables; read at start
 # grpc_port = 50051    # 0 disables; read at start

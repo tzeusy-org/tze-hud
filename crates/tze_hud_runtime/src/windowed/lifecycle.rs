@@ -1311,6 +1311,12 @@ impl FocusOrigin {
     fn leave(&mut self, still_owned: bool) -> Option<isize> {
         self.previous.take().filter(|_| still_owned)
     }
+
+    /// A tray-started visit returns to the window sampled at the click, or
+    /// leaves focus to Windows when there was none.
+    fn redirect(&mut self, origin: Option<isize>) {
+        self.previous = origin;
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -1337,6 +1343,29 @@ pub(super) fn hud_owns_foreground() -> bool {
     #[cfg(not(target_os = "windows"))]
     {
         false
+    }
+}
+
+/// The app window sampled at the last answering tray click (0: none).
+#[cfg(target_os = "windows")]
+static TRAY_CLICK_ORIGIN: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
+
+#[cfg(target_os = "windows")]
+pub(super) fn note_tray_click_origin(origin: Option<isize>) {
+    TRAY_CLICK_ORIGIN.store(origin.unwrap_or(0), std::sync::atomic::Ordering::Release);
+}
+
+/// A tray-started visit returns to the app sampled at the click, consumed
+/// once; the tray, not that app, held the foreground when focus was taken.
+pub(super) fn return_to_tray_click_origin() {
+    #[cfg(target_os = "windows")]
+    {
+        let origin = TRAY_CLICK_ORIGIN.swap(0, std::sync::atomic::Ordering::AcqRel);
+        CHROME_NATIVE_OWNER.with(|owner| {
+            if let Ok(mut owner) = owner.try_borrow_mut() {
+                owner.focus_origin.redirect((origin != 0).then_some(origin));
+            }
+        });
     }
 }
 
@@ -4168,6 +4197,17 @@ mod tests {
         assert_eq!(origin.leave(true), Some(30));
         origin.acquire(None, false);
         assert_eq!(origin.leave(true), None);
+
+        // A tray visit: the taskbar was in front, the sampled app gets keys.
+        origin.acquire(Some(40), false);
+        origin.redirect(Some(10));
+        assert_eq!(origin.leave(true), Some(10));
+        origin.acquire(Some(40), false);
+        origin.redirect(Some(10));
+        assert_eq!(origin.leave(false), None, "a switch during the visit wins");
+        origin.acquire(Some(40), false);
+        origin.redirect(None);
+        assert_eq!(origin.leave(true), None, "no app window: Windows decides");
     }
 
     #[test]

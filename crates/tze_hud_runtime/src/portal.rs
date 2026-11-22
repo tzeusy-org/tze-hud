@@ -268,7 +268,7 @@ impl PortalDriver {
         }
     }
 
-    fn key_for_tile(&self, tile_id: SceneId) -> Option<PortalKey> {
+    pub(crate) fn key_for_tile(&self, tile_id: SceneId) -> Option<PortalKey> {
         self.entries
             .iter()
             .find(|(_, entry)| entry.tile_scene_id == Some(tile_id))
