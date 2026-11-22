@@ -1348,7 +1348,7 @@ async fn countdown_kpi_and_stepper_render_their_shipped_contracts() {
     color_at(&blocked, 20, 54, "color.primary");
     color_at(&blocked, 49, 54, "color.caution");
     color_at(&blocked, 78, 54, "color.outline.variant");
-    for (step, filled) in [(2.6, 2), (7.0, 5)] {
+    for (step, filled) in [(2.0, 2), (7.0, 5)] {
         publish(
             &mut scene,
             "stepper",
@@ -1376,7 +1376,7 @@ async fn countdown_kpi_and_stepper_render_their_shipped_contracts() {
         if filled == 2 {
             assert_eq!(
                 pixels, blocked,
-                "fractional step must floor, including antialiased edges"
+                "republishing the same whole step changes no pixel"
             );
         }
     }

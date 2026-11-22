@@ -582,7 +582,11 @@ Every rejection carries a stable error code and a `hint` that tells the model
 what to do next. Codes are part of the API and don't change silently. A good
 error saves a model a round trip and its tokens.
 
-Typed widget values are rejected rather than silently clamped; invalid mixed
+Typed widget values are rejected rather than silently clamped (a fractional
+stepper count is refused, not floored:
+[`stepper_counts_are_whole_numbers`](../crates/tze_hud_widget/tests/shipped_bundles.rs),
+[`integer_counts_are_discovered_and_fractions_refused`](../crates/tze_hud_mcp/src/server/tests.rs));
+invalid mixed
 updates leave publication/current parameters unchanged. Both transports use
 the same scene admission check. Widget audiences default to model; owner/runtime
 parameters fail before any publication, lease or partial update, including a

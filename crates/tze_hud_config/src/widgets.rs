@@ -408,6 +408,28 @@ fn validate_initial_params(
             continue;
         }
 
+        // F32: the shared range and whole-number admission.
+        if decl.param_type == WidgetParamType::F32
+            && let Some(value) = raw_val
+                .as_float()
+                .or(raw_val.as_integer().map(|i| i as f64))
+            && let Err(error) = tze_hud_scene::SceneGraph::validate_widget_f32_value(
+                widget_type,
+                param_name,
+                decl,
+                value,
+            )
+        {
+            errors.push(ConfigError {
+                code: ConfigErrorCode::WidgetInvalidInitialParams,
+                field_path,
+                expected: decl.value_hint(),
+                got: format!("{raw_val:?}"),
+                hint: format!("tab {tab_name:?}, widget {widget_type:?}: {error}"),
+            });
+            continue;
+        }
+
         // Enum: check allowed_values if constraints are present.
         if decl.param_type == WidgetParamType::Enum {
             if let Some(constraints) = &decl.constraints {
@@ -736,6 +758,40 @@ mod tests {
                 .any(|e| matches!(e.code, ConfigErrorCode::WidgetInvalidInitialParams)),
             "type mismatch in initial_params should produce CONFIG_WIDGET_INVALID_INITIAL_PARAMS, got: {errors:?}"
         );
+    }
+
+    /// WHEN owner config sets a whole-number count THEN `2` and `2.0` load
+    /// and a fraction or out-of-range count is refused with the integer bound.
+    #[test]
+    fn owner_counts_must_be_whole() {
+        let mut gauge = make_gauge_type();
+        gauge.parameter_schema[0].constraints = Some(tze_hud_scene::WidgetParamConstraints {
+            f32_min: Some(0.0),
+            f32_max: Some(12.0),
+            f32_integer: true,
+            ..Default::default()
+        });
+        let type_map = type_map_from(&[gauge]);
+        let known: HashSet<String> = ["gauge".to_string()].into();
+        for (value, accepted) in [
+            (toml::Value::Integer(2), true),
+            (toml::Value::Float(2.0), true),
+            (toml::Value::Float(2.5), false),
+            (toml::Value::Integer(13), false),
+        ] {
+            let raw = make_config_with_tab_widgets(vec![RawTabWidget {
+                widget_type: Some("gauge".into()),
+                initial_params: HashMap::from([("level".to_string(), AnyValue(value.clone()))]),
+                ..Default::default()
+            }]);
+            let mut errors = Vec::new();
+            validate_widget_instances(&raw, &known, &type_map, &mut errors);
+            assert_eq!(errors.is_empty(), accepted, "{value:?}: {errors:?}");
+            if !accepted {
+                assert_eq!(errors[0].code, ConfigErrorCode::WidgetInvalidInitialParams);
+                assert_eq!(errors[0].expected, "an integer in 0..12");
+            }
+        }
     }
 
     /// WHEN initial_params has unknown parameter name THEN error.

@@ -66,7 +66,7 @@ unreachable or rejects the call, continue in chat and report the limitation once
 | Widget `params` declaration | `{"progress":0.5,"label":"Tests"}` as `params`, using discovered names/types |
 | Countdown `deadline<=24h` | `{"ends_in_ms":300000,"label":"Tests","severity":"info"}`; relative integer ms, starts at presentation |
 | KPI bundle | `{"value":"3 fail","label":"Tests","trend":"down","severity":"error"}` |
-| Stepper bundle | `{"step":2,"total":5,"state":"blocked","label":"Deploy"}`; step floors and clamps to total |
+| Stepper bundle | `{"step":2,"total":5,"state":"blocked","label":"Deploy"}`; whole counts only (`2.5` is refused); a step above total fills every dot |
 
 - Structured zone `type` is inferred from the zone; set it explicitly when
   selecting another accepted type in a mixed zone. Unknown fields are rejected.

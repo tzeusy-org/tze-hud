@@ -45,11 +45,23 @@ impl SceneGraph {
     ) -> Result<f32, ValidationError> {
         let min = decl.constraints.as_ref().and_then(|c| c.f32_min);
         let max = decl.constraints.as_ref().and_then(|c| c.f32_max);
-        if !value.is_finite()
+        let invalid = !value.is_finite()
             || value.abs() > f64::from(f32::MAX)
             || min.is_some_and(|min| value < f64::from(min))
-            || max.is_some_and(|max| value > f64::from(max))
+            || max.is_some_and(|max| value > f64::from(max));
+        // A whole-number count is refused (checked before narrowing, so a
+        // fraction too small for f32 still fails), and every refusal of one
+        // names the integer bound.
+        if decl.constraints.as_ref().is_some_and(|c| c.f32_integer)
+            && (invalid || value.fract() != 0.0)
         {
+            return Err(ValidationError::WidgetParameterTypeMismatch {
+                widget: widget.to_string(),
+                param: param.to_string(),
+                expected: decl.value_hint(),
+            });
+        }
+        if invalid {
             let range = match (min, max) {
                 (Some(min), Some(max)) => format!("{min}..{max} inclusive"),
                 (Some(min), None) => format!("at least {min}"),

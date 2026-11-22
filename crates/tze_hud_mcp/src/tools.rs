@@ -293,6 +293,9 @@ fn widget_params(scene: &SceneGraph, instance: &str) -> Value {
         let ty = match d.param_type {
             WidgetParamType::Deadline => "deadline<=24h".into(),
             WidgetParamType::F32 => match (c.and_then(|c| c.f32_min), c.and_then(|c| c.f32_max)) {
+                (Some(lo), Some(hi)) if c.is_some_and(|c| c.f32_integer) => {
+                    format!("integer {lo}..{hi}")
+                }
                 (Some(lo), Some(hi)) => format!("number {lo}..{hi}"),
                 _ => "number".into(),
             },

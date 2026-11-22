@@ -2421,7 +2421,8 @@ pub const WIDGET_TILE_Z_MIN: u32 = 0x9000_0000;
 pub enum WidgetParamType {
     /// Integer relative milliseconds, snapshotted to wall time on presentation.
     Deadline,
-    /// IEEE 754 32-bit float, range-clamped to [min, max].
+    /// IEEE 754 32-bit float. Admission rejects values outside [min, max]
+    /// (and fractions of a whole-number count); nothing is clamped.
     F32,
     /// UTF-8 string, max 1024 bytes by default.
     String,
@@ -2457,6 +2458,10 @@ pub struct WidgetParamConstraints {
     /// Maximum value (f32 parameters only). None = unconstrained.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub f32_max: Option<f32>,
+    /// Whole numbers only (f32 parameters): a value with a fractional part is
+    /// refused, never floored. Bounds and default must be whole too.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub f32_integer: bool,
     /// Maximum UTF-8 byte length for string parameters. 0 / None = default 1024.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub string_max_bytes: Option<u32>,
@@ -2496,6 +2501,14 @@ impl WidgetParameterDeclaration {
             WidgetParamType::F32 => {
                 let min = constraints.and_then(|c| c.f32_min);
                 let max = constraints.and_then(|c| c.f32_max);
+                if constraints.is_some_and(|c| c.f32_integer) {
+                    return match (min, max) {
+                        (Some(lo), Some(hi)) => format!("an integer in {lo}..{hi}"),
+                        (Some(lo), None) => format!("an integer >= {lo}"),
+                        (None, Some(hi)) => format!("an integer <= {hi}"),
+                        (None, None) => "an integer".into(),
+                    };
+                }
                 match (min, max) {
                     (Some(lo), Some(hi)) => format!("a finite f32 in {lo}..{hi} inclusive"),
                     (Some(lo), None) => format!("a finite f32 >= {lo}"),
