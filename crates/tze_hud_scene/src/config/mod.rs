@@ -176,7 +176,7 @@ impl DisplayProfile {
 
 /// A fully validated, frozen configuration.
 ///
-/// Returned by `ConfigLoader::freeze()`.
+/// Returned by `tze_hud_config::TzeHudConfig::freeze()`.
 #[derive(Clone, Debug)]
 pub struct ResolvedConfig {
     pub profile: DisplayProfile,
@@ -187,55 +187,14 @@ pub struct ResolvedConfig {
     pub source_path: Option<String>,
 }
 
-// ─── ConfigLoader Trait ───────────────────────────────────────────────────────
-
-/// Trait encoding the configuration loading and validation contract.
-///
-/// Implementations must:
-/// - Accept only TOML with parse errors including line/column.
-/// - Search configuration file chain (CLI → env → cwd → XDG) in order.
-/// - Enforce built-in profile budget values exactly.
-/// - Reject `[agents]` (agents live in `agents.toml`).
-/// - Collect ALL validation errors before reporting.
-/// - Reject `includes` fields (unsupported).
-pub trait ConfigLoader {
-    /// Parse a TOML configuration string.
-    ///
-    /// Returns `Err(ParseError)` with line and column if the TOML is invalid.
-    fn parse(toml_src: &str) -> Result<Self, ParseError>
-    where
-        Self: Sized;
-
-    /// Apply normalisation rules (resolve profile, fill defaults).
-    fn normalize(&mut self);
-
-    /// Validate all fields.  Returns ALL validation errors (never stops at first).
-    fn validate(&self) -> Vec<ConfigError>;
-
-    /// Freeze the validated config into a `ResolvedConfig`.
-    ///
-    /// Returns `Err` (with all errors) if validation fails.
-    fn freeze(self) -> Result<ResolvedConfig, Vec<ConfigError>>;
-
-    /// Resolve the file path to use according to the search chain:
-    /// (1) `cli_path`, (2) `$TZE_HUD_CONFIG` env, (3) `./tze_hud.toml`,
-    /// (4) XDG config.
-    ///
-    /// Returns `Ok(path)` for the first path found; returns `Err(searched_paths)` when
-    /// no file is found, where `searched_paths` is the ordered list of paths that were tried.
-    fn resolve_config_path(cli_path: Option<&str>) -> Result<String, Vec<String>>
-    where
-        Self: Sized;
-}
-
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    // These tests exercise DisplayProfile constants.  ConfigLoader conformance tests live in
-    // tze_hud_config/src/tests.rs alongside the TzeHudConfig implementation.
+    // These tests exercise DisplayProfile constants. Loader tests live in
+    // tze_hud_config/src/tests.rs alongside TzeHudConfig.
 
     /// WHEN profile = "full-display" THEN correct budget values resolved.
     #[test]

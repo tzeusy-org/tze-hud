@@ -1452,6 +1452,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
             }
         }
         // ── Create compositor + surface (async in a blocking context) ──────
+        crate::os_fonts::install();
         // We need an async context to call Compositor::new_windowed.
         // Use a temporary single-thread Tokio runtime here — this runs only
         // at startup and is dropped immediately after.

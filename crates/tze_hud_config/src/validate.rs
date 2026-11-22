@@ -1,7 +1,7 @@
 //! Startup config validation. Every config section is read once at startup;
 //! changing one requires a restart.
 
-use tze_hud_scene::config::{ConfigError, ConfigErrorCode, ConfigLoader};
+use tze_hud_scene::config::{ConfigError, ConfigErrorCode};
 
 use crate::loader::TzeHudConfig;
 

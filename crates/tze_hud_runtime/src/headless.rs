@@ -200,6 +200,7 @@ impl HeadlessRuntime {
         let runtime_context = Arc::new(config.build_runtime_context()?);
         let agents = config.agents.clone().shared();
 
+        crate::os_fonts::install();
         let mut compositor = Compositor::new_headless(config.width, config.height).await?;
         let surface = HeadlessSurface::new(&compositor.device, config.width, config.height);
 
