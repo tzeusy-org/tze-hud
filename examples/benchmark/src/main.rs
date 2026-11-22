@@ -46,8 +46,6 @@ use serde::{Deserialize, Serialize};
 mod cpu_calibration;
 #[cfg(feature = "headless")]
 mod publish;
-// Only the headless benchmark run builds a report; the stub binary keeps the types for its tests.
-#[cfg_attr(not(feature = "headless"), allow(dead_code))]
 mod validation;
 
 use cpu_calibration::CpuCalibrationResult;

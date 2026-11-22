@@ -44,6 +44,7 @@
 
 use serde::{Deserialize, Serialize};
 
+#[cfg(any(test, feature = "headless"))]
 use tze_hud_telemetry::{LatencyBucket, SessionSummary};
 
 // ─── Hardware factors ─────────────────────────────────────────────────────────
@@ -117,6 +118,7 @@ pub(crate) enum CalibrationDimension {
     None,
 }
 
+#[cfg(any(test, feature = "headless"))]
 impl CalibrationDimension {
     /// Extract the factor for this dimension from a [`HardwareFactors`].
     pub(crate) fn factor_from(&self, factors: &HardwareFactors) -> Option<f64> {
@@ -170,6 +172,7 @@ pub(crate) enum AssertionOutcome {
     NoSamples { metric: String },
 }
 
+#[cfg(any(test, feature = "headless"))]
 impl AssertionOutcome {
     /// Returns true if the outcome is a definitive pass.
     pub(crate) fn is_pass(&self) -> bool {
@@ -193,6 +196,7 @@ impl AssertionOutcome {
 ///
 /// Scaling: `effective_budget = base_budget_us * factor`
 /// where `factor` comes from the hardware calibration dimension.
+#[cfg(any(test, feature = "headless"))]
 pub(crate) struct BudgetAssertion {
     /// Human-readable name for this metric.
     pub metric: String,
@@ -202,6 +206,7 @@ pub(crate) struct BudgetAssertion {
     pub dimension: CalibrationDimension,
 }
 
+#[cfg(any(test, feature = "headless"))]
 impl BudgetAssertion {
     /// Create a new budget assertion.
     pub(crate) fn new(
@@ -321,6 +326,7 @@ pub(crate) struct ValidationReport {
     pub verdict: String,
 }
 
+#[cfg(any(test, feature = "headless"))]
 impl ValidationReport {
     /// Run all Layer-3 assertions against a `SessionSummary`.
     ///
