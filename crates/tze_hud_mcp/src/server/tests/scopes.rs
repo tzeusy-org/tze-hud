@@ -417,3 +417,56 @@ async fn the_session_table_is_bounded_per_agent() {
     ));
     assert_eq!(card_count(&server).await, 1);
 }
+
+/// Native unread is per session: each session's discovery lists only its
+/// own portals with their unread counts, and its publish replies report its
+/// own portal's unread; another session's output never adds to them.
+#[tokio::test]
+async fn portal_unread_is_per_session() {
+    let (server, _) = server();
+    let (server, _hub) = hub_portal(server);
+    let (a, b) = (
+        session(&server, "tze-hud").await,
+        session(&server, "docs").await,
+    );
+    for text in ["one", "two", "three"] {
+        ok(
+            &server,
+            &a,
+            "hud_publish",
+            json!({"surface": "portal:main", "content": text}),
+        )
+        .await;
+    }
+    ok(
+        &server,
+        &b,
+        "hud_publish",
+        json!({"surface": "portal:side", "content": "one"}),
+    )
+    .await;
+    let portals = |listed: &Value| -> Vec<(String, Value)> {
+        listed["surfaces"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|s| s["s"].as_str().unwrap().starts_with("portal:"))
+            .map(|s| (s["s"].as_str().unwrap().to_owned(), s["unread"].clone()))
+            .collect()
+    };
+    let seen_by_a = ok(&server, &a, "hud_surfaces", json!({})).await;
+    assert_eq!(portals(&seen_by_a), [("portal:main".to_owned(), json!(3))]);
+    let seen_by_b = ok(&server, &b, "hud_surfaces", json!({})).await;
+    assert_eq!(portals(&seen_by_b), [("portal:side".to_owned(), json!(1))]);
+    let unscoped = ok(&server, &ctx(), "hud_surfaces", json!({})).await;
+    assert!(portals(&unscoped).is_empty());
+    // B's publish reports only its own portal's unread.
+    let next = ok(
+        &server,
+        &b,
+        "hud_publish",
+        json!({"surface": "portal:side", "content": "two"}),
+    )
+    .await;
+    assert_eq!(next["unread"], 1, "{next}");
+}

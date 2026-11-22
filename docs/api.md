@@ -626,7 +626,7 @@ agents until one is paired.
   content, holdings, portals and input: `hud_input` returns and ACKs only its
   items and `remaining` counts only its backlog; a keyless `hud_clear` clears
   only its content; `hud_surfaces` marks `held` only for its holdings, lists
-  only its portals, and shows another session's content in a single-occupant
+  only its portals (with their `unread`), and shows another session's content in a single-occupant
   zone as `busy`; a notification `key` names a slot per session; answers,
   `wait_ms` waits and displaced receipts go to the publishing session; idle
   portal liveness counts per session. Calls without the header are the
