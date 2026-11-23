@@ -165,7 +165,8 @@ impl FocusManager {
     }
 
     /// Remove a tab's focus tree. Called when a tab is destroyed.
-    pub fn remove_tab(&mut self, tab_id: SceneId) {
+    #[cfg(test)]
+    fn remove_tab(&mut self, tab_id: SceneId) {
         self.trees.remove(&tab_id);
     }
 
@@ -179,7 +180,8 @@ impl FocusManager {
     ///
     /// Returns a `FocusRingUpdate` for the newly active tab (compositor needs
     /// to update the ring immediately after switch).
-    pub fn on_tab_switch(
+    #[cfg(test)]
+    fn on_tab_switch(
         &mut self,
         _from_tab: SceneId,
         to_tab: SceneId,
@@ -341,12 +343,12 @@ impl FocusManager {
     /// depth-first left-to-right tree order. Passthrough tiles skipped.
     /// Non-passthrough tiles with no focusable nodes receive tile-level focus.
     /// Wraps at end.
-    pub fn navigate_next(&mut self, tab_id: SceneId, scene: &SceneGraph) -> FocusTransition {
+    pub(crate) fn navigate_next(&mut self, tab_id: SceneId, scene: &SceneGraph) -> FocusTransition {
         self.navigate(tab_id, scene, false)
     }
 
     /// Move focus to the previous focusable element (NAVIGATE_PREV).
-    pub fn navigate_prev(&mut self, tab_id: SceneId, scene: &SceneGraph) -> FocusTransition {
+    pub(crate) fn navigate_prev(&mut self, tab_id: SceneId, scene: &SceneGraph) -> FocusTransition {
         self.navigate(tab_id, scene, true)
     }
 
@@ -454,7 +456,7 @@ impl FocusManager {
     /// If called after removal the `FocusLostEvent` will be silently dropped.
     ///
     /// Returns the focus transition (may be empty if tile did not hold focus).
-    pub fn on_tile_destroyed(
+    fn on_tile_destroyed(
         &mut self,
         tab_id: SceneId,
         tile_id: SceneId,
@@ -544,7 +546,8 @@ impl FocusManager {
     ///
     /// Returns `None` if the focused element is not owned by `namespace`
     /// (enforcing focus isolation between agents).
-    pub fn current_focus_for_namespace(
+    #[cfg(test)]
+    fn current_focus_for_namespace(
         &self,
         tab_id: SceneId,
         namespace: &str,
@@ -576,19 +579,9 @@ impl FocusManager {
 
     // ─── Public accessors ────────────────────────────────────────────────
 
-    /// Read-only access to all focus trees, keyed by tab_id.
-    ///
-    /// Provided for integration points (e.g. `InputProcessor::process_with_focus`)
-    /// that need to inspect current focus state without going through the lifecycle
-    /// API.
-    pub fn trees(&self) -> &HashMap<SceneId, FocusTree> {
-        &self.trees
-    }
-
     /// Returns the current focus owner for the given tab, or `FocusOwner::None`
     /// if the tab has no registered tree.
     ///
-    /// Convenience wrapper over `trees().get(tab_id).map(|t| t.current())`.
     /// Used by the runtime keyboard drain path to route raw key events to the
     /// correct focused node without going through the full lifecycle API.
     pub fn current_owner(&self, tab_id: SceneId) -> &FocusOwner {

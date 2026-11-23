@@ -75,7 +75,7 @@ pub use focus::{
     FocusGainedEvent, FocusLostEvent, FocusLostReason, FocusManager, FocusRequest, FocusResult,
     FocusRingBounds, FocusRingUpdate, FocusSource, FocusTransition,
 };
-pub use focus_tree::{FocusOwner, FocusTree};
+pub use focus_tree::FocusOwner;
 pub use jump_to_latest::{
     JumpToLatestGeometry, JumpToLatestTokens, compute_jump_to_latest_pill,
     jump_to_latest_badge_label, srgb_to_linear,
