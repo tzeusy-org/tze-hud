@@ -180,9 +180,9 @@ pub struct ScrollOffsetChangedEvent {
 ///
 /// # Usage
 ///
-/// `FollowTailAnchor` is stored in [`ScrollTileState`] alongside the existing
-/// offset fields.  It is updated by [`ScrollTileState::queue_user_scroll`] and
-/// consumed by [`ScrollTileState::notify_content_appended`].
+/// A tile stores its anchor alongside its scroll offsets. User scrolling
+/// updates the anchor, and content appends use it to decide whether to
+/// advance the offset.
 #[derive(Clone, Debug, Copy, PartialEq, Eq, Default)]
 pub enum FollowTailAnchor {
     /// The viewport is at the tail of the content (default for new tiles).
@@ -265,13 +265,13 @@ pub fn follow_tail_offset(
 
 /// Current scroll state for a single tile.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct ScrollTileState {
+struct ScrollTileState {
     /// Current horizontal scroll offset (pixels from content origin).
-    pub offset_x: f32,
+    offset_x: f32,
     /// Current vertical scroll offset (pixels from content origin).
-    pub offset_y: f32,
+    offset_y: f32,
     /// Scroll configuration (None = not scrollable).
-    pub config: Option<ScrollConfig>,
+    config: Option<ScrollConfig>,
     /// Pending agent `SetScrollOffsetRequest` for this tile, if any.
     /// Cleared each frame after applying (or discarding due to user scroll).
     pending_agent_request: Option<SetScrollOffsetRequest>,
@@ -313,7 +313,7 @@ pub struct ScrollTileState {
 }
 
 impl ScrollTileState {
-    pub fn new(config: ScrollConfig) -> Self {
+    fn new(config: ScrollConfig) -> Self {
         // When content_height is supplied on creation it is treated as
         // MAX-SCROLL-OFFSET (the external contract).  total_content_height_px
         // is not yet known (no content), so we leave it at 0.0.  The first
@@ -335,7 +335,7 @@ impl ScrollTileState {
     /// Updates the follow-tail anchor: a positive y-delta (scroll down) that
     /// brings the viewport to the tail transitions the anchor back to `AtTail`;
     /// any upward scroll transitions it to `ScrolledBack`.
-    pub fn queue_user_scroll(&mut self, delta_x: f32, delta_y: f32) {
+    fn queue_user_scroll(&mut self, delta_x: f32, delta_y: f32) {
         if let Some(config) = &self.config {
             if config.scrollable_x {
                 self.offset_x += delta_x;
@@ -415,7 +415,7 @@ impl ScrollTileState {
     ///
     /// `true` if the scroll offset changed (dirty), `false` if the anchor was
     /// `ScrolledBack` and the offset was left unchanged.
-    pub fn notify_content_appended(
+    fn notify_content_appended(
         &mut self,
         new_content_height: f32,
         viewport_height: f32,
@@ -489,7 +489,7 @@ impl ScrollTileState {
     ///
     /// `true` if `offset_y` changed (i.e. the tile was `ScrolledBack` and the
     /// offset moved — including when it clamps to zero), `false` otherwise.
-    pub fn notify_head_content_removed(&mut self, removed_height_px: f32) -> bool {
+    fn notify_head_content_removed(&mut self, removed_height_px: f32) -> bool {
         if !removed_height_px.is_finite() || removed_height_px <= 0.0 {
             return false;
         }
@@ -541,7 +541,7 @@ impl ScrollTileState {
     /// Current total content height in physical pixels (all rendered lines,
     /// not clamped to the viewport).  See the field doc for the
     /// total-content-height vs. max-scroll-offset coordinate-system note.
-    pub fn total_content_height_px(&self) -> f32 {
+    fn total_content_height_px(&self) -> f32 {
         self.total_content_height_px
     }
 
@@ -556,7 +556,7 @@ impl ScrollTileState {
     /// input (input-history "reset to tail on typing/submit").
     ///
     /// Returns `true` if the offset or anchor changed.
-    pub fn reset_to_tail(&mut self) -> bool {
+    fn reset_to_tail(&mut self) -> bool {
         let Some(config) = &self.config else {
             return false;
         };
@@ -573,7 +573,7 @@ impl ScrollTileState {
 
     /// Stop following the tail without moving (an OUTPUT selection holds the
     /// reading position, hud-ljhku.2). Returns whether it was following.
-    pub fn hold_reading(&mut self) -> bool {
+    fn hold_reading(&mut self) -> bool {
         std::mem::replace(&mut self.follow_tail, FollowTailAnchor::ScrolledBack)
             == FollowTailAnchor::AtTail
     }
@@ -581,13 +581,13 @@ impl ScrollTileState {
     /// Queue an agent `SetScrollOffsetRequest`.
     ///
     /// Will be applied only if no user scroll event arrives this frame.
-    pub fn queue_agent_request(&mut self, req: SetScrollOffsetRequest) {
+    fn queue_agent_request(&mut self, req: SetScrollOffsetRequest) {
         self.pending_agent_request = Some(req);
     }
 
     /// Commit the frame: apply pending agent request (if no user scroll this frame),
     /// then clear per-frame state. Returns `true` if the offset changed this frame.
-    pub fn commit_frame(&mut self) -> bool {
+    fn commit_frame(&mut self) -> bool {
         if !self.user_scroll_this_frame {
             // No user scroll — apply pending agent request if present
             if let Some(req) = self.pending_agent_request.take() {
@@ -639,7 +639,7 @@ impl ScrollTileState {
     }
 
     /// Returns a `ScrollOffsetChangedEvent` for notifying agents.
-    pub fn changed_event(&self, tile_id: SceneId) -> ScrollOffsetChangedEvent {
+    fn changed_event(&self, tile_id: SceneId) -> ScrollOffsetChangedEvent {
         ScrollOffsetChangedEvent {
             tile_id,
             offset_x: self.offset_x,
@@ -677,12 +677,12 @@ impl ScrollState {
     }
 
     /// Drop entries for tiles `keep` rejects (e.g. destroyed tiles).
-    pub fn retain_tiles(&mut self, mut keep: impl FnMut(SceneId) -> bool) {
+    pub(crate) fn retain_tiles(&mut self, mut keep: impl FnMut(SceneId) -> bool) {
         self.tiles.retain(|id, _| keep(*id));
     }
 
     /// Returns true if a tile is registered as scrollable.
-    pub fn is_scrollable(&self, tile_id: SceneId) -> bool {
+    pub(crate) fn is_scrollable(&self, tile_id: SceneId) -> bool {
         self.tiles.contains_key(&tile_id)
     }
 
@@ -707,7 +707,7 @@ impl ScrollState {
     ///
     /// The request will be applied at `commit_frame` unless a user scroll
     /// arrives in the same frame.
-    pub fn queue_agent_request(&mut self, req: SetScrollOffsetRequest) {
+    pub(crate) fn queue_agent_request(&mut self, req: SetScrollOffsetRequest) {
         if let Some(state) = self.tiles.get_mut(&req.tile_id) {
             state.queue_agent_request(req);
         } else {
@@ -716,7 +716,7 @@ impl ScrollState {
     }
 
     /// Commit a single tile frame and report if its offset changed.
-    pub fn commit_tile_frame(&mut self, tile_id: SceneId) -> bool {
+    pub(crate) fn commit_tile_frame(&mut self, tile_id: SceneId) -> bool {
         self.tiles
             .get_mut(&tile_id)
             .map(ScrollTileState::commit_frame)
@@ -759,7 +759,7 @@ impl ScrollState {
     ///
     /// Returns `true` if the offset actually changed, `false` otherwise.
     /// No-op if the tile is not registered.
-    pub fn notify_content_appended(
+    pub(crate) fn notify_content_appended(
         &mut self,
         tile_id: SceneId,
         new_content_height: f32,
@@ -779,7 +779,7 @@ impl ScrollState {
     ///
     /// Returns `true` if the scroll offset changed, `false` otherwise.
     /// No-op if the tile is not registered.
-    pub fn notify_head_content_removed(
+    pub(crate) fn notify_head_content_removed(
         &mut self,
         tile_id: SceneId,
         removed_height_px: f32,
@@ -802,7 +802,7 @@ impl ScrollState {
     /// Return the current follow-tail anchor state for a tile.
     ///
     /// Returns `AtTail` (the default) if the tile is not registered.
-    pub fn follow_tail_anchor(&self, tile_id: SceneId) -> FollowTailAnchor {
+    pub(crate) fn follow_tail_anchor(&self, tile_id: SceneId) -> FollowTailAnchor {
         self.tiles
             .get(&tile_id)
             .map(|s| s.follow_tail)
@@ -816,7 +816,7 @@ impl ScrollState {
     /// than re-measuring it) can read this back before adding a delta and
     /// re-calling [`Self::notify_content_appended`], instead of tracking a
     /// duplicate counter.
-    pub fn total_content_height_px(&self, tile_id: SceneId) -> f32 {
+    pub(crate) fn total_content_height_px(&self, tile_id: SceneId) -> f32 {
         self.tiles
             .get(&tile_id)
             .map(ScrollTileState::total_content_height_px)
@@ -824,7 +824,7 @@ impl ScrollState {
     }
 
     /// See [`ScrollTileState::hold_reading`]; `false` for unknown tiles.
-    pub fn hold_reading(&mut self, tile_id: SceneId) -> bool {
+    pub(crate) fn hold_reading(&mut self, tile_id: SceneId) -> bool {
         self.tiles
             .get_mut(&tile_id)
             .is_some_and(ScrollTileState::hold_reading)
@@ -834,7 +834,7 @@ impl ScrollState {
     /// anchor.  Delegates to [`ScrollTileState::reset_to_tail`]; see that
     /// method for the full contract.  No-op (`false`) if the tile is not
     /// registered.
-    pub fn reset_to_tail(&mut self, tile_id: SceneId) -> bool {
+    pub(crate) fn reset_to_tail(&mut self, tile_id: SceneId) -> bool {
         self.tiles
             .get_mut(&tile_id)
             .map(ScrollTileState::reset_to_tail)
