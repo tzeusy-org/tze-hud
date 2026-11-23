@@ -2602,15 +2602,19 @@ mod tests {
         let overrides = MarkdownTokens::from_token_map(&map(&[
             ("typography.heading.1.weight", "900"),
             ("typography.heading.2.scale", "2.0"),
+            ("typography.heading.3.weight", "500"),
             ("typography.bold.weight", "800"),
         ]));
         assert_eq!(overrides.heading_weight[0], 900);
-        assert_eq!(overrides.heading_weight[1], tokens().heading_weight[1]);
+        assert_eq!(overrides.heading_weight[1], 700);
+        assert_eq!(overrides.heading_weight[2], 500);
         assert_eq!(overrides.heading_scale[1], 2.0);
         assert_eq!(overrides.bold_weight, 800);
         let defaults = MarkdownTokens::from_token_map(&HashMap::new());
         assert_eq!(defaults.heading_weight, tokens().heading_weight);
         assert_eq!(defaults.heading_scale, tokens().heading_scale);
+        assert_eq!(defaults.heading_weight[0], 700);
+        assert_eq!(defaults.bold_weight, 700);
         for theme in [defaults, overrides] {
             for index in 0..6 {
                 let input = format!("{} 見出し", "#".repeat(index + 1));
@@ -2681,9 +2685,11 @@ mod tests {
             &*compact.plain_text,
             "Intro\nHeading\n• first\n• second\n• third"
         );
+        let ordered = parse("1) alpha\n2) beta\n3. gamma");
+        assert_eq!(ordered.plain_text.as_ref(), "1) alpha\n2) beta\n3. gamma");
         for (parsed, prefixes) in [
             (compact, ["• ", "• ", "• "]),
-            (parse("1. alpha\n2. beta\n3) gamma"), ["1. ", "2. ", "3) "]),
+            (ordered, ["1) ", "2) ", "3. "]),
         ] {
             assert_eq!(parsed.list_items.len(), prefixes.len());
             for (span, prefix) in parsed.list_items.iter().zip(prefixes) {
