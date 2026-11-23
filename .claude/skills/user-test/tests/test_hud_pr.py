@@ -499,6 +499,14 @@ def test_absent_pending_or_unreadable_checks_wait_for_the_next_minute(scenario, 
     assert len(scenario.calls("pr checks")) == 3
 
 
+@pytest.mark.parametrize(("initial", "interval"), [({}, 60), ({"mergeable": "CONFLICTING"}, 300)])
+def test_metadata_failure_preserves_the_known_retry_cadence(scenario, hud, initial, interval):
+    scenario.replace(checks=["pending"], **{"pr read": [initial, {"error": True}, {"state": "CLOSED"}]})
+    scenario.watch(1_000)
+    assert scenario.clock.sleeps == [interval, interval]
+    assert not hud.cards()
+
+
 def test_red_head_is_skipped_until_a_new_green_head(scenario, hud):
     scenario.replace(checks=["red", "green"], **{
         "pr read": [{}, {}, {}, {"headRefOid": NEW_HEAD}, {"state": "MERGED"}],

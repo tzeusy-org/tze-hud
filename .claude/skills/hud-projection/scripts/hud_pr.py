@@ -541,19 +541,20 @@ class Watcher:
 
     def run(self):
         failed_head = None
+        interval = STATE_INTERVAL
         while self.remaining() > 0:
             start = self.clock.monotonic()
-            interval = STATE_INTERVAL
             try:
                 pr = self.github.read(self.number)
                 if not is_held(pr):
                     return
                 head = pr["headRefOid"]
+                watching_checks = can_show_card(pr) and head != failed_head
+                interval = CHECK_INTERVAL if watching_checks else STATE_INTERVAL
                 state = self.state.read()
                 if head != state.get("head") or state.get("state") != "watching":
                     self.state.mark("watching", head=head, nonce=None, next_return_at=None)
-                if can_show_card(pr) and head != failed_head:
-                    interval = CHECK_INTERVAL
+                if watching_checks:
                     checks = self.github.checks(self.number)
                     if checks == "red":
                         current = self.github.read(self.number)
@@ -567,6 +568,7 @@ class Watcher:
                         if not is_held(current):
                             return
                         if current["headRefOid"] == head and current["checks_green"] and can_show_card(current):
+                            interval = STATE_INTERVAL
                             result = self.card(current)
                             if result == "stop":
                                 return
