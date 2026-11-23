@@ -5202,6 +5202,8 @@ mod tests {
 
     #[test]
     fn reveal_wheel_replays_after_contention_without_retargeting() {
+        use std::time::Instant;
+
         use tze_hud_scene::graph::overlay::{
             NotificationRevealField, NotificationRevealPanel, NotificationRevealRequest,
             NotificationRevealTarget,
@@ -5239,17 +5241,38 @@ mod tests {
             &winit::event::MouseScrollDelta::LineDelta(0.0, -1.0),
             crate::os_prefs::WheelLines::Fixed,
         );
+        let wake = harness.app.state.wake.clone();
+        let wait_for_completion = |before| {
+            let deadline = Instant::now() + SCENE_WAIT;
+            while wake.main_work_generation() == before {
+                assert!(
+                    Instant::now() < deadline,
+                    "scene availability worker did not complete for the retained wheel"
+                );
+                std::thread::yield_now();
+            }
+        };
         let held = scene_handle.blocking_lock();
+        let before = wake.main_work_generation();
         harness.app.enqueue_scroll_event(dx, dy, step);
         assert_eq!(held.overlay.notification_reveal.unwrap().scroll, 0.0);
+        assert!(!harness.app.drain_retained_pointer_input());
+        assert_eq!(harness.app.state.pending_pointer_buttons.len(), 1);
+        assert_eq!(wake.main_work_generation(), before);
         drop(held);
+        // The availability worker also acquires the scene; releasing our guard
+        // does not promise that an immediate try-lock can beat that worker.
+        wait_for_completion(before);
         assert!(harness.app.drain_retained_pointer_input());
+        assert!(harness.app.state.pending_pointer_buttons.is_empty());
+        assert!(harness.app.state.pending_scroll.is_empty());
         assert_eq!(
             harness.scene().overlay.notification_reveal.unwrap().scroll,
             tze_hud_input::WHEEL_LINE_PX
         );
 
         let mut held = scene_handle.blocking_lock();
+        let before = wake.main_work_generation();
         harness.app.enqueue_scroll_event(dx, dy, step);
         let target = NotificationRevealTarget {
             field: NotificationRevealField::Action(0),
@@ -5260,8 +5283,14 @@ mod tests {
             target,
             scroll: 0.0,
         });
+        assert!(!harness.app.drain_retained_pointer_input());
+        assert_eq!(harness.app.state.pending_pointer_buttons.len(), 1);
+        assert_eq!(wake.main_work_generation(), before);
         drop(held);
+        wait_for_completion(before);
         assert!(harness.app.drain_retained_pointer_input());
+        assert!(harness.app.state.pending_pointer_buttons.is_empty());
+        assert!(harness.app.state.pending_scroll.is_empty());
         assert_eq!(
             harness.scene().overlay.notification_reveal.unwrap().scroll,
             0.0
