@@ -724,35 +724,6 @@ pub struct TileSpatialBudget {
     pub max_tile_height_px: f32,
 }
 
-/// A dimension in which an agent has violated its resource budget.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub enum BudgetViolation {
-    /// Agent holds more tiles than `max_tiles`.
-    TileCountExceeded { current: u32, limit: u32 },
-    /// Texture memory across all tiles exceeds `max_texture_bytes`.
-    TextureMemoryExceeded {
-        current_bytes: u64,
-        limit_bytes: u64,
-    },
-    /// Scene mutation rate exceeds `max_update_rate_hz`.
-    UpdateRateExceeded { current_hz: f32, limit_hz: f32 },
-    /// A single tile contains more nodes than `max_nodes_per_tile`.
-    NodeCountPerTileExceeded {
-        tile_id_hint: String,
-        current: u32,
-        limit: u32,
-    },
-    /// Mutation would push texture memory past the absolute hard maximum.
-    /// This is a critical violation — session is revoked immediately.
-    CriticalTextureOomAttempt {
-        requested_bytes: u64,
-        hard_max_bytes: u64,
-    },
-    /// Session has accumulated too many protocol invariant violations.
-    /// This is a critical violation — session is revoked immediately.
-    RepeatedInvariantViolations { count: u32 },
-}
-
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Tile {
     pub id: SceneId,

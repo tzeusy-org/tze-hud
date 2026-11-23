@@ -716,27 +716,6 @@ impl SceneGraph {
         )
     }
 
-    /// [`Self::publish_to_zone_with_lease`] with no expiry at all: the
-    /// publication stays until cleared, even a notification (whose urgency
-    /// default would otherwise apply). `hud_publish` with `ttl_ms: 0`.
-    pub fn publish_held_to_zone_with_lease(
-        &mut self,
-        zone_name: &str,
-        content: ZoneContent,
-        publisher_namespace: &str,
-        lease_id: SceneId,
-        merge_key: Option<String>,
-    ) -> Result<(), ValidationError> {
-        self.publish_to_zone_until_with_lease(
-            zone_name,
-            content,
-            publisher_namespace,
-            lease_id,
-            merge_key,
-            None,
-        )
-    }
-
     fn check_zone_publish_lease(
         &self,
         publisher_namespace: &str,
@@ -1710,30 +1689,6 @@ impl SceneGraph {
         for origin in empty {
             self.publication_orphans.remove(&origin);
         }
-    }
-
-    /// Adopt only this session's still-unleased content after a complete claim.
-    /// Existing independently leased publications (including later claims) are untouched.
-    pub fn adopt_publications(&mut self, origin: SceneId, lease_id: SceneId) {
-        for r in self.zone_registry.active_publishes.values_mut().flatten() {
-            if r.lease_id.is_none() && r.publication_origin == Some(origin) {
-                r.lease_id = Some(lease_id);
-                r.publication_origin = None;
-            }
-        }
-        for r in self.widget_registry.active_publishes.values_mut().flatten() {
-            if r.lease_id.is_none() && r.publication_origin == Some(origin) {
-                r.lease_id = Some(lease_id);
-                r.publication_origin = None;
-            }
-        }
-        for s in &mut self.scheduled_publications {
-            if s.has_origin(origin) {
-                s.publisher.lease_id = Some(lease_id);
-                s.publisher.origin = None;
-            }
-        }
-        self.publication_orphans.remove(&origin);
     }
 
     /// Scoped counterpart of lease cleanup for a publication-only session.

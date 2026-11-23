@@ -20,6 +20,7 @@
 //! | `--grpc-port <port>`| `TZE_HUD_GRPC_PORT`    | `50051`      | gRPC listen port (0 to disable).         |
 //! | `--mcp-port <port>` | `TZE_HUD_MCP_PORT`     | `9090`       | MCP HTTP listen port (0 to disable).     |
 //! | `--fps <n>`         | `TZE_HUD_FPS`          | `60`         | Target frames per second.                |
+//! | `--debug-zones`     | `TZE_HUD_DEBUG_ZONES=1` | off          | Draw debug outlines around zones.        |
 //! | `--quiescent-efficiency-emit <path>` | `TZE_HUD_QUIESCENT_EFFICIENCY_EMIT` | — | Emit a real event-driven static-overlay efficiency artifact after 5s settle + 60s observation. |
 //! | `--print-attach-info` | —                    | —            | Print the MCP attach-info block (endpoint URL, bearer-PSK auth rule, paste-ready MCP client config) and exit 0 without starting the runtime. Never prints the PSK. |
 //! | `--help`            | —                      | —            | Print this help and exit.                |
@@ -124,6 +125,8 @@ OPTIONS:
                            (env: TZE_HUD_MCP_PORT)
     --fps <n>              Target frames per second  [default: 60]
                            (env: TZE_HUD_FPS)
+    --debug-zones          Draw debug outlines around zones
+                           (env: TZE_HUD_DEBUG_ZONES=1)
     --quiescent-efficiency-emit <path>
                            Measure a static event-driven windowed runtime for a
                            mandatory 5s settle plus 60s interval, emit JSON, and exit.
