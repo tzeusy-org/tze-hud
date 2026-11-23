@@ -1598,26 +1598,23 @@ impl WinitApp {
             if !raw.repeat && self.state.answer_keyboard.hold_key.take().is_some() {
                 super::notification_hold::cancel_hold(&mut scene, &self.state.global_tokens);
             }
-            if !modified
-                && is_escape_key(&raw.key, &raw.key_code)
-                && self.state.notification_reveal.dismiss(&mut scene)
-            {
-                true
-            } else if !modified
-                && scene.overlay.notification_focus.is_some()
-                && matches!(raw.key_code.as_str(), "PageUp" | "PageDown")
-                && scene
-                    .overlay
-                    .notification_reveal_panel
-                    .is_some_and(|panel| {
-                        let dy = if raw.key_code == "PageUp" {
-                            -panel.bounds.height
-                        } else {
-                            panel.bounds.height
-                        };
-                        super::notification_reveal::scroll_panel(&mut scene, dy)
-                    })
-            {
+            let reveal_key_handled = !modified
+                && ((is_escape_key(&raw.key, &raw.key_code)
+                    && self.state.notification_reveal.dismiss(&mut scene))
+                    || (scene.overlay.notification_focus.is_some()
+                        && matches!(raw.key_code.as_str(), "PageUp" | "PageDown")
+                        && scene
+                            .overlay
+                            .notification_reveal_panel
+                            .is_some_and(|panel| {
+                                let dy = if raw.key_code == "PageUp" {
+                                    -panel.bounds.height
+                                } else {
+                                    panel.bounds.height
+                                };
+                                super::notification_reveal::scroll_panel(&mut scene, dy)
+                            })));
+            if reveal_key_handled {
                 true
             } else if let Some(focus) = self.state.answer_keyboard.focus {
                 if !self
