@@ -6,8 +6,8 @@ impl SceneGraph {
 
     /// Register a resource as available for use in [`NodeData::StaticImage`] nodes.
     ///
-    /// Must be called after a successful resource upload before any agent-submitted
-    /// attaching a scene node that references the resource.
+    /// Call after a successful upload and before attaching a node that uses
+    /// this resource.
     /// Spec: Resource Upload Before Tile Creation.
     ///
     /// Calling this for an already-registered resource is a no-op: the existing

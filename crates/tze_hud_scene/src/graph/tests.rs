@@ -2779,7 +2779,7 @@ fn expire_lease_scoped_reaps_only_the_named_grace_expired_lease() {
     );
 }
 
-/// SetTileRoot replacement: old resource loses a ref, new resource gains one.
+/// Root replacement preserves reused image resources and releases unused ones.
 #[test]
 fn resource_refs_updated_on_set_tile_root_replacement() {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
@@ -2824,6 +2824,14 @@ fn resource_refs_updated_on_set_tile_root_replacement() {
         Some(0),
         "res_b registered but not yet referenced by any node"
     );
+
+    let old_root = scene.tiles[&tile_id].root_node.unwrap();
+    let mut reused_image = scene.nodes[&old_root].clone();
+    reused_image.id = SceneId::new();
+    scene
+        .set_tile_root_checked(tile_id, reused_image, "agent")
+        .unwrap();
+    assert_eq!(scene.resource_ref_count(&res_a), Some(1));
 
     // Replace tile root with a node referencing res_b.
     scene
