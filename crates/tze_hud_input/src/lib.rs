@@ -75,7 +75,7 @@ pub use focus::{
     FocusGainedEvent, FocusLostEvent, FocusLostReason, FocusManager, FocusRequest, FocusResult,
     FocusRingBounds, FocusRingUpdate, FocusSource, FocusTransition,
 };
-pub use focus_tree::{FocusOwner, FocusTree};
+pub use focus_tree::FocusOwner;
 pub use jump_to_latest::{
     JumpToLatestGeometry, JumpToLatestTokens, compute_jump_to_latest_pill,
     jump_to_latest_badge_label, srgb_to_linear,
@@ -1128,13 +1128,9 @@ impl InputProcessor {
     /// (`reverse = true`) focusable affordance and synchronize composer +
     /// hit-region-focus side effects.
     ///
-    /// This is the no-pointer analogue of [`Self::process_with_focus`]: it drives
-    /// the already-implemented focus cycling
-    /// ([`FocusManager::navigate_next`] / [`FocusManager::navigate_prev`],
-    /// ) and then applies the same composer-activation /
-    /// hit-region-focus bookkeeping the pointer click path applies, so the
-    /// composer (and any focusable region) is reachable and editable without a
-    /// pointer — e.g. on smart glasses / a Mobile Presence Node.
+    /// Like [`Self::process_with_focus`], this updates composer activation and
+    /// hit-region focus when focus moves. Keyboard traversal can reach focusable
+    /// regions and activate composer editing without a pointer.
     ///
     /// Returns the resulting [`FocusTransition`]; the caller broadcasts its
     /// `FocusGained`/`FocusLost` events over the focus-events channel exactly as

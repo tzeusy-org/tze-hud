@@ -177,16 +177,16 @@ pub struct SceneGraph {
 }
 
 /// Maximum number of tabs in a scene.
-pub const MAX_TABS: usize = 256;
+const MAX_TABS: usize = 256;
 
 /// Maximum number of tiles per tab.
-pub const MAX_TILES_PER_TAB: usize = 1024;
+const MAX_TILES_PER_TAB: usize = 1024;
 
 /// Maximum number of nodes per tile.
 pub const MAX_NODES_PER_TILE: usize = 64;
 
 /// Maximum name length for tabs, in UTF-8 bytes.
-pub const MAX_TAB_NAME_BYTES: usize = 128;
+const MAX_TAB_NAME_BYTES: usize = 128;
 
 /// Maximum content size for TextMarkdownNode, in UTF-8 bytes.
 pub const MAX_MARKDOWN_BYTES: usize = 65_535;
@@ -249,11 +249,11 @@ pub struct PendingAction {
 impl SceneGraph {
     // ─── Notification auto-dismiss TTL constants ─────────────────────────
     /// Default auto-dismiss TTL (µs) for low/normal notifications (urgency 0, 1).
-    pub const NOTIFICATION_TTL_INFO_US: u64 = 8_000_000; // 8 seconds
+    const NOTIFICATION_TTL_INFO_US: u64 = 8_000_000; // 8 seconds
     /// Default auto-dismiss TTL (µs) for urgent notifications (urgency 2).
-    pub const NOTIFICATION_TTL_WARNING_US: u64 = 15_000_000; // 15 seconds
+    const NOTIFICATION_TTL_WARNING_US: u64 = 15_000_000; // 15 seconds
     /// Default auto-dismiss TTL (µs) for critical notifications (urgency 3+).
-    pub const NOTIFICATION_TTL_CRITICAL_US: u64 = 30_000_000; // 30 seconds
+    const NOTIFICATION_TTL_CRITICAL_US: u64 = 30_000_000; // 30 seconds
 
     /// Create a new empty scene graph using the real system clock.
     pub fn new(width: f32, height: f32) -> Self {
