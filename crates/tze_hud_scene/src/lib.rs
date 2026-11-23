@@ -8,6 +8,7 @@
 //! and assertable without any GPU context.
 
 pub mod clock;
+pub mod dock;
 pub mod element_store;
 pub mod error_codes;
 pub mod graph;
