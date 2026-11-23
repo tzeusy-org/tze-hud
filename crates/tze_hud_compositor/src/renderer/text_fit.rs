@@ -21,9 +21,9 @@ use tze_hud_scene::types::{
     WidgetParameterValue, ZoneContent, ZonePublishRecord,
 };
 
-use super::Compositor;
 use super::notification_layout::NotificationLayoutCache;
 use super::notification_text::notification_text_layout;
+use super::{Compositor, ZoneStack};
 use crate::display::DisplayLayout;
 
 /// The compositor's current drawing inputs, shared with MCP admission.
@@ -95,27 +95,20 @@ impl tze_hud_scene::TextFit for TextFitMeasurer {
         scene: &SceneGraph,
         zone: &str,
         payload: &NotificationPayload,
+        display: Option<&str>,
     ) -> Vec<(&'static str, usize)> {
         let state = self.state();
         let Some(tokens) = &state.tokens else {
             return Vec::new();
         };
-        let Some(zone_def) = scene.zone_registry.zones.get(zone) else {
+        let Some((zone_name, zone_def)) = scene.zone_registry.zones.get_key_value(zone) else {
             return Vec::new();
         };
         // Only Stack zones draw notification cards.
         if !matches!(zone_def.contention_policy, ContentionPolicy::Stack { .. }) {
             return Vec::new();
         }
-        let zone_tokens = tze_hud_config::tokens::for_zone(tokens, zone);
         let policy = &zone_def.rendering_policy;
-        let (zx, zy, zw, zh) = super::zone_geometry_in(
-            &state.layout,
-            zone,
-            &scene.effective_zone_geometry(zone_def),
-            scene.display_area.width,
-            scene.display_area.height,
-        );
         // Measure intrinsic text fit in one card; stack visibility is a
         // separate question from whether its text fits inside that card.
         let record = ZonePublishRecord {
@@ -134,11 +127,28 @@ impl tze_hud_scene::TextFit for TextFitMeasurer {
             window_token: None,
             display: None,
         };
+        let stack = ZoneStack {
+            name: zone_name,
+            publishes: std::borrow::Cow::Borrowed(std::slice::from_ref(&record)),
+            display: ZoneStack::placed_display(
+                &state.layout,
+                ZoneStack::zone_display(&state.layout, zone),
+                display,
+            ),
+        };
+        let zone_tokens = tze_hud_config::tokens::for_zone(tokens, &stack.token_key());
+        let (zx, zy, zw, zh) = super::stack_geometry_in(
+            &state.layout,
+            &stack,
+            &scene.effective_zone_geometry(zone_def),
+            scene.display_area.width,
+            scene.display_area.height,
+        );
         let slots = Compositor::zone_slot_layout_with_tokens(
             &zone_tokens,
             scene,
             zone,
-            std::slice::from_ref(&record),
+            &stack.publishes,
             policy,
             (zw, zh),
             &state.cards,
@@ -411,6 +421,48 @@ mod tests {
         clipped.iter().find(|(f, _)| *f == field).map(|(_, n)| *n)
     }
 
+    #[test]
+    fn placed_notification_fit_uses_drawing_bounds_and_scale() {
+        use crate::display::{DisplayRect, normalize_display_name, placed_zone_key};
+        use tze_hud_config::tokens::set_zone_px_scale;
+
+        let (fit, scene) = measurer_and_scene();
+        let primary = DisplayRect {
+            name: "DISPLAY1".into(),
+            rect: Rect::new(0.0, 0.0, 1280.0, 720.0),
+            primary: true,
+        };
+        let secondary = DisplayRect {
+            name: "DISPLAY2".into(),
+            rect: Rect::new(-768.0, 0.0, 768.0, 720.0),
+            primary: false,
+        };
+        let assignments = HashMap::new();
+        fit.set_display_layout(DisplayLayout::new(
+            vec![primary.clone(), secondary],
+            &assignments,
+        ));
+        let title = "The nightly migration is ready for review across every shard";
+        let card = card(title, "", &["Review", "Later"]);
+        let primary_fit = fit.notification(&scene, ZONE, &card, None);
+        let placed = || fit.notification(&scene, ZONE, &card, Some("display2"));
+        let display_width_fit = placed();
+        let title_count =
+            |fit: &[(&'static str, usize)]| reported(fit, "title").unwrap_or(title.chars().count());
+        assert!(title_count(&display_width_fit) < title_count(&primary_fit));
+
+        let mut tokens = fit.state().tokens.clone().unwrap();
+        let display = normalize_display_name("DISPLAY2");
+        set_zone_px_scale(&mut tokens, &placed_zone_key(ZONE, &display), 1.5);
+        fit.set_tokens(tokens);
+        let scaled_fit = placed();
+        assert!(title_count(&scaled_fit) < title_count(&display_width_fit));
+        assert_eq!(fit.notification(&scene, ZONE, &card, None), primary_fit);
+
+        fit.set_display_layout(DisplayLayout::new(vec![primary], &assignments));
+        assert_eq!(placed(), primary_fit);
+    }
+
     /// ceil(log2(len)) + 1: the per-field layout bound.
     fn bound(len: usize) -> usize {
         (usize::BITS - len.saturating_sub(1).leading_zeros()) as usize + 1
@@ -424,7 +476,7 @@ mod tests {
         let title = "Nightly migration report for every production shard and region";
         let body = "The nightly migration finished but three shards reported checksum \
             drift that needs a manual look before tomorrow's deploy window opens";
-        let clipped = fit.notification(&scene, ZONE, &card(title, body, &[]));
+        let clipped = fit.notification(&scene, ZONE, &card(title, body, &[]), None);
         let t = reported(&clipped, "title").expect("title cut");
         let b = reported(&clipped, "body").expect("body cut");
         assert!(t > 0 && t < title.chars().count(), "{clipped:?}");
@@ -433,6 +485,7 @@ mod tests {
             &scene,
             ZONE,
             &card(char_prefix(title, t), char_prefix(body, b), &[]),
+            None,
         );
         assert!(again.is_empty(), "{t}/{b}: {again:?}");
     }
@@ -448,7 +501,7 @@ mod tests {
             "Roll back every region, then page the on-call engineer for a full incident review";
         let labels = [long, "Hold", longer];
         PREFIX_PROBES.with(|p| p.set(0));
-        let clipped = fit.notification(&scene, ZONE, &card("", "Deploy?", &labels));
+        let clipped = fit.notification(&scene, ZONE, &card("", "Deploy?", &labels), None);
         let probes = PREFIX_PROBES.with(std::cell::Cell::get);
         assert!(
             probes <= bound(long.chars().count()) + bound(longer.chars().count()),
@@ -460,7 +513,12 @@ mod tests {
         // smaller one.
         let alone = |label: &str| {
             reported(
-                &fit.notification(&scene, ZONE, &card("", "Deploy?", &[label, "Hold", "Ok"])),
+                &fit.notification(
+                    &scene,
+                    ZONE,
+                    &card("", "Deploy?", &[label, "Hold", "Ok"]),
+                    None,
+                ),
                 "actions",
             )
         };
@@ -468,12 +526,12 @@ mod tests {
         assert!(a > 0 && b > 0);
         assert_eq!(n, a.min(b), "smallest: {n} vs {a}/{b}");
         let shortened: Vec<&str> = labels.iter().map(|l| char_prefix(l, n)).collect();
-        let again = fit.notification(&scene, ZONE, &card("", "Deploy?", &shortened));
+        let again = fit.notification(&scene, ZONE, &card("", "Deploy?", &shortened), None);
         assert!(again.is_empty(), "{n}: {again:?}");
         let one_more = [char_prefix(long, a + 1), "Hold", "Ok"];
         assert_eq!(
             reported(
-                &fit.notification(&scene, ZONE, &card("", "Deploy?", &one_more)),
+                &fit.notification(&scene, ZONE, &card("", "Deploy?", &one_more), None),
                 "actions"
             ),
             Some(a),
@@ -490,18 +548,20 @@ mod tests {
             &scene,
             ZONE,
             &card("", "Retry?", &["Retry\nwith detail", "No"]),
+            None,
         );
         assert_eq!(clipped, [("actions", 5)]);
 
         let line = "Deploy the release to every production region and every staging region";
         let label = format!("{line}\nthen page");
-        let clipped = fit.notification(&scene, ZONE, &card("", "Deploy?", &[&label, "No"]));
+        let clipped = fit.notification(&scene, ZONE, &card("", "Deploy?", &[&label, "No"]), None);
         let n = reported(&clipped, "actions").expect("cut");
         assert!(n > 0 && n < line.chars().count(), "{clipped:?}");
         let again = fit.notification(
             &scene,
             ZONE,
             &card("", "Deploy?", &[char_prefix(line, n), "No"]),
+            None,
         );
         assert!(again.is_empty(), "{n}: {again:?}");
     }
@@ -539,12 +599,13 @@ mod tests {
         ] {
             for k in 1..=30 {
                 let first = format!("{}\nmore", "i".repeat(k));
-                let clipped = fit.notification(&scene, ZONE, &payload(&first, link));
+                let clipped = fit.notification(&scene, ZONE, &payload(&first, link), None);
                 let n = reported(&clipped, "actions").expect("line break cuts");
                 let again = fit.notification(
                     &scene,
                     ZONE,
                     &payload(char_prefix(&first, n), char_prefix(link, n)),
+                    None,
                 );
                 assert!(again.is_empty(), "{link} k={k} n={n}: {again:?}");
             }
@@ -559,6 +620,7 @@ mod tests {
             &scene,
             ZONE,
             &card("Build", "All tests passed.", &["Open", "Ok"]),
+            None,
         );
         assert!(clipped.is_empty(), "{clipped:?}");
     }

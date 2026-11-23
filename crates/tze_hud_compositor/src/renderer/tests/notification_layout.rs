@@ -706,6 +706,7 @@ async fn test_two_line_notification_title_produces_two_text_items() {
                         &scene,
                         "notification-area",
                         published,
+                        None,
                     );
                     let reported =
                         |field: &str| clipped.iter().find(|(f, _)| *f == field).map(|(_, n)| *n);

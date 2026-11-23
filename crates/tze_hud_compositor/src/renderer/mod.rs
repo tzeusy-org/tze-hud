@@ -860,6 +860,24 @@ pub(crate) struct ZoneStack<'a> {
 }
 
 impl ZoneStack<'_> {
+    fn zone_display(layout: &crate::display::DisplayLayout, zone: &str) -> Option<Rect> {
+        layout
+            .zone_display_rect(zone)
+            .or_else(|| layout.displays().iter().find(|d| d.primary).map(|d| d.rect))
+    }
+
+    fn placed_display(
+        layout: &crate::display::DisplayLayout,
+        own: Option<Rect>,
+        preference: Option<&str>,
+    ) -> Option<(Rect, String)> {
+        let display = preference?;
+        let rect = layout
+            .display_rect(display)
+            .filter(|rect| Some(*rect) != own)?;
+        Some((rect, crate::display::normalize_display_name(display)))
+    }
+
     /// The key this stack's tokens resolve by: the zone, or the zone placed
     /// on another display (that monitor's scale).
     pub(crate) fn token_key(&self) -> std::borrow::Cow<'_, str> {
@@ -889,15 +907,9 @@ pub(crate) fn zone_stacks_for<'a>(
     name: &'a String,
     publishes: &'a Vec<ZonePublishRecord>,
 ) -> Vec<ZoneStack<'a>> {
-    let own = layout
-        .zone_display_rect(name)
-        .or_else(|| layout.displays().iter().find(|d| d.primary).map(|d| d.rect));
+    let own = ZoneStack::zone_display(layout, name);
     let elsewhere = |record: &ZonePublishRecord| {
-        let display = record.display.as_deref()?;
-        let rect = layout
-            .display_rect(display)
-            .filter(|rect| Some(*rect) != own)?;
-        Some((rect, crate::display::normalize_display_name(display)))
+        ZoneStack::placed_display(layout, own, record.display.as_deref())
     };
     if !publishes.iter().any(|record| elsewhere(record).is_some()) {
         return vec![ZoneStack {
