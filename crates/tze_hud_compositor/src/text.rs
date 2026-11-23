@@ -4080,7 +4080,7 @@ mod tests {
     /// Cache hit for the same (content, geometry) pair is guaranteed after prime().
     ///
     /// This is the key invariant: zero truncation work per frame on unchanged
-    /// content — mirroring `cache_hit_after_prime` in `markdown.rs`.
+    /// content, as with unchanged Markdown cache keys.
     #[test]
     fn truncation_cache_hit_after_prime() {
         let mut fs = crate::fonts::bundled_font_system();

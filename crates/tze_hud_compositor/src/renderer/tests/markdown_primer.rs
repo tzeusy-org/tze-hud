@@ -187,10 +187,8 @@ async fn markdown_primer_landing_converges_on_render_path() {
     compositor.prime_markdown_cache(&scene);
     compositor.prime_truncation_cache(&scene);
 
-    // Poll with the SAME budget as primer_large_payload_swaps_in_off_thread
-    // (200 * 5ms = up to 1s), rendering one frame per try so we observe the
-    // RENDER PATH's own view of the snapshot, not just the primer's internal
-    // ArcSwap in isolation.
+    // Use the primer unit tests' poll budget (200 tries at 5 ms).
+    // Render one frame per try to observe the snapshot through the render path.
     let mut misses_before = compositor.markdown_cache_miss_count();
     let mut converged = false;
     for _ in 0..200 {
