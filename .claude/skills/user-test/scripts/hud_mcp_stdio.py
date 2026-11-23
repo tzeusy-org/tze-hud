@@ -30,6 +30,7 @@ background waiter, joins this session instead of running unscoped.
 from __future__ import annotations
 
 import ctypes
+import hashlib
 import http.client
 import json
 import os
@@ -325,6 +326,8 @@ class Adapter:
             if task.abort_phase is None:
                 task.cancelled = True
                 lost_reinitialize = lost_reinitialize or task.internal
+                if task.presence is not None and not task.internal and not self.stop:
+                    self.log_presence_failure(task.presence)
                 task.abort_phase, task.abort_deadline = "term", now + TERM_SECONDS
                 self.signal_task(task, signal.SIGTERM)
                 if task.process.stdin is not None:
@@ -580,6 +583,8 @@ class Adapter:
                 if "id" in task.request:
                     result = response.get("result") if isinstance(response, dict) else None
                     ok = ok and isinstance(result, dict) and result.get("isError") is not True
+                if not ok:
+                    self.log_presence_failure(task.presence)
                 self.presence.acknowledged(task.presence, ok, time.monotonic())
             return
         if task.cancelled:
@@ -595,6 +600,11 @@ class Adapter:
                 self.protocol = revision
         if "id" in task.request:
             self.queue(response if isinstance(response, dict) else failure(task.request["id"]))
+
+    @staticmethod
+    def log_presence_failure(op):
+        key_hash = hashlib.sha256(op.key.encode()).hexdigest()[:12]
+        print(f"hud_mcp_stdio: presence delivery failed [{key_hash}]", file=sys.stderr)
 
     def reap(self):
         now = time.monotonic()

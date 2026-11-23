@@ -118,3 +118,17 @@ def test_overflow_keeps_stop_and_bounds_pending_deliveries():
     assert len(ops) == PENDING_LIMIT
     assert all(op.params.get("key") != "read-0" for op in ops)
     assert [op.params.get("content") for op in ops if op.terminal] == [None, "complete"]
+
+
+def test_restart_can_adopt_a_final_and_priority_state_overtakes_pending_progress():
+    restarted = SessionPresence(True)
+    restarted.event(event("Stop", content="complete after restart"))
+    assert restarted.take().params == {"state": "done"}
+    assert restarted.take().params["content"] == "complete after restart"
+
+    state = SessionPresence(True)
+    state.event(tool())
+    assert state.take().params == {"state": "working"}
+    state.event(event("Notification", notice="idle_prompt"))
+    assert state.take().params == {"state": "done"}
+    assert state.take().params["content"] == "Read: running"

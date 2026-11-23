@@ -3,6 +3,7 @@
 import json
 import hashlib
 import os
+import re
 import selectors
 import signal
 import socket
@@ -486,6 +487,23 @@ def test_hook_lane_does_not_take_one_of_the_four_model_workers(hud):
             assert not adapter.selector.select(0)
             FakeHud.release.set()
             assert {adapter.receive()["id"] for _ in ids} == set(ids)
+
+
+def test_failed_mirror_delivery_logs_only_a_category_and_key_hash(hud):
+    host, home = hud
+    assert pair(host, home).returncode == 0
+    with tempfile.TemporaryDirectory(prefix="hud-hook-") as runtime:
+        with AdapterProcess(home, host=host, runtime=runtime, mirror=True) as adapter:
+            adapter.ready()
+            FakeHud.modes["tze-hud-presence"] = "drop"
+            hook_event(adapter, "Stop", last_assistant_message="synthetic final canary")
+            wait_request("tze-hud-presence")
+            with selectors.DefaultSelector() as selector:
+                selector.register(adapter.process.stderr, selectors.EVENT_READ)
+                assert selector.select(2), "mirror failure was not logged"
+            detail = adapter.process.stderr.readline().decode().strip()
+            assert re.fullmatch(r"hud_mcp_stdio: presence delivery failed \[[a-f0-9]{12}\]", detail)
+            assert FakeHud.last_psk not in detail
 
 
 def test_pair_writes_0600_file_and_never_prints_the_psk(hud):

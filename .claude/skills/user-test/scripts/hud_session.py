@@ -44,6 +44,9 @@ class SessionPresence:
         self.pending[op.key] = op
 
     def take(self):
+        state = self.pending.pop("state", None)
+        if state is not None:
+            return state
         if self.pending:
             return self.pending.pop(next(iter(self.pending)))
         return None
@@ -117,7 +120,11 @@ class SessionPresence:
             return
 
         if event == "Notification":
-            if self.state is None or (prompt is not None and prompt in self.closed):
+            if prompt is not None and prompt in self.closed:
+                return
+            if self.prompt is None and prompt is not None:
+                self.adopt_prompt(prompt)
+            if self.prompt is None:
                 return
             notice = item["notice"]
             if notice == "idle_prompt":
@@ -127,10 +134,14 @@ class SessionPresence:
                 self.set_state("blocked", "permission" if notice == "permission_prompt" else "input", actor)
             return
         if event == "Stop":
+            if self.prompt is None and prompt not in self.closed:
+                self.adopt_prompt(prompt)
             if self.prompt != prompt:
                 return
             self.close_prompt()
             self.set_state("done")
+            if not self.mirror:
+                return
             content = item["content"]
             final_hash = hashlib.sha256(repr(content).encode()).digest()
             if self.finals.get(prompt) != final_hash:

@@ -290,6 +290,7 @@ class LoopbackToolHarness:
     def publications(self):
         return [r["params"]["arguments"] for r in self.records if r["params"]["name"] == "hud_publish"]
 
+
 class UsageHarness(LoopbackToolHarness):
     """Official-docs-derived SYNTHETIC statusline JSON, not owner recordings."""
 

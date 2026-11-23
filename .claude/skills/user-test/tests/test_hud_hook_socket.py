@@ -64,6 +64,26 @@ def test_sender_uses_parent_pid_with_one_packet(runtime):
     assert not listener.path.exists()
 
 
+def test_production_hook_strips_credential_and_ignores_raw_fields(runtime):
+    hook = SCRIPTS.parents[1] / "hud-projection" / "scripts" / "portal_hook.py"
+    listener = hooks.HookListener.open(os.getpid())
+    assert listener is not None
+    try:
+        raw = {"hook_event_name": "Stop", "session_id": TOOL["session"],
+               "prompt_id": TOOL["prompt"], "transcript_path": "private synthetic path",
+               "last_assistant_message": "token=syntheticcredentialcanary"}
+        assert_silent(subprocess.run([sys.executable, str(hook)], input=json.dumps(raw).encode(),
+                                    capture_output=True, timeout=2))
+        peer, _ = listener.socket.accept()
+        with peer:
+            assert hooks.receive_event(peer) == {
+                "event": "Stop", "session": TOOL["session"],
+                "prompt": TOOL["prompt"], "content": None,
+            }
+    finally:
+        listener.close()
+
+
 @pytest.mark.parametrize("failure", ["missing", "refusing", "would_block"])
 def test_sender_drops_unavailable_packets_silently(runtime, failure):
     if failure == "missing":
