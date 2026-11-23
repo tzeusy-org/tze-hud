@@ -775,7 +775,7 @@ mod tests {
         let gate = crate::operator::handoff::BindGate::closed();
         let (fixture, mut control) = crate::net_addrs::tailnet_fixture();
         let grpc_binds: Arc<std::sync::Mutex<Vec<std::net::SocketAddr>>> = Arc::default();
-        let (rt, handles, _, _, _, _, reported) = start_enabled_network_services(
+        let (rt, handles, _, reported) = start_enabled_network_services(
             port,
             Default::default(),
             make_shared_state(),

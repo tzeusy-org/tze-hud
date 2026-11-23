@@ -4257,7 +4257,7 @@ mod tests {
         };
 
         // Composer INACTIVE (non-composer surface focused): the chord resizes.
-        let (tab_id, tile_id, (mut app, _rx)) = build(false);
+        let (tab_id, tile_id, mut app) = build(false);
         assert!(
             !app.state.input_processor.is_composer_active(),
             "precondition: composer must be inactive for the non-composer surface"
@@ -4270,7 +4270,7 @@ mod tests {
         );
 
         // Composer ACTIVE: the chord is NOT taken for resize (word-select wins).
-        let (tab_id2, tile_id2, (mut app2, _rx2)) = build(true);
+        let (tab_id2, tile_id2, mut app2) = build(true);
         assert!(
             app2.state.input_processor.is_composer_active(),
             "precondition: composer must be active for the composer surface"

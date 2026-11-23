@@ -134,6 +134,7 @@ pub(super) fn winit_mods_to_keyboard_modifiers(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tze_hud_scene::SceneGraph;
 
     #[test]
     fn key_press_text_types_layout_and_packet_text_but_not_chords() {
@@ -233,7 +234,6 @@ mod tests {
         );
     }
 
-    /// Build a minimal [`AgentDispatch`] for the given kind.
     /// hud-ljhku.13 R13.3 S1: five lines per notch scroll five OUTPUT text
     /// rows on a portal (its shaped line height), five 40 px lines on a
     /// surface without text, and WHEEL_PAGESCROLL one visible page.

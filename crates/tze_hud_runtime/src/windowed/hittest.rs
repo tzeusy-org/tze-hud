@@ -1065,7 +1065,6 @@ mod tests {
         assert_eq!(scene.tiles[&tile_id].bounds, tile_bounds);
         drop(scene);
         drop(shared);
-        while rx.try_recv().is_ok() {}
         // Exercise delivered edges at the same real menu seam. Teardown rows
         // represent the existing timeout/clear lifecycle, not a replacement timer.
         for case in [
@@ -1268,10 +1267,6 @@ mod tests {
             assert!(
                 app.state.input_processor.drag_states.is_empty(),
                 "{case}: no underlying drag"
-            );
-            assert!(
-                rx.try_recv().is_err(),
-                "{case}: menu edges cannot dispatch an agent callback"
             );
             {
                 let shared = app.state.shared_state.try_lock().unwrap();
