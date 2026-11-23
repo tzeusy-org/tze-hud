@@ -838,9 +838,8 @@ impl InputProcessor {
     /// Notify the input processor that a scrollable tile's content has grown.
     ///
     /// This is the primary wiring point for portal/stream-text append events.
-    /// It delegates to [`ScrollState::notify_content_appended`] to advance
-    /// the scroll offset when the tile is at-tail, or leave it
-    /// unchanged when the user has scrolled back.
+    /// It advances the scroll offset when the tile is at the tail and leaves
+    /// it unchanged when the user has scrolled back.
     ///
     /// After updating the scroll offset, the method syncs the tile's
     /// follow-tail anchor state into the scene so `prime_truncation_cache`
@@ -903,9 +902,8 @@ impl InputProcessor {
         changed
     }
 
-    /// Return a tile's current total content height in physical pixels (see
-    /// [`ScrollState::total_content_height_px`]), or `0.0` if the tile has no
-    /// tracked scroll state yet.
+    /// Return a tile's current total content height in physical pixels, or
+    /// `0.0` if the tile has no tracked scroll state yet.
     ///
     /// Lets a caller that appends content incrementally (e.g. one runtime
     /// -authored history entry at a time) read back the running total and add
@@ -947,8 +945,6 @@ impl InputProcessor {
     /// `PortalHub` payload cap or the 16 KiB `visible_transcript_window`
     /// cap — so that a scrolled-back viewport stays visually stable rather than
     /// jumping into the gap left by the removed content.
-    ///
-    /// Delegates to [`ScrollState::notify_head_content_removed`].
     ///
     /// # Parameters
     ///
