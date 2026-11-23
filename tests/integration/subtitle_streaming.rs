@@ -116,7 +116,7 @@ async fn connect_agent_with_zone_publish_cap(
         payload: Some(session_proto::client_message::Payload::SessionInit(
             session_proto::SessionInit {
                 agent_id: agent_id.to_string(),
-                initial_subscriptions: vec!["SCENE_TOPOLOGY".to_string()],
+
                 auth_credential: Some(tze_hud_protocol::auth::psk_credential(TEST_PSK.to_string())),
             },
         )),

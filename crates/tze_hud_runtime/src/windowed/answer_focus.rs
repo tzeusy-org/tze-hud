@@ -314,7 +314,6 @@ impl WinitApp {
             (transition, bounds)
         };
         let composer_focus_lost = transition.lost.is_some();
-        super::input_dispatch::dispatch_focus_event(&self.state.input_event_tx, transition);
         if composer_focus_lost {
             self.clear_local_composer_echo();
         }

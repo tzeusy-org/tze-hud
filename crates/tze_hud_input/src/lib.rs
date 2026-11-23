@@ -9,8 +9,7 @@
 //! - `lib.rs` — `InputProcessor`, pointer event processing, `AgentDispatch`
 //! - `focus_tree` — per-tab focus tree data structure and history
 //! - `focus`      — focus manager (lifecycle, cycling, events, ring metadata)
-//! - `keyboard`   — keyboard event types and dispatch (KeyDownEvent, KeyUpEvent,
-//!   CharacterEvent)
+//! - `keyboard`   — native raw key, character and modifier types
 //! - `command`    — abstract command input model (NAVIGATE_NEXT … SCROLL_DOWN)
 //!
 //! - [`composer_draft`] — runtime-owned bounded plain-text draft buffer for
@@ -18,7 +17,7 @@
 //!   paste, coalescible state-stream notifications, and transactional submit
 //!
 //! - [`mod@pointer`] — rich pointer event types (PointerDownEvent, ClickEvent, etc.)
-//! - [`events`] — RouteTarget, SceneLocalPatch, InputEnvelope, EventBatch
+//! - [`events`] — RouteTarget and SceneLocalPatch
 //! - `local_feedback` — rollback tracker
 //! - `scroll` — `ScrollConfig`, `ScrollState`, scroll-local-first processing
 //! - `capture` — pointer capture manager
@@ -80,10 +79,7 @@ pub use jump_to_latest::{
     JumpToLatestGeometry, JumpToLatestTokens, compute_jump_to_latest_pill,
     jump_to_latest_badge_label, srgb_to_linear,
 };
-pub use keyboard::{
-    KeyboardDispatch, KeyboardDispatchKind, KeyboardModifiers, KeyboardProcessor,
-    RawCharacterEvent, RawKeyDownEvent, RawKeyUpEvent,
-};
+pub use keyboard::{KeyboardModifiers, RawCharacterEvent, RawKeyDownEvent, RawKeyUpEvent};
 pub use portal_resize::{
     CursorIconTracker, DeviceResizeState, GeometrySnapshot, GestureAuthorityError,
     HotkeyResizeAxis, HotkeyResizeDir, HotkeyResizeOutcome, PortalCursor, PortalRect,
@@ -3898,8 +3894,8 @@ mod tests {
     /// 1. Update the scene graph tile offset (local-first, < 4ms p99).
     /// 2. Return a `ScrollOffsetChangedEvent` whose fields match the new offset.
     ///
-    /// The windowed runtime uses the returned event to build an `EventBatch`
-    /// for injection via `input_event_tx`; this test verifies that the event
+    /// The windowed runtime applies the returned local scroll update; this
+    /// test verifies that the event
     /// carries the correct committed offset (not a stale or zero value).
     #[test]
     fn test_scroll_local_update_before_agent_event() {

@@ -633,17 +633,15 @@ impl WinitApp {
         }
     }
 
-    /// Synchronously reset the geometry override for `element_id` and broadcast
-    /// an `ElementRepositionedEvent`.
+    /// Reset the saved geometry override and release local viewer geometry locks.
     ///
-    /// This is the sync chrome-layer path for the "Reset to default" context
-    /// menu action.  It mirrors the logic in `HudSessionImpl::reset_element_geometry`
-    /// but runs on the main thread without async, using the stored broadcast sender.
+    /// The "Reset to default" context-menu action runs on the main thread and
+    /// persists the updated element store in the background.
     ///
     /// No-op if the element has no user override.
     fn perform_reset_element_geometry(&mut self, element_id: tze_hud_scene::SceneId) {
-        // Collect previous override, fallback geometry, and optional persist path.
-        let (previous_override, fallback_geometry, store_snapshot, persist_file) = {
+        // Clear the override and collect the updated store and optional persist path.
+        let (store_snapshot, persist_file) = {
             let Ok(mut state) = self.state.shared_state.try_lock() else {
                 tracing::warn!("perform_reset_element_geometry: could not acquire shared state");
                 return;
@@ -683,32 +681,16 @@ impl WinitApp {
 
             // Clear the override.
             let previous = state.element_store.reset_geometry_override(element_id);
-            let Some(previous) = previous else {
+            let Some(_) = previous else {
                 tracing::debug!(
                     element_id = %element_id,
                     "perform_reset_element_geometry: no override — geometry lock released, no override to clear"
                 );
                 return;
             };
-            // Resolve fallback geometry (agent bounds → config → default policy).
-            let fallback = {
-                let Ok(scene) = state.scene.try_lock() else {
-                    return;
-                };
-                state
-                    .element_store
-                    .entries
-                    .get(&element_id)
-                    .map(|entry| {
-                        tze_hud_scene::element_store::fallback_geometry_for_element(
-                            element_id, entry, &scene,
-                        )
-                    })
-                    .unwrap_or(tze_hud_scene::ZERO_GEOMETRY_POLICY)
-            };
             let store_snapshot = state.element_store.clone();
             let persist_file = state.element_store_file.clone();
-            (previous, fallback, store_snapshot, persist_file)
+            (store_snapshot, persist_file)
         };
 
         // Persist the updated store on a background thread to avoid blocking the
@@ -719,29 +701,6 @@ impl WinitApp {
                     tracing::warn!(error = %e, "perform_reset_element_geometry: persist failed");
                 }
             });
-        }
-
-        // Broadcast ElementRepositionedEvent.
-        if let Some(ref tx) = self.state.element_repositioned_tx {
-            let event = tze_hud_protocol::proto::ElementRepositionedEvent {
-                // Use big-endian UUID bytes to match scene_id_to_bytes wire contract.
-                element_id: element_id.as_uuid().as_bytes().to_vec(),
-                new_geometry: Some(tze_hud_protocol::convert::geometry_policy_to_proto(
-                    &fallback_geometry,
-                )),
-                previous_geometry: Some(tze_hud_protocol::convert::geometry_policy_to_proto(
-                    &previous_override,
-                )),
-            };
-            // Errors (no receivers, channel lagged) are silently ignored —
-            // ElementRepositionedEvent is an ephemeral-realtime notification;
-            // subscribers that are not present at the moment of a geometry reset
-            // will learn the restored geometry on next subscription refresh.
-            tx.send(event).unwrap_or_default();
-            tracing::debug!(
-                element_id = %element_id,
-                "ElementRepositionedEvent broadcast after reset-to-default"
-            );
         }
     }
 }

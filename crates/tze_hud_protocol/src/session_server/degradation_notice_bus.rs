@@ -89,12 +89,6 @@ impl DegradationNoticeSender {
             .clone()
     }
 
-    /// Level-1 state-stream cadence gate. Transactional lanes never call this.
-    pub fn should_emit_state_stream(&self, source_sequence: u64) -> bool {
-        let level = self.current().level;
-        level == DegradationLevel::Normal as i32 || source_sequence.is_multiple_of(2)
-    }
-
     /// Publish from async session/runtime code with bounded backpressure.
     pub async fn publish(&self, notice: DegradationNotice) -> usize {
         let current = notice.clone();
@@ -220,17 +214,6 @@ mod tests {
             receiver.recv().await.unwrap().level,
             DegradationLevel::Normal as i32
         );
-    }
-
-    #[tokio::test]
-    async fn degradation_coalesces_only_the_state_stream_gate() {
-        let sender = DegradationNoticeSender::new(1);
-        assert!(sender.should_emit_state_stream(1));
-        sender
-            .publish(notice(DegradationLevel::RenderingSimplified))
-            .await;
-        assert!(!sender.should_emit_state_stream(1));
-        assert!(sender.should_emit_state_stream(2));
     }
 
     #[tokio::test]

@@ -8,7 +8,6 @@
 //! block, which is valid Rust (split impl across files in the same module).
 
 use super::SharedMutationBudgetEnforcer;
-use crate::convert;
 use crate::session::SharedState;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -17,9 +16,7 @@ use tze_hud_resource::{ResourceStore, ResourceStoreConfig};
 use tze_hud_scene::config::SharedAgents;
 #[cfg(any(test, feature = "dev-mode"))]
 use tze_hud_scene::graph::SceneGraph;
-#[cfg(any(test, feature = "dev-mode"))]
-use tze_hud_scene::types::GeometryPolicy;
-use tze_hud_scene::types::{ResourceBudget, SceneId};
+use tze_hud_scene::types::ResourceBudget;
 
 // ─── Service implementation ─────────────────────────────────────────────────
 
@@ -48,40 +45,6 @@ pub struct HudSessionImpl {
     pub(super) budget_enforcer: Option<SharedMutationBudgetEnforcer>,
     /// Bounded never-drop sender for transactional degradation notices.
     pub degradation_notices: super::DegradationNoticeSender,
-    /// Traffic-class-aware sender for runtime-injected input event batches.
-    ///
-    /// Carries `(namespace, EventBatch)` tuples. Each session handler subscribes
-    /// and delivers the batch only if `namespace` matches its own namespace AND the
-    /// agent has at least one of `INPUT_EVENTS` / `FOCUS_EVENTS` active. The batch
-    /// is filtered through `subscriptions::filter_event_batch` before delivery.
-    ///
-    /// Transactional variants use a durable per-session lane; ephemeral and
-    /// state-stream variants use bounded broadcast delivery.
-    pub input_event_tx: super::InputEventSender,
-
-    /// Broadcast sender for `ElementRepositionedEvent` notifications.
-    ///
-    /// Emitted after drag completion (geometry_override persisted) and after
-    /// reset-to-default (geometry_override cleared). Each session handler subscribes
-    /// and delivers the event only when the agent is subscribed to `SCENE_TOPOLOGY`
-    /// and the session is `Active`. Agents cannot reject — no response mechanism.
-    ///
-    /// Subscription category: SCENE_TOPOLOGY (requires `read_scene_topology`).
-    /// Message class: Transactional (never coalesced or dropped).
-    pub element_repositioned_tx:
-        tokio::sync::broadcast::Sender<crate::proto::ElementRepositionedEvent>,
-
-    /// Broadcast sender for optional internal batch-to-GPU correlation.
-    ///
-    /// Pairs internal scene batch ids with a frame number and local GPU-work
-    /// timestamp, not display completion or Publish request ids. The windowed
-    /// producer clones this sender; headless requires explicit optional wiring.
-    /// Sessions forward global metadata only to permitted TELEMETRY_FRAMES
-    /// subscribers. Delivery is lossy, without per-batch guarantees or replay.
-    ///
-    /// Subscription category: TELEMETRY_FRAMES (requires `read_telemetry`).
-    /// Message class: State-stream (coalesced/droppable under backpressure).
-    pub frame_presented_tx: tokio::sync::broadcast::Sender<crate::proto::FramePresented>,
 }
 
 /// Everything the session service takes from the runtime.
@@ -117,34 +80,9 @@ impl SessionDeps {
     }
 }
 
-/// Per-session receivers for the runtime → session feeds.
-pub(super) struct RuntimeFeeds {
-    /// Input events; the per-namespace durable lane is subscribed only after
-    /// authentication establishes the namespace.
-    pub input_events: super::InputEventSender,
-    /// Delivered when the agent holds the SCENE_TOPOLOGY subscription.
-    pub element_repositioned:
-        tokio::sync::broadcast::Receiver<crate::proto::ElementRepositionedEvent>,
-    /// Delivered when the agent holds the TELEMETRY_FRAMES subscription.
-    pub frame_presented: tokio::sync::broadcast::Receiver<crate::proto::FramePresented>,
-}
-
 impl HudSessionImpl {
-    pub(super) fn subscribe_feeds(&self) -> RuntimeFeeds {
-        RuntimeFeeds {
-            input_events: self.input_event_tx.clone(),
-            element_repositioned: self.element_repositioned_tx.subscribe(),
-            frame_presented: self.frame_presented_tx.subscribe(),
-        }
-    }
-
-    /// Build the service. The per-feature runtime → session channels are
-    /// created here, in one place.
+    /// Build the publication, upload and lifecycle service from runtime owners.
     pub fn from_deps(deps: SessionDeps) -> Self {
-        let (element_repositioned_tx, _) =
-            tokio::sync::broadcast::channel(super::BROADCAST_CHANNEL_CAPACITY);
-        let (frame_presented_tx, _) =
-            tokio::sync::broadcast::channel(super::BROADCAST_CHANNEL_CAPACITY);
         Self {
             state: deps.state,
             publication_defaults: deps.publication_defaults,
@@ -153,9 +91,6 @@ impl HudSessionImpl {
             resource_budget: deps.resource_budget,
             budget_enforcer: deps.budget_enforcer,
             degradation_notices: deps.degradation_notices,
-            input_event_tx: super::InputEventSender::new(super::BROADCAST_CHANNEL_CAPACITY),
-            element_repositioned_tx,
-            frame_presented_tx,
         }
     }
 
@@ -192,128 +127,5 @@ impl HudSessionImpl {
         }
         self.agents.store(Arc::new(agents));
         self
-    }
-
-    /// Inject a namespaced input batch in subscription-routing fixtures.
-    #[cfg(test)]
-    pub(crate) fn inject_input_event(
-        &self,
-        namespace: impl Into<String>,
-        batch: crate::proto::EventBatch,
-    ) -> usize {
-        self.input_event_tx.send((namespace.into(), batch))
-    }
-
-    /// Broadcast an `ElementRepositionedEvent` to all active sessions subscribed
-    /// to `SCENE_TOPOLOGY`.
-    ///
-    /// Called after:
-    /// - Drag completion: `geometry_override` has been persisted.
-    /// - Reset-to-default: `geometry_override` has been cleared.
-    ///
-    /// Each session handler delivers the event only when:
-    /// 1. The session is `SessionState::Active`.
-    /// 2. The agent is subscribed to `SCENE_TOPOLOGY`.
-    ///
-    /// Returns the number of active session handlers that received the broadcast
-    /// (0 if no sessions are connected).
-    pub fn broadcast_element_repositioned(
-        &self,
-        event: crate::proto::ElementRepositionedEvent,
-    ) -> usize {
-        self.element_repositioned_tx.send(event).unwrap_or_default()
-    }
-
-    /// Reset an element's user geometry override to the fallback position and
-    /// broadcast an `ElementRepositionedEvent` to subscribed agents.
-    ///
-    /// This is the programmatic path for "reset-to-default". The visual entry
-    /// point (right-click context menu / tap button on the drag handle) calls
-    /// this from the compositor/input pipeline.
-    ///
-    /// # Behaviour
-    ///
-    /// 1. Clears `geometry_override` from the element store entry.
-    /// 2. If no override was set, returns `false` (no-op).
-    /// 3. Re-resolves the effective geometry from the fallback chain:
-    ///    agent bounds → config override → default policy.
-    /// 4. Persists the element store to disk.
-    /// 5. Broadcasts `ElementRepositionedEvent {
-    ///        element_id,
-    ///        new_geometry  = fallback geometry,
-    ///        previous_geometry = cleared override,
-    ///    }` to sessions subscribed to `SCENE_TOPOLOGY`.
-    ///
-    /// Returns `true` if an override was cleared and the event was emitted.
-    pub async fn reset_element_geometry(&self, element_id: SceneId) -> bool {
-        let (previous_override, fallback_geometry, persist_request) = {
-            let mut st = self.state.lock().await;
-            // Attempt to clear the override.
-            let previous = st.element_store.reset_geometry_override(element_id);
-            if previous.is_none() {
-                // No override present — no-op.
-                return false;
-            }
-            // Resolve fallback geometry (agent bounds → config → default policy).
-            let scene = st.scene.lock().await;
-            let fallback = st
-                .element_store
-                .entries
-                .get(&element_id)
-                .map(|entry| {
-                    tze_hud_scene::element_store::fallback_geometry_for_element(
-                        element_id, entry, &scene,
-                    )
-                })
-                .unwrap_or(tze_hud_scene::ZERO_GEOMETRY_POLICY);
-            drop(scene);
-            let persist_req =
-                st.element_store_file
-                    .clone()
-                    .map(|file| super::ElementStorePersistRequest {
-                        store: st.element_store.clone(),
-                        file,
-                    });
-            (
-                previous.expect(
-                    "invariant: the `previous.is_none()` check above returns early, so \
-                     `previous` is guaranteed `Some` at this point",
-                ),
-                fallback,
-                persist_req,
-            )
-        };
-
-        // Persist store outside the lock.
-        super::persist_element_store(persist_request).await;
-
-        // Build and broadcast ElementRepositionedEvent.
-        let event = crate::proto::ElementRepositionedEvent {
-            element_id: super::scene_id_to_bytes(element_id),
-            new_geometry: Some(convert::geometry_policy_to_proto(&fallback_geometry)),
-            previous_geometry: Some(convert::geometry_policy_to_proto(&previous_override)),
-        };
-        self.broadcast_element_repositioned(event);
-        true
-    }
-
-    /// Build and broadcast a completed-drag event in geometry-event fixtures.
-    ///
-    /// `new_geometry` is the newly persisted policy.
-    /// `previous_geometry` is the geometry that was in effect before the drag
-    /// (the prior override or `None` if there was no override).
-    #[cfg(any(test, feature = "dev-mode"))]
-    pub fn emit_drag_repositioned_event(
-        &self,
-        element_id: SceneId,
-        new_geometry: &GeometryPolicy,
-        previous_geometry: Option<&GeometryPolicy>,
-    ) {
-        let event = crate::proto::ElementRepositionedEvent {
-            element_id: super::scene_id_to_bytes(element_id),
-            new_geometry: Some(convert::geometry_policy_to_proto(new_geometry)),
-            previous_geometry: previous_geometry.map(convert::geometry_policy_to_proto),
-        };
-        self.broadcast_element_repositioned(event);
     }
 }

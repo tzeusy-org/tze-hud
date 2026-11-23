@@ -83,8 +83,8 @@ use tze_hud_compositor::{
 };
 use tze_hud_config::resolve_runtime_widget_asset_store;
 use tze_hud_input::{
-    CursorIconTracker, FocusManager, InputProcessor, KeyboardProcessor, PointerEventKind,
-    PortalResizeState, RawCharacterEvent, RawKeyDownEvent, RawKeyUpEvent,
+    CursorIconTracker, FocusManager, InputProcessor, PointerEventKind, PortalResizeState,
+    RawCharacterEvent, RawKeyDownEvent, RawKeyUpEvent,
 };
 use tze_hud_protocol::session::SharedState;
 use tze_hud_resource::{RuntimeWidgetStore, RuntimeWidgetStoreConfig};
@@ -347,13 +347,6 @@ struct WindowedRuntimeState {
     /// Frame-ready sender (compositor thread will own this; stored here until
     /// the compositor thread is spawned and takes it).
     frame_ready_tx: Option<FrameReadyTx>,
-    /// Present-ack broadcast sender. Cloned from the gRPC session
-    /// service during network start; each compositor generation receives its own
-    /// clone and emits `FramePresented` after each presented frame. `None` in
-    /// compositor-only mode (grpc_port == 0), where there is no session to
-    /// subscribe — the compositor still drains the present-ack queue.
-    frame_presented_tx:
-        Option<tokio::sync::broadcast::Sender<tze_hud_protocol::proto::FramePresented>>,
     /// Runtime-owned degradation-notice lane. Each compositor generation gets
     /// a clone so a runtime mode switch does not sever connected sessions from
     /// later degradation transitions.
@@ -365,14 +358,8 @@ struct WindowedRuntimeState {
     /// Focus manager — tracks which node / tile has keyboard focus per tab.
     ///
     /// Updated on every pointer-down via `InputProcessor::process_with_focus`.
-    /// Consulted by the keyboard drain path to route `KeyboardProcessor` output
-    /// to the correct agent session.
+    /// Consulted by the keyboard drain for local command and composer routing.
     focus_manager: FocusManager,
-    /// Keyboard processor — translates raw OS key/char events into typed
-    /// `KeyboardDispatch` descriptors when a node or tile has focus.
-    ///
-    /// Stateless with respect to focus; focus is owned by `focus_manager`.
-    keyboard_processor: KeyboardProcessor,
     /// Frame pipeline (ArcSwap hit-test snapshot, overflow counters).
     pipeline: FramePipeline,
     /// Shutdown token.
@@ -516,27 +503,6 @@ struct WindowedRuntimeState {
     capture_seen: u64,
     /// Watches the config for `[design_tokens]` edits while it lives.
     _config_watch: Option<crate::appearance::watch::ConfigWatch>,
-    /// Broadcast sender for `ElementRepositionedEvent`.
-    ///
-    /// Cloned from the `HudSessionImpl` after creation. `None` when gRPC is
-    /// disabled (grpc_port == 0) or before network services start.
-    ///
-    /// Used by the windowed runtime to broadcast reset events without holding
-    /// the async session lock (the reset path is sync chrome-layer code).
-    element_repositioned_tx:
-        Option<tokio::sync::broadcast::Sender<tze_hud_protocol::proto::ElementRepositionedEvent>>,
-    /// Traffic-class-aware sender for runtime-injected input event batches.
-    ///
-    /// Cloned from the `HudSessionImpl` after creation. `None` when gRPC is
-    /// disabled (grpc_port == 0) or before network services start.
-    ///
-    /// Used by the windowed runtime to dispatch any `EventBatch` to agents —
-    /// scroll offset changes, keyboard down/up/character events, and future
-    /// input event types. Transactional variants use the durable lane while
-    /// ephemeral/state-stream variants remain bounded. Each pair is delivered
-    /// only to the session handler whose namespace matches, filtered by
-    /// `INPUT_EVENTS` subscription.
-    input_event_tx: Option<tze_hud_protocol::session_server::InputEventSender>,
     /// `(tile_id, anchor_byte)` for an in-progress composer pointer drag-select.
     ///
     /// Set on `PointerDown` when the hit lands on the focused composer node,
@@ -681,22 +647,11 @@ struct WindowedRuntimeState {
 }
 
 impl WindowedRuntimeState {
-    /// Clone runtime-owned session notifiers for one compositor generation.
-    ///
-    /// These senders outlive a compositor: a runtime mode switch joins the old
-    /// thread and starts a replacement against the same network session. Taking
-    /// them here would make the replacement silently lose frame, degradation,
-    /// and terminal-lease delivery.
+    /// Clone the runtime-owned notice lane for each compositor generation.
     fn compositor_runtime_senders(
         &self,
-    ) -> (
-        Option<tokio::sync::broadcast::Sender<tze_hud_protocol::proto::FramePresented>>,
-        Option<tze_hud_protocol::session_server::DegradationNoticeSender>,
-    ) {
-        (
-            self.frame_presented_tx.clone(),
-            self.degradation_notices.clone(),
-        )
+    ) -> Option<tze_hud_protocol::session_server::DegradationNoticeSender> {
+        self.degradation_notices.clone()
     }
 }
 
@@ -1649,7 +1604,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         // These runtime-owned senders are cloned into each compositor generation.
         // A mode switch joins this thread and calls `resumed()` again against the
         // same connected gRPC session, so taking them would drop later delivery.
-        let (frame_presented_tx, degradation_notices) = self.state.compositor_runtime_senders();
+        let degradation_notices = self.state.compositor_runtime_senders();
         let shutdown = self.state.shutdown.clone();
         let terminal_surface_recovery_failed = self.state.terminal_surface_recovery_failed.clone();
         let compositor_wake = self.state.wake.clone();
@@ -2082,12 +2037,12 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                             hit_test_snapshot.store(Arc::new(new_snap));
                             let built_scene_version = scene.version;
                             let built_geometry_epoch = scene.geometry_epoch;
-                            // ── Batch-correlated present ack drain ──
+                            // ── Local input-response correlation ───────────
                             // SceneGraph::publish records internal publication IDs.
                             // Drain under the scene lock before GPU submission;
                             // a failed primary attempt can consume ids without a
-                            // telemetry sample. Broadcast after local GPU work,
-                            // off the scene lock; main-thread present is separate.
+                            // local latency sample. Correlate after local GPU
+                            // work; main-thread presentation remains separate.
                             let presented_batch_ids = scene.drain_present_ack_batch_ids();
                             // ── DROP the scene lock BEFORE the vsync-blocking
                             // acquire/encode/submit/poll ────────────
@@ -2146,40 +2101,6 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                                 compositor_wake.notify_main(
                                     crate::idle_efficiency::RuntimeWakeupSource::FrameReady,
                                 );
-                            }
-
-                            // ── Broadcast FramePresented ──────────
-                            // Primary and secondary GPU work is complete. Pair
-                            // the drained ids with the primary frame number and
-                            // an emitter timestamp, without waiting for or
-                            // observing the independent main-thread surface present.
-                            // Permitted TELEMETRY_FRAMES subscribers receive this
-                            // optional, lossy metadata through the session gate.
-                            // No pending ids means no event; no receivers is an
-                            // ordinary broadcast miss, not a render failure.
-                            if frame_submitted
-                                && let Some(tx) = &frame_presented_tx
-                                && !presented_batch_ids.is_empty()
-                            {
-                                let present_wall_us = std::time::SystemTime::now()
-                                    .duration_since(std::time::UNIX_EPOCH)
-                                    .map(|d| d.as_micros() as u64)
-                                    .unwrap_or(0);
-                                let event = tze_hud_protocol::proto::FramePresented {
-                                    frame_number: compositor_telemetry.frame_number,
-                                    present_wall_us,
-                                    // 16-byte big-endian UUID, matching the
-                                    // scene_id_to_bytes / bytes_to_scene_id wire
-                                    // contract for FramePresented.batch_ids.
-                                    batch_ids: presented_batch_ids
-                                        .iter()
-                                        .map(|id| id.as_uuid().as_bytes().to_vec())
-                                        .collect(),
-                                };
-                                // Broadcast send errors only when there are no
-                                // subscribers — not an error for a droppable
-                                // state-stream present ack.
-                                let _ = tx.send(event);
                             }
 
                             // Telemetry emit (Stage 8)
@@ -2615,14 +2536,9 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                     }
                 }
 
-                // ── Keyboard → KeyboardProcessor drain (Stage 2) ─────────────
-                // Translate the raw OS event to a typed KeyboardDispatch using the
-                // current focus state, then dispatch to the owning agent session.
-                //
-                // The physical_key → DOM-style key_code string and the logical_key
-                // → DOM-style key string are extracted here
-                // compatibility. Only press and repeat events are forwarded (not
-                // key-release events for now — release delivery is a follow-up).
+                // ── Native keyboard drain (Stage 2) ─────────────────────────
+                // Translate physical/logical keys and modifiers once. The
+                // local drain applies shell, composer and command precedence.
                 let key_code_str = physical_key_to_key_code_str(&event.physical_key);
                 let logical_key_str = logical_key_to_str(&event.logical_key);
                 let mods = winit_mods_to_keyboard_modifiers(self.state.modifiers);
@@ -3078,27 +2994,20 @@ impl WindowedRuntime {
         //
         // gRPC server is disabled when grpc_port == 0 (per WindowedConfig docs).
         // gRPC and MCP listen on loopback plus local Tailscale addresses only.
-        let (
-            mut network_rt,
-            mut network_handles,
-            element_repositioned_tx,
-            input_event_tx,
-            frame_presented_tx,
-            degradation_notices,
-            grpc_bound_addrs,
-        ) = start_network_services_with_render_wake(
-            cfg.grpc_port,
-            Arc::clone(&cfg.agents),
-            shared_state.clone(),
-            Arc::clone(&runtime_context),
-            live.publication_defaults.clone(),
-            render_wake.clone(),
-            bind_gate.clone(),
-            pairing
-                .as_ref()
-                .map(|pairing| pairing.grpc_binds())
-                .unwrap_or_default(),
-        )?;
+        let (mut network_rt, mut network_handles, degradation_notices, grpc_bound_addrs) =
+            start_network_services_with_render_wake(
+                cfg.grpc_port,
+                Arc::clone(&cfg.agents),
+                shared_state.clone(),
+                Arc::clone(&runtime_context),
+                live.publication_defaults.clone(),
+                render_wake.clone(),
+                bind_gate.clone(),
+                pairing
+                    .as_ref()
+                    .map(|pairing| pairing.grpc_binds())
+                    .unwrap_or_default(),
+            )?;
 
         // ── MCP HTTP server ────────────────────────────────────────────────────
         //
@@ -3423,12 +3332,10 @@ impl WindowedRuntime {
             frame_ready_rx,
             deferred_present: false,
             frame_ready_tx: Some(frame_ready_tx),
-            frame_presented_tx,
             degradation_notices,
             window_surface: None,
             input_processor: input_processor_with_system_gestures(),
             focus_manager: FocusManager::new(),
-            keyboard_processor: KeyboardProcessor::new(),
             pipeline: FramePipeline::new(),
             shutdown,
             quiescent_failed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -3483,8 +3390,6 @@ impl WindowedRuntime {
             tokens_seen: 0,
             capture_seen: 0,
             _config_watch: config_watch,
-            element_repositioned_tx,
-            input_event_tx,
             composer_pointer_drag_anchor: None,
             reading_cursor: None,
             pressable_regions: Vec::new(),

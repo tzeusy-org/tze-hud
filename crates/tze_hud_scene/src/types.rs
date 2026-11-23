@@ -2836,24 +2836,6 @@ impl WidgetRegistry {
         self.instances.get(instance_name)
     }
 
-    /// Resolve a widget instance geometry policy using override precedence:
-    /// user override > instance geometry override > widget default policy.
-    pub fn resolve_geometry_policy_for_instance(
-        &self,
-        instance_name: &str,
-        user_override: Option<&GeometryPolicy>,
-    ) -> Option<GeometryPolicy> {
-        let instance = self.instances.get(instance_name)?;
-        let definition = self.definitions.get(&instance.widget_type_name)?;
-
-        resolve_geometry_override_chain(
-            user_override.copied(),
-            None,
-            instance.geometry_override,
-            Some(definition.default_geometry_policy),
-        )
-    }
-
     /// Get the current active publish(es) for a widget instance.
     #[cfg(any(test, feature = "test-support"))]
     pub fn active_for_widget(&self, instance_name: &str) -> &[WidgetPublishRecord] {
@@ -3361,26 +3343,6 @@ impl ZoneRegistry {
     /// Look up a zone by name.
     pub fn get_by_name(&self, name: &str) -> Option<&ZoneDefinition> {
         self.zones.get(name)
-    }
-
-    /// Resolve a zone geometry policy using override precedence:
-    /// user override > config override > zone default policy.
-    ///
-    /// In v1, zone defaults are represented by `ZoneDefinition.geometry_policy`.
-    /// When `config_override` is `None`, the zone default remains the fallback.
-    pub(crate) fn resolve_geometry_policy_for_zone(
-        &self,
-        zone_name: &str,
-        user_override: Option<&GeometryPolicy>,
-        config_override: Option<&GeometryPolicy>,
-    ) -> Option<GeometryPolicy> {
-        let zone = self.zones.get(zone_name)?;
-        resolve_geometry_override_chain(
-            user_override.copied(),
-            None,
-            config_override.copied(),
-            Some(zone.geometry_policy),
-        )
     }
 
     /// Query zones that accept a given media type.
@@ -3945,63 +3907,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn widget_registry_resolves_user_override_before_instance_and_default() {
-        let mut registry = WidgetRegistry::new();
-        let tab_id = SceneId::new();
-        let default_policy = GeometryPolicy::Relative {
-            x_pct: 0.0,
-            y_pct: 0.0,
-            width_pct: 0.3,
-            height_pct: 0.3,
-        };
-        registry.register_definition(WidgetDefinition {
-            id: "gauge".to_string(),
-            name: "Gauge".to_string(),
-            description: "test".to_string(),
-            parameter_schema: vec![],
-            layers: vec![],
-            default_geometry_policy: default_policy,
-            default_rendering_policy: RenderingPolicy::default(),
-            default_contention_policy: ContentionPolicy::LatestWins,
-            max_publishers: WidgetDefinition::default_max_publishers(),
-            ephemeral: false,
-            hover_behavior: None,
-        });
-
-        let config_override = GeometryPolicy::Relative {
-            x_pct: 0.2,
-            y_pct: 0.2,
-            width_pct: 0.4,
-            height_pct: 0.4,
-        };
-        registry.register_instance(WidgetInstance {
-            id: SceneId::new(),
-            widget_type_name: "gauge".to_string(),
-            tab_id,
-            geometry_override: Some(config_override),
-            contention_override: None,
-            instance_name: "gauge-main".to_string(),
-            current_params: HashMap::new(),
-            auto_clear_ms: None,
-        });
-
-        let user_override = GeometryPolicy::Relative {
-            x_pct: 0.6,
-            y_pct: 0.1,
-            width_pct: 0.2,
-            height_pct: 0.2,
-        };
-        assert_eq!(
-            registry.resolve_geometry_policy_for_instance("gauge-main", Some(&user_override)),
-            Some(user_override)
-        );
-        assert_eq!(
-            registry.resolve_geometry_policy_for_instance("gauge-main", None),
-            Some(config_override)
-        );
-    }
-
     /// Zoom draws a widget box bigger about its centre, kept on the display,
     /// while the stored layout stays at 100%.
     #[test]
@@ -4144,59 +4049,6 @@ mod tests {
             placed.geometry_override,
             Some(rel(0.0, 0.0, 0.1, 0.1)),
             "layout unchanged"
-        );
-    }
-
-    #[test]
-    fn zone_registry_resolves_user_override_before_config_and_default() {
-        let mut registry = ZoneRegistry::new();
-        let default_policy = GeometryPolicy::Relative {
-            x_pct: 0.0,
-            y_pct: 0.8,
-            width_pct: 1.0,
-            height_pct: 0.2,
-        };
-        registry.register(ZoneDefinition {
-            id: SceneId::new(),
-            name: "subtitle".to_string(),
-            description: "subtitle".to_string(),
-            geometry_policy: default_policy,
-            accepted_media_types: vec![ZoneMediaType::StreamText],
-            rendering_policy: RenderingPolicy::default(),
-            contention_policy: ContentionPolicy::LatestWins,
-            max_publishers: 1,
-            auto_clear_ms: None,
-            ephemeral: false,
-            layer_attachment: LayerAttachment::Content,
-        });
-
-        let config_override = GeometryPolicy::Relative {
-            x_pct: 0.1,
-            y_pct: 0.7,
-            width_pct: 0.8,
-            height_pct: 0.2,
-        };
-        let user_override = GeometryPolicy::Relative {
-            x_pct: 0.2,
-            y_pct: 0.6,
-            width_pct: 0.6,
-            height_pct: 0.2,
-        };
-        assert_eq!(
-            registry.resolve_geometry_policy_for_zone(
-                "subtitle",
-                Some(&user_override),
-                Some(&config_override)
-            ),
-            Some(user_override)
-        );
-        assert_eq!(
-            registry.resolve_geometry_policy_for_zone("subtitle", None, Some(&config_override)),
-            Some(config_override)
-        );
-        assert_eq!(
-            registry.resolve_geometry_policy_for_zone("subtitle", None, None),
-            Some(default_policy)
         );
     }
 }

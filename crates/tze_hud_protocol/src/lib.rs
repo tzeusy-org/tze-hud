@@ -8,16 +8,9 @@ pub mod convert;
 pub(crate) mod lease;
 pub mod session;
 pub mod session_server;
-// Subscription internals are exposed only for external protocol fixtures.
-#[cfg(any(test, feature = "dev-mode"))]
-pub mod subscriptions;
-#[cfg(not(any(test, feature = "dev-mode")))]
-#[allow(unreachable_pub)]
-pub(crate) mod subscriptions;
-
 /// Generated protobuf types and gRPC service definitions.
 ///
-/// Types from `types.proto` and `events.proto` are in the top-level module
+/// Types from `types.proto` are in the top-level module
 /// (package `tze_hud.protocol.v1`). The `session` submodule contains the
 /// bidirectional streaming session protocol types from `session.proto`
 /// (package `tze_hud.protocol.v1.session`).

@@ -184,19 +184,16 @@ separate acceptance.
 - `tze_hud_mcp` [`test_hud_publish_zone_contention_policy_latest_wins`](../crates/tze_hud_mcp/src/server/tests.rs)
 - `tze_hud_compositor` [`test_latest_wins_zone_renders_only_latest_publication`](../crates/tze_hud_compositor/src/renderer/tests/zone_stack.rs)
 
-The resident input bus retains transactional down/up/command batches in ordered
-per-subscriber queues. Pointer move/enter/leave and absolute scroll notifications
-share a bounded broadcast lane: slow receivers report lag and resume from retained
-samples. This does not promise per-tile coalescing or delivery of every sample;
-local scroll feedback does not wait on that lane.
+Local pointer and command processing keep their feedback and focus ownership.
+Portal input stays in its retained-until-ACK MCP queue. Scroll feedback and local
+frame coalescing do not wait on a resident input feed.
 
-- `tze_hud_protocol` [`ephemeral_pointer_moves_drop_on_lag_and_report_lagged`](../crates/tze_hud_protocol/src/session_server/input_event_bus.rs),
-  [`transactional_pointer_down_up_survive_slow_consumer`](../crates/tze_hud_protocol/src/session_server/input_event_bus.rs),
-  [`transactional_input_is_not_enqueued_for_an_unrelated_namespace`](../crates/tze_hud_protocol/src/session_server/tests/events.rs)
+- `tze_hud_runtime` native keyboard, focus, activation and pointer/scroll cases in
+  [the real event-loop harness](../crates/tze_hud_runtime/src/windowed/event_loop_harness.rs)
 - `tze_hud_input` [`test_scroll_changed_event_contains_current_offset`](../crates/tze_hud_input/src/scroll.rs)
   (latest queued request per frame); `integration`
-  [`portal_scroll_lag_preserves_visible_window`](../tests/integration/text_stream_portal_surface.rs)
-  (local viewport survives notification lag)
+  [`portal_scroll_coalesces_commits_without_resetting_visible_window`](../tests/integration/text_stream_portal_surface.rs)
+  (local viewport survives coalesced frame commits)
 
 Session scoping is tested by `tze_hud_mcp`
 [`input_reaches_only_the_session_that_asked`](../crates/tze_hud_mcp/src/server/tests/scopes.rs),

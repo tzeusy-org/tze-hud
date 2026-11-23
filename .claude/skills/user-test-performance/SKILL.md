@@ -84,7 +84,7 @@ MacBook) under new `target_id` keys.
 - `scripts/grpc_widget_publish_perf.py` (Python — secondary alternative)
   - Benchmarks `WidgetPublish` on one gRPC bidi stream.
   - Supports pacing, target registry, byte accounting, traceability tags, thresholds, and CSV recording.
-  - Uses local `scripts/proto_gen/` stubs (self-contained inside this skill). Regenerate the sole Python stub source from the current three protocol files with `uv run --with grpcio-tools==1.80.0 -- bash scripts/regen_proto_stubs.sh` from the repo root. Pass an output directory to validate regeneration separately. The retired user-test gRPC client no longer needs a second copy.
+  - Uses local `scripts/proto_gen/` stubs (self-contained inside this skill). Regenerate the sole Python stub source from the current two protocol files with `uv run --with grpcio-tools==1.80.0 -- bash scripts/regen_proto_stubs.sh` from the repo root. Pass an output directory to validate regeneration separately. The retired user-test gRPC client no longer needs a second copy.
 - `scripts/widget_soak_runner.py`
   - Runs the Rust gRPC widget harness concurrently for `agent-alpha`, `agent-beta`, and
     `agent-gamma` by default.

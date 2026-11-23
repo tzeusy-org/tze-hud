@@ -18,7 +18,7 @@ async fn handshake_with_psk(
         timestamp_wall_us: now_wall_us(),
         payload: Some(ClientPayload::SessionInit(SessionInit {
             agent_id: agent_id.to_string(),
-            initial_subscriptions: vec!["SCENE_TOPOLOGY".to_string()],
+
             auth_credential: Some(crate::auth::psk_credential(psk.to_string())),
         })),
     })

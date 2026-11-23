@@ -72,8 +72,8 @@ class HudSessionServicer(object):
 
     def Session(self, request_iterator, context):
         """Primary bidirectional session stream.
-        All session traffic (handshake, publications, uploads, events,
-        heartbeats and subscriptions) flows over this single stream.
+        All session traffic (handshake, publications, uploads and lifecycle
+        notices) flows over this single stream.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')

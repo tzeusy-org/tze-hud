@@ -3,7 +3,7 @@
 //! This module provides `HudSessionImpl`, the server-side implementation of the
 //! `HudSession` gRPC service. It manages the bidirectional streaming session
 //! lifecycle: handshake, publication management, resource uploads, heartbeats,
-//! event dispatch, and termination.
+//! degradation notices, and termination.
 //!
 //! # Session Lifecycle State Machine
 //!
@@ -44,7 +44,6 @@ pub mod budget_gate;
 pub mod degradation_notice_bus;
 mod element_persist;
 pub mod handshake;
-pub mod input_event_bus;
 pub mod lifecycle;
 pub mod service;
 pub mod stream_session;
@@ -55,13 +54,10 @@ pub use budget_gate::{
     MutationBudgetDecision, MutationBudgetEnforcer, SharedMutationBudgetEnforcer,
 };
 pub use degradation_notice_bus::{DegradationNoticeReceiver, DegradationNoticeSender};
-use element_persist::{
-    ElementStorePersistRequest, persist_element_store, touch_element_store_entry_by_namespace,
-};
+use element_persist::{persist_element_store, touch_element_store_entry_by_namespace};
 #[cfg(test)]
 use handshake::handle_session_init;
 use handshake::{HandshakeCtx, handle_handshake_read};
-pub use input_event_bus::{InputEventReceiver, InputEventRecvError, InputEventSender};
 pub use lifecycle::SessionState;
 pub use service::{HudSessionImpl, SessionDeps};
 use stream_session::StreamSession;
@@ -99,10 +95,6 @@ pub(super) fn now_ms() -> u64 {
         .as_millis() as u64
 }
 
-pub(super) fn scene_id_to_bytes(id: tze_hud_scene::SceneId) -> Vec<u8> {
-    id.as_uuid().as_bytes().to_vec()
-}
-
 #[cfg(test)]
 #[allow(clippy::result_large_err)] // tonic::Status is large by design; boxing it would add indirection on every call
 pub(super) fn bytes_to_scene_id(bytes: &[u8]) -> Result<tze_hud_scene::SceneId, Status> {
@@ -119,13 +111,6 @@ pub(super) fn bytes_to_scene_id(bytes: &[u8]) -> Result<tze_hud_scene::SceneId, 
     let uuid = uuid::Uuid::from_bytes(arr);
     Ok(tze_hud_scene::SceneId::from_uuid(uuid))
 }
-
-/// Broadcast channel capacity for transactional server-push messages.
-///
-/// Runtime-injected input events use this channel as well as degradation
-/// notices. Keep enough headroom for short key/pointer bursts while
-/// a session handler is also processing mutation responses.
-const BROADCAST_CHANNEL_CAPACITY: usize = 1024;
 
 // This observer is private to the owning service's retained lifecycle fixture.
 // The handle is the real session task, not the Tonic transport server task.
@@ -243,9 +228,6 @@ impl HudSession for HudSessionImpl {
         let render_wake = self.render_wake.clone();
         let publication_defaults = self.publication_defaults.clone();
         let degradation_notices = self.degradation_notices.clone();
-        // Runtime → session feeds, subscribed before the handler task starts
-        // so a terminal lease transition cannot race the session's setup.
-        let mut feeds = self.subscribe_feeds();
 
         // Create outbound channel
         let (tx, rx) = tokio::sync::mpsc::channel::<Result<ServerMessage, Status>>(
@@ -337,11 +319,6 @@ impl HudSession for HudSessionImpl {
                         .register_server_message_tx(&session.session_id, tx.clone());
                 }
 
-                // Register the durable input lane only after the session has an
-                // authenticated namespace. This prevents unrelated or incomplete
-                // sessions from accumulating transactional input for other agents.
-                let mut input_event_rx = feeds.input_events.subscribe(session.namespace.clone());
-
                 // Atomically subscribe and send the current policy before later events.
                 let (mut degradation_rx, current_degradation) =
                     degradation_notices.subscribe_with_current();
@@ -386,7 +363,7 @@ impl HudSession for HudSessionImpl {
                 //
                 // The loop also listens on `degradation_rx` for transactional DegradationNotice
                 // broadcasts. These are delivered unconditionally to all active
-                // sessions regardless of subscription config and are never dropped.
+                // sessions and are never dropped.
                 loop {
                     // Use heartbeat timeout for receive
                     let timeout_duration =
@@ -416,58 +393,14 @@ impl HudSession for HudSessionImpl {
                         // ── DegradationNotice broadcast ────
                         //
                         // Transactional — delivered unconditionally to all active sessions
-                        // regardless of subscription config. Never dropped.
+                        // Never dropped.
                         degradation_notice = degradation_rx.recv() => {
                             if let LoopAction::Break = session.on_degradation(degradation_notice, &tx).await {
                                 break;
                             }
                         }
 
-                        // ── Runtime-injected input EventBatch ───────────
-                        //
-                        // The compositor input pipeline (Stage 2) assembles ClickEvent /
-                        // CommandInputEvent batches for the owning agent and injects them
-                        // through `HudSessionImpl::input_event_tx`. Only batches
-                        // addressed to this session's namespace are forwarded; others are
-                        // silently discarded.
-                        //
-                        // Delivery is gated on subscription: the batch is filtered through
-                        // `subscriptions::filter_event_batch` before sending. If the agent
-                        // is not subscribed to INPUT_EVENTS / FOCUS_EVENTS the batch is
-                        // dropped silently (no error response).
-                        input_event_result = input_event_rx.recv() => {
-                            if let LoopAction::Break = session.on_input_event(input_event_result, &tx).await {
-                                break;
-                            }
-                        }
 
-                        // ── ElementRepositionedEvent broadcast ──────────
-                        //
-                        // Emitted after drag completion or reset-to-default. Delivered to
-                        // agents subscribed to SCENE_TOPOLOGY (requires read_scene_topology).
-                        // Transactional — never coalesced or dropped. Agent cannot reject.
-                        element_repositioned_result = feeds.element_repositioned.recv() => {
-                            if let LoopAction::Break = session.on_element_repositioned(element_repositioned_result, &tx).await {
-                                break;
-                            }
-                        }
-
-                        // ── FramePresented broadcast ─────────────────────
-                        //
-                        // Batch-correlated present acknowledgment: pairs the accepted
-                        // publication IDs composited into a presented frame with
-                        // that frame's present wall-clock. Delivered to agents subscribed
-                        // to TELEMETRY_FRAMES (requires read_telemetry). State-stream —
-                        // coalesced/droppable under backpressure. Agent cannot reject.
-                        frame_presented_result = feeds.frame_presented.recv() => {
-                            if let LoopAction::Break = session.on_frame_presented(
-                                frame_presented_result,
-                                &degradation_notices,
-                                &tx,
-                            ).await {
-                                break;
-                            }
-                        }
                     }
                 }
             }
@@ -886,143 +819,6 @@ impl StreamSession {
             }
             None => {
                 // Treat as ungraceful disconnect.
-                self.transition(SessionState::Closed);
-                LoopAction::Break
-            }
-        }
-    }
-
-    /// Handle a runtime-injected input `EventBatch` broadcast result.
-    ///
-    /// The compositor input pipeline assembles ClickEvent / CommandInputEvent batches
-    /// for the owning agent. Only batches addressed to this session's namespace are
-    /// forwarded; others are silently discarded. Delivery is gated on subscription.
-    async fn on_input_event(
-        &mut self,
-        input_event_result: Result<(String, crate::proto::EventBatch), InputEventRecvError>,
-        tx: &tokio::sync::mpsc::Sender<Result<ServerMessage, tonic::Status>>,
-    ) -> LoopAction {
-        match input_event_result {
-            Ok((target_namespace, batch)) => {
-                // Namespace filter: only deliver to the owning session.
-                if target_namespace == self.namespace {
-                    // Subscription filter: gate on INPUT_EVENTS / FOCUS_EVENTS.
-                    if let Some(filtered) =
-                        crate::subscriptions::filter_event_batch(batch, &self.subscriptions)
-                    {
-                        let seq = self.next_server_seq();
-                        let _ = tx
-                            .send(Ok(ServerMessage {
-                                sequence: seq,
-                                timestamp_wall_us: now_wall_us(),
-                                payload: Some(ServerPayload::EventBatch(filtered)),
-                            }))
-                            .await;
-                    }
-                }
-                LoopAction::Continue
-            }
-            Err(InputEventRecvError::Lagged(_)) => {
-                // Only ephemeral/state-stream input uses the bounded lane.
-                LoopAction::Continue
-            }
-            Err(InputEventRecvError::Closed) => {
-                // Runtime shutting down — treat as ungraceful disconnect.
-                self.transition(SessionState::Closed);
-                LoopAction::Break
-            }
-        }
-    }
-
-    /// Handle an `ElementRepositionedEvent` broadcast result.
-    ///
-    /// Emitted after drag completion or reset-to-default. Delivered to
-    /// agents subscribed to SCENE_TOPOLOGY (requires read_scene_topology).
-    /// Transactional — never coalesced or dropped. Agent cannot reject.
-    async fn on_element_repositioned(
-        &mut self,
-        element_repositioned_result: Result<
-            crate::proto::ElementRepositionedEvent,
-            tokio::sync::broadcast::error::RecvError,
-        >,
-        tx: &tokio::sync::mpsc::Sender<Result<ServerMessage, tonic::Status>>,
-    ) -> LoopAction {
-        match element_repositioned_result {
-            Ok(event) => {
-                // Gate on SCENE_TOPOLOGY subscription.
-                if self
-                    .subscriptions
-                    .contains(&crate::subscriptions::category::SCENE_TOPOLOGY.to_string())
-                {
-                    let seq = self.next_server_seq();
-                    let _ = tx
-                        .send(Ok(ServerMessage {
-                            sequence: seq,
-                            timestamp_wall_us: now_wall_us(),
-                            payload: Some(ServerPayload::ElementRepositioned(event)),
-                        }))
-                        .await;
-                }
-                LoopAction::Continue
-            }
-            Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                // Missed notifications. Log and continue — the element
-                // store state is persistent so a future snapshot or
-                // The element store will reflect the current position.
-                let _ = n; // suppress unused warning; production: tracing::warn!
-                LoopAction::Continue
-            }
-            Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                // Runtime shutting down — treat as ungraceful disconnect.
-                self.transition(SessionState::Closed);
-                LoopAction::Break
-            }
-        }
-    }
-
-    /// Handle a `FramePresented` broadcast result.
-    ///
-    /// Batch-correlated present acknowledgment. Delivered to agents subscribed to
-    /// TELEMETRY_FRAMES (requires the read_telemetry capability, enforced at
-    /// subscribe time — so checking the active subscription here is sufficient).
-    /// State-stream class:
-    /// coalesced/droppable under backpressure. Agent cannot reject.
-    async fn on_frame_presented(
-        &mut self,
-        frame_presented_result: Result<
-            crate::proto::FramePresented,
-            tokio::sync::broadcast::error::RecvError,
-        >,
-        degradation_notices: &DegradationNoticeSender,
-        tx: &tokio::sync::mpsc::Sender<Result<ServerMessage, tonic::Status>>,
-    ) -> LoopAction {
-        match frame_presented_result {
-            Ok(event) => {
-                // Gate on TELEMETRY_FRAMES subscription (read_telemetry capability
-                // was already enforced when the subscription was granted).
-                if degradation_notices.should_emit_state_stream(event.frame_number)
-                    && self
-                        .subscriptions
-                        .contains(&crate::subscriptions::category::TELEMETRY_FRAMES.to_string())
-                {
-                    let seq = self.next_server_seq();
-                    let _ = tx
-                        .send(Ok(ServerMessage {
-                            sequence: seq,
-                            timestamp_wall_us: now_wall_us(),
-                            payload: Some(ServerPayload::FramePresented(event)),
-                        }))
-                        .await;
-                }
-                LoopAction::Continue
-            }
-            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                // Missed present acks under backpressure. State-stream class —
-                // droppable; the latency probe samples, so a gap is acceptable.
-                LoopAction::Continue
-            }
-            Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                // Runtime shutting down — treat as ungraceful disconnect.
                 self.transition(SessionState::Closed);
                 LoopAction::Break
             }

@@ -21,7 +21,7 @@ Windows run never closes an owner check.
 | Scene graph: tabs, tiles, nodes, zones | `tze_hud_scene` |
 | Session portal + projection | `tze_hud_portal`, `tze_hud_runtime` portal modules, `tze_hud_input` |
 | MCP tools (zones, widgets, portal) | `tze_hud_mcp` |
-| gRPC resident session (zones, widgets, uploads, events) | `tze_hud_protocol` |
+| gRPC resident session (zones, widgets, uploads, lifecycle notices) | `tze_hud_protocol` |
 | SVG widgets + asset store | `tze_hud_widget`, `tze_hud_resource` |
 | Config, flat design tokens, built-in themes | `tze_hud_config` |
 | Frame/idle telemetry | `tze_hud_telemetry` |

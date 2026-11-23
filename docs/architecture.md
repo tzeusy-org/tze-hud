@@ -25,7 +25,6 @@ flowchart TD
     DRIVER -->|"portal tile and nodes"| SCENE
     INPUT -->|"local feedback / override"| SCENE
     INPUT -->|"composer submissions"| HUB
-    INPUT -->|"resident events"| GRPC
     SCENE --> COMP["Compositor: text, SVG, images, chrome"]
     COMP --> WINDOWS["Primary and secondary overlay surfaces"]
     HUB -->|"hud_input replies"| MCP
@@ -69,7 +68,7 @@ crates, the canonical app, five examples and a separate integration package.
 | `tze_hud_runtime` | Window/event-loop lifecycle, protocol wiring, portal driver, shell (including the [control panel](../crates/tze_hud_runtime/src/shell/control_panel/mod.rs) model and its sections), deadlines and operator services: [lib.rs](../crates/tze_hud_runtime/src/lib.rs), [windowed](../crates/tze_hud_runtime/src/windowed/mod.rs) |
 | `tze_hud_scene` | Shared scene graph, tiles/nodes/zones, leases, agent identity, the owner's visibility set and per-agent holdings and Clear: [SceneGraph](../crates/tze_hud_scene/src/graph/mod.rs), [visibility](../crates/tze_hud_scene/src/graph/visibility.rs), [agents](../crates/tze_hud_scene/src/graph/agents.rs), [lease](../crates/tze_hud_scene/src/lease/), [config](../crates/tze_hud_scene/src/config/) |
 | `tze_hud_mcp` | Discover, publish, clear, hold and input tools, with caller-scoped authorization and shared errors: [tools.rs](../crates/tze_hud_mcp/src/tools.rs); per-session ownership: [scopes.rs](../crates/tze_hud_mcp/src/scopes.rs) |
-| `tze_hud_protocol` | Protobuf schemas, resident session lifecycle, zone/widget publication, resource uploads, termination cleanup and event delivery: [proto](../crates/tze_hud_protocol/proto/), [session_server](../crates/tze_hud_protocol/src/session_server/mod.rs) |
+| `tze_hud_protocol` | Protobuf schemas, resident session lifecycle, zone/widget publication, resource uploads, termination cleanup and lifecycle notices: [proto](../crates/tze_hud_protocol/proto/), [session_server](../crates/tze_hud_protocol/src/session_server/mod.rs) |
 | `tze_hud_portal` | `PortalHub` state, pure scene-node renderer and resolved visual tokens: [hub.rs](../crates/tze_hud_portal/src/hub.rs), [render.rs](../crates/tze_hud_portal/src/render.rs), [tokens.rs](../crates/tze_hud_portal/src/tokens.rs) |
 | `tze_hud_input` | Hit testing, focus, pointer/keyboard processing, scrolling and composer editing: [lib.rs](../crates/tze_hud_input/src/lib.rs) |
 | `tze_hud_compositor` | GPU draw/present, text shaping, markdown, widget rasterization, per-display targets and the control panel's layout and drawing: [lib.rs](../crates/tze_hud_compositor/src/lib.rs), [control_panel.rs](../crates/tze_hud_compositor/src/renderer/control_panel.rs) |
@@ -236,9 +235,8 @@ Scene `graph/overlay.rs` owns serde-skipped session zone placement keyed by
 zone ID; `graph/zone_ops.rs` owns effective policy, placement and human reset.
 The shared scene resolver preserves rendered edge anchoring for compositor
 geometry and runtime drag admission. Windowed `portal.rs` distinguishes Tile
-and Zone capture/release: only Tile completion reaches persistence or agent
-reposition events. The human grip menu clears live Zone placement directly;
-the agent service reset and saved element-store contracts remain unchanged.
+and Zone capture/release: only Tile completion reaches persistence. The human grip menu clears live Zone placement directly;
+the saved element-store contract remains unchanged.
 
 Scene `graph/zone_ops.rs` owns notification-key validation, publisher-scoped
 replacement and selective clear. `graph/timed.rs` cancels matching delayed
@@ -279,12 +277,11 @@ the hub's 128-byte portal-id limit or pairing validation.
 **Input and reclaim [Observed].** Local input is handled by the
 [windowed keyboard](../crates/tze_hud_runtime/src/windowed/keyboard.rs) and
 [input dispatch](../crates/tze_hud_runtime/src/windowed/input_dispatch.rs)
-paths. Resident events use
-[`InputEventSender`](../crates/tze_hud_protocol/src/session_server/input_event_bus.rs)
-with ordered transactional queues and a separate droppable lane. Disconnect,
-resume, lease expiry and human override have distinct semantics; their
-regression anchors are in [invariants.md](invariants.md). A transport refactor
-must preserve these boundaries.
+paths. Focus, local feedback, portal submissions and acknowledgements stay with
+the runtime and MCP owners; there is no resident input or frame-telemetry feed.
+Resident termination, local portal grace, lease expiry and human override keep
+their distinct lifetimes; regression anchors are in [invariants.md](invariants.md).
+
 
 **Configuration and pixels [Observed].**
 [`RuntimeContext`](../crates/tze_hud_runtime/src/runtime_context.rs) supplies

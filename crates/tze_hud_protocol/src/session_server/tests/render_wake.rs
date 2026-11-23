@@ -8,7 +8,6 @@ fn direct_handler_test_session(namespace: &str, capabilities: Vec<String>) -> St
         agent_name: namespace.to_string(),
         capabilities,
         publication_origin: SceneId::new(),
-        subscriptions: Vec::new(),
         server_sequence: 0,
         state: SessionState::Active,
         last_client_sequence: 1,

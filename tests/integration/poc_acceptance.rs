@@ -411,7 +411,6 @@ impl Resident {
             payload: Some(ClientPayload::SessionInit(wire::SessionInit {
                 agent_id: agent_id.to_string(),
                 auth_credential: Some(tze_hud_protocol::auth::psk_credential(psk.to_string())),
-                ..Default::default()
             })),
         })
         .await
@@ -528,7 +527,6 @@ impl HungAgent {
                 auth_credential: Some(tze_hud_protocol::auth::psk_credential(
                     RESIDENT_PSK.to_string(),
                 )),
-                ..Default::default()
             })])
             .await;
         agent.replies.body = Some(response.await.expect("response headers").into_body());

@@ -21,8 +21,8 @@
 //! the gRPC session server — agents connect normally, session limits are
 //! enforced identically.
 //!
-//! Agents connecting to a headless
-//! runtime receive the full scene snapshot (handled by `HudSessionImpl`).
+//! Agents connect with a fresh resident session and receive its lifecycle
+//! handshake; scene snapshots and input feeds are not resident stream surfaces.
 //!
 //! # grpc_port = 0
 //!
@@ -45,7 +45,6 @@ use tokio::sync::Mutex;
 use tze_hud_compositor::{Compositor, HeadlessSurface};
 use tze_hud_config::resolve_runtime_widget_asset_store;
 use tze_hud_input::{AgentDispatch, InputProcessor, InputResult, PointerEvent};
-use tze_hud_protocol::proto::FramePresented;
 use tze_hud_protocol::proto::session::hud_session_server::HudSessionServer;
 use tze_hud_protocol::session::SharedState;
 use tze_hud_protocol::session_server::{DegradationNoticeSender, HudSessionImpl, SessionDeps};
@@ -174,15 +173,6 @@ pub struct HeadlessRuntime {
     _runtime_widget_store: Option<RuntimeWidgetStore>,
     /// Actual input samples; response context exists only for applied batches.
     pending_input_latency: PendingInputLatencySamples,
-    /// Broadcast sender for batch-correlated present acknowledgments.
-    ///
-    /// When set, `render_frame` drains the scene's present-ack queue after each
-    /// presented frame and emits a [`FramePresented`] pairing the applied
-    /// batch_ids with the frame number + present wall-clock. `None` (the default)
-    /// disables emission — the drain still runs so the queue never grows unbounded.
-    /// Wire this to `HudSessionImpl::frame_presented_tx` (via
-    /// [`HeadlessRuntime::set_frame_presented_tx`]) to deliver to gRPC subscribers.
-    frame_presented_tx: Option<tokio::sync::broadcast::Sender<FramePresented>>,
     degradation_controller: DegradationController,
     degradation_notices: DegradationNoticeSender,
     degradation_clock_start: Instant,
@@ -343,7 +333,6 @@ impl HeadlessRuntime {
             pending_input_latency: Arc::new(std::sync::Mutex::new(
                 std::collections::VecDeque::new(),
             )),
-            frame_presented_tx: None,
             degradation_controller: DegradationController::with_envelope(
                 crate::degradation::DegradationConfig::default(),
                 DegradationEnvelope::from_effective_fps(60).expect("60 Hz is valid"),
@@ -351,16 +340,6 @@ impl HeadlessRuntime {
             degradation_notices,
             degradation_clock_start: Instant::now(),
         })
-    }
-
-    /// Wire a `FramePresented` broadcast sender so the render loop emits
-    /// batch-correlated present acknowledgments.
-    ///
-    /// Pass `HudSessionImpl::frame_presented_tx.clone()` to deliver present acks
-    /// to gRPC agents subscribed to TELEMETRY_FRAMES, or a standalone sender in
-    /// tests to observe the correlation directly.
-    pub fn set_frame_presented_tx(&mut self, tx: tokio::sync::broadcast::Sender<FramePresented>) {
-        self.frame_presented_tx = Some(tx);
     }
 
     /// Get a reference to the shared state (scene + sessions).
@@ -534,11 +513,10 @@ impl HeadlessRuntime {
         let frame_time_us = frame_start.elapsed().as_micros() as u64;
         let degradation_work_time_us = degradation_work_start.elapsed().as_micros() as u64;
 
-        // ── Batch-correlated present acknowledgment ───────────────
-        // Successful local GPU work drains pending internal batch ids even when
-        // no sender/subscriber is attached. An explicitly wired optional sender
-        // pairs them with the frame number and emitter wall-clock; the headless
-        // surface present is a no-op, so this is not on-screen completion.
+        // ── Local input-response correlation ────────────────────────────────
+        // Successful GPU submission drains internal batch ids for local input
+        // latency measurement. Headless surface presentation is a no-op; this
+        // measures response submission rather than on-screen completion.
         // A skipped submission leaves both batch identity and timing context
         // pending for a frame that actually carries the response.
         let present_ack_batch_ids = if frame_submitted {
@@ -551,27 +529,6 @@ impl HeadlessRuntime {
             &present_ack_batch_ids,
             submitted_at,
         );
-        if let Some(tx) = &self.frame_presented_tx
-            && !present_ack_batch_ids.is_empty()
-        {
-            let present_wall_us = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map(|d| d.as_micros() as u64)
-                .unwrap_or(0);
-            let event = FramePresented {
-                frame_number: compositor_telemetry.frame_number,
-                present_wall_us,
-                // 16-byte big-endian UUID, matching the scene_id_to_bytes /
-                // bytes_to_scene_id wire contract.
-                batch_ids: present_ack_batch_ids
-                    .iter()
-                    .map(|id| id.as_uuid().as_bytes().to_vec())
-                    .collect(),
-            };
-            // Broadcast send errors only when there are no subscribers — not an
-            // error condition for a droppable state-stream present ack.
-            let _ = tx.send(event);
-        }
         let question_wakes = scene_guard.take_notification_wait_notifiers();
         drop(scene_guard);
         for wake in question_wakes {

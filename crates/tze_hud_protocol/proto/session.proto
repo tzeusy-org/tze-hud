@@ -3,7 +3,6 @@ syntax = "proto3";
 package tze_hud.protocol.v1.session;
 
 import "types.proto";
-import "events.proto";
 
 // ─── Session Protocol ─────────────────────────────────────────────────────────
 //
@@ -20,8 +19,8 @@ import "events.proto";
 
 service HudSession {
   // Primary bidirectional session stream.
-  // All session traffic (handshake, publications, uploads, events,
-  // heartbeats and subscriptions) flows over this single stream.
+  // All session traffic (handshake, publications, uploads and lifecycle
+  // notices) flows over this single stream.
   rpc Session(stream ClientMessage) returns (stream ServerMessage);
 }
 
@@ -83,8 +82,9 @@ message ClientMessage {
 
 message ServerMessage {
   // Removed public tile/session surface; never reuse.
-  reserved 12, 30, 54;
-  reserved "session_resume_result", "scene_snapshot", "reclaimed";
+  reserved 12, 30, 34, 51, 52, 54;
+  reserved "session_resume_result", "scene_snapshot", "event_batch",
+    "element_repositioned", "frame_presented", "reclaimed";
   uint64 sequence         = 1;  // Per-direction monotonically increasing, starts at 1
   uint64 timestamp_wall_us = 2; // Sender wall-clock (UTC us since epoch); advisory only
 
@@ -101,33 +101,17 @@ message ServerMessage {
     // Keepalive
     Heartbeat             heartbeat              = 33;
 
-    // Event batch (defined in events.proto)
-    // Carries per-frame InputEnvelope variants (pointer, keyboard, focus, capture,
-    // scroll, command events). Variants are filtered before delivery.
-    tze_hud.protocol.v1.EventBatch event_batch   = 34;
-
     // Resident scene-resource upload responses.
     ResourceUploadAccepted resource_upload_accepted = 41;
     ResourceStored         resource_stored          = 42;
 
     // Degradation notice.
     // Transactional — never dropped. Delivered to ALL active sessions unconditionally
-    // on degradation level change, regardless of subscription configuration.
+    // on degradation level change.
     DegradationNotice     degradation_notice      = 46;
 
     // Resident scene-resource upload-specific semantic errors.
     ResourceErrorResponse resource_error_response = 49;
-
-    // Element repositioned event — emitted on drag completion or reset-to-default.
-    // Subscription: SCENE_TOPOLOGY (requires the corresponding event permission).
-    // Message class: Transactional (never coalesced or dropped).
-    tze_hud.protocol.v1.ElementRepositionedEvent element_repositioned = 51;
-
-    // Optional internal batch-to-GPU correlation, independent of the removed
-    // public mutation route. No per-Publish or physical on-screen acknowledgment.
-    // Subscription: TELEMETRY_FRAMES (requires the corresponding event permission).
-    // Message class: State-stream (coalesced/droppable under backpressure).
-    tze_hud.protocol.v1.FramePresented frame_presented = 52;
 
     // The one reply shape for Publish, Clear and Hold. Transactional.
     RequestResult request_result = 53;
@@ -210,8 +194,9 @@ message SessionInit {
   reserved 4;
   reserved "requested_capabilities";
 
-  // Initial event subscriptions
-  repeated string initial_subscriptions  = 5;
+  // Removed resident event subscriptions.
+  reserved 5;
+  reserved "initial_subscriptions";
 
   // Resident reconnects establish a fresh session. Never reuse the old token field.
   reserved 6;
@@ -255,9 +240,9 @@ message SessionEstablished {
   reserved 8;
   reserved "estimated_skew_us";
 
-  // Subscription confirmation
-  repeated string active_subscriptions = 9;
-  repeated string denied_subscriptions = 10;
+  // Removed resident subscription confirmation.
+  reserved 9, 10;
+  reserved "active_subscriptions", "denied_subscriptions";
 
   // Field 12 (portal_part_tokens) removed in T5 S5: agents no longer draw the
   // portal, so the runtime no longer ships its resolved portal tokens.
@@ -441,8 +426,7 @@ enum DegradationLevel {
 
 // Runtime notifies all active sessions of a change in degradation level.
 // Transactional — never dropped under backpressure.
-// Delivered unconditionally to ALL active sessions regardless of subscription config.
-// degradation_notices subscriptions SHALL NOT be filterable.
+// Delivered unconditionally to all active sessions.
 message DegradationNotice {
   DegradationLevel level              = 1;  // Current degradation level
   string           reason             = 2;  // Human-readable reason for the change

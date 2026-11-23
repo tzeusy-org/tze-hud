@@ -3,16 +3,12 @@ use std::ops::ControlFlow;
 use std::time::Instant;
 
 use tze_hud_input::{
-    AgentDispatch, AgentDispatchKind, CommandAction, CommandProcessor, CommandSource,
-    HotkeyResizeAxis, HotkeyResizeDir, KeyboardModifiers, PortalFocusTarget, RawCharacterEvent,
-    RawCommandEvent, RawKeyDownEvent, RawKeyUpEvent, ShellReservedShortcut,
+    CommandAction, CommandProcessor, CommandSource, HotkeyResizeAxis, HotkeyResizeDir,
+    KeyboardModifiers, PortalFocusTarget, RawCharacterEvent, RawCommandEvent, RawKeyDownEvent,
+    RawKeyUpEvent, ShellReservedShortcut,
 };
 
 use super::WinitApp;
-use super::input_dispatch::{
-    dispatch_command_event, dispatch_focus_event, dispatch_keyboard_event, dispatch_pointer_event,
-    dispatch_scroll_offset_event_to_namespace,
-};
 use super::lifecycle::{INTERACTION_LOCK_BUDGET, spin_acquire};
 use crate::shell::{ChromeShortcut, ChromeTab, handle_shortcut};
 
@@ -42,50 +38,6 @@ fn str_preview(s: &str) -> std::borrow::Cow<'_, str> {
             end -= 1;
         }
         std::borrow::Cow::Owned(format!("{}…", &s[..end]))
-    }
-}
-
-/// Return a bounded string summary of a [`tze_hud_input::KeyboardDispatchKind`]
-/// for tracing fields.
-///
-/// The `Character` variant may carry an arbitrarily large clipboard payload;
-/// this helper applies [`str_preview`] to any embedded string fields so that
-/// the log line stays bounded regardless of paste size.  `KeyDown`/`KeyUp`
-/// key names are also previewed for consistency.
-fn keyboard_kind_preview(kind: &tze_hud_input::KeyboardDispatchKind) -> String {
-    use tze_hud_input::KeyboardDispatchKind;
-    match kind {
-        KeyboardDispatchKind::KeyDown {
-            key_code,
-            key,
-            modifiers,
-            repeat,
-            ..
-        } => format!(
-            "KeyDown {{ key_code: {:?}, key: {:?}, ctrl: {}, shift: {}, alt: {}, repeat: {} }}",
-            str_preview(key_code),
-            str_preview(key),
-            modifiers.ctrl,
-            modifiers.shift,
-            modifiers.alt,
-            repeat,
-        ),
-        KeyboardDispatchKind::KeyUp {
-            key_code,
-            key,
-            modifiers,
-            ..
-        } => format!(
-            "KeyUp {{ key_code: {:?}, key: {:?}, ctrl: {}, shift: {}, alt: {} }}",
-            str_preview(key_code),
-            str_preview(key),
-            modifiers.ctrl,
-            modifiers.shift,
-            modifiers.alt,
-        ),
-        KeyboardDispatchKind::Character { character, .. } => {
-            format!("Character {{ character: {:?} }}", str_preview(character))
-        }
     }
 }
 
@@ -306,19 +258,7 @@ pub(super) enum EscapeClearOutcome {
     Busy,
 }
 
-/// Synthetic device id used for keyboard-driven control activation (hud-2v8br).
-///
-/// Enter / Space on a Tab-focused portal control synthesizes a pointer
-/// down+up so the owning agent's existing click handler fires. A distinct,
-/// out-of-range id keeps these synthetic events from colliding with real
-/// pointer-device state (capture, drag) keyed by device id.
-const KEYBOARD_ACTIVATION_DEVICE_ID: u32 = u32::MAX;
-
-/// Result of classifying the active tab's keyboard focus for portal
-/// typing-recovery (hud-2v8br). The runtime-local analogue of
-/// [`tze_hud_input::PortalFocusTarget`], enriched with the namespace and
-/// pointer coordinates needed to synthesize a control activation, plus a `Busy`
-/// state for lock contention so the caller can defer the event.
+/// Runtime-local portal focus classification, including lock-busy recovery.
 enum PortalKeyFocus {
     /// A required lock stayed contended — defer the event and retry.
     Busy,
@@ -331,21 +271,11 @@ enum PortalKeyFocus {
 }
 
 /// Owned snapshot of a focused portal control (hud-2v8br), captured under the
-/// scene lock so the runtime can act (refocus / activate) after releasing it.
+/// scene lock so the runtime can recover composer focus after releasing it.
 struct PortalControlSnapshot {
     tile_id: tze_hud_scene::SceneId,
-    node_id: tze_hud_scene::SceneId,
-    interaction_id: String,
     /// The sibling composer node to redirect typing / Escape into.
     composer_node: tze_hud_scene::SceneId,
-    /// Owning agent namespace (for the synthetic activation dispatch).
-    namespace: String,
-    /// Control center in tile-local coordinates.
-    local_x: f32,
-    local_y: f32,
-    /// Control center in display-space coordinates.
-    display_x: f32,
-    display_y: f32,
 }
 
 /// Returns `true` for the Escape key (recovery-to-composer trigger, hud-2v8br).
@@ -520,39 +450,8 @@ impl WinitApp {
         ShellShortcutOutcome::Consumed
     }
 
-    /// Translate a raw key-down event through the `KeyboardProcessor`, log it,
-    /// and broadcast the resulting `KeyboardDispatch` over the `INPUT_EVENTS`
-    /// gRPC channel via `input_event_tx`.
-    ///
-    /// If `current_owner` is `FocusOwner::None` (no focused agent session),
-    /// `KeyboardProcessor::process_key_down` returns `None` and the event is
-    /// silently dropped — there is no recipient to deliver to.
-    ///
-    /// Delivery is best-effort (fire-and-forget): if the channel has no
-    /// receivers (gRPC disabled, agent not subscribed) the broadcast error is
-    /// silently ignored, consistent with the transactional keyboard-event
-    /// contract where dropped delivery is an infrastructure gap, not a
-    /// data-loss policy.
-    ///
-    /// # Composer interception
-    ///
-    /// When a composer region is focused (`accepts_composer_input = true`), the
-    /// event is first offered to the `ComposerDraftManager` via
-    /// `route_key_down_to_composer`.  If the manager consumes the event
-    /// (`consumed = true`), it is NOT forwarded to the agent as a raw
-    /// `KeyDownEvent`. Submitted text routes directly to the native portal.
-    /// Public Stage-1 entry for an OS key-down event.
-    ///
-    /// Applies the early gates that MUST run on the OS-event path — safe-mode
-    /// capture, the FIFO ordering guard, and the active-tab availability check —
-    /// then delegates the actual routing to [`Self::dispatch_key_down_event_inner`].
-    ///
-    /// FIFO ordering invariant: when events are already queued in
-    /// `pending_keyboard_events`, a freshly-arriving Stage-1 event must NOT jump
-    /// ahead of them, so it is appended to the queue and processed later by
-    /// `drain_pending_keyboard_events`.  The drain calls the *inner* directly
-    /// (bypassing this guard) so a queued event is actually consumed instead of
-    /// being rotated to the back forever.
+    /// Route OS key-down input through native shell, portal, composer and
+    /// focused-command handling. Safe mode captures input before local routing.
     pub(super) fn dispatch_key_down_event(&mut self, raw: &RawKeyDownEvent) {
         // ── Priority 1: Safe-mode capture ─────────────────────────────────
         // (See the inner fn / historical comments for the full precedence
@@ -813,14 +712,12 @@ impl WinitApp {
             return;
         }
 
-        // ── Portal control keyboard recovery / activation (hud-2v8br) ──────
+        // ── Portal control keyboard recovery (hud-2v8br) ────────────────────
         //
         // When Tab has parked focus on a non-composer portal control (minimize /
         // restore / submit), a keyboard-only viewer must never be stranded:
         //   - Escape recovers focus to the composer (explicit recovery),
-        //   - Enter / Space activate the control (mirroring a pointer click),
-        //   - any other key is consumed here so it never leaks to the agent as
-        //     raw input; printable text recovers to the composer via the
+        //   - other keys are consumed; printable text recovers via the
         //     following Character event (dispatch_character_event_inner).
         // Gated on `!is_composer_active()` so normal composer editing (where the
         // composer is the focus sink) is untouched — Enter submits, Space types,
@@ -849,10 +746,6 @@ impl WinitApp {
                                 .notification_keydowns
                                 .insert(keyboard_key_identity(&raw.key_code, &raw.key));
                         }
-                        return;
-                    }
-                    if is_activation_key(&raw.key, &raw.key_code) {
-                        self.activate_portal_control(&control);
                         return;
                     }
                     // Consume: printable text recovers via the Character event.
@@ -1044,55 +937,19 @@ impl WinitApp {
             } else {
                 self.state.consumed_command_keydowns.insert(key_identity);
             }
-            return;
-        }
-
-        // Build a namespace-resolver closure: given a tile_id, return its
-        // agent namespace from the scene.  A Cell is used to propagate a
-        // lock-busy signal out of the closure so the caller can defer the
-        // event.
-        let ns_lock_busy = std::cell::Cell::new(false);
-        let namespace_fn = |tile_id: tze_hud_scene::SceneId| -> Option<String> {
-            match self.namespace_for_keyboard_tile(tile_id) {
-                None => {
-                    ns_lock_busy.set(true);
-                    None
-                }
-                Some(ns) => ns,
-            }
-        };
-        if let Some(dispatch) =
-            self.state
-                .keyboard_processor
-                .process_key_down(raw, &focus_owner, namespace_fn)
-        {
-            tracing::debug!(
-                namespace = %str_preview(&dispatch.namespace),
-                tile_id = ?dispatch.tile_id,
-                node_id = ?dispatch.node_id,
-                kind = %keyboard_kind_preview(&dispatch.kind),
-                "keyboard: KeyDown dispatched to agent"
-            );
-            dispatch_keyboard_event(&self.state.input_event_tx, dispatch);
-        } else if ns_lock_busy.get() {
-            // Namespace lock was busy inside the closure; defer the whole event.
-            self.state
-                .pending_keyboard_events
-                .push_back(PendingKeyboardEvent::KeyDown(raw.clone()));
         }
     }
 
     /// Advance keyboard focus by one step for a Tab / Shift+Tab key-down
-    /// and broadcast the resulting focus transition.
+    /// and apply the resulting local focus transition.
     ///
     /// Drives [`tze_hud_input::InputProcessor::navigate_focus`] — the no-pointer
     /// analogue of the pointer click-to-focus path — so the composer (and any
     /// focusable region) is reachable without a pointer.  The composer
     /// activation / hit-region-focus bookkeeping is handled inside
     /// `navigate_focus`; this method mirrors the pointer path's transition
-    /// handling in `lifecycle.rs` (FocusGained/FocusLost broadcast over the
-    /// FOCUS_EVENTS channel, plus the composer blur delivery-context capture and
-    /// local-echo clear).
+    /// handling in `lifecycle.rs`, including composer blur delivery-context
+    /// capture and local-echo clear.
     ///
     /// Returns [`TabFocusOutcome::Busy`] when the shared-state or scene lock
     /// stays contended past [`INTERACTION_LOCK_BUDGET`], so the caller can defer
@@ -1112,7 +969,7 @@ impl WinitApp {
         // about_to_wait round-trip before the focus moves.  navigate_focus needs
         // &mut scene to update hit_region_states focus flags; on a true overrun we
         // fall back to deferring the event via TabFocusOutcome::Busy.
-        let (transition, command_dispatch) = {
+        let transition = {
             let Some(state) = spin_acquire(&self.state.shared_state, INTERACTION_LOCK_BUDGET)
             else {
                 tracing::trace!("tab focus traversal deferred: shared_state lock budget elapsed");
@@ -1133,16 +990,15 @@ impl WinitApp {
                 .tile_id()
                 .and_then(|tile_id| scene.tiles.get(&tile_id))
                 .map(|tile| tile.namespace.clone());
-            let command_dispatch = namespace.and_then(|namespace| {
+            let _ = namespace.and_then(|namespace| {
                 CommandProcessor::new().process(command, &owner, &mut scene, move |_| {
                     Some(namespace.clone())
                 })
             });
-            (transition, command_dispatch)
+            transition
         };
 
-        // Mirror the pointer path's transition handling (lifecycle.rs
-        // process_with_focus broadcast block).  The locks are already released.
+        // Mirror the pointer path's local transition handling after unlocking.
         let mut composer_focus_lost = false;
         if let Some((ev, ns)) = &transition.gained {
             tracing::debug!(
@@ -1165,11 +1021,6 @@ impl WinitApp {
             composer_focus_lost = true;
         }
 
-        dispatch_focus_event(&self.state.input_event_tx, transition);
-        if let Some(dispatch) = command_dispatch {
-            dispatch_command_event(&self.state.input_event_tx, dispatch);
-        }
-
         // Clear the local composer echo overlay if focus left a composer region.
         if composer_focus_lost {
             self.clear_local_composer_echo();
@@ -1188,7 +1039,7 @@ impl WinitApp {
         page_scroll_delta_y: Option<f32>,
         key_identity: &str,
     ) -> CommandDispatchOutcome {
-        let (dispatch, scroll_event) = {
+        let dispatch = {
             let Some(state) = spin_acquire(&self.state.shared_state, INTERACTION_LOCK_BUDGET)
             else {
                 return CommandDispatchOutcome::Busy;
@@ -1206,7 +1057,7 @@ impl WinitApp {
                     Some(namespace.clone())
                 })
             });
-            let scroll_event = dispatch.as_ref().and_then(|dispatch| {
+            let _ = dispatch.as_ref().and_then(|dispatch| {
                 page_scroll_delta_y.and_then(|delta_y| {
                     self.state.input_processor.process_keyboard_scroll(
                         dispatch.event.tile_id,
@@ -1215,11 +1066,10 @@ impl WinitApp {
                     )
                 })
             });
-            (dispatch, scroll_event)
+            dispatch
         };
 
         if let Some(dispatch) = dispatch {
-            let namespace = dispatch.namespace.clone();
             if dispatch.event.action == CommandAction::Activate
                 && let Some(node_id) = dispatch.event.node_id
             {
@@ -1234,19 +1084,8 @@ impl WinitApp {
                 action = ?dispatch.event.action,
                 source = ?dispatch.event.source,
                 local_ack_us = dispatch.local_ack_us,
-                "command input dispatched to focused agent"
+                "command input applied to local focus"
             );
-            dispatch_command_event(&self.state.input_event_tx, dispatch);
-            if let Some(event) = scroll_event {
-                // Enqueue the command first, then its resulting droppable state
-                // notification. InputEventReceiver prioritizes transactional
-                // input when both lanes are ready, preserving this sequence.
-                dispatch_scroll_offset_event_to_namespace(
-                    &self.state.input_event_tx,
-                    namespace,
-                    event,
-                );
-            }
         }
         CommandDispatchOutcome::Done
     }
@@ -1304,39 +1143,19 @@ impl WinitApp {
             PortalFocusTarget::Other => PortalKeyFocus::Other,
             PortalFocusTarget::Control {
                 tile_id,
-                node_id,
-                interaction_id,
                 composer_node,
-            } => {
-                let (Some(tile), Some(node)) =
-                    (scene.tiles.get(&tile_id), scene.nodes.get(&node_id))
-                else {
-                    return PortalKeyFocus::Other;
-                };
-                let tze_hud_scene::types::NodeData::HitRegion(hr) = &node.data else {
-                    return PortalKeyFocus::Other;
-                };
-                let local_x = hr.bounds.x + hr.bounds.width / 2.0;
-                let local_y = hr.bounds.y + hr.bounds.height / 2.0;
-                PortalKeyFocus::Control(PortalControlSnapshot {
-                    tile_id,
-                    node_id,
-                    interaction_id,
-                    composer_node,
-                    namespace: tile.namespace.clone(),
-                    local_x,
-                    local_y,
-                    display_x: tile.bounds.x + local_x,
-                    display_y: tile.bounds.y + local_y,
-                })
-            }
+                ..
+            } => PortalKeyFocus::Control(PortalControlSnapshot {
+                tile_id,
+                composer_node,
+            }),
         }
     }
 
     /// Redirect keyboard focus from a portal control to its sibling composer
-    /// (typing / Escape recovery, hud-2v8br) and broadcast the transition.
+    /// (typing / Escape recovery, hud-2v8br).
     ///
-    /// Mirrors [`Self::navigate_portal_focus`]'s lock + broadcast handling.
+    /// Mirrors [`Self::navigate_portal_focus`]'s local transition handling.
     /// Returns [`TabFocusOutcome::Busy`] on lock contention so the caller defers.
     fn refocus_composer_from_control(
         &mut self,
@@ -1361,10 +1180,10 @@ impl WinitApp {
             )
         };
 
-        // Mirror the pointer / Tab transition broadcast (locks already released).
+        // Mirror pointer / Tab composer cleanup after unlocking.
         let composer_focus_lost = transition.lost.is_some();
         tracing::debug!("portal recovery: focus redirected to composer");
-        dispatch_focus_event(&self.state.input_event_tx, transition);
+
         if composer_focus_lost {
             self.clear_local_composer_echo();
         }
@@ -1386,7 +1205,7 @@ impl WinitApp {
         tab_id: tze_hud_scene::SceneId,
         command: &RawCommandEvent,
     ) -> EscapeClearOutcome {
-        let (transition, command_dispatch) = {
+        {
             let Some(state) = spin_acquire(&self.state.shared_state, INTERACTION_LOCK_BUDGET)
             else {
                 return EscapeClearOutcome::Busy;
@@ -1406,59 +1225,22 @@ impl WinitApp {
                 .tile_id()
                 .and_then(|tile_id| scene.tiles.get(&tile_id))
                 .map(|tile| tile.namespace.clone());
-            let command_dispatch = namespace
+            let _ = namespace
                 .filter(|_| !self.state.input_processor.is_composer_active())
                 .and_then(|namespace| {
                     CommandProcessor::new().process(command, &owner, &mut scene, move |_| {
                         Some(namespace.clone())
                     })
                 });
-            let transition = self.state.input_processor.clear_keyboard_focus(
+            self.state.input_processor.clear_keyboard_focus(
                 &mut self.state.focus_manager,
                 &mut scene,
                 tab_id,
             );
-            (transition, command_dispatch)
         };
         tracing::debug!("portal recovery: Escape cleared the outer focus stop");
-        if let Some(dispatch) = command_dispatch {
-            dispatch_command_event(&self.state.input_event_tx, dispatch);
-        }
-        dispatch_focus_event(&self.state.input_event_tx, transition);
-        EscapeClearOutcome::Cleared
-    }
 
-    /// Activate a Tab-focused portal control by synthesizing a pointer
-    /// down+up to the owning agent (hud-2v8br), so Enter / Space fire the same
-    /// handler a pointer click does. The control's behavior (minimize / restore /
-    /// submit) is agent-owned and keyed off `interaction_id`, so a synthetic
-    /// press+release on the same node is the faithful keyboard analogue.
-    fn activate_portal_control(&mut self, control: &PortalControlSnapshot) {
-        let base = AgentDispatch {
-            namespace: control.namespace.clone(),
-            tile_id: control.tile_id,
-            node_id: control.node_id,
-            interaction_id: control.interaction_id.clone(),
-            local_x: control.local_x,
-            local_y: control.local_y,
-            display_x: control.display_x,
-            display_y: control.display_y,
-            device_id: KEYBOARD_ACTIVATION_DEVICE_ID,
-            kind: AgentDispatchKind::PointerDown,
-            capture_released_reason: None,
-        };
-        tracing::debug!(
-            interaction_id = %str_preview(&control.interaction_id),
-            "portal control activated via keyboard (synthetic pointer down+up)"
-        );
-        dispatch_pointer_event(&self.state.input_event_tx, base.clone());
-        dispatch_pointer_event(
-            &self.state.input_event_tx,
-            AgentDispatch {
-                kind: AgentDispatchKind::PointerUp,
-                ..base
-            },
-        );
+        EscapeClearOutcome::Cleared
     }
 
     /// OUTPUT reading keys; `Ok(true)` consumed, `Err` when the scene is busy.
@@ -1754,14 +1536,8 @@ impl WinitApp {
         Ok(consumed)
     }
 
-    /// Translate a raw key-up event through the `KeyboardProcessor`, log it,
-    /// and broadcast it over the `INPUT_EVENTS` gRPC channel.
-    ///
-    /// Events are dropped silently when `current_owner` is `FocusOwner::None`.
-    ///
-    /// Safe-mode capture applies here as well: when safe mode is active, key-up
-    /// events are dropped so agents never see a key-release for a key-down that
-    /// was already captured by the chrome layer.
+    /// Route key releases through native shell, notification and command state.
+    /// Safe mode captures releases before local routing.
     pub(super) fn dispatch_key_up_event(&mut self, raw: &RawKeyUpEvent) {
         // ── Safe-mode capture ──────────────────────────────────────────────
         // Mirror the key-down safe-mode guard: if safe mode is active, chrome
@@ -1959,61 +1735,11 @@ impl WinitApp {
                 ?axis,
                 "portal resize: Ctrl+Shift+Arrow directional KeyUp fallback consumed (resize applied)"
             );
-            return;
-        }
-
-        let focus_owner = self.state.focus_manager.current_owner(tab_id).clone();
-
-        let ns_lock_busy = std::cell::Cell::new(false);
-        let namespace_fn = |tile_id: tze_hud_scene::SceneId| -> Option<String> {
-            match self.namespace_for_keyboard_tile(tile_id) {
-                None => {
-                    ns_lock_busy.set(true);
-                    None
-                }
-                Some(ns) => ns,
-            }
-        };
-        if let Some(dispatch) =
-            self.state
-                .keyboard_processor
-                .process_key_up(raw, &focus_owner, namespace_fn)
-        {
-            tracing::debug!(
-                namespace = %str_preview(&dispatch.namespace),
-                tile_id = ?dispatch.tile_id,
-                node_id = ?dispatch.node_id,
-                kind = %keyboard_kind_preview(&dispatch.kind),
-                "keyboard: KeyUp dispatched to agent"
-            );
-            dispatch_keyboard_event(&self.state.input_event_tx, dispatch);
-        } else if ns_lock_busy.get() {
-            self.state
-                .pending_keyboard_events
-                .push_back(PendingKeyboardEvent::KeyUp(raw.clone()));
         }
     }
 
-    /// Translate a raw post-IME character event through the `KeyboardProcessor`,
-    /// log it, and broadcast it over the `INPUT_EVENTS` gRPC channel.
-    ///
-    /// Called both from `WindowEvent::Ime(Ime::Commit)` (IME path) and from
-    /// text-carrying key presses in `WindowEvent::KeyboardInput` (direct input path), as
-    /// well as the paste-shortcut path (Ctrl+V clipboard text).
-    ///
-    /// Events are dropped silently when `current_owner` is `FocusOwner::None`.
-    ///
-    /// # Safe-mode capture
-    ///
-    /// When safe mode is active, character events (including paste and IME commits)
-    /// are dropped so agents never receive character input while chrome owns input.
-    ///
-    /// # Composer interception
-    ///
-    /// When a composer region is focused, the character is routed into the
-    /// `ComposerDraftManager` draft buffer instead of being forwarded to the
-    /// agent as a raw `CharacterEvent`.  Only `EditOutcome::Unchanged` (no
-    /// active composer) allows the normal dispatch path.
+    /// Route post-IME text, direct character input and clipboard paste into the
+    /// native composer. Safe mode captures text before local routing.
     pub(super) fn dispatch_character_event(&mut self, raw: &RawCharacterEvent) {
         // ── Safe-mode capture ──────────────────────────────────────────────
         // All character input (Key::Character, paste shortcut, IME commits) is
@@ -2132,14 +1858,8 @@ impl WinitApp {
 
         // ── Composer draft intercept ──────────────────────────────
         //
-        // 4.4: NO character input reaches the agent while a composer
-        // region is focused — regardless of what route_character_to_composer
-        // returns.  In particular, when the clipboard text is ENTIRELY control
-        // characters, route_character_to_composer sanitises it to an empty
-        // string and paste("") returns EditOutcome::Unchanged (nothing was
-        // mutated in the draft).  Without an unconditional early-return here,
-        // the Unchanged case would fall through to the agent dispatch path
-        // below, leaking input to the agent while the composer is focused.
+        // Native composer editing sanitises incoming text. An all-control paste
+        // can produce EditOutcome::Unchanged and needs no echo/history update.
         if self.state.input_processor.is_composer_active() {
             let history_tile_id = match self.composer_target_for_tab(tab_id) {
                 ComposerTargetLookup::Ready(tile_id) => Some(tile_id),
@@ -2181,47 +1901,11 @@ impl WinitApp {
                 // clipboard contained only control characters that sanitised to
                 // empty, or the paste arrived while the composer was at
                 // capacity and already at its limit).  No echo push needed.
-                // Unconditional early-return below ensures the event still
-                // never reaches the agent path.
                 tracing::debug!(
                     character = %char_log_preview,
-                    "composer: Character absorbed (Unchanged — all-control or no-op paste); not forwarded to agent (§4.4)"
+                    "composer: Character absorbed (Unchanged — all-control or no-op paste)"
                 );
             }
-            // hard gate: the composer is active, so we MUST NOT fall
-            // through to the agent dispatch path below under any outcome.
-            return;
-        }
-
-        let focus_owner = self.state.focus_manager.current_owner(tab_id).clone();
-
-        let ns_lock_busy = std::cell::Cell::new(false);
-        let namespace_fn = |tile_id: tze_hud_scene::SceneId| -> Option<String> {
-            match self.namespace_for_keyboard_tile(tile_id) {
-                None => {
-                    ns_lock_busy.set(true);
-                    None
-                }
-                Some(ns) => ns,
-            }
-        };
-        if let Some(dispatch) =
-            self.state
-                .keyboard_processor
-                .process_character(raw, &focus_owner, namespace_fn)
-        {
-            tracing::debug!(
-                namespace = %str_preview(&dispatch.namespace),
-                tile_id = ?dispatch.tile_id,
-                node_id = ?dispatch.node_id,
-                kind = %keyboard_kind_preview(&dispatch.kind),
-                "keyboard: Character dispatched to agent"
-            );
-            dispatch_keyboard_event(&self.state.input_event_tx, dispatch);
-        } else if ns_lock_busy.get() {
-            self.state
-                .pending_keyboard_events
-                .push_back(PendingKeyboardEvent::Character(raw.clone()));
         }
     }
 
@@ -2844,8 +2528,7 @@ mod tests {
             "composer must be active after focusing the portal composer"
         );
 
-        let (mut app, mut input_event_rx) =
-            make_windowed_keyboard_test_app(scene, focus_manager, processor);
+        let mut app = make_windowed_keyboard_test_app(scene, focus_manager, processor);
 
         let bounds = |app: &WinitApp| {
             let shared = app
@@ -2941,10 +2624,6 @@ mod tests {
             after_minus.height < after_plus.height,
             "Ctrl+- must shrink the focused portal vertically as well"
         );
-        assert!(
-            input_event_rx.try_recv().is_err(),
-            "resize hotkey must be consumed locally, not forwarded as agent keyboard input"
-        );
     }
 
     /// focus acquired via keyboard Tab traversal (no pointer) must
@@ -3001,8 +2680,7 @@ mod tests {
         let mut focus_manager = FocusManager::new();
         focus_manager.add_tab(tab_id);
 
-        let (mut app, _input_event_rx) =
-            make_windowed_keyboard_test_app(scene, focus_manager, processor);
+        let mut app = make_windowed_keyboard_test_app(scene, focus_manager, processor);
 
         let bounds = |app: &WinitApp| {
             let shared = app
@@ -3130,8 +2808,7 @@ mod tests {
             "pointer down must focus the composer node"
         );
 
-        let (mut app, mut input_event_rx) =
-            make_windowed_keyboard_test_app(scene, focus_manager, processor);
+        let mut app = make_windowed_keyboard_test_app(scene, focus_manager, processor);
 
         let bounds = |app: &WinitApp| {
             let shared = app
@@ -3186,16 +2863,12 @@ mod tests {
             after_minus.height < after_equal.height,
             "Ctrl+- release fallback must shrink the focused portal vertically as well"
         );
-        assert!(
-            input_event_rx.try_recv().is_err(),
-            "release-fallback resize hotkey must be consumed locally, not forwarded as agent keyboard input"
-        );
     }
 
     #[test]
     fn ctrl_resize_hotkey_ignores_unfocused_portal_on_windowed_dispatch_path() {
         use tze_hud_input::{FocusManager, FocusRequest, InputProcessor, KeyboardModifiers};
-        use tze_hud_protocol::proto::input_envelope::Event as InputEvent;
+
         use tze_hud_scene::types::TileScrollConfig;
         use tze_hud_scene::{Rect, SceneGraph};
 
@@ -3242,8 +2915,7 @@ mod tests {
             "test setup must focus the non-portal tile"
         );
 
-        let (mut app, mut input_event_rx) =
-            make_windowed_keyboard_test_app(scene, focus_manager, InputProcessor::new());
+        let mut app = make_windowed_keyboard_test_app(scene, focus_manager, InputProcessor::new());
 
         let portal_bounds = |app: &WinitApp| {
             let shared = app
@@ -3282,89 +2954,6 @@ mod tests {
             app.state.portal_resize_states.is_empty(),
             "unfocused portal hotkey must not create resize state"
         );
-        let (namespace, batch) = input_event_rx
-            .try_recv()
-            .expect("non-consumed hotkey should continue to normal keyboard routing");
-        assert_eq!(namespace, "portal-agent");
-        match batch
-            .events
-            .first()
-            .and_then(|envelope| envelope.event.as_ref())
-        {
-            Some(InputEvent::KeyDown(ev)) => {
-                assert_eq!(ev.key, "=");
-                assert!(ev.ctrl, "forwarded key event must preserve Ctrl");
-            }
-            other => panic!("expected forwarded KeyDown event, got {other:?}"),
-        }
-    }
-
-    /// Enter on a Tab-focused portal control activates it by broadcasting a
-    /// synthetic PointerDown (+PointerUp) carrying the control's interaction_id,
-    /// so the owning agent's click handler fires — the control is not a dead stop.
-    #[test]
-    fn enter_on_focused_portal_control_activates_via_synthetic_pointer() {
-        use tze_hud_input::KeyboardModifiers;
-        use tze_hud_protocol::proto::input_envelope::Event as InputEvent;
-
-        let (mut scene, tab_id, _tile_id, composer_id, control_id) = portal_scene_with_control();
-        let mut processor = InputProcessor::new();
-        let mut focus_manager = FocusManager::new();
-        focus_manager.add_tab(tab_id);
-        // Tab onto the composer, then Tab again onto the control.
-        processor.navigate_focus(&mut focus_manager, &mut scene, tab_id, false);
-        processor.navigate_focus(&mut focus_manager, &mut scene, tab_id, false);
-        assert_eq!(
-            focus_manager.current_owner(tab_id).node_id(),
-            Some(control_id),
-            "test setup: focus must rest on the non-composer control"
-        );
-        assert!(
-            !processor.is_composer_active(),
-            "composer must be inactive while the control holds focus"
-        );
-
-        let (mut app, mut input_event_rx) =
-            make_windowed_keyboard_test_app(scene, focus_manager, processor);
-
-        app.dispatch_key_down_event_inner(
-            &RawKeyDownEvent {
-                key_code: "Enter".to_string(),
-                key: "Enter".to_string(),
-                modifiers: KeyboardModifiers::NONE,
-                repeat: false,
-                timestamp_mono_us: tze_hud_scene::MonoUs(1),
-            },
-            Some(tab_id),
-        );
-
-        // First broadcast must be a synthetic PointerDown on the control.
-        let (namespace, batch) = input_event_rx
-            .try_recv()
-            .expect("Enter on a focused control must broadcast a synthetic pointer event");
-        assert_eq!(namespace, "portal-agent");
-        match batch.events.first().and_then(|e| e.event.as_ref()) {
-            Some(InputEvent::PointerDown(ev)) => {
-                assert_eq!(
-                    ev.interaction_id, "portal-minimize",
-                    "activation must target the focused control's interaction_id"
-                );
-            }
-            other => panic!("expected synthetic PointerDown, got {other:?}"),
-        }
-        // A matching PointerUp completes the synthetic click.
-        let (_ns, up_batch) = input_event_rx
-            .try_recv()
-            .expect("activation must also broadcast a PointerUp");
-        assert!(
-            matches!(
-                up_batch.events.first().and_then(|e| e.event.as_ref()),
-                Some(InputEvent::PointerUp(_))
-            ),
-            "second synthetic event must be a PointerUp"
-        );
-        // Focus stays on the control (activation is not a focus move).
-        let _ = composer_id;
     }
 
     /// Typing a printable character while a portal control holds focus recovers
@@ -3386,8 +2975,7 @@ mod tests {
             "test setup: focus must rest on the control"
         );
 
-        let (mut app, _input_event_rx) =
-            make_windowed_keyboard_test_app(scene, focus_manager, processor);
+        let mut app = make_windowed_keyboard_test_app(scene, focus_manager, processor);
 
         app.dispatch_character_event_inner(
             &RawCharacterEvent {
@@ -3432,8 +3020,7 @@ mod tests {
             Some(control_id)
         );
 
-        let (mut app, _input_event_rx) =
-            make_windowed_keyboard_test_app(scene, focus_manager, processor);
+        let mut app = make_windowed_keyboard_test_app(scene, focus_manager, processor);
 
         app.dispatch_key_down_event_inner(
             &RawKeyDownEvent {
@@ -3459,11 +3046,11 @@ mod tests {
 
     /// Escape on a composer-less focus stop (a focusable node whose
     /// tile has no composer) clears focus to None — the keyboard user is never
-    /// stranded — and broadcasts a FocusLost for the released node.
+    /// stranded after the focused node is released.
     #[test]
     fn escape_on_composerless_stop_clears_focus_to_none() {
         use tze_hud_input::{FocusManager, InputProcessor, KeyboardModifiers};
-        use tze_hud_protocol::proto::input_envelope::Event as InputEvent;
+
         use tze_hud_scene::types::HitRegionNode;
         use tze_hud_scene::{Node, NodeData, Rect, SceneGraph, SceneId};
 
@@ -3506,7 +3093,7 @@ mod tests {
         processor.navigate_focus(&mut focus_manager, &mut scene, tab_id, false);
         assert_eq!(focus_manager.current_owner(tab_id).node_id(), Some(node_id));
 
-        let (mut app, mut rx) = make_windowed_keyboard_test_app(scene, focus_manager, processor);
+        let mut app = make_windowed_keyboard_test_app(scene, focus_manager, processor);
 
         app.dispatch_key_down_event_inner(
             &RawKeyDownEvent {
@@ -3523,19 +3110,6 @@ mod tests {
             *app.state.focus_manager.current_owner(tab_id),
             tze_hud_input::FocusOwner::None,
             "Escape on a composer-less stop must clear focus to None"
-        );
-        // A FocusLost event was broadcast for the released node. CANCEL is
-        // intentionally delivered first while the old owner is still the
-        // command target, so inspect the whole resulting event sequence.
-        let mut events = Vec::new();
-        while let Ok((_namespace, batch)) = rx.try_recv() {
-            events.extend(batch.events.into_iter().filter_map(|event| event.event));
-        }
-        assert!(
-            events
-                .iter()
-                .any(|event| matches!(event, InputEvent::FocusLost(_))),
-            "the broadcasts must include FocusLost for the released control; got {events:?}"
         );
     }
 
@@ -3561,8 +3135,7 @@ mod tests {
             "test setup: landing focus on the composer must activate the draft"
         );
 
-        let (mut app, _input_event_rx) =
-            make_windowed_keyboard_test_app(scene, focus_manager, processor);
+        let mut app = make_windowed_keyboard_test_app(scene, focus_manager, processor);
 
         // Native history reports its content growth through the input processor.
         {
@@ -3653,7 +3226,7 @@ mod tests {
             "test setup: composer focused"
         );
 
-        let (mut app, _rx) = make_windowed_keyboard_test_app(scene, focus_manager, processor);
+        let mut app = make_windowed_keyboard_test_app(scene, focus_manager, processor);
         app.state.portal_projection_driver = driver;
         let type_text = |app: &mut WinitApp, text: &str, at: u64| {
             app.dispatch_character_event_inner(
@@ -3806,7 +3379,7 @@ mod tests {
             "test setup: focusing the composer must activate the draft"
         );
 
-        let (mut app, _rx) = make_windowed_keyboard_test_app(scene, focus_manager, processor);
+        let mut app = make_windowed_keyboard_test_app(scene, focus_manager, processor);
         app.state.portal_projection_driver = driver;
 
         // Type a character (non-empty draft required for a real submission). This
@@ -4436,8 +4009,7 @@ mod tests {
         use tze_hud_input::{InputProcessor, KeyboardModifiers};
 
         let (scene, tab_id, tile_id, focus_manager) = portal_scene_with_focus();
-        let (mut app, _input_event_rx) =
-            make_windowed_keyboard_test_app(scene, focus_manager, InputProcessor::new());
+        let mut app = make_windowed_keyboard_test_app(scene, focus_manager, InputProcessor::new());
 
         let bounds = |app: &WinitApp| {
             let shared = app
@@ -4541,8 +4113,7 @@ mod tests {
             "pointer down must focus the composer node"
         );
 
-        let (mut app, mut input_event_rx) =
-            make_windowed_keyboard_test_app(scene, focus_manager, processor);
+        let mut app = make_windowed_keyboard_test_app(scene, focus_manager, processor);
         app.state.safe_mode_atomic.store(true, Ordering::Release);
 
         let bounds = |app: &WinitApp| {
@@ -4578,10 +4149,6 @@ mod tests {
         assert!(
             app.state.portal_resize_states.is_empty(),
             "safe-mode-captured resize hotkey must not create resize state"
-        );
-        assert!(
-            input_event_rx.try_recv().is_err(),
-            "safe-mode-captured resize hotkey must not be forwarded to the agent"
         );
     }
 
@@ -4677,7 +4244,7 @@ mod tests {
         };
 
         // Composer INACTIVE (non-composer surface focused): the chord resizes.
-        let (tab_id, tile_id, (mut app, _rx)) = build(false);
+        let (tab_id, tile_id, mut app) = build(false);
         assert!(
             !app.state.input_processor.is_composer_active(),
             "precondition: composer must be inactive for the non-composer surface"
@@ -4690,7 +4257,7 @@ mod tests {
         );
 
         // Composer ACTIVE: the chord is NOT taken for resize (word-select wins).
-        let (tab_id2, tile_id2, (mut app2, _rx2)) = build(true);
+        let (tab_id2, tile_id2, mut app2) = build(true);
         assert!(
             app2.state.input_processor.is_composer_active(),
             "precondition: composer must be active for the composer surface"

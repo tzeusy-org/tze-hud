@@ -73,7 +73,7 @@ async fn fresh_init_uses_current_credentials_and_permissions() {
             let credential = Some(crate::auth::psk_credential(key.to_string()));
             let payload = ClientPayload::SessionInit(SessionInit {
                 agent_id: "auth-check-agent".to_string(),
-                initial_subscriptions: vec!["SCENE_TOPOLOGY".to_string()],
+
                 auth_credential: credential,
             });
             tx.send(ClientMessage {
@@ -101,12 +101,6 @@ async fn fresh_init_uses_current_credentials_and_permissions() {
             match first.payload {
                 Some(ServerPayload::SessionEstablished(established)) => {
                     assert_eq!(established.namespace, "auth-check-agent");
-                    assert!(
-                        !established
-                            .active_subscriptions
-                            .iter()
-                            .any(|s| s == "SCENE_TOPOLOGY")
-                    );
                 }
                 other => panic!("{change}: handshake failed: {other:?}"),
             }

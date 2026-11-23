@@ -103,14 +103,13 @@ async fn handshake(
     let (tx, rx) = tokio::sync::mpsc::channel::<ClientMessage>(64);
     let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
 
-    // Send SessionInit with canonical capability names (create_tiles, access_input_events)
-    // and read_scene_topology so SCENE_TOPOLOGY subscription is granted.
+    // Authenticate a fresh resident session.
     tx.send(ClientMessage {
         sequence: 1,
         timestamp_wall_us: now_wall_us(),
         payload: Some(ClientPayload::SessionInit(SessionInit {
             agent_id: agent_id.to_string(),
-            initial_subscriptions: vec!["SCENE_TOPOLOGY".to_string()],
+
             auth_credential: Some(crate::auth::psk_credential(psk.to_string())),
         })),
     })
@@ -302,7 +301,7 @@ async fn handshake_with_capabilities(
         timestamp_wall_us: now_wall_us(),
         payload: Some(ClientPayload::SessionInit(SessionInit {
             agent_id: agent_id.to_string(),
-            initial_subscriptions: vec![],
+
             auth_credential: Some(crate::auth::psk_credential(psk.to_string())),
         })),
     })

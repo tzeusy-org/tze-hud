@@ -207,7 +207,6 @@ async fn production_config_rejects_unpaired_psk() {
         payload: Some(Request::SessionInit(SessionInit {
             agent_id: "paired-agent".to_string(),
             auth_credential: Some(tze_hud_protocol::auth::psk_credential("unpaired-key")),
-            ..Default::default()
         })),
     })
     .await

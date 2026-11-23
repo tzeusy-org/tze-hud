@@ -6,15 +6,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut config = prost_build::Config::new();
     config.protoc_executable(protoc);
 
-    // types.proto (shared types), events.proto (input events), and session.proto
+    // types.proto (shared types) and session.proto
     // (HudSession service, package tze_hud.protocol.v1.session).
     tonic_build::configure().compile_protos_with_config(
         config,
-        &[
-            "proto/types.proto",
-            "proto/events.proto",
-            "proto/session.proto",
-        ],
+        &["proto/types.proto", "proto/session.proto"],
         &["proto"],
     )?;
     Ok(())
