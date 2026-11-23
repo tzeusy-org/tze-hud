@@ -2174,3 +2174,117 @@ async fn test_long_session_caption_ellipsizes_and_moves_the_card_by_one_line() {
         "a banner draws no caption"
     );
 }
+
+#[tokio::test]
+async fn notification_reply_draws_inline_with_a_clipped_draft_and_token_colors() {
+    use tze_hud_scene::graph::{NotificationActivation, overlay::NotificationReplyView};
+    use tze_hud_scene::{NotificationAction, Rect, ZoneInteractionKind, ZoneRegistry};
+
+    const WIDTH: u32 = 1024;
+    const HEIGHT: u32 = 720;
+    const ZONE: &str = "notification-area";
+    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(WIDTH, HEIGHT).await);
+    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+    compositor.set_token_map(HashMap::from([
+        ("motion.enter.ms".into(), "0".into()),
+        ("portal.composer.background".into(), "#00FF00".into()),
+        ("portal.composer.caret_color".into(), "#FF00FF".into()),
+        ("portal.composer.caret_width_px".into(), "4".into()),
+        ("portal.composer.at_capacity_color".into(), "#FFA500".into()),
+    ]));
+    let clock = tze_hud_scene::TestClock::new(1_000);
+    let mut scene =
+        SceneGraph::new_with_clock(WIDTH as f32, HEIGHT as f32, Arc::new(clock.clone()));
+    let mut zone = ZoneRegistry::with_defaults().zones.remove(ZONE).unwrap();
+    zone.geometry_policy = GeometryPolicy::Relative {
+        x_pct: 0.1,
+        y_pct: 0.1,
+        width_pct: 0.35,
+        height_pct: 0.7,
+    };
+    scene.register_zone(zone);
+    for (title, actions) in [
+        ("Build passed", Vec::new()),
+        (
+            "Where to deploy?",
+            vec![NotificationAction {
+                label: "Other…".into(),
+                reply: Some("destination".into()),
+                ..Default::default()
+            }],
+        ),
+    ] {
+        clock.advance(1);
+        scene
+            .publish_to_zone(
+                ZONE,
+                ZoneContent::Notification(NotificationPayload {
+                    title: title.into(),
+                    actions,
+                    ..Default::default()
+                }),
+                "test",
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+    }
+    compositor.populate_zone_hit_regions(&mut scene, WIDTH as f32, HEIGHT as f32);
+    let initial = scene.overlay.notification_geometry.clone();
+    let action = scene
+        .overlay
+        .zone_hit_regions
+        .iter()
+        .find(|hit| matches!(hit.kind, ZoneInteractionKind::Action { index: 0 }))
+        .unwrap()
+        .clone();
+    assert!(matches!(
+        scene.activate_notification(&action, 0),
+        Some(NotificationActivation::Reply(_))
+    ));
+    assert_eq!(initial[0].publication_id, action.publication_id);
+    let draft = "W".repeat(tze_hud_scene::NOTIFICATION_REPLY_MAX_BYTES);
+    assert!(
+        scene.set_notification_reply_view(Some(NotificationReplyView {
+            publication_id: action.publication_id,
+            action_index: 0,
+            cursor_byte: draft.len(),
+            selection_anchor: draft.len(),
+            text: draft,
+            at_capacity: true,
+        }))
+    );
+    compositor.prime_markdown_cache(&scene);
+    compositor.prime_truncation_cache(&scene);
+    compositor.render_frame_headless(&mut scene, &surface);
+    let cards = &scene.overlay.notification_geometry;
+    let field = cards[0].reply.unwrap();
+    let caret = cards[0].reply_caret.unwrap();
+    let close = |actual: f32, expected: f32| {
+        assert!((actual - expected).abs() < 0.01, "{actual} vs {expected}")
+    };
+    close(cards[0].actions[0].y, action.bounds.y);
+    assert!(field.y > action.bounds.y + action.bounds.height);
+    let added = cards[0].bounds.height - initial[0].bounds.height;
+    assert!(added > field.height);
+    close(cards[1].bounds.y - initial[1].bounds.y, added);
+    assert!(caret.x > field.x + 0.8 * field.width);
+    assert!(caret.x + caret.width <= field.x + field.width);
+
+    let pixels = surface.read_pixels(&compositor.device);
+    let contains = |rect: Rect, color: fn(&[u8]) -> bool| {
+        let x_range = rect.x.ceil() as usize..(rect.x + rect.width).floor() as usize;
+        (rect.y.ceil() as usize..(rect.y + rect.height).floor() as usize).any(|y| {
+            x_range.clone().any(|x| {
+                let offset = (y * WIDTH as usize + x) * 4;
+                color(&pixels[offset..offset + 3])
+            })
+        })
+    };
+    assert!(contains(field, |rgb| rgb == [0, 255, 0]));
+    assert!(contains(caret, |rgb| rgb == [255, 0, 255]));
+    assert!(contains(field, |rgb| rgb[0] > 200
+        && (100..210).contains(&rgb[1])
+        && rgb[2] < 10));
+}

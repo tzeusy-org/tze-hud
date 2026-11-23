@@ -203,6 +203,27 @@ mod tests {
     }
 
     #[test]
+    fn dismissal_of_an_open_field_returns_the_existing_dismiss_receipt() {
+        let (mut scene, clock, mut region) = fixture(TEXT);
+        clock.set_us(EXPIRY_US);
+        region.kind = ZoneInteractionKind::Dismiss;
+        scene.overlay.zone_hit_regions.push(region.clone());
+        assert!(matches!(
+            scene.activate_notification(&region, 0),
+            Some(crate::graph::NotificationActivation::Callback(_))
+        ));
+        assert!(scene.overlay.notification_reply.is_none());
+        assert!(scene.zone_registry.active_for_zone(ZONE).is_empty());
+        assert_eq!(
+            scene
+                .notification_wait_answer(region.publication_id, PUBLISHER)
+                .unwrap()
+                .kind,
+            PendingActionKind::Dismiss
+        );
+    }
+
+    #[test]
     fn exact_card_removal_drops_held_field_and_completes_existing_wait() {
         for reason in [
             NotificationGone::Replaced,

@@ -5376,6 +5376,69 @@ mod tests {
                 .text,
             "use the staging DB"
         );
+        // The pending IME candidate owns Enter and does not alter the draft.
+        harness
+            .app
+            .set_text_input_preedit("かん".into(), Some((3, 3)));
+        harness.press_named_key("Enter");
+        harness.drain();
+        assert!(take_action_ids(&harness).is_empty());
+        assert_eq!(
+            harness
+                .scene()
+                .overlay
+                .notification_reply
+                .as_ref()
+                .unwrap()
+                .text,
+            "use the staging DB"
+        );
+        harness.app.set_text_input_preedit(String::new(), None);
+        harness
+            .app
+            .dispatch_character_event(&tze_hud_input::keyboard::RawCharacterEvent {
+                character: "漢".into(),
+                timestamp_mono_us: tze_hud_scene::MonoUs(0),
+            });
+        harness.drain();
+        assert!(harness.tick());
+        let card = harness.scene().overlay.notification_geometry[0].clone();
+        let caret = card.reply_caret.unwrap();
+        let window_origin = (40.0, 20.0);
+        let local = super::notification_reply::reply_ime_area(caret, window_origin);
+        assert_eq!(
+            local,
+            tze_hud_scene::Rect::new(caret.x - 40.0, caret.y - 20.0, caret.width, caret.height)
+        );
+        assert!(card.reply.unwrap().contains_point(caret.x, caret.y));
+
+        // Paused input can neither edit nor submit. Resuming preserves the draft.
+        harness
+            .app
+            .state
+            .safe_mode_atomic
+            .store(true, std::sync::atomic::Ordering::Release);
+        harness.type_text("ignored");
+        harness.press_named_key("Backspace");
+        harness.press_named_key("Enter");
+        harness.drain();
+        assert!(take_action_ids(&harness).is_empty());
+        assert_eq!(
+            harness
+                .scene()
+                .overlay
+                .notification_reply
+                .as_ref()
+                .unwrap()
+                .text,
+            "use the staging DB漢"
+        );
+        harness
+            .app
+            .state
+            .safe_mode_atomic
+            .store(false, std::sync::atomic::Ordering::Release);
+        harness.type_text("!");
         harness.press_named_key("Enter");
         harness.drain();
         let mut scene = harness.scene();
@@ -5386,7 +5449,7 @@ mod tests {
             actions[0].kind,
             tze_hud_scene::graph::PendingActionKind::Reply {
                 callback_id: "database".into(),
-                text: "use the staging DB".into(),
+                text: "use the staging DB漢!".into(),
             }
         );
     }

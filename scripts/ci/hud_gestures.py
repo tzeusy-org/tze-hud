@@ -1207,12 +1207,14 @@ def open_card(run: Run, key: str, *, actions: list[dict] | None = None, park_poi
     return notification_entry(status, key)
 
 
-def take_card_answer(run: Run, key: str, action: str, *, dismiss: bool = False) -> None:
-    """One retained callback/dismiss, its local exit, and no duplicate item."""
+def take_card_answer(run: Run, key: str, action: str, *, dismiss: bool = False,
+                     reply_text: str | None = None) -> None:
+    """One retained answer, its local exit, and no duplicate item."""
     items = run.take(1)
     if len(items) != 1 or items[0].get("action") != action or items[0].get("key") != key \
             or items[0].get("s") != "zone:notification-area" \
-            or (dismiss and items[0].get("kind") != "dismiss"):
+            or (dismiss and items[0].get("kind") != "dismiss") \
+            or (reply_text is not None and items[0].get("text") != reply_text):
         raise ScenarioFailed(f"card {key} delivers one {action}", {"items": items, "status": run.status()})
     run.expect(f"card {key} exited", lambda s: notification_entry(s, key) is None)
     extra = run.inputs()
@@ -1517,6 +1519,22 @@ def scenario_card_copy(run: Run) -> None:
     run.snapshot("card-copy.feedback")
     if items := run.inputs(wait_ms=250):
         raise ScenarioFailed("copy queues no agent input", {"items": items})
+
+
+def scenario_card_reply(run: Run) -> None:
+    """R11.2 S1: the on-card reply field sends the typed line once."""
+    key, action, text = "gesture-card-reply", "use-database", "use the staging DB"
+    open_card(run, key, actions=[{"label": "Other…", "reply": action}])
+    run.click(f"zone:notification-area/{key}/0")
+    run.expect("inline reply field is drawn", lambda st: (
+        (card := notification_entry(st, key)) and card.get("reply_field")
+    ))
+    run.type(text)
+    if items := run.inputs():
+        raise ScenarioFailed("typing does not publish draft text", {"items": items})
+    run.snapshot("card-reply.draft")
+    run.key("Return")
+    take_card_answer(run, key, action, reply_text=text)
 
 
 def scenario_card_reveal(run: Run) -> None:
@@ -3105,6 +3123,7 @@ SCENARIOS: dict[str, Callable[[Run], None]] = {
     "held-press": scenario_held_press,
     "card-link": scenario_card_link,
     "card-copy": scenario_card_copy,
+    "card-reply": scenario_card_reply,
     "card-reveal": scenario_card_reveal,
     "stack-trim": scenario_stack_trim,
     "portal-reading": scenario_portal_reading,
