@@ -30,14 +30,16 @@ ARTIFACT_SHA256 = "1e7a299903ab316a453391619910d43b9a13da3048dbbbc61c55d53c66844
 CARD_KEY = "gesture-card-link"
 TARGET = f"zone:notification-area/{CARD_KEY}/0"
 COVER_RADIUS = 12
+COVER_SETTLE_S = 0.8
+COVER_SAMPLE_S = 0.025
 WS_EX_TOOLWINDOW = 0x80
 WS_EX_LAYERED = 0x80000
 WS_POPUP = 0x80000000
 WS_CHILD = 0x40000000
+WS_VISIBLE = 0x10000000
 GWL_STYLE = -16
 GW_HWNDPREV = 3
 GW_OWNER = 4
-SWP_SHOWWINDOW = 0x40
 PM_REMOVE = 1
 
 
@@ -56,8 +58,12 @@ def source_identity() -> dict:
     def git(*args: str) -> bytes:
         return subprocess.check_output(["git", *args], cwd=REPO, timeout=15)
 
-    checkout, parent, tree = git("rev-parse", "HEAD", "HEAD^", f"{PR_SOURCE}^{{tree}}").decode().split()
-    require(parent == PR_SOURCE and tree == PR_TREE, "witness is not a direct child of the exact PR source")
+    checkout, tree = git("rev-parse", "HEAD", f"{PR_SOURCE}^{{tree}}").decode().split()
+    git("merge-base", "--is-ancestor", PR_SOURCE, "HEAD")
+    require(tree == PR_TREE, "witness is not based on the exact PR tree")
+    changed = set(git("diff", "--name-only", PR_SOURCE, "HEAD").decode().splitlines())
+    require(changed == {".github/workflows/windows.yml", "scripts/ci/card_link_raise_probe.py"},
+            "witness branch contains changes beyond the detached probe")
     source_files = ("scripts/ci/hud_gestures.py", "scripts/ci/hud_sendinput.py",
                     "scripts/ci/windows_smoke.py", "app/tze_hud_app/config/production.toml")
     hashes = {}
@@ -93,7 +99,7 @@ def original_executable(archive: Path, metadata_file: Path, directory: Path, rep
 
 
 def child_window() -> None:
-    """Own one hidden window. Reveal it once on command and hold it until EOF."""
+    """Wait without a window until the rendered target is known."""
     import hud_sendinput as win
 
     user32 = win.user32
@@ -109,25 +115,26 @@ def child_window() -> None:
         getattr(user32, symbol).restype, getattr(user32, symbol).argtypes = result, args
     win.kernel32.GetModuleHandleW.argtypes = [wintypes.LPCWSTR]
     win.kernel32.GetModuleHandleW.restype = wintypes.HMODULE
+    print(json.dumps({"phase": "ready", "pid": os.getpid()}), flush=True)
+    command = sys.stdin.readline()
+    if not command:
+        return
+    x, y = json.loads(command)
+    width, height = win.screen_size()
+    radius = COVER_RADIUS
+    require(radius <= x < width - radius and radius <= y < height - radius,
+            "fixture point is too close to a display edge")
     # The predefined button class paints opaque content and takes part in hit testing.
+    # Create it at its final position, without asking a background process to re-raise it.
+    foreground_before = win.foreground_identity()
     hwnd = user32.CreateWindowExW(win.WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW, "Button", "",
-                                 WS_POPUP, 0, 0, 1, 1, None, None,
+                                 WS_POPUP | WS_VISIBLE, x - radius, y - radius, radius * 2, radius * 2, None, None,
                                  win.kernel32.GetModuleHandleW(None), None)
     require(bool(hwnd), "could not create the owned covering window")
     try:
-        print(json.dumps({"phase": "created", "hwnd": hwnd, "pid": os.getpid()}), flush=True)
-        command = sys.stdin.readline()
-        if not command:
-            return
-        x, y = json.loads(command)
-        width, height = win.screen_size()
-        radius = COVER_RADIUS
-        require(radius <= x < width - radius and radius <= y < height - radius,
-                "fixture point is too close to a display edge")
-        require(bool(user32.SetWindowPos(hwnd, win.HWND_TOP, x - radius, y - radius, radius * 2, radius * 2,
-                                         win.SWP_NOACTIVATE | win.SWP_NOOWNERZORDER | SWP_SHOWWINDOW)),
-                "could not show the owned covering window in normal z-order")
-        print(json.dumps({"phase": "shown", "hwnd": hwnd, "pid": os.getpid()}), flush=True)
+        print(json.dumps({"phase": "created", "hwnd": hwnd, "pid": os.getpid(),
+                          "foreground_before": foreground_before, "foreground_after": win.foreground_identity()}),
+              flush=True)
         closed = threading.Event()
 
         def pipe_closed() -> None:
@@ -166,6 +173,38 @@ def above(win, higher: int, lower: int) -> bool:
         if lower == higher:
             return True
     return False
+
+
+def observe_cover(win, hud: dict, helper: dict, point: tuple[int, int]) -> dict:
+    return {"foreground": win.foreground_identity(), "at_point": win.window_at(point),
+            "cover_above_hud": above(win, helper["hwnd"], hud["hwnd"]),
+            "hud_above_cover": above(win, hud["hwnd"], helper["hwnd"])}
+
+
+def settle_cover(win, hud: dict, helper: dict, point: tuple[int, int], samples: list[dict]) -> bool:
+    start = time.monotonic()
+    stable = 0
+    expected = {"foreground": hud, "at_point": helper, "cover_above_hud": True, "hud_above_cover": False}
+    while time.monotonic() - start < COVER_SETTLE_S:
+        state = observe_cover(win, hud, helper, point)
+        elapsed = time.monotonic() - start
+        samples.append({"elapsed_ms": round(elapsed * 1000), **state})
+        stable = stable + 1 if state == expected else 0
+        if stable == 2:
+            return elapsed < COVER_SETTLE_S
+        time.sleep(max(0, min(COVER_SAMPLE_S, COVER_SETTLE_S - elapsed)))
+    return False
+
+
+def desktop_patch(win, gestures, artifact: Path, name: str, point: tuple[int, int]) -> dict:
+    width, height, rgba = win.desktop_rgba()
+    x, y = point
+    r = COVER_RADIUS
+    require(r <= x < width - r and r <= y < height - r, "mapped patch lies outside the desktop frame")
+    crop = b"".join(rgba[(row * width + x - r) * 4 : (row * width + x + r) * 4] for row in range(y - r, y + r))
+    (artifact / f"{name}.desktop.png").write_bytes(gestures.encode_png_rgba(r * 2, r * 2, crop))
+    center = (r * (r * 2) + r) * 4
+    return {"sha256": hashlib.sha256(crop).hexdigest(), "point_rgba": list(crop[center:center + 4])}
 
 
 def verify_timeline(timeline: dict, fixture: dict, before: dict, after: dict) -> dict:
@@ -237,14 +276,11 @@ def witness(exe: Path, out: Path, report: dict) -> None:
                     raise RuntimeError(f"cover timed out before {phase}") from None
                 require(bool(line), f"cover exited before {phase}")
                 receipt = json.loads(line)
-                require(receipt.get("phase") == phase and receipt.get("pid") == child.pid
-                        and isinstance(receipt.get("hwnd"), int) and receipt["hwnd"] > 0,
+                require(receipt.get("phase") == phase and receipt.get("pid") == child.pid,
                         "cover handshake does not match the freshly started native helper")
-                return {key: receipt[key] for key in ("hwnd", "pid")}
+                return receipt
 
-            helper = receive("created")
-            report["cover_created"] = live_window(win, helper)
-            require(not report["cover_created"]["visible"], "cover must start hidden")
+            report["cover_ready"] = receive("ready")
             open_card = gestures.open_card
 
             def cover_after_publish(run, key, **kwargs):
@@ -258,16 +294,28 @@ def witness(exe: Path, out: Path, report: dict) -> None:
                 require(not run.inj.calls, "original publication unexpectedly moved the pointer")
                 point = gestures.resolve_target(run.status(), TARGET)
                 hud = {"hwnd": win.fullscreen_window(run.pid), "pid": run.pid}
-                require(hud["hwnd"] is not None and hud["pid"] != helper["pid"]
-                        and win.foreground_identity() == hud and win.window_at(point) == hud,
+                baseline = {"foreground": win.foreground_identity(), "at_point": win.window_at(point)}
+                report["fixture"] = {"point": list(point), "baseline": baseline, "samples": []}
+                require(hud["hwnd"] is not None and hud["pid"] != child.pid
+                        and baseline == {"foreground": hud, "at_point": hud},
                         "baseline point and foreground must belong to the exact fullscreen HUD")
                 hud_window = live_window(win, hud)
+                fixture = report["fixture"]
+                fixture["hud"] = hud_window
                 require(hud_window["visible"] and not hud_window["style"] & win.WS_EX_TOPMOST,
                         "HUD must be visible in normal z-order")
+                fixture["uncovered_pixels"] = desktop_patch(win, gestures, artifact, "fixture-before", point)
                 child.stdin.write(json.dumps(point) + "\n")
                 child.stdin.flush()
-                require(receive("shown") == helper, "cover HWND changed when shown")
+                created = receive("created")
+                report["cover_created"] = created
+                require(isinstance(created.get("hwnd"), int) and created["hwnd"] > 0,
+                        "cover has no native window handle")
+                helper = {"hwnd": created["hwnd"], "pid": child.pid}
                 cover = live_window(win, helper)
+                fixture["cover"] = cover
+                stable = settle_cover(win, hud, helper, point, fixture["samples"])
+                fixture["candidate_pixels"] = desktop_patch(win, gestures, artifact, "fixture-after-placement", point)
                 x, y = point
                 r = COVER_RADIUS
                 require(cover["visible"] and cover["rect"] == [x - r, y - r, x + r, y + r]
@@ -275,14 +323,16 @@ def witness(exe: Path, out: Path, report: dict) -> None:
                         and cover["style"] & win.WS_EX_NOACTIVATE
                         and not cover["style"] & (win.WS_EX_TOPMOST | win.WS_EX_TRANSPARENT | WS_EX_LAYERED),
                         "cover must be an independent opaque normal window at the mapped point")
-                require(above(win, helper["hwnd"], hud["hwnd"]), "cover is not above the HUD in normal z-order")
-                samples = []
-                for _ in range(2):
-                    samples.append({"foreground": win.foreground_identity(), "at_point": win.window_at(point)})
-                    time.sleep(0.02)
-                report["fixture"] = {"hud": hud_window, "cover": cover, "point": list(point), "samples": samples}
-                require(all(sample == {"foreground": hud, "at_point": helper} for sample in samples),
-                        "owned cover did not persist above the point with HUD foreground")
+                final = observe_cover(win, hud, helper, point)
+                fixture["before_original_press"] = final
+                require(live_window(win, helper) == cover, "cover changed while gathering fixture evidence")
+                require(created["foreground_before"] == created["foreground_after"] == hud
+                        and all(sample["foreground"] == hud for sample in fixture["samples"])
+                        and stable and final == {"foreground": hud, "at_point": helper,
+                                             "cover_above_hud": True, "hud_above_cover": False},
+                        "new cover did not persist above the mapped point while HUD stayed foreground")
+                require(fixture["candidate_pixels"] != fixture["uncovered_pixels"],
+                        "independent desktop capture did not show the candidate cover")
                 return card
 
             original = gestures.SCENARIOS["card-link"]
@@ -290,6 +340,7 @@ def witness(exe: Path, out: Path, report: dict) -> None:
             def observe_after_both_presses(run):
                 original(run)
                 fixture = report["fixture"]
+                helper = fixture["cover"]["identity"]
                 report["cover_after_scenario"] = live_window(win, helper)
                 require(report["cover_after_scenario"] == fixture["cover"],
                         "cover was removed or changed rather than uncovered by the original harness")
@@ -298,6 +349,8 @@ def witness(exe: Path, out: Path, report: dict) -> None:
                         and above(win, hud["identity"]["hwnd"], helper["hwnd"]),
                         "normal z-order did not put the live HUD above the unchanged cover")
                 report["hud_above_cover_after_both_presses"] = True
+                fixture["after_presses_pixels"] = desktop_patch(
+                    win, gestures, artifact, "fixture-after-presses", tuple(fixture["point"]))
 
             with mock.patch.object(gestures, "open_card", cover_after_publish), \
                     mock.patch.dict(gestures.SCENARIOS, {"card-link": observe_after_both_presses}):
