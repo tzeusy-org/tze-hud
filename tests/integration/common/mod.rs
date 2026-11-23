@@ -96,7 +96,6 @@ pub(crate) async fn connect_agent(
             session_proto::SessionInit {
                 agent_id: agent_id.to_string(),
                 initial_subscriptions: vec!["SCENE_TOPOLOGY".to_string()],
-                resume_token: Vec::new(),
                 auth_credential: Some(tze_hud_protocol::auth::psk_credential(psk.to_string())),
             },
         )),

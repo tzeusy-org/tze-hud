@@ -319,7 +319,6 @@ impl HeadlessRuntime {
             }),
             safe_mode_atomic: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             active_tab_mirror: Arc::new(std::sync::Mutex::new(None)),
-            token_store: tze_hud_protocol::token::TokenStore::new(),
         }));
 
         tracing::info!(

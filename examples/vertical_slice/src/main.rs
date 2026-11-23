@@ -108,7 +108,6 @@ impl Agent {
             .send(Request::SessionInit(SessionInit {
                 agent_id: AGENT_ID.to_string(),
                 initial_subscriptions: Vec::new(),
-                resume_token: Vec::new(),
                 auth_credential: Some(psk_credential(psk)),
             }))
             .await?;

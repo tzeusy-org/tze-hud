@@ -171,7 +171,6 @@ impl HudSessionImpl {
             element_store_file: None,
             safe_mode_atomic: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             active_tab_mirror: Arc::new(std::sync::Mutex::new(None)),
-            token_store: crate::token::TokenStore::new(),
         }));
         Self::from_deps(SessionDeps::new(
             state,

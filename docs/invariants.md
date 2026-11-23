@@ -546,27 +546,25 @@ encoding: [`render_visual_goldens`](../crates/tze_hud_portal/src/render_goldens.
 The driver preserves the first-class surface and focusable composer in
 [`drain_declares_first_class_portal_surface_on_tile`](../crates/tze_hud_runtime/src/portal.rs).
 
-## 4. Disconnect is not release
+## 4. Resident termination releases only its own publications
 
-A disconnected agent's leases become orphaned (content kept) for
-a grace period. Reconnecting within the grace period with the resume token
-restores the same surfaces and their budget usage; when the grace period
-ends, the runtime reclaims everything with no agent help. Reclaiming a lease
-clears only the zone and widget publications made under that lease, never the
-rest of the agent's namespace; only the owner's agent-wide Clear (§3) takes
-the whole namespace. gRPC zone and widget publications (including scheduled
-content) carry an in-memory session origin. Disconnect starts its finite
-grace period and idle deadline; authenticated resume restores that origin.
-Grace expiry reclaims its current and pending content without touching
-concurrent sessions, overwritten content, MCP publications or independently
-leased content. No public scene snapshot exposes that origin or scene nodes.
+Local portal attachments and existing internal lease owners retain their orphan
+grace and restoration rules. A disconnected lease keeps its content for its
+grace period; expiry reclaims it without agent help. Reclaiming a lease clears
+only publications made under that lease, never the agent's whole namespace.
+
+A resident stream ends on transport termination, explicit close, the existing
+receive-timeout handling or unpair. Cleanup clears only the active and
+scheduled zone and widget publications still owned by that origin, aborts its
+pending uploads and returns admission capacity. Other streams, MCP, newer
+replacements and independently leased content keep their own lifetimes.
+Reconnects establish fresh origins through `SessionInit` and republish desired
+state. No public scene snapshot exposes an origin or scene nodes.
 
 - `tze_hud_protocol` [`disconnect_transitions_to_orphaned_and_sets_disconnection_badge`](../crates/tze_hud_protocol/tests/lease_governance.rs),
   [`grace_period_expiry_removes_tile_and_nodes`](../crates/tze_hud_protocol/tests/lease_governance.rs)
 - `tze_hud_runtime` [`portal_degrade_then_publish_within_grace_resumes_same_tile`](../crates/tze_hud_runtime/src/portal.rs)
-- `tze_hud_protocol` (gRPC session) [`grpc_disconnect_orphans_publications_without_touching_peer`](../crates/tze_hud_protocol/src/session_server/tests/invariants.rs),
-  [`grpc_resume_within_grace_restores_publication_origin`](../crates/tze_hud_protocol/src/session_server/tests/invariants.rs),
-  [`grpc_grace_expiry_reclaims_publications_and_rejects_resume`](../crates/tze_hud_protocol/src/session_server/tests/invariants.rs)
+- `tze_hud_protocol` (gRPC session) [`grpc_termination_clears_owned_publications_without_touching_peer`](../crates/tze_hud_protocol/src/session_server/tests/invariants.rs)
 - `tze_hud_runtime` (headless frame sweep) [`render_frame_reclaims_orphaned_lease_after_grace`](../crates/tze_hud_runtime/src/headless.rs)
 - `tze_hud_compositor` (badge draw command) [`orphaned_tile_emits_disconnection_badge_draw_cmd`](../crates/tze_hud_compositor/src/renderer/tests/focus_chrome.rs)
 - `integration` (POC acceptance, over gRPC and MCP with `production.toml`)
@@ -597,6 +595,8 @@ updates remain rejected while paused. Fresh zone/widget Hold is also refused
 before changing active or pending publications, expiries, scene version or
 leases, including a request queued behind pause at the scene lock. A suspended
 MCP lease refuses Hold before mutation even if its early pause flag was false.
+Resident termination still clears its active and pending publications while paused.
+
 An already completed gRPC sequence replays its cached result without retiming
 content; normal finite and indefinite Hold work again after resume.
 Terminal lease cleanup still removes its queued publications during pause,

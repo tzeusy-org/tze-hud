@@ -87,7 +87,6 @@ use tze_hud_input::{
     PortalResizeState, RawCharacterEvent, RawKeyDownEvent, RawKeyUpEvent,
 };
 use tze_hud_protocol::session::SharedState;
-use tze_hud_protocol::token::TokenStore;
 use tze_hud_resource::{RuntimeWidgetStore, RuntimeWidgetStoreConfig};
 use tze_hud_scene::graph::SceneGraph;
 use tze_hud_scene::types::ZoneContent;
@@ -3008,7 +3007,6 @@ impl WindowedRuntime {
             }),
             safe_mode_atomic: Arc::clone(&safe_mode_atomic),
             active_tab_mirror: Arc::clone(&active_tab_mirror),
-            token_store: TokenStore::new(),
         }));
 
         let (frame_ready_tx, frame_ready_rx) = frame_ready_channel();

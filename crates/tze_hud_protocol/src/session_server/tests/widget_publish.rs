@@ -574,7 +574,6 @@ async fn test_widget_publish_missing_capability_rejected() {
             assert!(result.hint.contains("allow"));
             assert!(result.hint.contains("reconnect"));
             assert!(result.hint.contains("fresh SessionInit"));
-            assert!(result.hint.contains("valid SessionResume"));
             assert!(result.hint.contains("retry"));
         }
         other => panic!("Expected WidgetPublishResult(rejected), got: {other:?}"),

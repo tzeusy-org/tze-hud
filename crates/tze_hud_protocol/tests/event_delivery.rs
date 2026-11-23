@@ -305,7 +305,6 @@ async fn connect(client: &mut Client, agent_id: &str, subscriptions: &[&str]) ->
         payload: Some(ClientPayload::SessionInit(SessionInit {
             agent_id: agent_id.to_string(),
             initial_subscriptions: subscriptions.iter().map(|s| s.to_string()).collect(),
-            resume_token: Vec::new(),
             auth_credential: Some(tze_hud_protocol::auth::psk_credential(
                 "test-psk".to_string(),
             )),

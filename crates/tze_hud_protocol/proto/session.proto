@@ -29,15 +29,14 @@ service HudSession {
 
 message ClientMessage {
   // Removed public tile/session surface; never reuse.
-  reserved 20, 40;
-  reserved "mutation_batch", "claim_tile";
+  reserved 11, 20, 40;
+  reserved "session_resume", "mutation_batch", "claim_tile";
   uint64 sequence         = 1;  // Per-direction monotonically increasing, starts at 1
   uint64 timestamp_wall_us = 2; // Sender wall-clock (UTC us since epoch); advisory only
 
   oneof payload {
     // Session lifecycle
     SessionInit       session_init       = 10;
-    SessionResume     session_resume     = 11;
     SessionClose      session_close      = 12;
 
     // Keepalive
@@ -84,8 +83,8 @@ message ClientMessage {
 
 message ServerMessage {
   // Removed public tile/session surface; never reuse.
-  reserved 30, 54;
-  reserved "scene_snapshot", "reclaimed";
+  reserved 12, 30, 54;
+  reserved "session_resume_result", "scene_snapshot", "reclaimed";
   uint64 sequence         = 1;  // Per-direction monotonically increasing, starts at 1
   uint64 timestamp_wall_us = 2; // Sender wall-clock (UTC us since epoch); advisory only
 
@@ -93,9 +92,6 @@ message ServerMessage {
     // Session lifecycle
     SessionEstablished    session_established    = 10;
     SessionError          session_error          = 11;
-
-    // Server response to SessionResume
-    SessionResumeResult   session_resume_result  = 12;
 
     // Safe-mode lifecycle notifications
     // Both are transactional (never dropped).
@@ -217,8 +213,9 @@ message SessionInit {
   // Initial event subscriptions
   repeated string initial_subscriptions  = 5;
 
-  // Optional resume token from a previous session
-  bytes  resume_token           = 6;  // Empty = new session; non-empty = resume attempt
+  // Resident reconnects establish a fresh session. Never reuse the old token field.
+  reserved 6;
+  reserved "resume_token";
 
   // Field 7 (agent_timestamp_wall_us, clock-skew estimation) removed in the reset.
   reserved 7;
@@ -226,20 +223,6 @@ message SessionInit {
 
   // Structured PSK credential, required for authentication.
   AuthCredential auth_credential = 13;
-}
-
-// First message from client for reconnection within grace period.
-// Alternative to SessionInit when agent has a valid resume token.
-message SessionResume {
-  // Removed public tile/session surface; never reuse.
-  reserved 4;
-  reserved "pre_shared_key";
-  string agent_id                   = 1;
-  bytes  resume_token               = 2;  // Token from previous SessionEstablished
-  uint64 last_seen_server_sequence  = 3;  // Last server sequence the client processed
-
-  // Structured auth credential for re-authentication.
-  AuthCredential auth_credential    = 5;
 }
 
 // Graceful disconnect from client.
@@ -260,7 +243,8 @@ message SessionEstablished {
   // Field 3 (granted_capabilities) removed in T5 S2.
   reserved 3;
   reserved "granted_capabilities";
-  bytes  resume_token             = 4;  // Token for future reconnect within grace period
+  reserved 4;
+  reserved "resume_token";
   uint64 heartbeat_interval_ms    = 5;  // How often client must send Heartbeat (default 5000)
   uint64 server_sequence          = 6;  // Starting server-side sequence number
 
@@ -286,28 +270,6 @@ message SessionError {
   string code    = 1;  // Error code (e.g. "AUTH_FAILED", "DUPLICATE_AGENT_ID")
   string message = 2;  // Human-readable explanation
   string hint    = 3;  // Machine-readable correction suggestion
-}
-
-// Server response to a valid SessionResume.
-// Followed immediately by the current DegradationNotice.
-// Agents MUST use the subscription state from this message rather than assuming
-// their pre-disconnect subscription set is intact.
-message SessionResumeResult {
-  // Removed public tile/session surface; never reuse.
-  reserved 4;
-  reserved "negotiated_protocol_version";
-  bool   accepted                        = 1;   // true = resume accepted; false = rejected
-  bytes  new_session_token               = 2;   // New token for this resumed session (opaque bytes, e.g. UUIDv7)
-  uint64 new_server_sequence             = 3;   // Current server-side sequence
-  // Field 5 (granted_capabilities) removed in T5 S2.
-  reserved 5;
-  reserved "granted_capabilities";
-  // Field 6 (error) removed in T5 S1: rejections are sent as SessionError.
-  reserved 6;
-  reserved "error";
-  // Confirmed subscription state after resume. Agents MUST use these values.
-  repeated string active_subscriptions   = 7;   // Confirmed active subscription set
-  repeated string denied_subscriptions   = 8;   // Denied (not in allow list)
 }
 
 // ─── Safe-mode lifecycle messages ─────────────────────────────

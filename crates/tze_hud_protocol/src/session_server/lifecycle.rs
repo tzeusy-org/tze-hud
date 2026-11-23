@@ -3,7 +3,7 @@
 /// Session lifecycle states.
 ///
 /// The state machine progresses through these states in response to protocol
-/// events (stream open/close, SessionInit/Resume, heartbeat timeout, etc.).
+/// events (stream open/close, SessionInit, heartbeat timeout, etc.).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionState {
     /// TCP/TLS establishment in progress. Initial state when gRPC stream is opened.
@@ -14,10 +14,8 @@ pub enum SessionState {
     Active,
     /// Graceful close: agent sent SessionClose, waiting for stream termination.
     Disconnecting,
-    /// Stream terminated. Leases are orphaned if previously Active.
+    /// Stream terminated; its publications and admission slot are released.
     Closed,
-    /// Agent is reconnecting within the grace period using a resume token.
-    Resuming,
 }
 
 impl SessionState {
@@ -29,7 +27,6 @@ impl SessionState {
             Self::Active => "Active",
             Self::Disconnecting => "Disconnecting",
             Self::Closed => "Closed",
-            Self::Resuming => "Resuming",
         }
     }
 }

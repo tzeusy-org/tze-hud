@@ -19,7 +19,6 @@ async fn handshake_with_psk(
         payload: Some(ClientPayload::SessionInit(SessionInit {
             agent_id: agent_id.to_string(),
             initial_subscriptions: vec!["SCENE_TOPOLOGY".to_string()],
-            resume_token: Vec::new(),
             auth_credential: Some(crate::auth::psk_credential(psk.to_string())),
         })),
     })
@@ -137,12 +136,11 @@ fn assert_lifetime_owner(scene: &SceneGraph, origin: SceneId, lease: Option<Scen
 struct PublicationSession {
     tx: tokio::sync::mpsc::Sender<ClientMessage>,
     stream: tonic::Streaming<ServerMessage>,
-    resume_token: Vec<u8>,
     session_id: SceneId,
 }
 
 impl PublicationSession {
-    async fn disconnect(self, state: &Arc<Mutex<SharedState>>) -> (Vec<u8>, SceneId) {
+    async fn disconnect(self, state: &Arc<Mutex<SharedState>>) -> SceneId {
         let cleanup = state
             .lock()
             .await
@@ -151,14 +149,7 @@ impl PublicationSession {
         drop(self.tx);
         drop(self.stream);
         await_session_cleanup(cleanup).await;
-        let st = state.lock().await;
-        let scene = st.scene.lock().await;
-        assert_lifetime_owner(&scene, self.session_id, None);
-        assert_eq!(
-            scene.next_lease_deadline_ms(SceneGraph::DEFAULT_MAX_SUSPENSION_MS),
-            Some(scene.now_millis() + DEFAULT_GRACE_PERIOD_MS)
-        );
-        (self.resume_token, self.session_id)
+        self.session_id
     }
 }
 
@@ -176,7 +167,6 @@ async fn connect_publications(
     let Some(ServerPayload::SessionEstablished(e)) = &init[0].payload else {
         panic!("expected establishment")
     };
-    let resume_token = e.resume_token.clone();
     let session_id = bytes_to_scene_id(&e.session_id).unwrap();
     let invalid = publish_and_ack(
         &tx,
@@ -215,377 +205,292 @@ async fn connect_publications(
     PublicationSession {
         tx,
         stream,
-        resume_token,
         session_id,
     }
 }
 
-async fn send_resume(
-    client: &mut HudSessionClient<tonic::transport::Channel>,
-    agent: &str,
-    resume_token: Vec<u8>,
-) -> (
-    tokio::sync::mpsc::Sender<ClientMessage>,
-    tonic::Streaming<ServerMessage>,
-) {
-    let (tx, rx) = tokio::sync::mpsc::channel::<ClientMessage>(64);
-    tx.send(ClientMessage {
-        sequence: 1,
-        timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::SessionResume(SessionResume {
-            agent_id: agent.to_string(),
-            resume_token,
-            last_seen_server_sequence: 0,
-
-            auth_credential: Some(crate::auth::psk_credential("test-key")),
-        })),
-    })
-    .await
-    .unwrap();
-    let stream = client
-        .session(tokio_stream::wrappers::ReceiverStream::new(rx))
-        .await
-        .unwrap()
-        .into_inner();
-    (tx, stream)
-}
-
-/// Disconnect retains content and sets a finite origin deadline without touching a peer.
+/// Every resident termination releases its own retained work, while another
+/// stream, MCP replacements and independent local lease owners keep theirs.
 #[tokio::test]
-async fn grpc_disconnect_orphans_publications_without_touching_peer() {
-    let clock = wall_aligned_clock();
-    let (mut client, server, state) = setup_test_with_clock(clock.clone()).await;
-    let session = connect_publications(&mut client, "orphan-agent", &state).await;
-    let peer = connect_publications(&mut client, "orphan-agent", &state).await;
-    assert_ne!(session.session_id, peer.session_id);
-    let (duplicate_cleanup, mut peer_cleanup) = {
-        let mut st = state.lock().await;
-        (
-            st.sessions.observe_cleanup(&session.session_id),
-            st.sessions.observe_cleanup(&peer.session_id),
-        )
-    };
-    let (_, origin) = session.disconnect(&state).await;
-    await_session_cleanup(duplicate_cleanup).await;
-    {
-        let st = state.lock().await;
-        let mut scene = st.scene.lock().await;
-        assert_eq!(st.sessions.session_count(), 1);
-        assert_lifetime_owner(&scene, origin, None);
-        assert_lifetime_owner(&scene, peer.session_id, None);
-        assert_eq!(
-            peer_cleanup.try_recv(),
-            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
-        );
-        // Independent MCP content in this same namespace is outside the disconnected origin.
-        scene
-            .publish_to_zone(
-                "subtitle",
-                ZoneContent::StreamText("MCP".into()),
-                "orphan-agent",
-                Some("mcp".into()),
-                None,
-                None,
-            )
-            .unwrap();
-        clock.advance(DEFAULT_GRACE_PERIOD_MS);
-        scene.expire_leases();
-        assert!(
-            !scene.zone_registry.active_publishes["subtitle"]
-                .iter()
-                .any(|r| r.publication_origin == Some(origin))
-        );
-        assert!(
-            !scene.widget_registry.active_publishes["gauge"]
-                .iter()
-                .any(|r| r.publication_origin == Some(origin))
-        );
-        assert!(subtitle_texts(&scene).contains(&"MCP".to_string()));
-        assert_lifetime_owner(&scene, peer.session_id, None);
-        assert_eq!(
-            scene.scheduled_publications.len(),
-            1,
-            "only the connected peer keeps its delayed publication"
-        );
-        clock.advance(60_000);
-        assert!(
-            scene
-                .apply_due_publications()
-                .iter()
-                .all(|r| r.result.is_ok())
-        );
-        assert!(
-            !scene.zone_registry.active_publishes["subtitle"]
-                .iter()
-                .any(|r| r.merge_key.as_deref() == Some(&format!("delayed-{origin}")))
-        );
-    }
-    peer.disconnect(&state).await;
-    await_session_cleanup(peer_cleanup).await;
-    assert_eq!(state.lock().await.sessions.session_count(), 0);
-    server.abort();
-}
-
-/// Resume restores the stable publication origin while the physical session stays fresh.
-#[tokio::test]
-async fn grpc_resume_within_grace_restores_publication_origin() {
-    let clock = wall_aligned_clock();
-    let (mut client, server, state) = setup_test_with_clock(clock.clone()).await;
-    let session = connect_publications(&mut client, "resume-agent", &state).await;
-    let (token, origin) = session.disconnect(&state).await;
-    clock.advance(DEFAULT_GRACE_PERIOD_MS - 1);
-    let (tx, mut stream) = send_resume(&mut client, "resume-agent", token).await;
-    assert!(matches!(
-        next_server_msg(&mut stream).await.payload,
-        Some(ServerPayload::SessionResumeResult(SessionResumeResult {
-            accepted: true,
-            ..
-        }))
-    ));
-    assert!(matches!(
-        next_server_msg(&mut stream).await.payload,
-        Some(ServerPayload::DegradationNotice(_))
-    ));
-    let registry_id = {
-        let st = state.lock().await;
-        let mut scene = st.scene.lock().await;
-        clock.advance(2);
-        scene.expire_leases();
-        assert_lifetime_owner(&scene, origin, None);
-        assert_eq!(scene.scheduled_publications.len(), 1);
-        assert_eq!(
-            scene.next_lease_deadline_ms(SceneGraph::DEFAULT_MAX_SUSPENSION_MS),
-            None
-        );
-        let id = st
-            .sessions
-            .session_for_namespace("resume-agent")
-            .unwrap()
-            .session_id
-            .clone();
-        assert_ne!(id, origin.as_uuid().to_string());
-        id
-    };
-    let cleanup = state
-        .lock()
-        .await
-        .sessions
-        .observe_registered_cleanup(&registry_id);
-    drop(tx);
-    drop(stream);
-    await_session_cleanup(cleanup).await;
-    {
-        let st = state.lock().await;
-        let mut scene = st.scene.lock().await;
-        clock.advance(DEFAULT_GRACE_PERIOD_MS);
-        scene.expire_leases();
-        assert!(scene.scheduled_publications.is_empty());
-        assert!(
-            !scene
-                .widget_registry
-                .active_publishes
-                .get("gauge")
-                .is_some_and(|r| r.iter().any(|r| r.publication_origin == Some(origin)))
-        );
-    }
-    server.abort();
-}
-
-/// Invariant 4: when the grace period ends, the runtime's lease sweep
-/// reclaims the orphaned lease and its tile, and the resume token is dead.
-#[tokio::test]
-async fn grpc_grace_expiry_reclaims_publications_and_rejects_resume() {
-    let clock = wall_aligned_clock();
-    let (mut client, server, state) = setup_test_with_clock(clock.clone()).await;
-    {
-        let st = state.lock().await;
-        configure_lifetime_surfaces(&mut *st.scene.lock().await);
-    }
-    let (tx, init, mut pending) = handshake(&mut client, "never-claim", "test-key").await;
-    let (token, origin) = match &init[0].payload {
-        Some(ServerPayload::SessionEstablished(e)) => (
-            e.resume_token.clone(),
-            bytes_to_scene_id(&e.session_id).unwrap(),
-        ),
-        other => panic!("expected establishment, got {other:?}"),
-    };
-    let mut zone = subtitle_publish("held", 0, 0, 0);
-    zone.key = origin.to_string();
-    assert!(publish_and_ack(&tx, &mut pending, 2, zone).await.ok);
-    assert!(
-        publish_and_ack(
-            &tx,
-            &mut pending,
-            3,
-            lifetime_widget_publish(&origin.to_string(), 0.9)
-        )
-        .await
-        .ok
-    );
-    let future = state.lock().await.scene.lock().await.now_wall_us() + 60_000_000;
-    let mut delayed = subtitle_publish("must-not-reappear", 0, future, 0);
-    delayed.key = "pending".into();
-    assert!(publish_and_ack(&tx, &mut pending, 4, delayed).await.ok);
-    let cleanup = state.lock().await.sessions.observe_cleanup(&origin);
-    drop(tx);
-    drop(pending);
-    await_session_cleanup(cleanup).await;
-    let (wrong_tx, mut wrong_stream) = send_resume(&mut client, "wrong-agent", token.clone()).await;
-    match next_server_msg(&mut wrong_stream).await.payload {
-        Some(ServerPayload::SessionError(e)) => assert_eq!(e.code, "SESSION_GRACE_EXPIRED"),
-        other => panic!("expected wrong-owner refusal, got {other:?}"),
-    }
-    drop(wrong_tx);
-    drop(wrong_stream);
-    {
-        let st = state.lock().await;
-        let mut scene = st.scene.lock().await;
-        assert_lifetime_owner(&scene, origin, None);
-        // A same-key MCP replacement is current content, so it must survive origin cleanup.
-        scene
-            .publish_to_zone(
-                "subtitle",
-                tze_hud_scene::ZoneContent::StreamText("replacement".into()),
-                "never-claim",
-                Some(origin.to_string()),
-                None,
-                None,
-            )
-            .unwrap();
-        clock.advance(crate::token::DEFAULT_GRACE_PERIOD_MS);
-        // Production applies due batches before lease expiry; grace cancellation still wins.
-        assert!(scene.apply_due_publications().is_empty());
-        scene.expire_leases();
-        assert_eq!(
-            scene.zone_registry.active_publishes["subtitle"][0].publication_origin,
-            None
-        );
-        assert!(
-            scene
-                .widget_registry
-                .active_publishes
-                .get("gauge")
-                .is_none_or(|v| v.iter().all(|r| r.publication_origin != Some(origin)))
-        );
-        assert_eq!(
-            scene.widget_registry.instances["gauge"].current_params["level"],
-            tze_hud_scene::WidgetParameterValue::F32(0.0)
-        );
-        assert!(scene.scheduled_publications.is_empty());
-        clock.advance(60_000);
-        assert!(scene.apply_due_publications().is_empty());
-        assert_eq!(scene.zone_registry.active_publishes["subtitle"].len(), 1);
-    }
-    let (_tx, mut expired) = send_resume(&mut client, "never-claim", token).await;
-    match next_server_msg(&mut expired).await.payload {
-        Some(ServerPayload::SessionError(e)) => assert_eq!(e.code, "SESSION_GRACE_EXPIRED"),
-        other => panic!("expected expired token, got {other:?}"),
-    }
-    // Two publication-only origins become due before grace expires. Applying
-    // one must not prune the other's deadline while it is still scheduled.
-    let present_at = state.lock().await.scene.lock().await.now_wall_us() + 1_000_000;
-    let mut scheduled_sessions = Vec::new();
-    for agent in ["pending-a", "pending-b"] {
-        let (tx, init, mut stream) = handshake(&mut client, agent, "test-key").await;
-        let origin = match &init[0].payload {
-            Some(ServerPayload::SessionEstablished(e)) => bytes_to_scene_id(&e.session_id).unwrap(),
-            other => panic!("expected establishment, got {other:?}"),
+async fn grpc_termination_clears_owned_publications_without_touching_peer() {
+    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+    for ending in ["transport", "close", "timeout", "unpair"] {
+        let wakes = Arc::new(AtomicU64::new(0));
+        let wake_counter = Arc::clone(&wakes);
+        let notifier = tze_hud_scene::render_wake::RenderWakeNotifier::new(move || {
+            wake_counter.fetch_add(1, Ordering::AcqRel);
+        });
+        let (mut client, server, state) = setup_test_with_state_and_render_wake(notifier).await;
+        let mut owner = connect_publications(&mut client, "lifetime-owner", &state).await;
+        let peer_agent = if ending == "unpair" {
+            "lifetime-peer"
+        } else {
+            "lifetime-owner"
         };
-        let publish = Publish {
-            surface: "zone:status-bar".into(),
-            content: Some(crate::proto::ZoneContent {
-                payload: Some(crate::proto::zone_content::Payload::StatusBar(
-                    crate::proto::StatusBarPayload {
-                        entries: HashMap::from([(agent.to_string(), "pending".into())]),
-                    },
-                )),
-            }),
-            present_at_us: present_at,
-            key: agent.into(),
-            ..Default::default()
-        };
-        assert!(publish_and_ack(&tx, &mut stream, 2, publish).await.ok);
-        scheduled_sessions.push((tx, stream, origin));
-    }
-    let origins: Vec<_> = scheduled_sessions
-        .iter()
-        .map(|(_, _, origin)| *origin)
-        .collect();
-    for (tx, stream, origin) in scheduled_sessions {
-        let cleanup = state.lock().await.sessions.observe_cleanup(&origin);
-        drop(tx);
-        drop(stream);
-        await_session_cleanup(cleanup).await;
-    }
-    {
-        let st = state.lock().await;
-        let mut scene = st.scene.lock().await;
-        assert!(
-            scene
-                .zone_registry
-                .active_publishes
-                .get("status-bar")
-                .is_none_or(Vec::is_empty)
-        );
-        assert_eq!(scene.scheduled_publications.len(), 2);
-        assert!(
-            scene
+        let mut peer = connect_publications(&mut client, peer_agent, &state).await;
+        let origin = owner.session_id;
+        let future = state.lock().await.scene.lock().await.now_wall_us() + 60_000_000;
+        // A pending notification has its own waiter, even before it materializes.
+        owner
+            .tx
+            .send(ClientMessage {
+                sequence: 6,
+                timestamp_wall_us: now_wall_us(),
+                payload: Some(ClientPayload::Publish(Publish {
+                    surface: "zone:notification-area".into(),
+                    key: "pending-question".into(),
+                    content: Some(crate::proto::ZoneContent {
+                        payload: Some(crate::proto::zone_content::Payload::Notification(
+                            crate::proto::NotificationPayload {
+                                text: "pending".into(),
+                                ..Default::default()
+                            },
+                        )),
+                    }),
+                    present_at_us: future,
+                    ..Default::default()
+                })),
+            })
+            .await
+            .unwrap();
+        // Notifications are ephemeral; a heartbeat orders observation after admission.
+        owner
+            .tx
+            .send(ClientMessage {
+                sequence: 7,
+                timestamp_wall_us: now_wall_us(),
+                payload: Some(ClientPayload::Heartbeat(Heartbeat {
+                    timestamp_mono_us: 7,
+                })),
+            })
+            .await
+            .unwrap();
+        assert!(matches!(
+            next_server_msg(&mut owner.stream).await.payload,
+            Some(ServerPayload::Heartbeat(_))
+        ));
+        let ready = Arc::new(AtomicU64::new(0));
+        let ready_counter = Arc::clone(&ready);
+        let (notification, local_lease) = {
+            let st = state.lock().await;
+            let mut scene = st.scene.lock().await;
+            let notification = scene
                 .scheduled_publications
                 .iter()
-                .all(|s| s.publisher.lease_id.is_none())
-        );
-        let grace_deadline = scene.now_wall_us() / 1_000 + crate::token::DEFAULT_GRACE_PERIOD_MS;
-        assert_eq!(
-            scene.next_lease_deadline_ms(SceneGraph::DEFAULT_MAX_SUSPENSION_MS),
-            Some(grace_deadline)
-        );
-        scene
-            .publish_to_zone(
-                "status-bar",
-                tze_hud_scene::ZoneContent::StatusBar(tze_hud_scene::StatusBarPayload {
-                    entries: HashMap::from([("operator".into(), "keep".into())]),
-                }),
-                "operator",
-                Some("operator".into()),
-                None,
-                None,
-            )
-            .unwrap();
-        clock.advance(1_000);
-        let results = scene.apply_due_publications();
-        assert_eq!(results.len(), 2);
-        assert!(results.iter().all(|r| r.result.is_ok()), "{results:?}");
-        assert!(scene.scheduled_publications.is_empty());
-        let records = &scene.zone_registry.active_publishes["status-bar"];
-        assert_eq!(records.len(), 3);
-        for origin in origins {
-            let record = records
-                .iter()
-                .find(|r| r.publication_origin == Some(origin))
+                .find(|s| {
+                    s.publisher.origin == Some(origin) && s.notification_publication.is_some()
+                })
+                .and_then(|s| s.notification_publication)
                 .unwrap();
-            assert_eq!(record.lease_id, None);
-            assert_eq!(record.expires_at_wall_us, None);
+            scene.arm_notification_wait(
+                notification,
+                "lifetime-owner",
+                Arc::new(AtomicBool::new(true)),
+                u64::MAX,
+                tze_hud_scene::render_wake::RenderWakeNotifier::new(move || {
+                    ready_counter.fetch_add(1, Ordering::AcqRel);
+                }),
+            );
+            scene
+                .publish_to_zone(
+                    "subtitle",
+                    ZoneContent::StreamText("MCP replacement".into()),
+                    "lifetime-owner",
+                    Some(origin.to_string()),
+                    None,
+                    None,
+                )
+                .unwrap();
+            let lease = scene.grant_lease("local-owner", 60_000);
+            scene
+                .publish_to_zone_for_lease(
+                    "subtitle",
+                    ZoneContent::StreamText("local lease".into()),
+                    "local-owner",
+                    Some("local".into()),
+                    None,
+                    None,
+                    Vec::new(),
+                    Some(lease),
+                )
+                .unwrap();
+            let now = scene.now_millis();
+            scene.disconnect_lease(&lease, now).unwrap();
+            (notification, lease)
+        };
+        let store = state.lock().await.resource_store.clone();
+        owner
+            .tx
+            .send(ClientMessage {
+                sequence: 8,
+                timestamp_wall_us: now_wall_us(),
+                payload: Some(ClientPayload::ResourceUploadStart(ResourceUploadStart {
+                    expected_hash: blake3::hash(&[1, 2, 3, 255]).as_bytes().to_vec(),
+                    resource_type: 1,
+                    total_size_bytes: 4,
+                    metadata: Some(ResourceMetadata {
+                        width: 1,
+                        height: 1,
+                        ..Default::default()
+                    }),
+                    inline_data: Vec::new(),
+                })),
+            })
+            .await
+            .unwrap();
+        assert!(matches!(
+            next_server_msg(&mut owner.stream).await.payload,
+            Some(ServerPayload::ResourceUploadAccepted(_))
+        ));
+        assert_eq!(store.in_flight_count("lifetime-owner").await, 1);
+        let cleanup = state.lock().await.sessions.observe_cleanup(&origin);
+        let before = wakes.load(Ordering::Acquire);
+        let mut peer_sequence = 6;
+        match ending {
+            "close" => owner
+                .tx
+                .send(ClientMessage {
+                    sequence: 9,
+                    timestamp_wall_us: now_wall_us(),
+                    payload: Some(ClientPayload::SessionClose(SessionClose::default())),
+                })
+                .await
+                .unwrap(),
+            "unpair" => {
+                let closers = state
+                    .lock()
+                    .await
+                    .sessions
+                    .close_namespace("lifetime-owner");
+                assert_eq!(closers.len(), 1);
+                for closer in closers {
+                    tokio::time::timeout(Duration::from_secs(5), closer.ended())
+                        .await
+                        .unwrap();
+                }
+            }
+            "timeout" => {
+                // The peer remains responsive while only the owner misses its receive window.
+                for _ in 0..3 {
+                    tokio::time::pause();
+                    tokio::time::advance(Duration::from_millis(DEFAULT_HEARTBEAT_INTERVAL_MS))
+                        .await;
+                    tokio::time::resume();
+                    peer.tx
+                        .send(ClientMessage {
+                            sequence: peer_sequence,
+                            timestamp_wall_us: now_wall_us(),
+                            payload: Some(ClientPayload::Heartbeat(Heartbeat {
+                                timestamp_mono_us: peer_sequence,
+                            })),
+                        })
+                        .await
+                        .unwrap();
+                    assert!(matches!(
+                        next_server_msg(&mut peer.stream).await.payload,
+                        Some(ServerPayload::Heartbeat(_))
+                    ));
+                    peer_sequence += 1;
+                }
+            }
+            "transport" => {}
+            _ => unreachable!(),
         }
-        assert_eq!(
-            scene.next_lease_deadline_ms(SceneGraph::DEFAULT_MAX_SUSPENSION_MS),
-            Some(grace_deadline)
+        if ending == "transport" {
+            drop(owner.tx);
+            drop(owner.stream);
+            await_session_cleanup(cleanup).await;
+        } else {
+            // The trigger itself must clean up while the transport is retained;
+            // dropping it first would let EOF conceal a broken close/timeout.
+            await_session_cleanup(cleanup).await;
+            drop(owner.tx);
+            drop(owner.stream);
+        }
+        assert_eq!(store.in_flight_count("lifetime-owner").await, 0);
+        assert!(
+            wakes.load(Ordering::Acquire) > before,
+            "{ending}: cleanup must wake presentation"
         );
-        clock.advance(crate::token::DEFAULT_GRACE_PERIOD_MS - 1_000);
-        scene.expire_leases();
-        let remaining = &scene.zone_registry.active_publishes["status-bar"];
-        assert_eq!(remaining.len(), 1);
-        assert_eq!(remaining[0].publisher_namespace, "operator");
-        assert_eq!(remaining[0].publication_origin, None);
-        assert_eq!(remaining[0].lease_id, None);
-        assert_eq!(remaining[0].expires_at_wall_us, None);
-        assert!(scene.apply_due_publications().is_empty());
         assert_eq!(
-            scene.next_lease_deadline_ms(SceneGraph::DEFAULT_MAX_SUSPENSION_MS),
-            None
+            ready.load(Ordering::Acquire),
+            1,
+            "{ending}: waiter receives one readiness wake"
         );
+        {
+            let st = state.lock().await;
+            let scene = st.scene.lock().await;
+            assert_eq!(st.sessions.session_count(), 1);
+            assert_lifetime_owner(&scene, peer.session_id, None);
+            assert!(
+                scene
+                    .zone_registry
+                    .active_publishes
+                    .values()
+                    .flatten()
+                    .all(|r| r.publication_origin != Some(origin))
+            );
+            assert!(
+                scene
+                    .widget_registry
+                    .active_publishes
+                    .values()
+                    .flatten()
+                    .all(|r| r.publication_origin != Some(origin))
+            );
+            assert!(
+                scene
+                    .scheduled_publications
+                    .iter()
+                    .all(|s| s.publisher.origin != Some(origin))
+            );
+            assert_eq!(
+                scene.scheduled_publications.len(),
+                1,
+                "only the peer retains scheduled work"
+            );
+            assert!(subtitle_texts(&scene).contains(&"MCP replacement".to_string()));
+            assert_eq!(
+                scene.leases[&local_lease].state,
+                tze_hud_scene::LeaseState::Orphaned
+            );
+            assert!(subtitle_texts(&scene).contains(&"local lease".to_string()));
+            assert_eq!(
+                scene.notification_wait_outcome(notification),
+                Some(tze_hud_scene::graph::NotificationOutcome::Gone(
+                    tze_hud_scene::graph::NotificationGone::Cleared
+                ))
+            );
+        }
+        // Reconnect is a new authenticated origin and starts without old content.
+        let (fresh_tx, fresh_init, fresh_stream) =
+            handshake(&mut client, "lifetime-owner", "test-key").await;
+        let Some(ServerPayload::SessionEstablished(fresh)) = &fresh_init[0].payload else {
+            panic!("expected fresh init");
+        };
+        let fresh_id = bytes_to_scene_id(&fresh.session_id).unwrap();
+        assert_ne!(fresh_id, origin);
+        let fresh_cleanup = state.lock().await.sessions.observe_cleanup(&fresh_id);
+        drop(fresh_tx);
+        drop(fresh_stream);
+        await_session_cleanup(fresh_cleanup).await;
+        peer.tx
+            .send(ClientMessage {
+                sequence: peer_sequence,
+                timestamp_wall_us: now_wall_us(),
+                payload: Some(ClientPayload::Heartbeat(Heartbeat {
+                    timestamp_mono_us: peer_sequence,
+                })),
+            })
+            .await
+            .unwrap();
+        assert!(matches!(
+            next_server_msg(&mut peer.stream).await.payload,
+            Some(ServerPayload::Heartbeat(_))
+        ));
+        peer.disconnect(&state).await;
+        server.abort();
     }
-
-    server.abort();
 }
 
 /// Connect a zone publisher to a scene with the default zones.

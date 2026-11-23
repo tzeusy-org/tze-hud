@@ -241,7 +241,6 @@ impl SharedStateBuilder {
             element_store_file: None,
             safe_mode_atomic,
             active_tab_mirror,
-            token_store: tze_hud_protocol::token::TokenStore::new(),
         }
     }
 }

@@ -12,7 +12,6 @@ use tze_hud_input::{InputProcessor, KeyboardProcessor};
 use tokio::sync::Mutex as TokioMutex;
 use tze_hud_input::{FocusManager, FocusRequest};
 use tze_hud_protocol::session::{SessionRegistry, SharedState};
-use tze_hud_protocol::token::TokenStore;
 use tze_hud_scene::graph::SceneGraph;
 use tze_hud_scene::types::{
     ContentionPolicy, DragHandleElementKind, GeometryPolicy, LayerAttachment, RenderingPolicy,
@@ -68,7 +67,6 @@ pub(super) fn make_shared_state() -> Arc<TokioMutex<SharedState>> {
         element_store_file: None,
         safe_mode_atomic: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         active_tab_mirror: Arc::new(std::sync::Mutex::new(None)),
-        token_store: TokenStore::new(),
     }))
 }
 

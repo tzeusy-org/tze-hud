@@ -54,7 +54,7 @@ fn rejection_hint(code: &str, reason: String) -> String {
     let action = match code {
         "INVALID_ARGUMENT" => "Correct the rejected request fields and resend as a new request",
         "NOT_ALLOWED" => {
-            "Ask the operator to grant the required allow entry, then reconnect with a fresh SessionInit or valid SessionResume, then retry"
+            "Ask the operator to grant the required allow entry, then reconnect with a fresh SessionInit, then retry"
         }
         "NOT_HELD" => "Publish to obtain a holding before retrying",
         "SAFE_MODE_ACTIVE" => "Wait for SessionResumed before retrying",

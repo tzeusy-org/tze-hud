@@ -7,8 +7,6 @@ use super::upload::UploadByteRateLimiter;
 use crate::lease::LeaseCorrelationCache;
 use tze_hud_scene::types::SceneId;
 
-use super::budget_gate::SharedMutationBudgetEnforcer;
-
 // ─── Session state ──────────────────────────────────────────────────────────
 
 /// Per-session state tracked by the streaming server.
@@ -19,19 +17,16 @@ pub(super) struct StreamSession {
     pub(super) agent_name: String,
     /// Permissions from the agent's `allow` list, fixed at handshake.
     pub(super) capabilities: Vec<String>,
-    pub(super) scene_session_id: SceneId,
-    /// Stable ownership across authenticated resumes; physical scene_session_id stays fresh.
+    /// Ownership of publications from this physical resident stream.
     pub(super) publication_origin: SceneId,
-    pub(super) budget_enforcer: Option<SharedMutationBudgetEnforcer>,
     pub(super) subscriptions: Vec<String>,
     pub(super) server_sequence: u64,
-    pub(super) resume_token: Vec<u8>,
 
     /// Current lifecycle state.
     pub(super) state: SessionState,
 
     /// Last validated client-side sequence number.
-    /// Initialized to 1 during session init/resume (treating the handshake message as
+    /// Initialized to 1 during session init (treating the handshake message as
     /// sequence 1). Each subsequent validated message must carry a strictly greater
     /// sequence number within `max_sequence_gap` of the previous.
     pub(super) last_client_sequence: u64,

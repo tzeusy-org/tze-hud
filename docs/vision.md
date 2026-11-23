@@ -50,8 +50,10 @@ Surfaces on that lifecycle, in priority order:
   small, deterministic calls. Responses carry what the model needs next and
   nothing else.
 - **Two planes, chosen by traffic shape.** MCP for discoverable one-shot calls
-  (zones, widgets, portal); gRPC streams for resident sessions (zones, widgets, input,
-  high-rate updates). Message classes stay distinct: transactional (acked),
+  (zones, widgets, portal); the resident gRPC stream handles zone and widget
+  publication, resource upload, and session lifecycle. Future high-rate content
+  may use a dedicated stream brokered through MCP; a concrete v2 consumer will
+  define that discovery and stream contract. Message classes stay distinct: transactional (acked),
   state-stream (coalesced), ephemeral (droppable).
 - **Cheap when idle.** An idle HUD costs ~nothing; a busy one costs in
   proportion to what changed.

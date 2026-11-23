@@ -1736,7 +1736,9 @@ fn clear_widget_for_publisher_refreshes_current_params_from_remaining_publish() 
                 .clear_widget_for_publisher("gauge", "agent.b")
                 .unwrap(),
             "lease" => scene.clear_publications_for_lease(peer_lease),
-            "origin" => scene.clear_publications_for_origin(peer_origin),
+            "origin" => {
+                scene.clear_publications_for_origin(peer_origin);
+            }
             _ => unreachable!(),
         }
         assert_eq!(

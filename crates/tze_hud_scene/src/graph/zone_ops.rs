@@ -1725,8 +1725,21 @@ impl SceneGraph {
         }
     }
 
-    /// Scoped counterpart of lease cleanup for a publication-only session.
-    pub(crate) fn clear_publications_for_origin(&mut self, origin: SceneId) {
+    /// Clear only this resident origin's unleased active and scheduled content.
+    /// Independently leased content and newer replacement origins survive.
+    /// Returns whether retained publications changed.
+    pub fn clear_publications_for_origin(&mut self, origin: SceneId) -> bool {
+        if !self.has_publications_for_origin(origin) {
+            return false;
+        }
+        let active_waits: Vec<_> = self
+            .zone_registry
+            .active_publishes
+            .values()
+            .flatten()
+            .filter(|r| r.publication_origin == Some(origin) && r.lease_id.is_none())
+            .map(|r| r.publication_id)
+            .collect();
         for publishes in self.zone_registry.active_publishes.values_mut() {
             publishes.retain(|r| r.publication_origin != Some(origin) || r.lease_id.is_some());
         }
@@ -1750,24 +1763,22 @@ impl SceneGraph {
         let pending_waits: Vec<_> = self
             .scheduled_publications
             .iter()
+            .filter(|s| s.has_origin(origin))
             .filter_map(|s| s.notification_publication)
             .collect();
         self.scheduled_publications
             .retain(|s| !s.has_origin(origin));
-        for id in pending_waits {
-            if !self
-                .scheduled_publications
-                .iter()
-                .any(|s| s.notification_publication == Some(id))
-            {
-                self.finish_notification_wait(
-                    id,
-                    super::NotificationOutcome::Gone(super::NotificationGone::Cleared),
-                );
-            }
+        for id in active_waits.into_iter().chain(pending_waits) {
+            self.finish_notification_wait(
+                id,
+                super::NotificationOutcome::Gone(super::NotificationGone::Cleared),
+            );
         }
         self.publication_orphans.remove(&origin);
+        self.prune_notification_waits();
+        self.prune_notification_feedback();
         self.version += 1;
+        true
     }
 
     /// Clear active and scheduled publications owned by `lease_id`.
