@@ -184,6 +184,8 @@ pub struct WindowedPresentOutcome {
     /// second surface acquisition.
     pub surface_acquired: bool,
     pub gpu_submitted: bool,
+    /// False when exact raster authority changed after signature prediction.
+    pub signature_current: bool,
 }
 
 impl WindowedFrameBuild {
@@ -818,12 +820,14 @@ impl Compositor {
                     telemetry,
                     surface_acquired: false,
                     gpu_submitted: false,
+                    signature_current: false,
                 };
             }
         };
         let surface_acquired = frame.acquisition.is_fresh();
 
-        let (encoder, encode_us) = self.encode_windowed_passes(build, target, &frame.view, true);
+        let (encoder, encode_us, signature_current) =
+            self.encode_windowed_passes(build, target, &frame.view, true);
         let frame_start = build.frame_start;
         let mut telemetry = build.telemetry.clone();
         telemetry.stage6_render_encode_us = encode_us;
@@ -876,6 +880,7 @@ impl Compositor {
                 telemetry,
                 surface_acquired,
                 gpu_submitted,
+                signature_current,
             };
         }
 
@@ -884,6 +889,7 @@ impl Compositor {
             telemetry,
             surface_acquired,
             gpu_submitted,
+            signature_current,
         }
     }
 
@@ -900,7 +906,7 @@ impl Compositor {
         target: &FrameTarget,
         view: &wgpu::TextureView,
         include_panel: bool,
-    ) -> (wgpu::CommandEncoder, u64) {
+    ) -> (wgpu::CommandEncoder, u64, bool) {
         let mut tv = self.target_view(build, target);
         if tv.panel_here && !include_panel {
             tv.card_items = &[];
@@ -935,7 +941,7 @@ impl Compositor {
             (tv.width, tv.height),
         );
 
-        let (mut encoder, encode_us) = self.encode_from_inputs(
+        let (mut encoder, encode_us, signature_current) = self.encode_from_inputs(
             &tv.vertices,
             view,
             &inputs,
@@ -988,7 +994,7 @@ impl Compositor {
             (sw, sh),
         );
 
-        (encoder, encode_us)
+        (encoder, encode_us, signature_current)
     }
 
     /// Map a canvas-space build onto one display window (see
@@ -1465,7 +1471,7 @@ impl Compositor {
         let render_menu_text = self.prepare_menu_text(&context_menu_text, surf_w, surf_h);
 
         // Headless never uses overlay mode — pass false for the pipeline selector.
-        let (mut encoder, encode_us, encode_inputs) = self.encode_frame(
+        let (mut encoder, encode_us, encode_inputs, _) = self.encode_frame(
             &vertices,
             &frame.view,
             scene,

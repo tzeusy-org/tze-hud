@@ -2752,8 +2752,9 @@ impl Compositor {
     ///
     /// # Returns
     ///
-    /// `(encoder, encode_us)` — the ready-to-submit encoder and the wall-clock
-    /// microseconds spent encoding (for `FrameTelemetry::stage6_render_encode_us`).
+    /// `(encoder, encode_us, signature_current)` — the ready-to-submit encoder,
+    /// whether raster authority still matches prediction, and encoding wall-clock
+    /// microseconds (for `FrameTelemetry::stage6_render_encode_us`).
     /// `bg_vertex_count`: number of vertices at the start of `vertices` that
     /// make up the initial Background slice.  This includes any overlay-mode
     /// clear quad prepended before Background zone vertices, so in overlay
@@ -2982,8 +2983,9 @@ impl Compositor {
         use_overlay_pipeline: bool,
         bg_vertex_count: usize,
         chrome_vertex_start: usize,
-    ) -> (wgpu::CommandEncoder, u64) {
+    ) -> (wgpu::CommandEncoder, u64, bool) {
         let encode_start = std::time::Instant::now();
+        let mut signature_current = true;
 
         // Upload the full vertex buffer once — individual passes render
         // different vertex sub-ranges from it using draw ranges.
@@ -3029,7 +3031,7 @@ impl Compositor {
                         5 => LayerAttachment::Chrome,
                         _ => unreachable!("rounded rect band"),
                     };
-                    self.encode_image_pass(
+                    signature_current &= self.encode_image_pass(
                         &mut encoder,
                         frame_view,
                         textured_cmds,
@@ -3172,7 +3174,7 @@ impl Compositor {
             }
         }
         let encode_us = encode_start.elapsed().as_micros() as u64;
-        (encoder, encode_us)
+        (encoder, encode_us, signature_current)
     }
 
     /// Final pass of every frame: the system card (or, while open, the control
@@ -3238,9 +3240,9 @@ impl Compositor {
         use_overlay_pipeline: bool,
         bg_vertex_count: usize,
         chrome_vertex_start: usize,
-    ) -> (wgpu::CommandEncoder, u64, EncodeInputs) {
+    ) -> (wgpu::CommandEncoder, u64, EncodeInputs, bool) {
         let inputs = self.collect_encode_inputs(scene, surf_w, surf_h);
-        let (encoder, encode_us) = self.encode_from_inputs(
+        let (encoder, encode_us, signature_current) = self.encode_from_inputs(
             vertices,
             frame_view,
             &inputs,
@@ -3251,7 +3253,7 @@ impl Compositor {
             bg_vertex_count,
             chrome_vertex_start,
         );
-        (encoder, encode_us, inputs)
+        (encoder, encode_us, inputs, signature_current)
     }
 }
 

@@ -282,10 +282,15 @@ impl super::Compositor {
         sw: f32,
         sh: f32,
         resident_layer: Option<LayerAttachment>,
-    ) {
-        if cmds.is_empty() {
-            return;
+    ) -> bool {
+        let selected = |cmd: &&TexturedDrawCmd| match &cmd.source {
+            super::draw_cmds::ImageSource::Generic => resident_layer.is_none(),
+            super::draw_cmds::ImageSource::Resident { layer, .. } => resident_layer == Some(*layer),
+        };
+        if !cmds.iter().any(|cmd| selected(&cmd)) {
+            return true;
         }
+        let mut signature_current = true;
 
         use wgpu::util::DeviceExt;
 
@@ -306,7 +311,7 @@ impl super::Compositor {
 
         image_pass.set_pipeline(&self.texture_rect_pipeline);
 
-        for cmd in cmds {
+        for cmd in cmds.iter().filter(selected) {
             let cache = match &cmd.source {
                 super::draw_cmds::ImageSource::Generic if resident_layer.is_none() => {
                     &self.image_texture_cache
@@ -320,7 +325,12 @@ impl super::Compositor {
             };
             let entry = match cache.get(&cmd.resource_id) {
                 Some(e) => e,
-                None => continue, // shouldn't happen if ensure was called
+                None => {
+                    if matches!(&cmd.source, super::draw_cmds::ImageSource::Resident { .. }) {
+                        signature_current = false;
+                    }
+                    continue;
+                }
             };
 
             let verts =
@@ -343,11 +353,14 @@ impl super::Compositor {
                 // pairing revocation. Already encoded/submitted GPU work may
                 // finish; the transition wake builds the next frame without it.
                 // No lock survives this call, an await, or a GPU wait.
-                proof.with_authorized(draw);
+                if proof.with_authorized(draw).is_none() {
+                    signature_current = false;
+                }
             } else {
                 draw();
             }
         }
+        signature_current
     }
 
     /// A card control (dismiss or action): `fill` (if any) in `shape.s`

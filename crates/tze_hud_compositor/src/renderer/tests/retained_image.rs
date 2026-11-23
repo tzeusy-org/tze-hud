@@ -349,15 +349,19 @@ async fn resident_raster_stale_draw_denies_revoked_source_with_live_same_hash_pe
         )
         .unwrap();
     let (_, commands, _, _) =
-        compositor.build_frame_vertices(&scene, 128.0, 64.0, &mut FrameTelemetry::default());
+        compositor.build_frame_vertices(&scene, 128.0, 64.0, &mut FrameTelemetry::new(0));
     assert_eq!(commands.len(), 2);
     assert_eq!(compositor.resident_image_texture_cache.len(), 1);
     // Both exact draw commands were selected while A was live. B's live source
     // keeps the shared GPU cache entry after A is revoked before encoding.
     directory.with_agents_of(Default::default());
     let frame = surface.acquire_frame().unwrap();
-    let (encoder, _, _) =
+    let (encoder, _, _, signature_current) =
         compositor.encode_frame(&[], &frame.view, &scene, &commands, 128, 64, false, 0, 0);
+    assert!(
+        !signature_current,
+        "denied stale draw invalidates predicted presentation signature"
+    );
     compositor.queue.submit(std::iter::once(encoder.finish()));
     let pixels = surface.read_pixels(&compositor.device);
     assert_ne!(
@@ -412,13 +416,13 @@ async fn resident_raster_respects_background_and_content_bands() {
         let tab = scene.create_tab("foreground tile", 0).unwrap();
         let lease = scene.grant_lease("peer", 60_000);
         let tile = scene
-            .create_tile(tab, "peer", lease, Rect::new(16.0, 0.0, 16.0, 64.0), 1)
+            .create_tile(tab, "peer", lease, Rect::new(10.0, 0.0, 6.0, 64.0), 1)
             .unwrap();
         scene
             .set_tile_root(
                 tile,
                 solid_node(
-                    Rect::new(0.0, 0.0, 16.0, 64.0),
+                    Rect::new(0.0, 0.0, 6.0, 64.0),
                     Rgba::new(1.0, 1.0, 0.0, 1.0),
                     None,
                 ),

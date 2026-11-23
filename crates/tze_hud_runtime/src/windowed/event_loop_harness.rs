@@ -1847,6 +1847,7 @@ mod tests {
                         telemetry,
                         surface_acquired: primary_succeeds,
                         gpu_submitted: primary_succeeds,
+                        signature_current: true,
                     },
                     versions,
                 );
@@ -3096,6 +3097,7 @@ mod tests {
                     telemetry,
                     surface_acquired: false,
                     gpu_submitted: true,
+                    signature_current: true,
                 },
                 versions,
             );
