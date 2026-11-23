@@ -5557,7 +5557,8 @@ mod tests {
         use tze_hud_scene::graph::{SurfaceClasses, overlay::GoToCue};
 
         for hide in [false, true] {
-            let mut harness = approve_reject_notification_harness();
+            let clock = Arc::new(tze_hud_scene::TestClock::new(1_000));
+            let mut harness = approve_reject_notification_harness_on(clock.clone());
             let (zone, content) = {
                 let scene = harness.scene();
                 (
@@ -5582,6 +5583,8 @@ mod tests {
                     )
                     .unwrap();
             }
+            // The owner chord must select the scoped card over the generic fixture.
+            clock.advance(1);
             let card = publish_go_to_card(&mut harness, "go-to", "nested");
             let pairs = Arc::new(AtomicUsize::new(0));
             let (started_tx, started_rx) = std::sync::mpsc::channel();
@@ -5615,7 +5618,9 @@ mod tests {
                 click_at(&mut harness, point);
             } else {
                 assert_eq!(harness.app.focus_newest_question(true), Ok(true));
-                assert!(harness.app.state.answer_keyboard.focus.unwrap().nested);
+                let focus = harness.app.state.answer_keyboard.focus.unwrap();
+                assert_eq!(focus.publication_id, card);
+                assert!(focus.nested);
                 let mut step = key_down("Tab", "Tab", 100);
                 let PendingKeyboardEvent::KeyDown(raw) = &mut step else {
                     unreachable!()
@@ -5724,7 +5729,9 @@ mod tests {
         use std::sync::atomic::{AtomicIsize, AtomicUsize, Ordering::SeqCst};
         use tze_hud_scene::graph::overlay::GoToCue;
 
-        let mut harness = approve_reject_notification_harness();
+        let clock = Arc::new(tze_hud_scene::TestClock::new(1_000));
+        let mut harness = approve_reject_notification_harness_on(clock.clone());
+        clock.advance(1);
         let card = publish_go_to_card(&mut harness, "go-to", "retained-key");
         let lookups = Arc::new(AtomicUsize::new(0));
         harness.app.state.window_go_to.inject(
@@ -5748,6 +5755,16 @@ mod tests {
             scene.overlay.notification_go_to[&card].available
         });
         assert_eq!(harness.app.focus_newest_question(false), Ok(true));
+        assert_eq!(
+            harness
+                .app
+                .state
+                .answer_keyboard
+                .focus
+                .unwrap()
+                .publication_id,
+            card
+        );
         let mut step = key_down("Tab", "Tab", 100);
         let PendingKeyboardEvent::KeyDown(raw) = &mut step else {
             unreachable!()
