@@ -97,7 +97,7 @@ async fn overflowing_notification_action_label_ellipsizes_without_moving_later_a
         panic!("expected the original notification");
     };
     assert_eq!(
-        fit.notification(&scene, ZONE, payload),
+        fit.notification(&scene, ZONE, payload, None),
         [("actions", explicit.chars().count() - 1)],
         "admission counts the painted original characters"
     );
