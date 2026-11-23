@@ -41,6 +41,8 @@ GWL_STYLE = -16
 GW_HWNDPREV = 3
 GW_OWNER = 4
 PM_REMOVE = 1
+# HWND_TOPMOST and HWND_NOTOPMOST, in the only order the child requests.
+COVER_BANDS = (("promoted", -1, False, True), ("demoted", -2, True, False))
 
 
 def require(condition: bool, message: str) -> None:
@@ -125,7 +127,7 @@ def child_window() -> None:
     require(radius <= x < width - radius and radius <= y < height - radius,
             "fixture point is too close to a display edge")
     # The predefined button class paints opaque content and takes part in hit testing.
-    # Create it at its final position, without asking a background process to re-raise it.
+    # The child creates one window at its final position.
     foreground_before = win.foreground_identity()
     hwnd = user32.CreateWindowExW(win.WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW, "Button", "",
                                  WS_POPUP | WS_VISIBLE, x - radius, y - radius, radius * 2, radius * 2, None, None,
@@ -135,6 +137,10 @@ def child_window() -> None:
         print(json.dumps({"phase": "created", "hwnd": hwnd, "pid": os.getpid(),
                           "foreground_before": foreground_before, "foreground_after": win.foreground_identity()}),
               flush=True)
+        # Selecting HWND_NOTOPMOST moves a topmost window above the ordinary band.
+        # The parent waits for both receipts and observes the cleared bit before input.
+        for phase, band, _, _ in COVER_BANDS:
+            print(json.dumps(place_cover(win, hwnd, (x, y), phase, band)), flush=True)
         closed = threading.Event()
 
         def pipe_closed() -> None:
@@ -150,6 +156,34 @@ def child_window() -> None:
                 user32.DispatchMessageW(ctypes.byref(msg))
     finally:
         require(bool(user32.DestroyWindow(hwnd)), "owned covering window could not be destroyed")
+
+
+def place_cover(win, hwnd: int, point: tuple[int, int], phase: str, band: int) -> dict:
+    user32 = win.user32
+    before = win.foreground_identity()
+    style_before = user32.GetWindowLongPtrW(hwnd, win.GWL_EXSTYLE)
+    flags = win.SWP_NOACTIVATE | win.SWP_NOMOVE | win.SWP_NOSIZE | win.SWP_NOOWNERZORDER
+    ctypes.set_last_error(0)
+    accepted = bool(user32.SetWindowPos(hwnd, band, 0, 0, 0, 0, flags))
+    error = ctypes.get_last_error()
+    return {
+        "phase": phase, "hwnd": hwnd, "pid": os.getpid(), "insert_after": band, "flags": flags,
+        "accepted": accepted, "last_error": error, "foreground_before": before,
+        "foreground_after": win.foreground_identity(), "at_point": win.window_at(point),
+        "topmost_before": bool(style_before & win.WS_EX_TOPMOST),
+        "topmost_after": bool(user32.GetWindowLongPtrW(hwnd, win.GWL_EXSTYLE) & win.WS_EX_TOPMOST),
+    }
+
+
+def verified_bands(transitions: list[dict], helper: dict, hud: dict) -> bool:
+    return len(transitions) == len(COVER_BANDS) and all(
+        transition["phase"] == phase and transition["insert_after"] == band
+        and transition["hwnd"] == helper["hwnd"] and transition["pid"] == helper["pid"]
+        and transition["accepted"] is True and transition["topmost_before"] is before
+        and transition["topmost_after"] is after
+        and transition["foreground_before"] == transition["foreground_after"] == hud
+        for transition, (phase, band, before, after) in zip(transitions, COVER_BANDS)
+    )
 
 
 def live_window(win, identity: dict) -> dict:
@@ -312,6 +346,9 @@ def witness(exe: Path, out: Path, report: dict) -> None:
                 require(isinstance(created.get("hwnd"), int) and created["hwnd"] > 0,
                         "cover has no native window handle")
                 helper = {"hwnd": created["hwnd"], "pid": child.pid}
+                transitions = fixture["band_transitions"] = []
+                for phase, _, _, _ in COVER_BANDS:
+                    transitions.append(receive(phase))
                 cover = live_window(win, helper)
                 fixture["cover"] = cover
                 stable = settle_cover(win, hud, helper, point, fixture["samples"])
@@ -326,6 +363,7 @@ def witness(exe: Path, out: Path, report: dict) -> None:
                 final = observe_cover(win, hud, helper, point)
                 fixture["before_original_press"] = final
                 require(live_window(win, helper) == cover, "cover changed while gathering fixture evidence")
+                require(verified_bands(transitions, helper, hud), "cover did not complete both nonactivating band transitions")
                 require(created["foreground_before"] == created["foreground_after"] == hud
                         and all(sample["foreground"] == hud for sample in fixture["samples"])
                         and stable and final == {"foreground": hud, "at_point": helper,
