@@ -45,6 +45,7 @@ pub(super) fn route_answer_key(
     focus: AnswerFocus,
     raw: &tze_hud_input::RawKeyDownEvent,
     tokens: &std::collections::HashMap<String, String>,
+    authorize_go_to: impl FnOnce() -> bool,
 ) -> AnswerKeyOutcome {
     let mut outcome = AnswerKeyOutcome {
         activation: None,
@@ -125,6 +126,9 @@ pub(super) fn route_answer_key(
         None
     };
     let Some(target) = target else { return outcome };
+    if target.kind == ZoneInteractionKind::GoTo && !authorize_go_to() {
+        return outcome;
+    }
     if super::notification_hold::needs_hold(scene, target, tokens) {
         let key = keyboard_key_identity(&raw.key_code, &raw.key);
         scene.begin_notification_hold(target.clone(), Some(key.clone()));

@@ -96,29 +96,89 @@ pub(super) fn revalidate(
     .then_some(window.target)
 }
 
-/// Main-thread activation seam. Failed overlay-assisted attempts put back
-/// the foreground that the temporary acquisition displaced.
+#[cfg(any(target_os = "windows", test))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ActivationFailure {
+    Cancelled,
+    Unavailable,
+    Blocked,
+}
+
+/// Main-thread activation seam. Each effect follows a foreground sample,
+/// after any potentially slow validation of the destination.
 #[cfg(any(target_os = "windows", test))]
 pub(super) trait Foreground {
+    fn revalidate(&mut self, target: Target) -> Option<Target>;
+    fn current(&self) -> Option<isize>;
     fn restore_minimized(&mut self, target: Target) -> bool;
     fn raise(&mut self, target: Target) -> bool;
-    fn acquire_overlay(&mut self) -> bool;
-    fn release_overlay(&mut self);
+    fn acquire_overlay(
+        &mut self,
+        previous: Option<isize>,
+    ) -> Result<Option<isize>, ActivationFailure>;
+    fn release_overlay(&mut self, overlay: isize, previous: Option<isize>);
 }
 
 #[cfg(any(target_os = "windows", test))]
-pub(super) fn activate(api: &mut (impl Foreground + ?Sized), target: Target) -> bool {
-    if target.minimized && !api.restore_minimized(target) {
-        return false;
+pub(super) fn activate(
+    api: &mut (impl Foreground + ?Sized),
+    target: Target,
+    previous: Option<isize>,
+) -> Result<Option<isize>, ActivationFailure> {
+    use ActivationFailure::{Blocked, Cancelled, Unavailable};
+
+    let checked = api.revalidate(target);
+    if api.current() != previous {
+        return Err(Cancelled);
+    }
+    let mut target = checked.ok_or(Unavailable)?;
+    if previous == Some(target.hwnd) {
+        return Ok(None);
+    }
+    if target.minimized {
+        if !api.restore_minimized(target) {
+            return Err(if api.current() == previous {
+                Blocked
+            } else {
+                Cancelled
+            });
+        }
+        let checked = api.revalidate(target);
+        let current = api.current();
+        // A successful restore may itself have activated the target. Leave
+        // final identity and success accounting to foreground confirmation.
+        if current == Some(target.hwnd) {
+            return checked.map(|_| None).ok_or(Unavailable);
+        }
+        if current != previous {
+            return Err(Cancelled);
+        }
+        target = checked.ok_or(Unavailable)?;
     }
     if api.raise(target) {
-        return true;
+        return Ok(None);
     }
-    if api.acquire_overlay() && api.raise(target) {
-        return true;
+    if api.current() != previous {
+        return Err(Cancelled);
     }
-    api.release_overlay();
-    false
+    let overlay = api.acquire_overlay(previous)?.ok_or(Blocked)?;
+    let checked = api.revalidate(target);
+    let current = api.current();
+    if current != Some(overlay) && current != previous {
+        return Err(Cancelled);
+    }
+    let result = match checked {
+        Some(target) if api.raise(target) => return Ok(Some(overlay)),
+        Some(_) => Blocked,
+        None => Unavailable,
+    };
+    let current = api.current();
+    if current == Some(overlay) {
+        api.release_overlay(overlay, previous);
+    } else if current != previous {
+        return Err(Cancelled);
+    }
+    Err(result)
 }
 
 #[cfg(target_os = "windows")]
@@ -340,57 +400,141 @@ mod tests {
         );
     }
 
+    const ORIGIN: isize = 10;
+    const OVERLAY: isize = 20;
+    const OTHER_APP: isize = 30;
+    const TARGET: Target = Target {
+        hwnd: 1,
+        pid: 1,
+        minimized: false,
+    };
+
+    struct ActivationApi {
+        current: Option<isize>,
+        accept_direct: bool,
+        accept_assisted: bool,
+        switch_on_validation: Option<Option<isize>>,
+        switch_on_refusal: bool,
+        effects: Vec<&'static str>,
+    }
+
+    impl Default for ActivationApi {
+        fn default() -> Self {
+            Self {
+                current: Some(ORIGIN),
+                accept_direct: false,
+                accept_assisted: false,
+                switch_on_validation: None,
+                switch_on_refusal: false,
+                effects: Vec::new(),
+            }
+        }
+    }
+
+    impl Foreground for ActivationApi {
+        fn revalidate(&mut self, target: Target) -> Option<Target> {
+            if let Some(next) = self.switch_on_validation.take() {
+                self.current = next;
+            }
+            Some(target)
+        }
+        fn current(&self) -> Option<isize> {
+            self.current
+        }
+        fn restore_minimized(&mut self, _: Target) -> bool {
+            self.effects.push("restore");
+            true
+        }
+        fn raise(&mut self, _: Target) -> bool {
+            self.effects.push("raise");
+            if self.current == Some(OVERLAY) {
+                return self.accept_assisted;
+            }
+            if !self.accept_direct && self.switch_on_refusal {
+                self.current = Some(OTHER_APP);
+            }
+            self.accept_direct
+        }
+        fn acquire_overlay(
+            &mut self,
+            previous: Option<isize>,
+        ) -> Result<Option<isize>, ActivationFailure> {
+            assert_eq!(previous, Some(ORIGIN));
+            self.effects.push("overlay");
+            self.current = Some(OVERLAY);
+            Ok(self.current)
+        }
+        fn release_overlay(&mut self, overlay: isize, previous: Option<isize>) {
+            assert_eq!(self.current, Some(overlay));
+            self.effects.push("release");
+            self.current = previous;
+        }
+    }
+
     #[test]
     fn go_to_uses_foreground_fallback_only_when_needed() {
-        #[derive(Default)]
-        struct Api {
-            overlay: bool,
-            handoff: bool,
-            calls: Vec<&'static str>,
-        }
-        impl Foreground for Api {
-            fn restore_minimized(&mut self, _: Target) -> bool {
-                self.calls.push("restore");
-                true
-            }
-            fn raise(&mut self, _: Target) -> bool {
-                self.calls.push("raise");
-                self.handoff
-            }
-            fn acquire_overlay(&mut self) -> bool {
-                self.calls.push("overlay");
-                self.handoff = self.overlay;
-                true
-            }
-            fn release_overlay(&mut self) {
-                self.calls.push("release");
-            }
-        }
-        let target = Target {
-            hwnd: 1,
-            pid: 1,
-            minimized: false,
-        };
-        let mut direct = Api {
-            handoff: true,
+        let mut direct = ActivationApi {
+            accept_direct: true,
             ..Default::default()
         };
-        assert!(activate(&mut direct, target));
-        assert_eq!(direct.calls, ["raise"]);
-        let mut fallback = Api {
-            overlay: true,
+        assert_eq!(activate(&mut direct, TARGET, Some(ORIGIN)), Ok(None));
+        assert_eq!(direct.effects, ["raise"]);
+
+        let mut fallback = ActivationApi {
+            accept_assisted: true,
             ..Default::default()
         };
-        assert!(activate(
-            &mut fallback,
-            Target {
-                minimized: true,
-                ..target
-            }
-        ));
-        assert_eq!(fallback.calls, ["restore", "raise", "overlay", "raise"]);
-        let mut blocked = Api::default();
-        assert!(!activate(&mut blocked, target));
-        assert_eq!(blocked.calls, ["raise", "overlay", "raise", "release"]);
+        assert_eq!(
+            activate(
+                &mut fallback,
+                Target {
+                    minimized: true,
+                    ..TARGET
+                },
+                Some(ORIGIN)
+            ),
+            Ok(Some(OVERLAY))
+        );
+        assert_eq!(fallback.effects, ["restore", "raise", "overlay", "raise"]);
+
+        let mut blocked = ActivationApi::default();
+        assert_eq!(
+            activate(&mut blocked, TARGET, Some(ORIGIN)),
+            Err(ActivationFailure::Blocked)
+        );
+        assert_eq!(blocked.effects, ["raise", "overlay", "raise", "release"]);
+        assert_eq!(blocked.current, Some(ORIGIN));
+    }
+
+    #[test]
+    fn go_to_cancels_if_the_foreground_changes_during_destination_validation_or_raise() {
+        let mut reading = ActivationApi {
+            switch_on_validation: Some(Some(OTHER_APP)),
+            ..Default::default()
+        };
+        assert_eq!(
+            activate(
+                &mut reading,
+                Target {
+                    minimized: true,
+                    ..TARGET
+                },
+                Some(ORIGIN)
+            ),
+            Err(ActivationFailure::Cancelled)
+        );
+        assert!(reading.effects.is_empty());
+        assert_eq!(reading.current, Some(OTHER_APP));
+
+        let mut refused = ActivationApi {
+            switch_on_refusal: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            activate(&mut refused, TARGET, Some(ORIGIN)),
+            Err(ActivationFailure::Cancelled)
+        );
+        assert_eq!(refused.effects, ["raise"]);
+        assert_eq!(refused.current, Some(OTHER_APP));
     }
 }

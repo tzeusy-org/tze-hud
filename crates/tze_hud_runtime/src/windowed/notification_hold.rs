@@ -93,7 +93,7 @@ impl WinitApp {
         if let Some(activation) = activation {
             self.deliver_notification_activation(
                 activation,
-                super::window_go_to::GoToOrigin::Keyboard,
+                super::window_go_to::GoToOrigin::Keyboard(None),
             );
         }
         changed

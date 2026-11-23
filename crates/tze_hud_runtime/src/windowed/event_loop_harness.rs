@@ -5602,6 +5602,7 @@ mod tests {
             // The real foreground remains the same HWND when nested Esc
             // leaves the card and returns to a composer in the HUD.
             harness.app.state.window_go_to.test_foreground = Some(Box::new(|| Some(10)));
+            harness.app.state.window_go_to.test_hud_foreground = Some(10);
             present_go_to_card(&mut harness, true);
             wait_for_go_to(&mut harness, |scene| {
                 scene
@@ -5718,6 +5719,88 @@ mod tests {
         assert_eq!(state.attempted_at_mono_us, None);
         assert_eq!(state.cue, None);
         assert_eq!(lookups.load(SeqCst), 1);
+    }
+
+    #[test]
+    fn go_to_drops_a_retained_answer_key_after_native_foreground_leaves_the_hud() {
+        use std::sync::atomic::{AtomicIsize, AtomicUsize, Ordering::SeqCst};
+        use tze_hud_scene::graph::overlay::GoToCue;
+
+        let mut harness = approve_reject_notification_harness();
+        let card = publish_go_to_card(&mut harness, "go-to", "retained-key");
+        let lookups = Arc::new(AtomicUsize::new(0));
+        harness.app.state.window_go_to.inject(
+            {
+                let lookups = lookups.clone();
+                move || {
+                    lookups.fetch_add(1, SeqCst);
+                    go_to_windows("retained-key", 1)
+                }
+            },
+            |_| false,
+        );
+        let foreground = Arc::new(AtomicIsize::new(30));
+        harness.app.state.window_go_to.test_foreground = Some(Box::new({
+            let foreground = foreground.clone();
+            move || Some(foreground.load(SeqCst))
+        }));
+        harness.app.state.window_go_to.test_hud_foreground = Some(30);
+        present_go_to_card(&mut harness, true);
+        wait_for_go_to(&mut harness, |scene| {
+            scene.overlay.notification_go_to[&card].available
+        });
+        assert_eq!(harness.app.focus_newest_question(false), Ok(true));
+        let mut step = key_down("Tab", "Tab", 100);
+        let PendingKeyboardEvent::KeyDown(raw) = &mut step else {
+            unreachable!()
+        };
+        raw.modifiers.shift = true;
+        harness.enqueue(step);
+        harness.enqueue(key_up("Tab", "Tab", 110));
+        harness.drain();
+
+        let handle = Arc::clone(&harness.app.state.shared_state.blocking_lock().scene);
+        let held = handle.blocking_lock();
+        let PendingKeyboardEvent::KeyDown(enter) = key_down("Enter", "Enter", 200) else {
+            unreachable!()
+        };
+        let PendingKeyboardEvent::KeyUp(release) = key_up("Enter", "Enter", 210) else {
+            unreachable!()
+        };
+        harness.app.dispatch_key_down_event(&enter);
+        harness.app.dispatch_key_up_event(&release);
+        assert_eq!(harness.pending_len(), 2);
+        // Windows has moved on, but the deferred Enter drains before winit
+        // receives the corresponding focus-loss event.
+        foreground.store(31, SeqCst);
+        drop(held);
+        harness.drain();
+        assert_eq!(harness.pending_len(), 0);
+        assert_eq!(
+            harness
+                .app
+                .state
+                .answer_keyboard
+                .focus
+                .unwrap()
+                .publication_id,
+            card
+        );
+        assert_eq!(
+            harness.scene().overlay.notification_go_to[&card].attempted_at_mono_us,
+            None
+        );
+        assert_eq!(lookups.load(SeqCst), 1);
+
+        // A fresh press while the HUD owns foreground still reaches the
+        // press lookup. The fake Windows API refuses the actual switch.
+        foreground.store(30, SeqCst);
+        harness.press_named_key("Enter");
+        wait_for_go_to(&mut harness, |scene| {
+            scene.overlay.notification_go_to[&card].cue == Some(GoToCue::Blocked)
+        });
+        assert_eq!(lookups.load(SeqCst), 2);
+        assert_eq!(harness.app.state.window_go_to.activations, 0);
     }
 
     #[test]

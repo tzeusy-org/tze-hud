@@ -1570,6 +1570,16 @@ impl WinitApp {
         let modified = raw.modifiers.ctrl || raw.modifiers.alt || raw.modifiers.meta;
         let traversal = is_bare_tab_chord(&raw.key, &raw.modifiers);
         let activation = !modified && is_activation_key(&raw.key, &raw.key_code);
+        let mut go_to_origin = super::window_go_to::GoToOrigin::Keyboard(None);
+        let window_go_to = &self.state.window_go_to;
+        let mut authorize_go_to = || {
+            let foreground = window_go_to.foreground();
+            if !window_go_to.keyboard_owns_foreground(foreground) {
+                return false;
+            }
+            go_to_origin = super::window_go_to::GoToOrigin::Keyboard(foreground);
+            true
+        };
         let mut wake = None;
         let mut answer_exit = false;
         let mut return_focus = false;
@@ -1599,6 +1609,7 @@ impl WinitApp {
                         focus,
                         raw,
                         &self.state.global_tokens,
+                        authorize_go_to,
                     );
                     wake = outcome.activation;
                     answer_exit = outcome.exit;
@@ -1684,6 +1695,8 @@ impl WinitApp {
                             .state
                             .safe_mode_atomic
                             .load(std::sync::atomic::Ordering::Acquire)
+                        && (control.kind != tze_hud_scene::ZoneInteractionKind::GoTo
+                            || authorize_go_to())
                     {
                         // The pending-keyboard drain bypasses the outer FIFO guard;
                         // a key queued before pause must not activate a card afterward.
@@ -1733,7 +1746,7 @@ impl WinitApp {
                 .insert(keyboard_key_identity(&raw.key_code, &raw.key));
         }
         if let Some(wake) = wake {
-            self.deliver_notification_activation(wake, super::window_go_to::GoToOrigin::Keyboard);
+            self.deliver_notification_activation(wake, go_to_origin);
         }
         Ok(consumed)
     }

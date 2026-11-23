@@ -1331,15 +1331,19 @@ fn owns_foreground(owner: &ChromeNativeOwner, foreground: Option<isize>) -> bool
         })
 }
 
+#[cfg(target_os = "windows")]
+pub(super) fn hud_owned_foreground(foreground: Option<isize>) -> bool {
+    CHROME_NATIVE_OWNER.with(|owner| {
+        owner
+            .try_borrow()
+            .is_ok_and(|owner| owns_foreground(&owner, foreground))
+    })
+}
+
 pub(super) fn hud_owns_foreground() -> bool {
     #[cfg(target_os = "windows")]
     {
-        let foreground = foreground_window();
-        CHROME_NATIVE_OWNER.with(|owner| {
-            owner
-                .try_borrow()
-                .is_ok_and(|owner| owns_foreground(&owner, foreground))
-        })
+        hud_owned_foreground(foreground_window())
     }
     #[cfg(not(target_os = "windows"))]
     {
@@ -1427,18 +1431,24 @@ pub(super) fn focus_window_for_text_input(window: &Window) {
     #[cfg(target_os = "windows")]
     if let Some(hwnd) = hwnd_for_window(window) {
         use windows::Win32::UI::Input::KeyboardAndMouse::SetFocus;
-        acquire_window_foreground(hwnd, || {
-            // SAFETY: This is the overlay's live HWND on the winit thread.
-            let _ = unsafe { SetFocus(hwnd) };
-        });
+        acquire_window_foreground(
+            hwnd,
+            |_, _| true,
+            || {
+                // SAFETY: This is the overlay's live HWND on the winit thread.
+                let _ = unsafe { SetFocus(hwnd) };
+            },
+        );
     }
 }
 
 /// Foreground acquisition shared by text focus and the card's native handoff.
-/// Text-only focus and IME steps belong to the caller.
+/// Text-only focus and IME steps belong to the caller. The guard can allow
+/// this HWND after the first raise attempt.
 #[cfg(target_os = "windows")]
 pub(super) fn acquire_window_foreground(
     hwnd: windows::Win32::Foundation::HWND,
+    may_continue: impl Fn(bool, windows::Win32::Foundation::HWND) -> bool,
     after_raise: impl FnOnce(),
 ) -> bool {
     use windows::Win32::Foundation::{FALSE, TRUE};
@@ -1453,6 +1463,9 @@ pub(super) fn acquire_window_foreground(
     // SAFETY: The caller supplies an overlay HWND owned by this winit thread.
     // AttachThreadInput is paired and never attaches to the destination app.
     unsafe {
+        if !may_continue(false, GetForegroundWindow()) {
+            return false;
+        }
         let _ = BringWindowToTop(hwnd);
         let fg = GetForegroundWindow();
         let our_thread = GetCurrentThreadId();
@@ -1462,12 +1475,29 @@ pub(super) fn acquire_window_foreground(
             GetWindowThreadProcessId(fg, None)
         };
         let attach_required = fg_thread != 0 && fg_thread != our_thread;
-        let attached = attach_required && AttachThreadInput(our_thread, fg_thread, TRUE).as_bool();
+        let attached = attach_required && {
+            let current = GetForegroundWindow();
+            may_continue(true, current)
+                && current == fg
+                && AttachThreadInput(our_thread, fg_thread, TRUE).as_bool()
+        };
 
+        // The first write attempts the temporary change. Once attempted, its
+        // matching cleanup still runs if the owner has moved focus meanwhile.
+        let mut timeout_write_attempted = false;
         let (sfw, timeout_attempt) = with_temporary_foreground_lock_timeout(
             read_foreground_lock_timeout,
-            set_foreground_lock_timeout,
+            |timeout| {
+                if !timeout_write_attempted && !may_continue(true, GetForegroundWindow()) {
+                    return false;
+                }
+                timeout_write_attempted = true;
+                set_foreground_lock_timeout(timeout)
+            },
             || {
+                if !may_continue(true, GetForegroundWindow()) {
+                    return false;
+                }
                 let sfw = SetForegroundWindow(hwnd).as_bool();
                 after_raise();
                 sfw
@@ -1499,7 +1529,7 @@ pub(super) fn acquire_window_foreground(
                 fg_after == hwnd,
             ));
         }
-        fg_after == hwnd
+        may_continue(true, fg_after) && fg_after == hwnd
     }
 }
 

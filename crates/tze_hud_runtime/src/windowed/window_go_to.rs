@@ -55,7 +55,7 @@ fn take_result<T>(worker: &mut Option<mpsc::Receiver<T>>) -> Option<T> {
 
 #[derive(Clone, Copy)]
 pub(super) enum GoToOrigin {
-    Keyboard,
+    Keyboard(Option<isize>),
     Pointer(Option<isize>),
 }
 
@@ -114,6 +114,8 @@ pub(super) struct WindowGoTo {
     test_activate: Option<Box<dyn FnMut(Target) -> bool>>,
     #[cfg(test)]
     pub(super) test_foreground: Option<Box<dyn Fn() -> Option<isize>>>,
+    #[cfg(test)]
+    pub(super) test_hud_foreground: Option<isize>,
     pub(super) activations: u64,
 }
 
@@ -157,6 +159,23 @@ impl WindowGoTo {
             return lifecycle::foreground_window();
         }
         None
+    }
+
+    pub(super) fn keyboard_owns_foreground(&self, observed: Option<isize>) -> bool {
+        #[cfg(test)]
+        if self.test_activate.is_some() {
+            return self.test_foreground.is_none()
+                || observed.is_some() && observed == self.test_hud_foreground;
+        }
+        #[cfg(target_os = "windows")]
+        {
+            lifecycle::hud_owned_foreground(observed)
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = observed;
+            false
+        }
     }
 
     pub(super) fn next_deadline(&self) -> Option<Instant> {
@@ -250,8 +269,7 @@ impl WinitApp {
             stamp,
             bounds,
             foreground: match origin {
-                GoToOrigin::Keyboard => state.foreground(),
-                GoToOrigin::Pointer(foreground) => foreground,
+                GoToOrigin::Keyboard(foreground) | GoToOrigin::Pointer(foreground) => foreground,
             },
             origin,
             answer_visit: self.state.answer_keyboard.visit,
@@ -454,18 +472,20 @@ impl WinitApp {
             let feedback = match result {
                 Ok(Match::None) => Feedback::Cue(GoToCue::NotFound),
                 Ok(Match::Multiple(count)) => Feedback::Cue(GoToCue::Ambiguous(count)),
-                Ok(Match::One(target)) => match self.activate_go_to(target, &token, press.bounds) {
-                    Ok(handoff) => {
-                        handoffs.push(PendingHandoff {
-                            press,
-                            handoff,
-                            until: now + FOREGROUND_CONFIRM_TIMEOUT,
-                            next_check: now,
-                        });
-                        continue;
+                Ok(Match::One(target)) => {
+                    match self.activate_go_to(target, &token, press.bounds, press.foreground) {
+                        Ok(handoff) => {
+                            handoffs.push(PendingHandoff {
+                                press,
+                                handoff,
+                                until: now + FOREGROUND_CONFIRM_TIMEOUT,
+                                next_check: now,
+                            });
+                            continue;
+                        }
+                        Err(feedback) => feedback,
                     }
-                    Err(cue) => Feedback::Cue(cue),
-                },
+                }
                 Err(_) => Feedback::Cue(GoToCue::Blocked),
             };
             self.finish_go_to(press, feedback);
@@ -545,7 +565,8 @@ impl WinitApp {
         target: Target,
         token: &str,
         bounds: Rect,
-    ) -> Result<Handoff, GoToCue> {
+        previous: Option<isize>,
+    ) -> Result<Handoff, Feedback> {
         #[cfg(test)]
         if let Some(injected) = self.state.window_go_to.test_activate.as_mut() {
             return if injected(target) {
@@ -554,7 +575,7 @@ impl WinitApp {
                     temporary_overlay: None,
                 })
             } else {
-                Err(GoToCue::Blocked)
+                Err(Feedback::Cue(GoToCue::Blocked))
             };
         }
         #[cfg(target_os = "windows")]
@@ -569,14 +590,14 @@ impl WinitApp {
                 .or(self.state.window.as_ref())
                 .and_then(|window| lifecycle::hwnd_for_window(window));
             let Some(inspector) = self.state.window_go_to.inspector.as_ref() else {
-                return Err(GoToCue::Blocked);
+                return Err(Feedback::Cue(GoToCue::Blocked));
             };
-            windows_activate(target, &inspector.apps, token, overlay)
+            windows_activate(target, &inspector.apps, token, overlay, previous)
         }
         #[cfg(not(target_os = "windows"))]
         {
-            let _ = (target, token, bounds);
-            Err(GoToCue::Blocked)
+            let _ = (target, token, bounds, previous);
+            Err(Feedback::Cue(GoToCue::Blocked))
         }
     }
 }
@@ -585,14 +606,14 @@ fn release_temporary_foreground(overlay: Option<isize>, previous: Option<isize>)
     #[cfg(target_os = "windows")]
     if let Some(previous) = previous
         && let Some(overlay) = overlay
-        && Some(overlay) == lifecycle::foreground_window()
+        && previous != overlay
     {
         use windows::Win32::Foundation::HWND;
         use windows::Win32::UI::WindowsAndMessaging::{IsWindow, SetForegroundWindow};
         let previous = HWND(previous as _);
         // SAFETY: Release only our temporary foreground, using a verified HWND.
         unsafe {
-            if IsWindow(previous).as_bool() {
+            if IsWindow(previous).as_bool() && lifecycle::foreground_window() == Some(overlay) {
                 let _ = SetForegroundWindow(previous);
             }
         }
@@ -607,84 +628,93 @@ fn windows_activate(
     apps: &[String],
     token: &str,
     overlay: Option<windows::Win32::Foundation::HWND>,
-) -> Result<Handoff, GoToCue> {
-    use window_match::{Foreground, native};
+    previous: Option<isize>,
+) -> Result<Handoff, Feedback> {
+    use std::cell::Cell;
+    use window_match::{ActivationFailure, Foreground, native};
     use windows::Win32::Foundation::HWND;
     use windows::Win32::UI::WindowsAndMessaging::{
-        GetForegroundWindow, SW_RESTORE, SetForegroundWindow, ShowWindowAsync,
+        SW_RESTORE, SetForegroundWindow, ShowWindowAsync,
     };
 
     struct Win32<'a> {
         overlay: Option<HWND>,
-        previous: Option<isize>,
         apps: &'a [String],
         token: &'a str,
-        target_lost: bool,
-        temporary_overlay: Option<isize>,
-    }
-
-    impl Win32<'_> {
-        fn valid_window(&mut self, target: Target) -> Option<HWND> {
-            let window = window_match::revalidate(target, self.apps, self.token, native::observe)
-                .and_then(native::hwnd);
-            self.target_lost = window.is_none();
-            window
-        }
     }
 
     impl Foreground for Win32<'_> {
+        fn revalidate(&mut self, target: Target) -> Option<Target> {
+            window_match::revalidate(target, self.apps, self.token, native::observe)
+                .filter(|checked| native::hwnd(*checked).is_some())
+        }
+
+        fn current(&self) -> Option<isize> {
+            lifecycle::foreground_window()
+        }
+
         fn restore_minimized(&mut self, target: Target) -> bool {
-            // SAFETY: native::hwnd verifies the destination's process.
-            self.valid_window(target)
-                .is_some_and(|hwnd| unsafe { ShowWindowAsync(hwnd, SW_RESTORE).as_bool() })
+            // SAFETY: activate validates the destination and samples the
+            // original foreground immediately before this call.
+            unsafe { ShowWindowAsync(HWND(target.hwnd as _), SW_RESTORE).as_bool() }
         }
 
         fn raise(&mut self, target: Target) -> bool {
-            // SAFETY: native::hwnd verifies the destination's process.
-            self.valid_window(target).is_some_and(|hwnd| unsafe {
-                hwnd == GetForegroundWindow() || SetForegroundWindow(hwnd).as_bool()
-            })
+            // SAFETY: activate validates the destination and samples an
+            // authorized foreground immediately before this call.
+            unsafe { SetForegroundWindow(HWND(target.hwnd as _)).as_bool() }
         }
 
-        fn acquire_overlay(&mut self) -> bool {
-            if self.target_lost {
-                return false;
-            }
+        fn acquire_overlay(
+            &mut self,
+            previous: Option<isize>,
+        ) -> Result<Option<isize>, ActivationFailure> {
             let Some(overlay) = self.overlay else {
-                return false;
+                return Ok(None);
             };
-            let acquired = lifecycle::acquire_window_foreground(overlay, || {});
-            // BringWindowToTop itself may have made the overlay foreground.
-            if lifecycle::foreground_window() == Some(overlay.0 as isize) {
-                self.temporary_overlay = Some(overlay.0 as isize);
+            let handle = Some(overlay.0 as isize);
+            let interrupted = Cell::new(false);
+            let may_continue = |after_raise, current| {
+                let allowed = current == previous || after_raise && current == handle;
+                interrupted.set(interrupted.get() || !allowed);
+                !interrupted.get()
+            };
+            let acquired = lifecycle::acquire_window_foreground(
+                overlay,
+                |after_raise, current| {
+                    let current = (!current.0.is_null()).then_some(current.0 as isize);
+                    may_continue(after_raise, current)
+                },
+                || {},
+            );
+            let current = self.current();
+            if !may_continue(true, current) {
+                Err(ActivationFailure::Cancelled)
+            } else if acquired || current == handle {
+                Ok(handle)
+            } else {
+                Ok(None)
             }
-            acquired
         }
 
-        fn release_overlay(&mut self) {
-            release_temporary_foreground(self.temporary_overlay, self.previous);
+        fn release_overlay(&mut self, overlay: isize, previous: Option<isize>) {
+            release_temporary_foreground(Some(overlay), previous);
         }
     }
 
-    let Some(target) = window_match::revalidate(target, apps, token, native::observe) else {
-        return Err(GoToCue::NotFound);
-    };
     let mut api = Win32 {
         overlay,
-        previous: lifecycle::foreground_window(),
         apps,
         token,
-        target_lost: false,
-        temporary_overlay: None,
     };
-    if window_match::activate(&mut api, target) {
-        Ok(Handoff {
+    window_match::activate(&mut api, target, previous)
+        .map(|temporary_overlay| Handoff {
             target,
-            temporary_overlay: api.temporary_overlay,
+            temporary_overlay,
         })
-    } else if api.target_lost {
-        Err(GoToCue::NotFound)
-    } else {
-        Err(GoToCue::Blocked)
-    }
+        .map_err(|failure| match failure {
+            ActivationFailure::Cancelled => Feedback::Cancelled,
+            ActivationFailure::Unavailable => Feedback::Cue(GoToCue::NotFound),
+            ActivationFailure::Blocked => Feedback::Cue(GoToCue::Blocked),
+        })
 }
