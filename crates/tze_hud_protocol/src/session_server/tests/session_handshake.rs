@@ -2,6 +2,7 @@ use super::*;
 
 #[tokio::test]
 async fn test_initial_handshake_failures_carry_recovery_hints() {
+    use prost::Message;
     let service = HudSessionImpl::new(SceneGraph::new(800.0, 600.0), "test-key");
     let agents = tze_hud_scene::config::AgentDirectory::unrestricted("test-key");
     let budget = ResourceBudget::default();
@@ -31,12 +32,20 @@ async fn test_initial_handshake_failures_carry_recovery_hints() {
                 ..Default::default()
             })),
             "INVALID_HANDSHAKE",
-            "First message must be SessionInit or SessionResume",
+            "First message must be SessionInit",
         ),
         (
             Ok(Some(ClientMessage::default())),
             "INVALID_HANDSHAKE",
-            "First message must be SessionInit or SessionResume",
+            "First message must be SessionInit",
+        ),
+        (
+            // Retired ClientMessage.session_resume (tag 11), discarded by protobuf.
+            Ok(Some(
+                ClientMessage::decode([0x08, 1, 0x5a, 0].as_slice()).unwrap(),
+            )),
+            "INVALID_HANDSHAKE",
+            "First message must be SessionInit",
         ),
     ] {
         let (tx, mut rx) = tokio::sync::mpsc::channel(16);
@@ -50,9 +59,6 @@ async fn test_initial_handshake_failures_carry_recovery_hints() {
         assert!(error.message.contains(message_fragment));
         assert!(error.hint.contains("new stream"));
         assert!(error.hint.contains("SessionInit"));
-        if code == "INVALID_HANDSHAKE" {
-            assert!(error.hint.contains("SessionResume"));
-        }
         assert!(rx.try_recv().is_err(), "rejection sends only one error");
         assert_eq!(service.state.lock().await.sessions.session_count(), 0);
     }
@@ -83,33 +89,15 @@ async fn test_session_registration_rejections_carry_recovery_hints() {
     let enforcer: SharedMutationBudgetEnforcer = Arc::new(RejectRegistration);
     let agents = tze_hud_scene::config::AgentDirectory::unrestricted("test-key");
     let budget = ResourceBudget::default();
-    for resume in [false, true] {
+    {
         let clock = tze_hud_scene::TestClock::new(0);
         let scene = SceneGraph::new_with_clock(800.0, 600.0, Arc::new(clock));
         let service = HudSessionImpl::new(scene, "test-key");
-        let token = vec![1; 16];
-        let payload = if resume {
-            service.state.lock().await.token_store.insert(
-                token.clone(),
-                "rejected-agent".to_string(),
-                Vec::new(),
-                Vec::new(),
-                DEFAULT_GRACE_PERIOD_MS,
-                0,
-            );
-            ClientPayload::SessionResume(SessionResume {
-                agent_id: "rejected-agent".to_string(),
-                resume_token: token.clone(),
-                auth_credential: Some(crate::auth::psk_credential("test-key")),
-                ..Default::default()
-            })
-        } else {
-            ClientPayload::SessionInit(SessionInit {
-                agent_id: "rejected-agent".to_string(),
-                auth_credential: Some(crate::auth::psk_credential("test-key")),
-                ..Default::default()
-            })
-        };
+        let payload = ClientPayload::SessionInit(SessionInit {
+            agent_id: "rejected-agent".to_string(),
+            auth_credential: Some(crate::auth::psk_credential("test-key")),
+            ..Default::default()
+        });
         let (live_agents, closer) = (agents.clone().shared(), Default::default());
         let ctx = HandshakeCtx {
             state: &service.state,
@@ -143,15 +131,7 @@ async fn test_session_registration_rejections_carry_recovery_hints() {
         assert!(error.hint.contains("capacity"));
         assert!(error.hint.contains("new stream with SessionInit"));
         assert!(rx.try_recv().is_err(), "rejection sends only one error");
-        let mut state = service.state.lock().await;
-        assert_eq!(state.sessions.session_count(), 0);
-        if resume {
-            assert!(error.hint.contains("token has been consumed"));
-            assert!(matches!(
-                state.token_store.consume(&token, "rejected-agent", 0),
-                Err(crate::token::ResumeError::TokenNotFound)
-            ));
-        }
+        assert_eq!(service.state.lock().await.sessions.session_count(), 0);
     }
 }
 
@@ -200,7 +180,32 @@ async fn test_handshake_init_established_and_current_degradation() {
         }
     }
 
-    let (_tx, messages, _stream) = handshake(&mut client, "test-agent", "test-key").await;
+    let mut legacy_init = SessionInit {
+        agent_id: "test-agent".into(),
+        initial_subscriptions: vec!["SCENE_TOPOLOGY".into()],
+        auth_credential: Some(crate::auth::psk_credential("test-key")),
+    }
+    .encode_to_vec();
+    legacy_init.extend_from_slice(&[0x32, 3, 1, 2, 3]); // Retired SessionInit.resume_token, tag 6.
+    let (tx, rx) = tokio::sync::mpsc::channel(64);
+    tx.send(ClientMessage {
+        sequence: 1,
+        timestamp_wall_us: now_wall_us(),
+        payload: Some(ClientPayload::SessionInit(
+            SessionInit::decode(legacy_init.as_slice()).unwrap(),
+        )),
+    })
+    .await
+    .unwrap();
+    let mut stream = client
+        .session(tokio_stream::wrappers::ReceiverStream::new(rx))
+        .await
+        .unwrap()
+        .into_inner();
+    let messages = vec![
+        next_server_msg(&mut stream).await,
+        next_server_msg(&mut stream).await,
+    ];
 
     tokio::time::timeout(Duration::from_secs(1), registry_changes.changed())
         .await
@@ -224,7 +229,6 @@ async fn test_handshake_init_established_and_current_degradation() {
         Some(ServerPayload::SessionEstablished(established)) => {
             assert!(!established.session_id.is_empty());
             assert_eq!(established.namespace, "test-agent");
-            assert!(!established.resume_token.is_empty());
             assert_eq!(
                 established.heartbeat_interval_ms,
                 DEFAULT_HEARTBEAT_INTERVAL_MS
@@ -258,6 +262,17 @@ async fn test_handshake_init_established_and_current_degradation() {
         }
         other => panic!("Expected current DegradationNotice, got: {other:?}"),
     }
+    tx.send(ClientMessage::decode([0x08, 2, 0x5a, 0].as_slice()).unwrap())
+        .await
+        .unwrap();
+    let Some(ServerPayload::RequestResult(result)) = next_server_msg(&mut stream).await.payload
+    else {
+        panic!("removed-only envelope must receive the standard request refusal");
+    };
+    assert_eq!(result.seq, 2);
+    assert!(!result.ok);
+    assert_eq!(result.code, "INVALID_ARGUMENT");
+    assert!(!result.hint.is_empty());
 }
 
 #[tokio::test]
@@ -276,7 +291,6 @@ async fn test_handshake_auth_failure() {
             payload: Some(ClientPayload::SessionInit(SessionInit {
                 agent_id: "bad-agent".to_string(),
                 initial_subscriptions: Vec::new(),
-                resume_token: Vec::new(),
                 auth_credential: Some(crate::auth::psk_credential("wrong-key".to_string())),
             })),
         })
@@ -558,7 +572,7 @@ async fn test_graceful_disconnect_session_close() {
                     .is_none()
             );
             if std::mem::take(&mut *self.block_next.lock().unwrap()) {
-                // Init and Resume release earlier state and token locks before
+                // Init releases earlier shared-state locks before
                 // register_session. Take this real lock before returning Allow,
                 // so their next awaited state lock is deterministically pending.
                 let guard = Arc::clone(&self.state)
@@ -610,7 +624,6 @@ async fn test_graceful_disconnect_session_close() {
             agent_id: agent.to_string(),
             initial_subscriptions: vec!["SCENE_TOPOLOGY".to_string()],
             auth_credential: Some(crate::auth::psk_credential("test-key")),
-            ..Default::default()
         })
     }
 
@@ -627,23 +640,16 @@ async fn test_graceful_disconnect_session_close() {
         id
     }
 
-    async fn ready(stream: &mut tonic::Streaming<ServerMessage>, resume: bool) -> Vec<u8> {
+    async fn ready(stream: &mut tonic::Streaming<ServerMessage>) {
         let message = tokio::time::timeout(Duration::from_secs(5), stream.next())
             .await
             .expect("handshake reply timed out")
             .unwrap()
             .unwrap();
-        let token = match message.payload {
-            Some(ServerPayload::SessionEstablished(established)) if !resume => {
-                established.resume_token
-            }
-            Some(ServerPayload::SessionResumeResult(result)) if resume => {
-                assert!(result.accepted);
-                result.new_session_token
-            }
-            other => panic!("expected successful handshake, got {other:?}"),
-        };
-        assert!(!token.is_empty());
+        assert!(matches!(
+            message.payload,
+            Some(ServerPayload::SessionEstablished(_))
+        ));
         let message = tokio::time::timeout(Duration::from_secs(5), stream.next())
             .await
             .expect("current degradation notice timed out")
@@ -653,8 +659,6 @@ async fn test_graceful_disconnect_session_close() {
             message.payload,
             Some(ServerPayload::DegradationNotice(_))
         ));
-
-        token
     }
 
     async fn normal_close(
@@ -719,34 +723,13 @@ async fn test_graceful_disconnect_session_close() {
         let (tx, mut stream, handler) =
             open_owned_stream(&mut owned_client, init(namespace), &mut handlers).await;
         let id = registered_id(&mut registrations, namespace).await;
-        ready(&mut stream, false).await;
+        ready(&mut stream).await;
         peers.push((namespace, id, tx, stream, handler, 2u64));
     }
 
     let mut outcomes = Vec::new();
-    for (resume, preguard, panic_handler) in [
-        (false, true, false),
-        (false, true, true),
-        (true, true, false),
-        (true, true, true),
-        (false, false, false),
-        (false, false, true),
-    ] {
-        let payload = if resume {
-            let (tx, mut stream, handler) =
-                open_owned_stream(&mut owned_client, init("budget-cleanup"), &mut handlers).await;
-            let seed_id = registered_id(&mut registrations, "budget-cleanup").await;
-            let token = ready(&mut stream, false).await;
-            normal_close(&owned_state, &witness, seed_id, tx, stream, handler, 2).await;
-            ClientPayload::SessionResume(SessionResume {
-                agent_id: "budget-cleanup".to_string(),
-                resume_token: token,
-                auth_credential: Some(crate::auth::psk_credential("test-key")),
-                ..Default::default()
-            })
-        } else {
-            init("budget-cleanup")
-        };
+    for (preguard, panic_handler) in [(true, false), (true, true), (false, false), (false, true)] {
+        let payload = init("budget-cleanup");
         *witness.block_next.lock().unwrap() = preguard;
         let (tx, mut stream, handler) =
             open_owned_stream(&mut owned_client, payload, &mut handlers).await;
@@ -754,9 +737,15 @@ async fn test_graceful_disconnect_session_close() {
         if preguard {
             assert!(witness.barrier.lock().unwrap().is_some());
         } else {
-            ready(&mut stream, false).await;
+            ready(&mut stream).await;
             registry_changes.borrow_and_update();
         }
+        let cleanup = (!preguard).then_some(id);
+        let cleanup = if let Some(id) = cleanup {
+            Some(owned_state.lock().await.sessions.observe_cleanup(&id))
+        } else {
+            None
+        };
         let ObservedSessionHandler { task, panic } = handler;
         if panic_handler {
             panic.send(()).expect("actual handler panic lane closed");
@@ -779,6 +768,12 @@ async fn test_graceful_disconnect_session_close() {
         drop(tx);
         assert!(observe_stream_end(&mut stream, Duration::from_millis(500)).await);
 
+        if let Some(cleanup) = cleanup {
+            tokio::time::timeout(Duration::from_secs(5), cleanup)
+                .await
+                .expect("cancelled handler cleanup timed out")
+                .expect("cleanup witness dropped");
+        }
         if !preguard {
             tokio::time::timeout(Duration::from_secs(1), registry_changes.changed())
                 .await
@@ -828,90 +823,10 @@ async fn test_graceful_disconnect_session_close() {
             .unwrap_or(0);
         let remains = witness.entries.lock().unwrap().contains_key(&id);
         eprintln!(
-            "budget_handler_vector resume={resume} preguard={preguard} panic={panic_handler} id={id:?} removal_calls={removal_calls} remains={remains} peers_live=true"
+            "budget_handler_vector preguard={preguard} panic={panic_handler} id={id:?} removal_calls={removal_calls} remains={remains} peers_live=true"
         );
-        outcomes.push((resume, preguard, panic_handler, removal_calls, remains));
+        outcomes.push((preguard, panic_handler, removal_calls, remains));
     }
-
-    // A completed Resume keeps its own registration until real normal cleanup.
-    let (seed_tx, mut seed_stream, seed_handler) =
-        open_owned_stream(&mut owned_client, init("budget-cleanup"), &mut handlers).await;
-    let seed_id = registered_id(&mut registrations, "budget-cleanup").await;
-    let token = ready(&mut seed_stream, false).await;
-    normal_close(
-        &owned_state,
-        &witness,
-        seed_id,
-        seed_tx,
-        seed_stream,
-        seed_handler,
-        2,
-    )
-    .await;
-    assert_eq!(
-        owned_state.lock().await.sessions.session_count(),
-        peers.len()
-    );
-    let (resume_tx, mut resume_stream, resume_handler) = open_owned_stream(
-        &mut owned_client,
-        ClientPayload::SessionResume(SessionResume {
-            agent_id: "budget-cleanup".to_string(),
-            resume_token: token,
-            auth_credential: Some(crate::auth::psk_credential("test-key")),
-            ..Default::default()
-        }),
-        &mut handlers,
-    )
-    .await;
-    let resume_id = registered_id(&mut registrations, "budget-cleanup").await;
-    assert_ne!(resume_id, seed_id);
-    ready(&mut resume_stream, true).await;
-    assert_eq!(
-        owned_state.lock().await.sessions.session_count(),
-        peers.len() + 1
-    );
-    normal_close(
-        &owned_state,
-        &witness,
-        resume_id,
-        resume_tx,
-        resume_stream,
-        resume_handler,
-        2,
-    )
-    .await;
-    assert_eq!(
-        owned_state.lock().await.sessions.session_count(),
-        peers.len()
-    );
-    for (_namespace, peer_id, peer_tx, peer_stream, _handler, sequence) in &mut peers {
-        assert!(witness.entries.lock().unwrap().contains_key(peer_id));
-        assert!(!witness.removals.lock().unwrap().contains_key(peer_id));
-        let nonce = *sequence * 100;
-        peer_tx
-            .send(ClientMessage {
-                sequence: *sequence,
-                timestamp_wall_us: now_wall_us(),
-                payload: Some(ClientPayload::Heartbeat(Heartbeat {
-                    timestamp_mono_us: nonce,
-                })),
-            })
-            .await
-            .unwrap();
-        let reply = tokio::time::timeout(Duration::from_secs(5), peer_stream.next())
-            .await
-            .expect("unaffected peer stopped responding after normal Resume")
-            .unwrap()
-            .unwrap();
-        let Some(ServerPayload::Heartbeat(echo)) = reply.payload else {
-            panic!("unaffected peer did not echo after normal Resume");
-        };
-        assert_eq!(echo.timestamp_mono_us, nonce);
-        *sequence += 1;
-    }
-    eprintln!(
-        "budget_handler_normal_resume id={resume_id:?} removal_calls=1 registry_absent=true peers_live=true"
-    );
 
     // Rejected registration never owns an entry and must not receive removal.
     let before_reject = witness.entries.lock().unwrap().len();
@@ -942,12 +857,12 @@ async fn test_graceful_disconnect_session_close() {
     server.abort();
     assert!(server.await.unwrap_err().is_cancelled());
 
-    // Emit every actual owning-task row before asserting the intended RED.
-    assert_eq!(outcomes.len(), 6);
-    for (resume, preguard, panic_handler, removal_calls, remains) in outcomes {
+    // Each successful registration has exactly one owning removal.
+    assert_eq!(outcomes.len(), 4);
+    for (preguard, panic_handler, removal_calls, remains) in outcomes {
         assert_eq!(
             removal_calls, 1,
-            "successful budget registration needs one owning removal: resume={resume} preguard={preguard} panic={panic_handler}"
+            "successful budget registration needs one owning removal: preguard={preguard} panic={panic_handler}"
         );
         assert!(
             !remains,
@@ -974,7 +889,6 @@ async fn test_auth_structured_psk_credential_accepted() {
         payload: Some(ClientPayload::SessionInit(SessionInit {
             agent_id: "psk-agent".to_string(),
             initial_subscriptions: Vec::new(),
-            resume_token: Vec::new(),
             auth_credential: Some(crate::proto::session::AuthCredential {
                 credential: Some(
                     crate::proto::session::auth_credential::Credential::PreSharedKey(
@@ -1066,7 +980,6 @@ async fn test_psk_with_capability_allows_input_events_subscription() {
         payload: Some(ClientPayload::SessionInit(SessionInit {
             agent_id: "sub-test-agent".to_string(),
             initial_subscriptions: vec!["INPUT_EVENTS".to_string()],
-            resume_token: Vec::new(),
             auth_credential: Some(crate::auth::psk_credential("test-key".to_string())),
         })),
     })
@@ -1293,7 +1206,6 @@ async fn degradation_notice_send_failure_unregisters_session() {
             payload: Some(ClientPayload::SessionInit(SessionInit {
                 agent_id: "doomed".to_string(),
                 initial_subscriptions: Vec::new(),
-                resume_token: Vec::new(),
                 auth_credential: Some(crate::auth::psk_credential("test-key".to_string())),
             })),
         })
@@ -1374,23 +1286,6 @@ async fn test_handshake_unpaired_mid_flight_is_refused_at_registration() {
     tokio::time::timeout(std::time::Duration::from_secs(1), close.closed())
         .await
         .expect("Unpair's close reaches the registered signal");
-    // Closed before its handler armed a registry guard, the task's close
-    // branch still unregisters exactly this session.
-    let mut st = service.state.lock().await;
-    let mut registry_changes = st.sessions.subscribe_changes();
-    let (other, _other_signal) = crate::session::SessionCloser::pair();
-    st.sessions.register("late", &[], other);
-    registry_changes.borrow_and_update();
-    assert_eq!(st.sessions.remove_closed(&close), 1);
-    assert!(registry_changes.has_changed().unwrap());
-    assert_eq!(st.sessions.connected("late"), 1, "another session stays");
-    registry_changes.borrow_and_update();
-    assert_eq!(st.sessions.remove_closed(&close), 0);
-    assert!(
-        !registry_changes.has_changed().unwrap(),
-        "missing removal is quiet"
-    );
-    drop(st);
     drop(close);
     tokio::time::timeout(
         std::time::Duration::from_secs(1),

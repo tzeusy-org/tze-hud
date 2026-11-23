@@ -3,12 +3,12 @@
 //! This module provides `HudSessionImpl`, the server-side implementation of the
 //! `HudSession` gRPC service. It manages the bidirectional streaming session
 //! lifecycle: handshake, publication management, resource uploads, heartbeats,
-//! event dispatch, and reconnection.
+//! event dispatch, and termination.
 //!
 //! # Session Lifecycle State Machine
 //!
 //! ```text
-//! Connecting → Handshaking → Active → Disconnecting → Closed → Resuming
+//! Connecting → Handshaking → Active → Disconnecting → Closed
 //! ```
 //!
 //! Valid transitions:
@@ -18,9 +18,6 @@
 //! - Active → Disconnecting (SessionClose received)
 //! - Active → Closed (ungraceful: heartbeat timeout or stream EOF/RST)
 //! - Disconnecting → Closed (stream termination complete)
-//! - Closed → Resuming (SessionResume within grace period)
-//! - Resuming → Active (valid resume token)
-//! - Resuming → Closed (expired/invalid token)
 
 // LeaseCorrelationCache and DEFAULT_LEASE_CORRELATION_CACHE_CAPACITY are used
 // transitively in `mod tests { use super::* }`.
@@ -31,7 +28,6 @@ use crate::proto::session::hud_session_server::HudSession;
 use crate::proto::session::server_message::Payload as ServerPayload;
 use crate::proto::session::*;
 use crate::session::{SESSION_EVENT_CHANNEL_CAPACITY, SharedState};
-use crate::token::DEFAULT_GRACE_PERIOD_MS;
 use std::sync::Arc;
 // Duration and Instant are used transitively in `mod tests { use super::* }`.
 #[allow(unused_imports)]
@@ -258,14 +254,19 @@ impl HudSession for HudSessionImpl {
 
         // The owner's unpair ends the session from outside (see below).
         let (closer, close) = crate::session::SessionCloser::pair();
-        let (closing_tx, closing_state) = (tx.clone(), Arc::clone(&state));
+        let closing_tx = tx.clone();
         let live_agents = self.agents.clone();
+
+        // Cleanup outlives a cancelled handler and owns the completion signal.
+        let cleanup_guard =
+            SessionCleanupGuard::new(state.clone(), render_wake.clone(), close.clone());
+        let cleanup = Arc::clone(&cleanup_guard.shared);
 
         // Spawn the session handler task
         #[cfg(test)]
         let handler_state = Arc::clone(&state);
         let session_handler = async move {
-            // Wait for the first message (must be SessionInit or SessionResume)
+            // Wait for the first message (must be SessionInit)
             let first_read = match tokio::time::timeout(
                 tokio::time::Duration::from_millis(5000),
                 inbound.message(),
@@ -299,28 +300,32 @@ impl HudSession for HudSessionImpl {
                 resource_budget: &resource_budget,
                 budget_enforcer: budget_enforcer.as_ref(),
             };
-            let mut session = handle_handshake_read(handshake_ctx, &tx, first_read).await;
-
-            let Some((ref mut session, ref mut budget_registration_guard)) = session else {
+            let Some((mut session, budget_registration, established)) =
+                handle_handshake_read(handshake_ctx, &tx, first_read).await
+            else {
                 return; // Handshake failed, error already sent
             };
 
             session.publication_defaults = publication_defaults;
 
-            if session.state == SessionState::Resuming {
-                render_wake.notify();
+            {
+                let mut cleanup = cleanup.lock().unwrap_or_else(|p| p.into_inner());
+                let cleanup = cleanup.as_mut().expect("session cleanup is armed");
+                cleanup.session = Some(RegisteredResident {
+                    session_id: session.session_id.clone(),
+                    publication_origin: session.publication_origin,
+                    budget_registration,
+                });
             }
 
-            // The handshake registered this session; from here on, every exit
-            // (early `break 'active`, panic, task cancellation) must unregister
-            // it. Normal exits run the full cleanup below and disarm the guard.
-            let mut registry_guard = RegistryGuard::new(state.clone(), session.session_id.clone());
+            // Registry registration and cleanup arming have no intervening await.
+            if tx.send(Ok(established)).await.is_err() {
+                return;
+            }
 
-            // Everything between registration and cleanup runs inside this
-            // labeled block so no early exit can skip the cleanup below.
-            let mut upload_worker = None;
+            // Dropping this block closes upload channels before cleanup joins it.
             'active: {
-                // Transition: Handshaking/Resuming → Active
+                // Transition: Handshaking → Active
                 session.transition(SessionState::Active);
 
                 // Safe mode reaches this stream through the registry: it needs
@@ -359,25 +364,25 @@ impl HudSession for HudSessionImpl {
                     tokio::sync::mpsc::channel::<UploadWorkerCommand>(64);
                 let (upload_event_tx, mut upload_event_rx) =
                     tokio::sync::mpsc::channel::<UploadWorkerEvent>(64);
-                upload_worker = Some(tokio::spawn(run_upload_worker(
+                let upload_worker = tokio::spawn(run_upload_worker(
                     state.clone(),
                     session.namespace.clone(),
                     upload_command_rx,
                     upload_event_tx,
                     upload_rate_limit_bytes_per_sec,
                     render_wake.clone(),
-                )));
+                ));
+                cleanup
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .as_mut()
+                    .expect("session cleanup is armed")
+                    .upload_worker = Some(upload_worker);
 
                 // Main message loop
                 //
-                // The loop exits for one of three reasons:
-                //   1. Stream EOF (graceful): agent closed the stream.
-                //   2. Stream error: transport-level error.
-                //   3. Heartbeat timeout: no message for heartbeat_missed_threshold × interval.
-                //
-                // In cases (2) and (3) the disconnect is ungraceful; leases become orphaned.
-                // In case (1) the disconnect may be graceful (SessionClose was sent) or
-                // ungraceful (agent dropped the connection without sending SessionClose).
+                // EOF, transport errors, explicit close and the existing receive
+                // timeout all end this physical session and release its content.
                 //
                 // The loop also listens on `degradation_rx` for transactional DegradationNotice
                 // broadcasts. These are delivered unconditionally to all active
@@ -466,86 +471,23 @@ impl HudSession for HudSessionImpl {
                     }
                 }
             }
-
-            // The command sender and event receiver were dropped with the active
-            // loop. Join outside all shared-state locks; the closed event lane
-            // wakes blocked replies/backpressure and the worker aborts only its
-            // owned pending IDs before the cleanup witness can complete.
-            if let Some(worker) = upload_worker {
-                if let Err(error) = worker.await {
-                    tracing::error!(%error, "resource upload worker failed during session cleanup");
-                }
-            }
-
-            // Cleanup: disconnect is not release (invariant 4).
-            //
-            // The session's active leases become ORPHANED (badge shown, content
-            // kept) and the resume token is saved so the agent can reconnect
-            // within the grace period using SessionResume. When the grace period
-            // ends, the compositor's `expire_leases()` sweep reclaims the leases
-            // and their content with no agent help. Token and lease grace are
-            // measured on the scene clock so they expire together. Tokens are
-            // not persisted across process restarts.
-            {
-                let mut st = state.lock().await;
-                st.sessions.remove_session(&session.session_id);
-                registry_guard.disarm();
-
-                // Only sessions that completed the handshake get a grace period.
-                if !session.resume_token.is_empty() {
-                    let now = {
-                        let mut scene = st.scene.lock().await;
-                        let now = scene.now_millis();
-                        scene.orphan_publications(
-                            session.publication_origin,
-                            now,
-                            DEFAULT_GRACE_PERIOD_MS,
-                        );
-                        now
-                    };
-                    st.token_store.insert_with_publication_origin(
-                        session.resume_token.clone(),
-                        session.agent_name.clone(),
-                        session.capabilities.clone(),
-                        session.subscriptions.clone(),
-                        DEFAULT_GRACE_PERIOD_MS,
-                        now,
-                        Some(session.publication_origin),
-                    );
-                }
-            }
-            render_wake.notify();
-            if let Some(enforcer) = &session.budget_enforcer {
-                enforcer.remove_session(session.scene_session_id);
-            }
-            if let Some(guard) = budget_registration_guard.as_mut() {
-                guard.disarm();
-            }
-            #[cfg(test)]
-            state
-                .lock()
-                .await
-                .sessions
-                .finish_cleanup(&session.scene_session_id);
         };
         // Unpair drops the handler wherever it waits, even on a send to a hung
-        // agent; its registry guard unregisters it, and the stream ends. The
+        // agent; cleanup then releases its publications, uploads and slot. The
         // close arm is polled first, so a closed handler makes no more progress.
         let session_handler = async move {
             tokio::select! {
                 biased;
                 () = close.closed() => {
                     tracing::info!("session closed: the owner unpaired this agent");
-                    // The handler may have stopped between registering and
-                    // arming its registry guard; unregister it here either way.
-                    closing_state.lock().await.sessions.remove_closed(&close);
                     let _ = closing_tx.try_send(Err(Status::unauthenticated(
                         "this agent was unpaired; pair again to reconnect",
                     )));
                 }
                 () = session_handler => {}
             }
-            // Dropping `close` here tells the unpairing owner this task ended.
+            cleanup_guard.finish().await;
+            // Dropping `close` now tells the unpairing owner cleanup has finished.
         };
         #[cfg(not(test))]
         tokio::spawn(session_handler);
@@ -558,44 +500,105 @@ impl HudSession for HudSessionImpl {
     }
 }
 
-/// Unregisters a session (and its outbound sender) if the handler task dies
-/// before the normal cleanup runs, e.g. on panic or runtime shutdown. Normal
-/// exits call [`RegistryGuard::disarm`] after removing the entry themselves.
-/// Removal only: lease orphaning stays in the normal cleanup path.
-struct RegistryGuard {
-    state: Arc<Mutex<SharedState>>,
+/// Cleanup for one physical resident, including paths where the active future
+/// is dropped by unpair, task cancellation or panic. The upload channels belong
+/// to that future; dropping them wakes the worker so it aborts its pending IDs.
+struct RegisteredResident {
     session_id: String,
-    armed: bool,
+    publication_origin: tze_hud_scene::SceneId,
+    budget_registration: Option<handshake::BudgetRegistrationGuard>,
 }
 
-impl RegistryGuard {
-    fn new(state: Arc<Mutex<SharedState>>, session_id: String) -> Self {
-        Self {
-            state,
-            session_id,
-            armed: true,
+struct SessionCleanup {
+    state: Arc<Mutex<SharedState>>,
+    render_wake: tze_hud_scene::render_wake::RenderWakeNotifier,
+    session: Option<RegisteredResident>,
+    upload_worker: Option<tokio::task::JoinHandle<()>>,
+    // The owner waits for this signal, including cleanup after cancellation.
+    _close: crate::session::SessionCloseSignal,
+}
+
+impl SessionCleanup {
+    async fn run(mut self) {
+        // Never hold SharedState while joining: the worker needs it to finish.
+        if let Some(worker) = self.upload_worker.take() {
+            if let Err(error) = worker.await {
+                tracing::error!(%error, "resource upload worker failed during session cleanup");
+            }
         }
-    }
-
-    fn disarm(&mut self) {
-        self.armed = false;
-    }
-}
-
-impl Drop for RegistryGuard {
-    fn drop(&mut self) {
-        if !self.armed {
+        let Some(mut session) = self.session.take() else {
             return;
+        };
+        let (changed, question_wakes) = {
+            let mut st = self.state.lock().await;
+            st.sessions.remove_session(&session.session_id);
+            let mut scene = st.scene.lock().await;
+            let changed = scene.clear_publications_for_origin(session.publication_origin);
+            (changed, scene.take_notification_wait_notifiers())
+        };
+        for wake in question_wakes {
+            wake.notify();
         }
-        // The registry lock is async; hand removal to the runtime if one is
-        // still alive (if it is not, the whole registry is going away anyway).
-        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
-            let state = self.state.clone();
-            let session_id = std::mem::take(&mut self.session_id);
-            runtime.spawn(async move {
-                state.lock().await.sessions.remove_session(&session_id);
-            });
+        if changed {
+            self.render_wake.notify();
         }
+        // Release admission only after uploads and retained publications end.
+        drop(session.budget_registration.take());
+        #[cfg(test)]
+        self.state
+            .lock()
+            .await
+            .sessions
+            .finish_cleanup(&session.publication_origin);
+    }
+}
+
+struct SessionCleanupGuard {
+    shared: Arc<std::sync::Mutex<Option<SessionCleanup>>>,
+}
+
+impl SessionCleanupGuard {
+    fn new(
+        state: Arc<Mutex<SharedState>>,
+        render_wake: tze_hud_scene::render_wake::RenderWakeNotifier,
+        close: crate::session::SessionCloseSignal,
+    ) -> Self {
+        Self {
+            shared: Arc::new(std::sync::Mutex::new(Some(SessionCleanup {
+                state,
+                render_wake,
+                session: None,
+                upload_worker: None,
+                _close: close,
+            }))),
+        }
+    }
+
+    fn start(&mut self) -> Option<tokio::task::JoinHandle<()>> {
+        let cleanup = self
+            .shared
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .take()?;
+        // Without a runtime, the scene and upload store are shutting down too.
+        let runtime = tokio::runtime::Handle::try_current().ok()?;
+        Some(runtime.spawn(cleanup.run()))
+    }
+
+    async fn finish(mut self) {
+        // A separate task keeps cleanup alive if the supervisor is cancelled
+        // while awaiting it. Taking the data makes normal/Drop cleanup exclusive.
+        if let Some(task) = self.start() {
+            if let Err(error) = task.await {
+                tracing::error!(%error, "resident session cleanup failed");
+            }
+        }
+    }
+}
+
+impl Drop for SessionCleanupGuard {
+    fn drop(&mut self) {
+        drop(self.start());
     }
 }
 
@@ -666,8 +669,8 @@ async fn handle_client_message(
                 })
                 .await;
         }
-        // SessionInit/SessionResume should not appear after handshake
-        ClientPayload::SessionInit(_) | ClientPayload::SessionResume(_) => {
+        // SessionInit should not appear after handshake
+        ClientPayload::SessionInit(_) => {
             // Protocol violation: ignore (or could send RuntimeError)
         }
     }
@@ -749,7 +752,7 @@ impl StreamSession {
                                         code: code.to_string(),
                                         message,
                                         hint: format!(
-                                            "Open a new stream with SessionInit or SessionResume; send increasing sequence numbers starting at 2 with gaps no larger than {DEFAULT_MAX_SEQUENCE_GAP}"
+                                            "Open a new stream with SessionInit; send increasing sequence numbers starting at 2 with gaps no larger than {DEFAULT_MAX_SEQUENCE_GAP}"
                                         ),
                                     })),
                                 }))
@@ -1104,7 +1107,7 @@ async fn send_resource_error_response(
     .to_string();
     let next_action = match err {
         StoreResourceError::CapabilityDenied => {
-            "Ask the operator to grant upload_resource in the allow entries, then reconnect with a fresh SessionInit or valid SessionResume, then retry ResourceUploadStart"
+            "Ask the operator to grant upload_resource in the allow entries, then reconnect with a fresh SessionInit, then retry ResourceUploadStart"
         }
         StoreResourceError::BudgetExceeded { .. } => {
             "Use a smaller resource or wait for resource capacity, then retry ResourceUploadStart"

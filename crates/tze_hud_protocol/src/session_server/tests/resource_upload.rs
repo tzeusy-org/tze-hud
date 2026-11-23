@@ -186,7 +186,6 @@ async fn test_resource_upload_start_requires_upload_resource_capability() {
             assert!(action.contains("allow"));
             assert!(action.contains("reconnect"));
             assert!(action.contains("fresh SessionInit"));
-            assert!(action.contains("valid SessionResume"));
         }
         other => panic!("expected ResourceErrorResponse, got: {other:?}"),
     }

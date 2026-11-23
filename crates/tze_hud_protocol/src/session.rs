@@ -12,7 +12,6 @@ use tze_hud_scene::element_store::ElementStore;
 use tze_hud_scene::graph::SceneGraph;
 
 use crate::proto::session::ServerMessage;
-use crate::token::TokenStore;
 
 /// The element-store file and its writer. The runtime owns the one writer and
 /// hands it in here, so the protocol crate never serializes the file itself.
@@ -90,9 +89,6 @@ pub struct SharedState {
     /// switch).  A one-frame lag is acceptable: the scene remains the source of
     /// truth and the mirror reconverges on the next refresh.
     pub active_tab_mirror: Arc<std::sync::Mutex<Option<SceneId>>>,
-    /// In-memory resume token store.
-    /// Cleared on process restart; never persisted.
-    pub token_store: TokenStore,
 }
 
 impl SharedState {
@@ -152,7 +148,9 @@ pub struct SessionCloser {
 }
 
 /// The session task's half of a [`SessionCloser`]: the task drops its handler
-/// when [`Self::closed`] fires, and dropping this tells the closer it ended.
+/// when [`Self::closed`] fires. Cleanup retains a clone; dropping the last copy
+/// tells the closer all owned work has ended.
+#[derive(Clone)]
 pub struct SessionCloseSignal {
     close: Arc<tokio::sync::Notify>,
     _ended: tokio::sync::watch::Sender<()>,
@@ -180,7 +178,7 @@ impl SessionCloser {
         self.close.notify_one();
     }
 
-    /// Resolves once the task has dropped its [`SessionCloseSignal`].
+    /// Resolves once the task and its cleanup have dropped every [`SessionCloseSignal`].
     pub async fn ended(mut self) {
         while self.ended.changed().await.is_ok() {}
     }
@@ -196,10 +194,6 @@ impl Default for SessionCloser {
 impl SessionCloseSignal {
     pub async fn closed(&self) {
         self.close.notified().await;
-    }
-
-    fn is_for(&self, closer: &SessionCloser) -> bool {
-        Arc::ptr_eq(&self.close, &closer.close)
     }
 }
 
@@ -228,10 +222,6 @@ pub struct SessionRegistry {
     /// Observers of the full normal cleanup boundary, never a cleanup trigger.
     #[cfg(test)]
     cleanup_observers: HashMap<SceneId, Vec<tokio::sync::oneshot::Sender<()>>>,
-    /// The registry and wire use distinct IDs. Bind their actual identities
-    /// before a handshake reply so resumed transports can observe cleanup too.
-    #[cfg(test)]
-    cleanup_session_ids: HashMap<String, SceneId>,
 }
 
 impl SessionRegistry {
@@ -285,26 +275,6 @@ impl SessionRegistry {
         removed
     }
 
-    #[cfg(test)]
-    pub(crate) fn bind_cleanup_session(&mut self, registry_id: &str, scene_id: SceneId) {
-        self.cleanup_session_ids
-            .insert(registry_id.to_string(), scene_id);
-    }
-
-    /// Observe the actual scene session corresponding to a registered transport,
-    /// including resumes whose response does not expose the scene session ID.
-    #[cfg(test)]
-    pub(crate) fn observe_registered_cleanup(
-        &mut self,
-        registry_id: &str,
-    ) -> tokio::sync::oneshot::Receiver<()> {
-        let scene_id = *self
-            .cleanup_session_ids
-            .get(registry_id)
-            .expect("registered transport must have a bound scene session identity");
-        self.observe_cleanup(&scene_id)
-    }
-
     /// Register before dropping the transport, keyed by the scene session ID
     /// carried by SessionEstablished (distinct from the internal registry ID).
     /// Simultaneous connections in one namespace stay distinct; oneshots retain
@@ -322,12 +292,9 @@ impl SessionRegistry {
         rx
     }
 
-    /// Called only after normal lease/token/upload/enforcer cleanup completes.
-    /// RegistryGuard's removal-only fallback must not signal this boundary.
+    /// Called only after publication, upload and admission cleanup completes.
     #[cfg(test)]
     pub(crate) fn finish_cleanup(&mut self, session_id: &SceneId) {
-        self.cleanup_session_ids
-            .retain(|_, scene_id| scene_id != session_id);
         if let Some(observers) = self.cleanup_observers.remove(session_id) {
             for observer in observers {
                 let _ = observer.send(());
@@ -399,19 +366,6 @@ impl SessionRegistry {
                 s.closer.clone()
             })
             .collect()
-    }
-
-    /// Remove the session `signal` closes, wherever its task stopped: a task
-    /// closed mid-handshake has registered but holds no cleanup guard yet.
-    /// Returns how many entries went.
-    pub fn remove_closed(&mut self, signal: &SessionCloseSignal) -> usize {
-        let before = self.sessions.len();
-        self.sessions.retain(|_, s| !signal.is_for(&s.closer));
-        let removed = before - self.sessions.len();
-        if removed > 0 {
-            self.notify_changed();
-        }
-        removed
     }
 
     /// Register the `ServerMessage` sender for an existing session.

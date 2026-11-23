@@ -356,7 +356,6 @@ async fn test_element_repositioned_not_delivered_without_scene_topology_subscrip
         payload: Some(ClientPayload::SessionInit(SessionInit {
             agent_id: "no-topology-agent".to_string(),
             initial_subscriptions: vec![],
-            resume_token: Vec::new(),
             auth_credential: Some(crate::auth::psk_credential("test-key".to_string())),
         })),
     })
@@ -463,7 +462,6 @@ async fn handshake_telemetry(
         payload: Some(ClientPayload::SessionInit(SessionInit {
             agent_id: agent_id.to_string(),
             initial_subscriptions,
-            resume_token: Vec::new(),
             auth_credential: Some(crate::auth::psk_credential(psk.to_string())),
         })),
     })

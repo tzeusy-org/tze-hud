@@ -1,7 +1,6 @@
 //! Session handshake handlers — SS-6 submodule.
 //!
-//! Contains `handle_session_init` and `handle_session_resume`, extracted
-//! mechanically from `mod.rs`.
+//! Contains the authenticated `SessionInit` handshake.
 //! The dispatcher (`dispatch_message`) and session loop remain in `mod.rs`
 //! and call these functions unchanged.
 
@@ -25,7 +24,7 @@ use super::{DEFAULT_HEARTBEAT_INTERVAL_MS, now_wall_us};
 /// Owns the exact successful budget registration across handshake and handler awaits.
 pub(super) struct BudgetRegistrationGuard {
     scene_session_id: tze_hud_scene::SceneId,
-    enforcer: Option<super::SharedMutationBudgetEnforcer>,
+    enforcer: super::SharedMutationBudgetEnforcer,
 }
 
 impl BudgetRegistrationGuard {
@@ -35,20 +34,14 @@ impl BudgetRegistrationGuard {
     ) -> Self {
         Self {
             scene_session_id,
-            enforcer: Some(enforcer),
+            enforcer,
         }
-    }
-
-    pub(super) fn disarm(&mut self) {
-        self.enforcer = None;
     }
 }
 
 impl Drop for BudgetRegistrationGuard {
     fn drop(&mut self) {
-        if let Some(enforcer) = self.enforcer.take() {
-            enforcer.remove_session(self.scene_session_id);
-        }
+        self.enforcer.remove_session(self.scene_session_id);
     }
 }
 
@@ -57,20 +50,20 @@ pub(super) async fn handle_handshake_read(
     ctx: HandshakeCtx<'_>,
     tx: &tokio::sync::mpsc::Sender<Result<ServerMessage, Status>>,
     read: Result<Option<ClientMessage>, Status>,
-) -> Option<(StreamSession, Option<BudgetRegistrationGuard>)> {
+) -> Option<(
+    StreamSession,
+    Option<BudgetRegistrationGuard>,
+    ServerMessage,
+)> {
     let error = match read {
         Ok(Some(message)) => match message.payload {
             Some(client_message::Payload::SessionInit(init)) => {
                 return handle_session_init(ctx, tx, &init).await;
             }
-            Some(client_message::Payload::SessionResume(resume)) => {
-                return handle_session_resume(ctx, tx, &resume).await;
-            }
             _ => SessionError {
                 code: "INVALID_HANDSHAKE".to_string(),
-                message: "First message must be SessionInit or SessionResume".to_string(),
-                hint: "Send SessionInit or SessionResume as the first message on a new stream"
-                    .to_string(),
+                message: "First message must be SessionInit".to_string(),
+                hint: "Send SessionInit as the first message on a new stream".to_string(),
             },
         },
         Ok(None) => SessionError {
@@ -168,7 +161,11 @@ pub(super) async fn handle_session_init(
     ctx: HandshakeCtx<'_>,
     tx: &tokio::sync::mpsc::Sender<Result<ServerMessage, Status>>,
     init: &SessionInit,
-) -> Option<(StreamSession, Option<BudgetRegistrationGuard>)> {
+) -> Option<(
+    StreamSession,
+    Option<BudgetRegistrationGuard>,
+    ServerMessage,
+)> {
     let HandshakeCtx {
         state,
         agents,
@@ -194,7 +191,6 @@ pub(super) async fn handle_session_init(
 
     let session_uuid = uuid::Uuid::now_v7();
     let namespace = identity.agent_id.clone();
-    let resume_token = uuid::Uuid::now_v7().as_bytes().to_vec();
     let scene_session_id = tze_hud_scene::SceneId::from_uuid(session_uuid);
     let resource_budget = resource_budget.clone();
     let registration_guard = if let Some(enforcer) = budget_enforcer {
@@ -246,9 +242,6 @@ pub(super) async fn handle_session_init(
             send_unpaired(tx).await;
             return None;
         };
-        #[cfg(test)]
-        st.sessions
-            .bind_cleanup_session(&registered.session_id, scene_session_id);
         (
             registered.session_id,
             st.resource_store.upload_rate_limit_bytes_per_sec(),
@@ -260,12 +253,9 @@ pub(super) async fn handle_session_init(
         namespace: namespace.clone(),
         agent_name: namespace.clone(),
         capabilities: granted_capabilities,
-        scene_session_id,
         publication_origin: scene_session_id,
-        budget_enforcer: budget_enforcer.cloned(),
         subscriptions: sub_result.active.clone(),
         server_sequence: 0,
-        resume_token: resume_token.clone(),
         state: SessionState::Handshaking,
         last_client_sequence: 1, // SessionInit is sequence 1; start validation from next
         safe_mode_active: false,
@@ -280,209 +270,23 @@ pub(super) async fn handle_session_init(
     let compositor_ts = now_wall_us();
 
     let seq = session.next_server_seq();
-    let _ = tx
-        .send(Ok(ServerMessage {
-            sequence: seq,
-            timestamp_wall_us: compositor_ts,
-            payload: Some(ServerPayload::SessionEstablished(SessionEstablished {
-                // Reuse the already-created UUID bytes directly; no need to
-                // re-parse the string we just formatted.
-                session_id: session_uuid.as_bytes().to_vec(),
-                namespace,
-                resume_token,
-                heartbeat_interval_ms: DEFAULT_HEARTBEAT_INTERVAL_MS,
-                server_sequence: seq,
-                compositor_timestamp_wall_us: compositor_ts,
-                active_subscriptions: sub_result.active,
-                denied_subscriptions: sub_result.denied,
-            })),
-        }))
-        .await;
-
-    Some((session, registration_guard))
-}
-
-/// Handle a `SessionResume` message — the first message on a reconnecting stream
-/// within the grace period.
-///
-/// # Protocol contract
-///
-/// 1. Re-authenticate via the structured PSK credential.
-/// 2. Look up and consume the resume token from the [`TokenStore`].
-///    - If missing or expired → `SessionError(SESSION_GRACE_EXPIRED)`.
-///    - If valid → restore session state and issue new token.
-/// 3. Send [`SessionResumeResult`] with `accepted=true` and the confirmed
-///    subscription/capability state.
-/// 4. The caller sends the current degradation state, without scene content.
-#[allow(clippy::too_many_arguments)]
-pub(super) async fn handle_session_resume(
-    ctx: HandshakeCtx<'_>,
-    tx: &tokio::sync::mpsc::Sender<Result<ServerMessage, Status>>,
-    resume: &SessionResume,
-) -> Option<(StreamSession, Option<BudgetRegistrationGuard>)> {
-    let HandshakeCtx {
-        state,
-        agents,
-        live_agents,
-        closer,
-        resource_budget,
-        budget_enforcer,
-    } = ctx;
-    // Re-authentication is required on resume.
-    let identity = match identify_session(agents, resume.auth_credential.as_ref(), &resume.agent_id)
-    {
-        Ok(identity) => identity,
-        Err(rejection) => {
-            send_auth_failed(tx, rejection).await;
-            return None;
-        }
+    // No await follows successful registry insertion. The caller arms the
+    // cleanup owner before sending this prepared establishment message.
+    let established = ServerMessage {
+        sequence: seq,
+        timestamp_wall_us: compositor_ts,
+        payload: Some(ServerPayload::SessionEstablished(SessionEstablished {
+            // Reuse the already-created UUID bytes directly; no need to
+            // re-parse the string we just formatted.
+            session_id: session_uuid.as_bytes().to_vec(),
+            namespace,
+            heartbeat_interval_ms: DEFAULT_HEARTBEAT_INTERVAL_MS,
+            server_sequence: seq,
+            compositor_timestamp_wall_us: compositor_ts,
+            active_subscriptions: sub_result.active,
+            denied_subscriptions: sub_result.denied,
+        })),
     };
 
-    // Step 2: Validate the resume token.
-    // Token expiry is measured on the scene clock, the same clock that
-    // drives orphan grace expiry, so both end together.
-    let resume_result = {
-        let mut st = state.lock().await;
-        let current_ms = st.scene.lock().await.now_millis();
-        st.token_store
-            .consume(&resume.resume_token, &identity.agent_id, current_ms)
-    };
-
-    let prior_entry = match resume_result {
-        Ok(entry) => entry,
-        Err(err) => {
-            // Token invalid or expired — agent must perform a full SessionInit.
-            let _ = tx
-                .send(Ok(ServerMessage {
-                    sequence: 1,
-                    timestamp_wall_us: now_wall_us(),
-                    payload: Some(ServerPayload::SessionError(SessionError {
-                        code: err.error_code().to_string(),
-                        message: err.message().to_string(),
-                        hint: err.hint().to_string(),
-                    })),
-                }))
-                .await;
-            return None;
-        }
-    };
-
-    // Step 3: Build restored session.
-    let session_uuid = uuid::Uuid::now_v7();
-    let namespace = identity.agent_id.clone();
-    // Issue a fresh single-use token for the resumed session.
-    let new_resume_token = uuid::Uuid::now_v7().as_bytes().to_vec();
-    let scene_session_id = tze_hud_scene::SceneId::from_uuid(session_uuid);
-    let resource_budget = resource_budget.clone();
-    let registration_guard = if let Some(enforcer) = budget_enforcer {
-        if let super::MutationBudgetDecision::Reject {
-            error_code,
-            message,
-        } = enforcer.register_session(
-            scene_session_id,
-            &namespace,
-            resource_budget,
-            agents.contains(&namespace),
-        ) {
-            let _ = tx
-                .send(Ok(ServerMessage {
-                    sequence: 1,
-                    timestamp_wall_us: now_wall_us(),
-                    payload: Some(ServerPayload::SessionError(SessionError {
-                        code: error_code.to_string(),
-                        message,
-                        hint: "Wait for resource capacity to become available, then open a new stream with SessionInit; this resume token has been consumed"
-                            .to_string(),
-                    })),
-                }))
-                .await;
-            return None;
-        }
-        Some(BudgetRegistrationGuard::new(
-            scene_session_id,
-            Arc::clone(enforcer),
-        ))
-    } else {
-        None
-    };
-
-    // Restore only publications still owned by this resumable origin.
-    {
-        let st = state.lock().await;
-        let mut scene = st.scene.lock().await;
-        if let Some(origin) = prior_entry.publication_origin {
-            scene.resume_publications(origin);
-        }
-    }
-
-    // Register the resumed agent in the session registry so shared-state
-    // operations (e.g. broadcast) can find it, and capture the
-    // current upload-rate configuration for this session.
-    let (session_id, upload_rate_limit_bytes_per_sec) = {
-        let mut st = state.lock().await;
-        let recheck = || {
-            identify_session(
-                &live_agents.load(),
-                resume.auth_credential.as_ref(),
-                &resume.agent_id,
-            )
-        };
-        let Some(registered) =
-            register_if_paired(&mut st, &namespace, &identity.permissions, closer, recheck)
-        else {
-            drop(st);
-            send_unpaired(tx).await;
-            return None;
-        };
-        #[cfg(test)]
-        st.sessions
-            .bind_cleanup_session(&registered.session_id, scene_session_id);
-        (
-            registered.session_id,
-            st.resource_store.upload_rate_limit_bytes_per_sec(),
-        )
-    };
-
-    let mut session = StreamSession {
-        publication_defaults: Default::default(),
-        session_id,
-        namespace: namespace.clone(),
-        agent_name: namespace.clone(),
-        // Permissions come from the current config, not the pre-disconnect set.
-        capabilities: identity.permissions,
-        scene_session_id,
-        publication_origin: prior_entry.publication_origin.unwrap_or(scene_session_id),
-        budget_enforcer: budget_enforcer.cloned(),
-        // Restore subscription set from before the disconnect.
-        subscriptions: prior_entry.subscriptions.clone(),
-        server_sequence: 0,
-        resume_token: new_resume_token.clone(),
-        state: SessionState::Resuming,
-        last_client_sequence: 1, // SessionResume is sequence 1; start validation from next
-        safe_mode_active: false,
-        lease_correlation_cache: LeaseCorrelationCache::new(
-            DEFAULT_LEASE_CORRELATION_CACHE_CAPACITY,
-        ),
-        resource_upload_rate_limiter: UploadByteRateLimiter::with_limit(
-            upload_rate_limit_bytes_per_sec,
-        ),
-    };
-
-    let compositor_ts = now_wall_us();
-    let seq = session.next_server_seq();
-    let _ = tx
-        .send(Ok(ServerMessage {
-            sequence: seq,
-            timestamp_wall_us: compositor_ts,
-            payload: Some(ServerPayload::SessionResumeResult(SessionResumeResult {
-                accepted: true,
-                new_session_token: new_resume_token.clone(),
-                new_server_sequence: seq,
-                active_subscriptions: prior_entry.subscriptions,
-                denied_subscriptions: Vec::new(),
-            })),
-        }))
-        .await;
-
-    Some((session, registration_guard))
+    Some((session, registration_guard, established))
 }

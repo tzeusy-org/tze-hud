@@ -194,7 +194,6 @@ mod tests {
     use std::sync::{Arc, RwLock};
     use tokio::sync::Mutex;
     use tze_hud_protocol::session::{SessionRegistry, SharedState};
-    use tze_hud_protocol::token::TokenStore;
     use tze_hud_scene::graph::SceneGraph;
     use tze_hud_scene::types::{LeaseState, SceneId};
 
@@ -212,7 +211,6 @@ mod tests {
             element_store_file: None,
             safe_mode_atomic: Arc::new(AtomicBool::new(false)),
             active_tab_mirror: Arc::new(std::sync::Mutex::new(None)),
-            token_store: TokenStore::new(),
         }))
     }
 

@@ -25,11 +25,15 @@ uuid = { workspace = true }
 tokio-stream = { workspace = true }
 
 [dev-dependencies]
+# Drive the real receive-timeout path without a wall-clock sleep.
+tokio = { workspace = true, features = ["test-util"] }
 # Self-dependency with dev-mode enabled so that integration tests under tests/
 # can call HudSessionImpl::new without going through the production config path.
 tze_hud_protocol = { path = ".", version = "0.1.0", features = ["dev-mode"] }
 # Behavior tests build scenes with the scene test-support helpers.
 tze_hud_scene = { path = "../tze_hud_scene", version = "0.1.0", features = ["test-support"] }
+# Observe upload-slot ownership after the real stream cleanup boundary.
+tze_hud_resource = { path = "../tze_hud_resource", version = "0.1.0", features = ["test-support"] }
 tempfile = { workspace = true }
 
 [build-dependencies]

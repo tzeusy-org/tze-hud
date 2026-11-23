@@ -300,8 +300,7 @@ impl SceneGraph {
         self.version += 1;
     }
 
-    /// Give publication-only sessions the same finite reconnect grace as leases.
-    /// The protocol passes the same captured scene time used for its resume token.
+    /// Start finite grace for the unleased publications belonging to an origin.
     pub fn orphan_publications(&mut self, origin: SceneId, now_ms: u64, grace_ms: u64) -> bool {
         self.prune_publication_orphans();
         if !self.has_publications_for_origin(origin) {
@@ -312,7 +311,7 @@ impl SceneGraph {
         true
     }
 
-    /// Successful authenticated resume cancels only this origin's cleanup.
+    /// Cancel only this origin's pending cleanup.
     pub fn resume_publications(&mut self, origin: SceneId) -> bool {
         self.reap_orphaned_publications(self.clock.now_millis());
         self.publication_orphans.remove(&origin).is_some()

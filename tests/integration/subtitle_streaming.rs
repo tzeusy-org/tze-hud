@@ -117,7 +117,6 @@ async fn connect_agent_with_zone_publish_cap(
             session_proto::SessionInit {
                 agent_id: agent_id.to_string(),
                 initial_subscriptions: vec!["SCENE_TOPOLOGY".to_string()],
-                resume_token: Vec::new(),
                 auth_credential: Some(tze_hud_protocol::auth::psk_credential(TEST_PSK.to_string())),
             },
         )),

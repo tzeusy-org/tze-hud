@@ -5,9 +5,9 @@ mod allow;
 mod events;
 mod invariants;
 mod lifecycle_verbs;
+mod reconnect;
 mod render_wake;
 mod resource_upload;
-mod resume;
 mod safe_mode;
 mod session_handshake;
 mod widget_publish;
@@ -111,7 +111,6 @@ async fn handshake(
         payload: Some(ClientPayload::SessionInit(SessionInit {
             agent_id: agent_id.to_string(),
             initial_subscriptions: vec!["SCENE_TOPOLOGY".to_string()],
-            resume_token: Vec::new(),
             auth_credential: Some(crate::auth::psk_credential(psk.to_string())),
         })),
     })
@@ -304,7 +303,6 @@ async fn handshake_with_capabilities(
         payload: Some(ClientPayload::SessionInit(SessionInit {
             agent_id: agent_id.to_string(),
             initial_subscriptions: vec![],
-            resume_token: Vec::new(),
             auth_credential: Some(crate::auth::psk_credential(psk.to_string())),
         })),
     })

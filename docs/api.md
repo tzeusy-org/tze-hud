@@ -957,7 +957,7 @@ down to the lifecycle.
 
 | Client → server | Server → client |
 |---|---|
-| `SessionInit{agent_id, auth_credential, subscriptions, …}` / `SessionResume{resume_token, auth_credential}` | `SessionEstablished{session_id, namespace, resume_token, heartbeat_interval_ms, …}` / `SessionResumeResult`, then current `DegradationNotice` |
+| `SessionInit{agent_id, auth_credential, initial_subscriptions, …}` | `SessionEstablished{session_id, namespace, heartbeat_interval_ms, …}`, then current `DegradationNotice` |
 | `Publish{surface, content \| params, ttl_ms, present_at_us?, expires_at_us?, key?}` | `RequestResult{seq, ok, code?, hint?, ttl_ms?}` |
 | `Clear{surface, key?}` (zone or widget) | `EventBatch{…}` (input, focus, commands), `ElementRepositioned`, `FramePresented` |
 | `Hold{surface, ttl_ms}` (zone or widget) | `SessionSuspended` / `SessionResumed` (safe mode) |
@@ -973,9 +973,21 @@ callback/dismiss stream.
 
 Public `ClaimTile`, `MutationBatch`, `SceneSnapshot`, `Reclaimed`, placement
 and tile surfaces are removed. Their wire tags and names stay reserved.
-Only structured PSK credentials authenticate init and resume; legacy resume
-PSKs, local-socket credentials and protocol-version negotiation are removed.
-Handshake and resume send no scene content, foreign portal transcript or draft.
+Only structured PSK credentials authenticate `SessionInit`. Legacy PSKs,
+local-socket credentials and protocol-version negotiation are removed.
+The handshake sends no scene content, foreign portal transcript or draft.
+
+A transport termination, explicit close, or termination by the existing
+receive-timeout handling ends the resident session. The runtime clears that
+session's active and scheduled publications, aborts its pending uploads and
+returns its admission slot. A client reconnects with `SessionInit` to establish
+a fresh origin and republish its desired state. `SessionResumed` means leaving
+safe mode on a connected stream. The removed reconnect envelope and response
+and their token fields have reserved tags and names. A removed resume envelope
+as the first message receives `SessionError(INVALID_HANDSHAKE)`; a
+sequence-valid removed-only envelope on an active stream follows the existing
+`INVALID_ARGUMENT` request path. An old token field on a valid `SessionInit`
+is ignored by protobuf.
 
 `FramePresented` remains optional server metadata at `ServerMessage` field 52:
 `frame_number` (1), `present_wall_us` (2) and ordered raw 16-byte internal

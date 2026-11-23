@@ -790,7 +790,6 @@ async fn agent_receives_element_repositioned_event_with_old_and_new_geometry() {
         payload: Some(ClientPayload::SessionInit(SessionInit {
             agent_id: "test-agent-notify".to_string(),
             initial_subscriptions: vec!["SCENE_TOPOLOGY".to_string()],
-            resume_token: vec![],
             auth_credential: Some(tze_hud_protocol::auth::psk_credential(
                 "test-key".to_string(),
             )),
