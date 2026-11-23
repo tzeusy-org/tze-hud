@@ -216,6 +216,8 @@ jobs:
       # from the gestures artifact, not the job conclusion); one that flakes
       # leaves at once by a PR citing the failing run, never by a retry.
       # Graduated 2026-11-15: overlay-pointer, tray.
+      # overlay-pointer is informational after an Alt-Tab failure in run
+      # 45240911758 and a pass on the same source tree in main run 45244669423.
       # continue-on-error keeps the uploads running; "Required gesture verdict"
       # fails the job afterwards, fail-closed if this step never set its output.
       # Required scenarios run first within each HUD boot, but the timeout is
@@ -227,7 +229,7 @@ jobs:
         timeout-minutes: 8
         env:
           GH_TOKEN: ${{ github.token }}
-          GESTURES_REQUIRED: overlay-pointer,tray
+          GESTURES_REQUIRED: tray
         shell: pwsh
         run: |
           # Keep Edge onboarding out of the link clicks on this disposable VM.
