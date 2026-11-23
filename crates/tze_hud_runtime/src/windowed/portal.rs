@@ -182,8 +182,6 @@ pub(super) enum DragRelease {
 }
 
 pub(super) struct DragReleasedData {
-    /// Scene-level ID of the element that was dragged.
-    element_id: tze_hud_scene::SceneId,
     /// Final snapped/clamped bounds; dragging preserves the original dimensions.
     bounds: Rect,
     /// Primary canvas dimensions for relative geometry normalization.
@@ -544,7 +542,6 @@ pub(super) fn apply_drag_handle_pointer_event(
 
             // Return data the caller will use to persist after releasing locks.
             Some(DragRelease::Tile(DragReleasedData {
-                element_id: eid,
                 bounds: Rect::new(final_x, final_y, width, height),
                 display: (display_width, display_height),
                 namespace,
@@ -2029,8 +2026,8 @@ mod tests {
             panic!("PointerUp after activated tile drag must return tile persistence data");
         };
         assert_eq!(
-            released.element_id, element_id,
-            "released element_id must match the dragged tile"
+            released.bounds, scene.tiles[&element_id].bounds,
+            "persistence data must carry the dragged tile geometry"
         );
         assert!(
             released.bounds.x >= 0.0 && released.bounds.x + released.bounds.width <= 1920.0,
@@ -3527,7 +3524,6 @@ mod tests {
         };
 
         let released = DragReleasedData {
-            element_id: frame_id,
             bounds: frame_final,
             display: (1920.0, 1080.0),
             namespace: "portal-agent".to_string(),
