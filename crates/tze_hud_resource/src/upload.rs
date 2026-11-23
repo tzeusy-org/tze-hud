@@ -212,6 +212,14 @@ impl ResourceStore {
 
     // ─── Handle upload start ─────────────────────────────────────────────────
 
+    /// Canonical dimensions only for a matching retained raster type. Legacy
+    /// font/SVG collisions must never borrow raster metadata.
+    pub fn raster_dimensions(&self, id: &ResourceId, kind: ResourceType) -> Option<(u32, u32)> {
+        let record = self.dedup.get(id)?;
+        let raster = record.raster.as_ref().filter(|r| r.resource_type == kind)?;
+        Some((raster.width, raster.height))
+    }
+
     /// Process a `ResourceUploadStart` message.
     ///
     /// # Fast path (inline data)

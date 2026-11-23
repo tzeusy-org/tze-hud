@@ -32,7 +32,7 @@ impl Resident {
             timestamp_wall_us: 0,
             payload: Some(ClientPayload::SessionInit(SessionInit {
                 agent_id: agent.into(),
-                auth_credential: Some(tze_hud_protocol::auth::psk_credential(credential.into())),
+                auth_credential: Some(tze_hud_protocol::auth::psk_credential(credential)),
             })),
         })
         .await

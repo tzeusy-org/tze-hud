@@ -295,26 +295,29 @@ impl AgentDirectory {
                 _ => old.authorization.revoke(),
             }
         }
-        let mut changed: HashSet<&str> = self
-            .agents
-            .keys()
-            .chain(paired.agents.keys())
-            .map(String::as_str)
-            .filter(|id| match (self.agents.get(*id), paired.agents.get(*id)) {
-                (Some(old), Some(new)) => old.psk_sha256 != new.psk_sha256,
-                _ => true,
-            })
-            .collect();
-        changed.extend(replaced);
-        let mut dev = self
-            .dev_authorizations
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        for id in changed {
-            dev.revoke(id);
-        }
-        let generations = Arc::new(dev.generations.clone());
-        drop(dev);
+        let generations = if self.dev_psk.is_some() {
+            let mut changed: HashSet<&str> = self
+                .agents
+                .keys()
+                .chain(paired.agents.keys())
+                .map(String::as_str)
+                .filter(|id| match (self.agents.get(*id), paired.agents.get(*id)) {
+                    (Some(old), Some(new)) => old.psk_sha256 != new.psk_sha256,
+                    _ => true,
+                })
+                .collect();
+            changed.extend(replaced);
+            let mut dev = self
+                .dev_authorizations
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            for id in changed {
+                dev.revoke(id);
+            }
+            Arc::new(dev.generations.clone())
+        } else {
+            Arc::clone(&self.dev_generations)
+        };
         Self {
             agents: paired.agents,
             dev_psk: self.dev_psk.clone(),

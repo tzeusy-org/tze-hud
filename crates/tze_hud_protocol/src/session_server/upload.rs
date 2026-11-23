@@ -23,6 +23,7 @@ use tze_hud_scene::types::*;
 pub(super) struct ResidentUploadState {
     pub(super) request_sequence: u64,
     pub(super) metadata: ResourceMetadata,
+    pub(super) resource_type: StoreResourceType,
     pub(super) total_size_bytes: u64,
 }
 
@@ -288,7 +289,8 @@ pub(super) async fn run_upload_worker(
                     .await
                 {
                     Ok(Some(stored)) => {
-                        let metadata = canonical_raster_metadata(&store, &stored, metadata);
+                        let metadata =
+                            canonical_raster_metadata(&store, &stored, resource_type, metadata);
                         register_uploaded_scene_resource(&state, &stored.resource_id, &render_wake)
                             .await;
                         if event_tx
@@ -311,6 +313,7 @@ pub(super) async fn run_upload_worker(
                             ResidentUploadState {
                                 request_sequence,
                                 metadata,
+                                resource_type,
                                 total_size_bytes: start.total_size_bytes,
                             },
                         );
@@ -476,7 +479,12 @@ pub(super) async fn run_upload_worker(
                     .await
                 {
                     Ok(stored) => {
-                        let metadata = canonical_raster_metadata(&store, &stored, tracked.metadata);
+                        let metadata = canonical_raster_metadata(
+                            &store,
+                            &stored,
+                            tracked.resource_type,
+                            tracked.metadata,
+                        );
                         in_flight_uploads.remove(&upload_id_bytes);
                         register_uploaded_scene_resource(&state, &stored.resource_id, &render_wake)
                             .await;
@@ -522,13 +530,12 @@ pub(super) async fn run_upload_worker(
 fn canonical_raster_metadata(
     store: &tze_hud_resource::ResourceStore,
     stored: &StoreResourceStored,
+    resource_type: StoreResourceType,
     mut metadata: ResourceMetadata,
 ) -> ResourceMetadata {
-    if let Some(record) = store.dedup_index().get(&stored.resource_id)
-        && let Some(raster) = &record.raster
-    {
-        metadata.width = raster.width;
-        metadata.height = raster.height;
+    if let Some((width, height)) = store.raster_dimensions(&stored.resource_id, resource_type) {
+        metadata.width = width;
+        metadata.height = height;
     }
     metadata
 }
