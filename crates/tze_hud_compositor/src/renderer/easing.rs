@@ -309,17 +309,25 @@ mod tests {
             (
                 "decelerate",
                 "accelerate",
-                "240",
+                Some("240"),
                 (EaseOutQuad, EaseInQuad, 240),
             ),
-            ("invalid", "invalid", "-10", (EaseOutQuad, EaseInQuad, 120)),
-            ("linear", "standard", "120", (Linear, EaseInOut, 120)),
+            (
+                "invalid",
+                "invalid",
+                Some("-10"),
+                (EaseOutQuad, EaseInQuad, 120),
+            ),
+            ("linear", "standard", None, (Linear, EaseInOut, 120)),
         ] {
-            let motion = ZoneMotion::from_token_map(&HashMap::from([
+            let mut tokens = HashMap::from([
                 ("motion.enter.easing".into(), enter.into()),
                 ("motion.exit.easing".into(), exit.into()),
-                ("motion.exit.ms".into(), ms.into()),
-            ]));
+            ]);
+            if let Some(ms) = ms {
+                tokens.insert("motion.exit.ms".into(), ms.into());
+            }
+            let motion = ZoneMotion::from_token_map(&tokens);
             assert_eq!((motion.enter, motion.exit, motion.exit_ms), expected);
         }
     }
@@ -354,6 +362,7 @@ mod tests {
 
         let (mut previous_x, mut previous_y) = scroll.advance(19.1, 500.0, 16.6);
         assert_eq!(previous_x, 19.1, "snap to the nearby target immediately");
+        assert!((4.0..=500.0).contains(&previous_y));
         assert!(
             !scroll.is_settled(19.1, 500.0),
             "long-axis motion stays active"

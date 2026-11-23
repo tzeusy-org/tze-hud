@@ -619,16 +619,26 @@ mod tests {
             0.0,
             200.0,
         );
-        let mut second = text_node("# heading\ntool output across two lines here", 0.0, 200.0);
+        let mut second = text_node(
+            "# Heading\nwith **bold**, `code`, and a longer paragraph that wraps across lines",
+            0.0,
+            160.0,
+        );
+        let mut third = text_node("assistant again", 0.0, 200.0);
         let end = text_node("fixed absolute control", 50.0, 200.0);
         let mut parent = text_node("", 12.0, 200.0);
-        parent.children = vec![first.id, second.id];
-        let [first_id, second_id] = [first.id, second.id];
+        let [first_id, second_id, third_id, end_id] = [first.id, second.id, third.id, end.id];
+        parent.children = vec![first_id, second_id, third_id];
         let cached_first = parse_markdown_subset(&text(&mut first).content, &tokens);
         let cached_second = parse_markdown_subset(&text(&mut second).content, &tokens);
-        let cached = HashMap::from([(first_id, &cached_first), (second_id, &cached_second)]);
+        let cached_third = parse_markdown_subset(&text(&mut third).content, &tokens);
+        let cached = HashMap::from([
+            (first_id, &cached_first),
+            (second_id, &cached_second),
+            (third_id, &cached_third),
+        ]);
         let parent_id = parent.id;
-        let mut nodes: HashMap<_, _> = [parent, first, second, end]
+        let mut nodes: HashMap<_, _> = [parent, first, second, third, end]
             .into_iter()
             .map(|n| (n.id, n))
             .collect();
@@ -640,17 +650,20 @@ mod tests {
         let hits = resolve_tile_flow_offsets(&mut fs, &nodes, gap, &tokens, &cached);
         assert_eq!(PARSE_MARKDOWN_SUBSET_CALLS.with(|count| count.get()), 0);
         let misses = resolve_tile_flow_offsets(&mut fs, &nodes, gap, &tokens, &HashMap::new());
-        assert_eq!(PARSE_MARKDOWN_SUBSET_CALLS.with(|count| count.get()), 2);
+        assert_eq!(PARSE_MARKDOWN_SUBSET_CALLS.with(|count| count.get()), 3);
         assert_eq!(hits, misses);
-        assert_eq!(hits.len(), 2);
+        assert_eq!(hits.len(), 3);
+        assert!(!hits.contains_key(&end_id));
+
+        let height =
+            |fs: &mut FontSystem, id, parsed| flow_child_height(fs, &nodes[&id], &tokens, parsed);
+        let first_height = height(&mut fs, first_id, Some(&cached_first));
+        let second_height = height(&mut fs, second_id, Some(&cached_second));
+        assert_eq!(first_height, height(&mut fs, first_id, None));
+        assert_eq!(second_height, height(&mut fs, second_id, None));
         assert_eq!(hits[&first_id], 12.0);
-        let first_height =
-            flow_child_height(&mut fs, &nodes[&first_id], &tokens, Some(&cached_first));
         assert_eq!(hits[&second_id], 12.0 + first_height + gap);
-        assert_eq!(
-            first_height,
-            flow_child_height(&mut fs, &nodes[&first_id], &tokens, None)
-        );
+        assert_eq!(hits[&third_id], hits[&second_id] + second_height + gap);
     }
 
     #[test]
