@@ -244,11 +244,19 @@ impl RuntimeContext {
     pub fn resident_accounting_snapshot(&self) -> serde_json::Value {
         let limits = self.resident_ledger.limits();
         let usage = self.resident_ledger.snapshot();
+        let fallback = self.resource_budget();
         serde_json::json!({
             "profile": self.operational_envelope.profile_name,
             "admission": {
                 "max_resident_sessions": self.operational_envelope.max_resident_sessions,
                 "max_guest_sessions": DEFAULT_MAX_GUEST_SESSIONS,
+                "max_agent_update_hz": self.operational_envelope.max_agent_update_hz,
+                "fallback_session": {
+                    "max_update_rate_hz": fallback.max_update_rate_hz,
+                },
+                "absolute_hard_max": {
+                    "update_rate_hz": HARD_MAX_UPDATE_RATE_HZ,
+                },
             },
             "limits": {
                 "aggregate_bytes": limits.aggregate_bytes,
@@ -418,6 +426,8 @@ mod tests {
         let admission = &snapshot["admission"];
         assert_eq!(admission["max_resident_sessions"], 8);
         assert_eq!(admission["max_guest_sessions"], DEFAULT_MAX_GUEST_SESSIONS);
+        let fallback = &admission["fallback_session"];
+        assert_eq!(fallback["max_update_rate_hz"].as_f64(), Some(30.0));
         assert_eq!(snapshot["counters"]["class_denials"], 0);
         assert!(snapshot["accounted_byte_rules"]["measurement_scope"].is_string());
         assert!(snapshot["consumers"]["resource"].is_array());
