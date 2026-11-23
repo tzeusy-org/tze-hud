@@ -2,6 +2,19 @@ use super::notification_wait::is_unanswered_question;
 use super::*;
 use std::collections::hash_map::Entry;
 
+type AdmissionMeasure<'a> = dyn FnMut(&SceneGraph, &ZoneContent, Option<&str>, Option<&str>) + 'a;
+
+enum AdmissionTiming<'a> {
+    Absolute {
+        expiry: Option<u64>,
+        urgency_default: bool,
+    },
+    AfterMeasurement {
+        ttl_us: Option<u64>,
+        measure: &'a mut AdmissionMeasure<'a>,
+    },
+}
+
 impl SceneGraph {
     /// Agent writes cannot change owner configuration or runtime-local widget state.
     pub fn validate_widget_param_audience(
@@ -293,7 +306,6 @@ impl SceneGraph {
             true,
             None,
         )
-        .map(|_| ())
     }
 
     /// `urgency_default` gives a notification with no explicit expiry its
@@ -312,7 +324,39 @@ impl SceneGraph {
         publication_origin: Option<SceneId>,
         urgency_default: bool,
         publication_id: Option<SceneId>,
-    ) -> Result<Option<String>, ValidationError> {
+    ) -> Result<(), ValidationError> {
+        self.publish_to_zone_with_timing(
+            zone_name,
+            content,
+            publisher_namespace,
+            merge_key,
+            content_classification,
+            breakpoints,
+            lease_id,
+            publication_origin,
+            publication_id,
+            AdmissionTiming::Absolute {
+                expiry: expires_at_wall_us,
+                urgency_default,
+            },
+        )
+        .map(|_| ())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn publish_to_zone_with_timing(
+        &mut self,
+        zone_name: &str,
+        content: ZoneContent,
+        publisher_namespace: &str,
+        merge_key: Option<String>,
+        content_classification: Option<String>,
+        breakpoints: Vec<u64>,
+        lease_id: Option<SceneId>,
+        publication_origin: Option<SceneId>,
+        publication_id: Option<SceneId>,
+        timing: AdmissionTiming<'_>,
+    ) -> Result<(u64, Option<u64>), ValidationError> {
         // Check zone exists and content type is accepted
         let (contention_policy, max_publishers, accepted) = {
             let zone = self.zone_registry.get_by_name(zone_name).ok_or_else(|| {
@@ -351,21 +395,23 @@ impl SceneGraph {
         //   3+ (critical)   → 30 s
         //
         // A publisher-supplied expires_at always takes precedence.
-        let effective_expires_at = expires_at_wall_us.or_else(|| {
-            if !urgency_default {
-                return None;
-            }
-            if let ZoneContent::Notification(ref payload) = content {
-                let ttl_us: u64 = match payload.urgency {
-                    0 | 1 => Self::NOTIFICATION_TTL_INFO_US,
-                    2 => Self::NOTIFICATION_TTL_WARNING_US,
-                    _ => Self::NOTIFICATION_TTL_CRITICAL_US,
-                };
-                Some(now_us.saturating_add(ttl_us))
-            } else {
-                None
-            }
-        });
+        let effective_expires_at = match &timing {
+            AdmissionTiming::Absolute {
+                expiry,
+                urgency_default,
+            } => expiry.or_else(|| match &content {
+                ZoneContent::Notification(payload) if *urgency_default => {
+                    let ttl_us = match payload.urgency {
+                        0 | 1 => Self::NOTIFICATION_TTL_INFO_US,
+                        2 => Self::NOTIFICATION_TTL_WARNING_US,
+                        _ => Self::NOTIFICATION_TTL_CRITICAL_US,
+                    };
+                    Some(now_us.saturating_add(ttl_us))
+                }
+                _ => None,
+            }),
+            AdmissionTiming::AfterMeasurement { .. } => None,
+        };
 
         let publication_id = publication_id.unwrap_or_default();
         let waiting_before: Vec<_> = self
@@ -423,7 +469,21 @@ impl SceneGraph {
             }
             None => None,
         };
-        let display = record.display.clone();
+        if let AdmissionTiming::AfterMeasurement { ttl_us, measure } = timing {
+            measure(
+                self,
+                &record.content,
+                record.merge_key.as_deref(),
+                record.display.as_deref(),
+            );
+            // Measurement holds the scene lock. Start the presentation
+            // lifetime only after shaping so it can reach a renderer.
+            record.published_at_wall_us = self.clock.now_us();
+            record.expires_at_wall_us =
+                ttl_us.map(|ttl| record.published_at_wall_us.saturating_add(ttl));
+        }
+        let now_us = record.published_at_wall_us;
+        let expires_at = record.expires_at_wall_us;
         let mut new_records = Vec::new();
         let mut slot = self
             .zone_registry
@@ -494,7 +554,7 @@ impl SceneGraph {
         }
         self.prune_publication_orphans();
         self.version += 1;
-        Ok(display)
+        Ok((now_us, expires_at))
     }
 
     /// Resolve the "best" lease state for a given namespace.
@@ -574,7 +634,6 @@ impl SceneGraph {
     /// Publish under an active, namespace-owned lease using an already resolved
     /// absolute deadline. `None` means held, including notifications; no urgency
     /// default is applied. This touches only publication state, not tile topology.
-    /// Returns the display assigned during admission, if any.
     pub fn publish_to_zone_until_with_lease(
         &mut self,
         zone_name: &str,
@@ -583,7 +642,7 @@ impl SceneGraph {
         lease_id: SceneId,
         merge_key: Option<String>,
         expires_at_wall_us: Option<u64>,
-    ) -> Result<Option<String>, ValidationError> {
+    ) -> Result<(), ValidationError> {
         self.check_zone_publish_lease(publisher_namespace, lease_id)?;
         self.publish_to_zone_inner(
             zone_name,
@@ -601,7 +660,6 @@ impl SceneGraph {
     }
 
     /// Admit an MCP question under a pre-reserved, runtime-only identity.
-    /// Returns the display assigned during admission, if any.
     #[allow(clippy::too_many_arguments)]
     pub fn publish_notification_until_with_id(
         &mut self,
@@ -612,7 +670,7 @@ impl SceneGraph {
         key: Option<String>,
         expiry: Option<u64>,
         id: SceneId,
-    ) -> Result<Option<String>, ValidationError> {
+    ) -> Result<(), ValidationError> {
         self.check_zone_publish_lease(namespace, lease)?;
         self.publish_to_zone_inner(
             zone,
@@ -626,6 +684,35 @@ impl SceneGraph {
             None,
             false,
             Some(id),
+        )
+    }
+
+    /// Place an immediate MCP publication and measure it before presentation.
+    /// Returns the presentation time and optional absolute expiry in wall µs.
+    #[allow(clippy::too_many_arguments)]
+    pub fn publish_to_zone_with_measurement<'measure>(
+        &mut self,
+        zone: &str,
+        content: ZoneContent,
+        namespace: &str,
+        lease: SceneId,
+        key: Option<String>,
+        ttl_us: Option<u64>,
+        publication_id: Option<SceneId>,
+        measure: &'measure mut AdmissionMeasure<'measure>,
+    ) -> Result<(u64, Option<u64>), ValidationError> {
+        self.check_zone_publish_lease(namespace, lease)?;
+        self.publish_to_zone_with_timing(
+            zone,
+            content,
+            namespace,
+            key,
+            None,
+            Vec::new(),
+            Some(lease),
+            None,
+            publication_id,
+            AdmissionTiming::AfterMeasurement { ttl_us, measure },
         )
     }
 
@@ -648,7 +735,6 @@ impl SceneGraph {
             merge_key,
             None,
         )
-        .map(|_| ())
     }
 
     fn check_zone_publish_lease(

@@ -5232,6 +5232,7 @@ async fn portal_unread_is_reported_until_the_viewer_reaches_the_tail() {
 struct MarkerFit {
     calls: std::sync::atomic::AtomicUsize,
     notification_displays: std::sync::Mutex<Vec<Option<String>>>,
+    notification_clock: Option<TestClock>,
 }
 
 /// Characters before the "LONG" marker, when `text` carries one.
@@ -5252,6 +5253,9 @@ impl tze_hud_scene::TextFit for MarkerFit {
             .lock()
             .unwrap()
             .push(display.map(str::to_owned));
+        if let Some(clock) = &self.notification_clock {
+            clock.advance(20);
+        }
         let actions = payload
             .actions
             .iter()
@@ -5364,6 +5368,42 @@ async fn clipping_uses_the_admitted_question_display_without_placing_twice() {
     assert_eq!(cards[0].display.as_deref(), Some("DISPLAY2"));
     assert_eq!(cards[1].display.as_deref(), Some("DISPLAY3"));
     assert_eq!(cards[2].display.as_deref(), Some("DISPLAY4"));
+}
+
+#[tokio::test]
+async fn notification_clipping_finishes_before_ttl_or_delay_starts() {
+    for delay in [0, 5] {
+        let (server, clock) = server();
+        let server = server.with_text_fit(Arc::new(MarkerFit {
+            notification_clock: Some(clock.clone()),
+            ..Default::default()
+        }));
+        let reply = call(
+            &server,
+            "hud_publish",
+            json!({
+                "surface":"zone:notification-area", "ttl_ms":10, "delay_ms":delay,
+                "content":{"title":"Press LONG","actions":[{"label":"OK","callback_id":"ok"}]}
+            }),
+        )
+        .await;
+        assert_eq!(reply["clipped"]["title"], 6, "{reply}");
+        assert_eq!(reply["expires_in_ms"], 10 + delay, "{reply}");
+        let mut scene = server.scene.lock().await;
+        let admitted = scene.now_wall_us();
+        if delay > 0 {
+            assert!(scene.apply_due_publications().is_empty());
+            clock.advance(delay);
+            assert!(scene.apply_due_publications()[0].result.is_ok());
+        }
+        let cards = scene.zone_registry.active_for_zone("notification-area");
+        assert_eq!(cards.len(), 1);
+        assert_eq!(cards[0].published_at_wall_us, admitted + delay * 1_000);
+        assert_eq!(
+            cards[0].expires_at_wall_us,
+            Some(admitted + (delay + 10) * 1_000)
+        );
+    }
 }
 
 /// R5.1 S1/S2/S4: each cut card field is

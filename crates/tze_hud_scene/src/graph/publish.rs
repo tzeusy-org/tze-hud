@@ -195,7 +195,6 @@ impl SceneGraph {
                     !*held,
                     notification_id,
                 )
-                .map(|_| ())
             }
             Publication::Widget {
                 widget_name,
