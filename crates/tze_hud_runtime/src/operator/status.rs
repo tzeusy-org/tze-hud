@@ -3,6 +3,7 @@
 //! Carries no secrets: agents appear by id with an `admin` flag, never by PSK
 //! or hash.
 
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -498,10 +499,10 @@ impl StatusSource {
                 *count += hub.list(&s.namespace).len();
             }
         }
-        live.into_iter()
-            .zip(held)
-            .map(|(s, holdings)| {
-                json!({
+        let mut primaries = Vec::new();
+        let mut siblings = HashMap::new();
+        for (s, holdings) in live.into_iter().zip(held) {
+            let row = json!({
                     "agent": s.agent,
                     "label": s.label,
                     "holdings": holdings,
@@ -509,7 +510,20 @@ impl StatusSource {
                     "state": s.presence.map(|presence| presence.state),
                     "reason": s.presence.and_then(|presence| presence.reason),
                     "since_ms": s.presence.map(|presence| presence.since_ms),
-                })
+            });
+            if let Some(parent) = s.parent_namespace {
+                siblings.insert(parent, row);
+            } else {
+                primaries.push((s.namespace, row));
+            }
+        }
+        primaries
+            .into_iter()
+            .map(|(namespace, mut row)| {
+                if let Some(sibling) = siblings.remove(&namespace) {
+                    row["sibling"] = sibling;
+                }
+                row
             })
             .collect()
     }

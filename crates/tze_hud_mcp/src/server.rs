@@ -140,6 +140,7 @@ pub enum SessionEnd {
 
 /// The `initialize` metadata key carrying the session label.
 pub const LABEL_META_KEY: &str = "tze-hud/label";
+const PARENT_META_KEY: &str = "tze.hud/parent";
 
 /// A successful tool result: one text block of compact JSON.
 fn tool_result(value: &serde_json::Value) -> serde_json::Value {
@@ -510,17 +511,22 @@ impl McpServer {
         let Some(identity) = self.identity(ctx) else {
             return SessionEnd::Unauthenticated;
         };
-        let closed = ctx
-            .session_id
-            .as_deref()
-            .and_then(|id| self.scopes.close(&identity.agent_id, id));
-        match closed {
-            Some(scope) => {
-                self.release_scope(&scope, "ended").await;
-                SessionEnd::Released
-            }
-            None => SessionEnd::Unknown,
+        if let Some(id) = ctx.session_id.as_deref()
+            && self.release_session(&identity.agent_id, id).await
+        {
+            SessionEnd::Released
+        } else {
+            SessionEnd::Unknown
         }
+    }
+
+    /// End a scope selected by a trusted runtime caller and release its sibling.
+    pub async fn release_session(&self, agent: &str, id: &str) -> bool {
+        let closed = self.scopes.close(agent, id);
+        for scope in &closed {
+            self.release_scope(scope, "ended").await;
+        }
+        !closed.is_empty()
     }
 
     /// Clear everything a closed scope owns: zone and widget content,
@@ -563,8 +569,13 @@ impl McpServer {
         );
     }
 
-    /// Open a session for `agent`, releasing one first at the table bound.
-    async fn open_scope(&self, agent: &str, label: Option<&str>) -> String {
+    /// Open a session for `agent`, releasing scopes first at the table bound.
+    async fn open_scope(
+        &self,
+        agent: &str,
+        label: Option<&str>,
+        parent: Option<&str>,
+    ) -> Result<String, JsonRpcError> {
         let mut scene = self.scene.lock().await;
         let mut held = scene.holding_namespaces();
         if let Some(portals) = &self.portals {
@@ -575,11 +586,12 @@ impl McpServer {
         }
         let (scope, evicted) = self
             .scopes
-            .open(agent, label, |s| !held.contains(&s.namespace));
+            .open_with_parent(agent, label, parent, |s| !held.contains(&s.namespace))
+            .ok_or_else(|| JsonRpcError::invalid_params("Invalid MCP parent session"))?;
         // Its cards carry its label as a caption.
         scene.set_scoped_session_label(&scope.namespace, scope.session_label());
         drop(scene);
-        if let Some(evicted) = evicted {
+        for evicted in evicted {
             self.release_scope(&evicted, "session limit").await;
         }
         tracing::info!(
@@ -587,7 +599,7 @@ impl McpServer {
             label = scope.label().as_deref().unwrap_or(""),
             "MCP session started"
         );
-        scope.id.clone()
+        Ok(scope.id.clone())
     }
 
     fn tool_context<'a>(
@@ -672,14 +684,28 @@ impl McpServer {
 
         match request.method.as_str() {
             "initialize" => {
+                let meta = request.params.pointer("/_meta");
+                let parent = match meta.and_then(|meta| meta.get(PARENT_META_KEY)) {
+                    Some(serde_json::Value::String(parent)) if scope.is_none() => {
+                        Some(parent.as_str())
+                    }
+                    Some(_) => {
+                        return respond(McpResponse::err(
+                            id,
+                            JsonRpcError::invalid_params("Invalid MCP parent session"),
+                        ));
+                    }
+                    None => None,
+                };
                 // A session's own re-initialize keeps its scope.
                 if scope.is_none() {
-                    let label = request
-                        .params
-                        .pointer("/_meta")
-                        .and_then(|meta| meta.get(LABEL_META_KEY))
+                    let label = meta
+                        .and_then(|m| m.get(LABEL_META_KEY))
                         .and_then(serde_json::Value::as_str);
-                    *opened = Some(self.open_scope(&identity.agent_id, label).await);
+                    match self.open_scope(&identity.agent_id, label, parent).await {
+                        Ok(session) => *opened = Some(session),
+                        Err(error) => return respond(McpResponse::err(id, error)),
+                    }
                 }
                 respond(McpResponse::ok(id, crate::schema::initialize_result()))
             }
