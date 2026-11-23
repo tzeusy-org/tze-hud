@@ -4400,12 +4400,21 @@ async fn notification_progress_and_copy_admission() {
     };
     call(&server, "hud_publish", publish("deployment", 0.0)).await;
     call(&server, "hud_publish", publish("other", 1.0)).await;
+    let original_ids = {
+        let scene = server.scene.lock().await;
+        let cards = scene.zone_registry.active_for_zone("notification-area");
+        assert_eq!(cards.len(), 2);
+        [cards[0].publication_id, cards[1].publication_id]
+    };
+    call(&server, "hud_publish", publish("deployment", 0.4)).await;
     call(&server, "hud_publish", publish("deployment", 0.7)).await;
     let scene = server.scene.lock().await;
     let cards = scene.zone_registry.active_for_zone("notification-area");
     assert_eq!(cards.len(), 2);
     assert_eq!(cards[0].merge_key.as_deref(), Some("deployment"));
     assert_eq!(cards[1].merge_key.as_deref(), Some("other"));
+    assert_ne!(cards[0].publication_id, original_ids[0]);
+    assert_eq!(cards[1].publication_id, original_ids[1]);
     let ZoneContent::Notification(payload) = &cards[0].content else {
         panic!("expected the updated notification");
     };

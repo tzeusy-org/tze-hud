@@ -1047,6 +1047,7 @@ impl super::Compositor {
     /// the color channels so text fades with the backdrop.
     ///
     /// Returns a flat `Vec<TextItem>` ready for `TextRasterizer::prepare_text_items`.
+    #[cfg(any(test, feature = "dev-mode"))]
     pub(super) fn collect_text_items(&self, scene: &SceneGraph, sw: f32, sh: f32) -> Vec<TextItem> {
         self.collect_text_items_with_reveal(scene, sw, sh, None)
     }
