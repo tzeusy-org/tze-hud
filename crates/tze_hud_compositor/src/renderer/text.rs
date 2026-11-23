@@ -675,6 +675,7 @@ impl super::Compositor {
                                         action_layout.label_width(&b, index),
                                         tze_hud_scene::types::TextAlign::Center,
                                     );
+                                    text.overflow = TextOverflow::Ellipsis;
                                     if let Some(color) = error_color {
                                         text.color = color;
                                     }

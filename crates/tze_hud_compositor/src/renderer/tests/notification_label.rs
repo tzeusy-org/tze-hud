@@ -1,4 +1,5 @@
 use super::*;
+use tze_hud_scene::TextFit;
 use tze_hud_scene::types::{
     FontFamily, NotificationAction, NotificationPayload, ZoneContent, ZoneInteractionKind,
     ZoneRegistry,
@@ -88,6 +89,18 @@ async fn overflowing_notification_action_label_ellipsizes_without_moving_later_a
                 .then_some(candidate)
         })
         .expect("the label box fits a prefix and an ellipsis");
+
+    let fit = super::super::text_fit::TextFitMeasurer::new();
+    fit.set_tokens(compositor.token_map.clone());
+    let ZoneContent::Notification(payload) = &scene.zone_registry.active_publishes[ZONE][0].content
+    else {
+        panic!("expected the original notification");
+    };
+    assert_eq!(
+        fit.notification(&scene, ZONE, payload),
+        [("actions", explicit.chars().count() - 1)],
+        "admission counts the painted original characters"
+    );
 
     publish(&mut scene, &explicit);
     compositor.prime_markdown_cache(&scene);
