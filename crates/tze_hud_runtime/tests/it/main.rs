@@ -14,7 +14,3 @@ mod idle_efficiency_counters;
 #[cfg(feature = "dev-mode")]
 #[path = "../pixel_readback.rs"]
 mod pixel_readback;
-
-#[cfg(feature = "dev-mode")]
-#[path = "../present_ack.rs"]
-mod present_ack;

@@ -49,9 +49,6 @@ pub(super) fn build_runtime_context(cfg: &WindowedConfig) -> SharedRuntimeContex
 type NetworkServices = (
     Option<NetworkRuntime>,
     Vec<tokio::task::JoinHandle<()>>,
-    Option<tokio::sync::broadcast::Sender<tze_hud_protocol::proto::ElementRepositionedEvent>>,
-    Option<tze_hud_protocol::session_server::InputEventSender>,
-    Option<tokio::sync::broadcast::Sender<tze_hud_protocol::proto::FramePresented>>,
     Option<tze_hud_protocol::session_server::DegradationNoticeSender>,
     Vec<std::net::SocketAddr>,
 );
@@ -91,10 +88,9 @@ pub(super) fn start_network_services_with_render_wake(
         tracing::info!(
             "windowed runtime: gRPC server disabled (grpc_port = 0); running compositor-only"
         );
-        // Compositor-only mode: no session, so no present-ack subscriber. The
-        // compositor thread still drains the present-ack queue (bounded memory)
-        // but has no sender to broadcast on.
-        return Ok((None, Vec::new(), None, None, None, None, Vec::new()));
+        // Compositor-only mode has no resident sessions or notice sender.
+        // Local input-response correlation still drains in the compositor.
+        return Ok((None, Vec::new(), None, Vec::new()));
     }
 
     start_enabled_network_services(
@@ -179,18 +175,6 @@ fn start_enabled_network_services(
         ..SessionDeps::new(shared_state, agents)
     });
 
-    // Clone the broadcast senders before moving the service into the gRPC task.
-    // The windowed runtime holds these senders to:
-    // - broadcast ElementRepositionedEvents from the sync chrome-layer reset path.
-    // - inject EventBatch payloads (scroll, keyboard, and future input events)
-    //   on the input_event_tx channel after windowed input is processed.
-    let element_repositioned_tx = service.element_repositioned_tx.clone();
-    let input_event_tx = service.input_event_tx.clone();
-    // Present-ack broadcast sender: the compositor thread emits
-    // `FramePresented` on this after each presented frame, mirroring the
-    // headless runtime's producer. Cloned before the service moves into the
-    // gRPC task; subscribers attach via HudSession::subscribe_frame_presented.
-    let frame_presented_tx = service.frame_presented_tx.clone();
     let degradation_notices = service.degradation_notices.clone();
 
     // Bind the listeners eagerly. `std::net::TcpListener::bind` is
@@ -296,9 +280,6 @@ fn start_enabled_network_services(
     Ok((
         Some(network_rt),
         vec![handle],
-        Some(element_repositioned_tx),
-        Some(input_event_tx),
-        Some(frame_presented_tx),
         Some(degradation_notices),
         grpc_bound_addrs,
     ))
@@ -602,7 +583,7 @@ mod tests {
     fn start_network_services_grpc_port_zero_returns_no_runtime() {
         let shared_state = make_shared_state();
         let ctx: SharedRuntimeContext = Arc::new(RuntimeContext::headless_default());
-        let (rt, handles, _tx, _scroll_tx, present_tx, _degradation_notices, grpc_addrs) =
+        let (rt, handles, degradation_notices, grpc_addrs) =
             start_network_services(0, Default::default(), shared_state, ctx)
                 .expect("start_network_services should not fail for port 0");
         assert!(
@@ -614,8 +595,8 @@ mod tests {
             "grpc_port=0 must not spawn any network task handles"
         );
         assert!(
-            present_tx.is_none(),
-            "grpc_port=0 has no session, so no present-ack sender"
+            degradation_notices.is_none(),
+            "grpc_port=0 has no session, so no degradation notice sender"
         );
         assert!(
             grpc_addrs.is_empty(),
@@ -637,16 +618,15 @@ mod tests {
                 .is_err(),
             "production startup must reject an occupied loopback port"
         );
-        let (rt, handles, _tx, _scroll_tx, present_tx, _degradation_notices, grpc_addrs) =
-            start_network_services_on_listener(
-                listener,
-                Default::default(),
-                shared_state,
-                ctx,
-                Default::default(),
-                None,
-            )
-            .expect("start_network_services should not error for a valid port");
+        let (rt, handles, degradation_notices, grpc_addrs) = start_network_services_on_listener(
+            listener,
+            Default::default(),
+            shared_state,
+            ctx,
+            Default::default(),
+            None,
+        )
+        .expect("start_network_services should not error for a valid port");
         assert!(
             rt.is_some(),
             "non-zero grpc_port must create a NetworkRuntime"
@@ -656,9 +636,8 @@ mod tests {
             "non-zero grpc_port must spawn at least one network task handle"
         );
         assert!(
-            present_tx.is_some(),
-            "non-zero grpc_port must expose the session present-ack sender so the \
-             compositor thread can broadcast FramePresented"
+            degradation_notices.is_some(),
+            "non-zero grpc_port must expose the transactional degradation notice lane"
         );
         assert_eq!(
             grpc_addrs.first().map(|a| a.port()),
@@ -685,7 +664,7 @@ mod tests {
         let defaults = tze_hud_scene::PublicationDefaults::new(30_000);
         let scene = Arc::clone(&shared_state.blocking_lock().scene);
         scene.blocking_lock().zone_registry = tze_hud_scene::ZoneRegistry::with_defaults();
-        let (rt, handles, _, _, _, _, grpc_addrs) = start_network_services_on_listener(
+        let (rt, handles, _, grpc_addrs) = start_network_services_on_listener(
             listener,
             tze_hud_scene::config::AgentDirectory::unrestricted("bootstrap-key").shared(),
             shared_state,
@@ -716,7 +695,6 @@ mod tests {
                 payload: Some(Payload::SessionInit(SessionInit {
                     agent_id: "bootstrap".into(),
                     auth_credential: Some(tze_hud_protocol::auth::psk_credential("bootstrap-key")),
-                    ..Default::default()
                 })),
                 ..Default::default()
             })

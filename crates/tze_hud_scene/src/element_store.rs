@@ -107,8 +107,7 @@ impl ElementStore {
     ///
     /// The caller MUST:
     /// 1. Persist the store after a successful clear.
-    /// 2. Re-resolve the effective geometry via the fallback chain to populate
-    ///    the `new_geometry` field of any outbound `ElementRepositionedEvent`.
+    /// 2. Re-resolve the effective local geometry via the fallback chain.
     pub fn reset_geometry_override(&mut self, element_id: SceneId) -> Option<GeometryPolicy> {
         let entry = self.entries.get_mut(&element_id)?;
         entry.geometry_override.take()
@@ -389,10 +388,8 @@ pub const ZERO_GEOMETRY_POLICY: GeometryPolicy = GeometryPolicy::Relative {
 /// Resolve the fallback geometry for an element after its user override has
 /// been cleared (or when no override is present).
 ///
-/// Implements the shared resolution chain used by both the sync Winit-thread
-/// path (`perform_reset_element_geometry` in `tze_hud_runtime::windowed`) and
-/// the async gRPC path (`HudSessionImpl::reset_element_geometry` in
-/// `tze_hud_protocol::session_server`):
+/// Implements the local resolution chain used by the Winit-thread reset path
+/// (`perform_reset_element_geometry` in `tze_hud_runtime::windowed`):
 ///
 /// - **Tile**: agent-requested bounds → (no config override) → zero policy.
 /// - **Zone**: config policy from `zone_registry` → zero policy.

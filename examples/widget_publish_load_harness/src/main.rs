@@ -618,7 +618,7 @@ fn build_session_init(cli: &Cli, psk: &str, sequence: u64) -> session_proto::Cli
         timestamp_wall_us: now_wall_us(),
         payload: Some(ClientPayload::SessionInit(session_proto::SessionInit {
             agent_id: cli.agent_id.clone(),
-            initial_subscriptions: Vec::new(),
+
             auth_credential: Some(session_proto::AuthCredential {
                 credential: Some(session_proto::auth_credential::Credential::PreSharedKey(
                     session_proto::PreSharedKeyCredential {

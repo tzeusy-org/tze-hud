@@ -64,7 +64,7 @@ mod drag_reposition;
 // E2E integration tests for persistent movable elements.
 // Tests: cross-session persistence (TOML round-trip), element discovery by
 // namespace filter, display resolution change (relative-percentage invariance).
-// Also covers reset fallback paths and ElementRepositionedEvent delivery.
+// Also covers local reset fallback paths.
 #[path = "movable_elements_e2e.rs"]
 mod movable_elements_e2e;
 

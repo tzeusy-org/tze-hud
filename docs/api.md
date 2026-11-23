@@ -21,7 +21,7 @@ discovery.
 | Discover | `hud_surfaces` | `SessionEstablished` + current `DegradationNotice` | MCP lists usable surfaces and holdings; gRPC establishes the session |
 | Claim + fill | `hud_publish` | `Publish` (zones, widgets) | Claiming is implicit in the first publish |
 | Update | `hud_publish` | `Publish` | Latest wins |
-| Interact | `hud_input` | `EventBatch` (pushed) | MCP pulls input and acks it in the same call |
+| Interact | `hud_input` | none | MCP pulls input and acks it in the same call |
 | Hold | `hud_hold` | `Hold` | Renews without resending content |
 | Release | `hud_clear` | `Clear` | |
 | Reclaim | none (runtime) | none (runtime) | Runs on expiry, disconnect, or human override; a disconnect has no live session to push to |
@@ -621,14 +621,13 @@ Before upgrading an existing `agents.toml`, remove every `tiles` allow entry,
 including one mixed with `*`; the new binary rejects it. Preserve agent ids,
 PSK hashes, `paired_at`, comments and file ACLs. Choose only the zone, widget
 and portal grants the agent needs. Tile-only agents may keep an empty allow
-list or be retired. Zone, widget and portal grants do not restore the former
-`tiles` access to gRPC resource uploads, input/focus events, scene-topology
-events or frame telemetry. Through `agents.toml`, only `*` grants their internal
-permissions (`upload_resource`, `access_input_events`, `read_scene_topology`,
-`read_telemetry`); those names are not valid allow entries. Keeping narrow
-grants means losing that access. Choosing `*` widens access to all non-admin
-surfaces and permissions and must be an explicit owner decision. There is no
-alias, automatic migration, or automatic grant widening.
+list or be retired. Zone, widget and portal grants do not grant resident gRPC
+resource upload access. Through `agents.toml`, only `*` grants the internal
+`upload_resource` permission; that name is not a valid allow entry. Resident
+input/focus, topology and frame-telemetry feeds are removed regardless of grant.
+Choosing `*` widens access to all non-admin surfaces and permissions and must
+be an explicit owner decision. There is no alias, automatic migration or
+automatic grant widening.
 
 Validate the edited file with the new binary and restart it before reconnecting
 agents. An invalid or unreadable `agents.toml` exits strict startup with code 1.
@@ -957,9 +956,9 @@ down to the lifecycle.
 
 | Client → server | Server → client |
 |---|---|
-| `SessionInit{agent_id, auth_credential, initial_subscriptions, …}` | `SessionEstablished{session_id, namespace, heartbeat_interval_ms, …}`, then current `DegradationNotice` |
+| `SessionInit{agent_id, auth_credential}` | `SessionEstablished{session_id, namespace, heartbeat_interval_ms, …}`, then current `DegradationNotice` |
 | `Publish{surface, content \| params, ttl_ms, present_at_us?, expires_at_us?, key?}` | `RequestResult{seq, ok, code?, hint?, ttl_ms?}` |
-| `Clear{surface, key?}` (zone or widget) | `EventBatch{…}` (input, focus, commands), `ElementRepositioned`, `FramePresented` |
+| `Clear{surface, key?}` (zone or widget) | `RequestResult` |
 | `Hold{surface, ttl_ms}` (zone or widget) | `SessionSuspended` / `SessionResumed` (safe mode) |
 | `ResourceUpload*` (images), `Heartbeat`, `SessionClose` | Resource upload replies, `Heartbeat`, `DegradationNotice` |
 
@@ -989,43 +988,16 @@ sequence-valid removed-only envelope on an active stream follows the existing
 `INVALID_ARGUMENT` request path. An old token field on a valid `SessionInit`
 is ignored by protobuf.
 
-`FramePresented` remains optional server metadata at `ServerMessage` field 52:
-`frame_number` (1), `present_wall_us` (2) and ordered raw 16-byte internal
-scene `batch_ids` (3). Each ID identifies a publication committed by
-`SceneGraph::publish` or the scene scheduler. `RequestResult.seq` separately
-correlates request acceptance to the original `ClientMessage.sequence`.
-Delivery requires both internal `read_telemetry` permission and explicit
-`TELEMETRY_FRAMES` subscription. Through `agents.toml`, only an owner-chosen
-`*` supplies that permission; narrow zone/widget/portal grants do not.
-The event is global metadata for those subscribers, not owner-filtered content.
-
-The [windowed producer](../crates/tze_hud_runtime/src/windowed/mod.rs) samples
-UTC microseconds after primary and secondary GPU submission/poll work, using
-the primary compositor's frame number and submission-success condition. It
-neither waits for nor observes the independent main-thread surface present.
-The [headless producer](../crates/tze_hud_runtime/src/headless.rs) has an
-optional sender, absent by default, and a no-op surface present. Neither path
-proves physical on-screen or per-monitor completion; subtracting a remote
-client timestamp does not establish synchronized one-way latency.
-
-Several committed publications may share a sample. Only a successful scene
-commit adds a correlation ID. The producer emits an event when IDs are
-pending. Windowed drains before submission, so a failed primary attempt may
-consume IDs without a sample. Headless retains IDs on skipped submissions and
-drains after successful GPU work, even without a sender. No receivers is an
-ordinary broadcast miss. Lag and Simplified-mode cadence can drop delivery.
-Delivery is best effort, and a closed producer feed ends the session. Use
-`RequestResult` to determine acceptance and an observed frame sample to
-measure local submission. External opt-in adoption and Windows owner
-acceptance remain separate evidence.
+Resident input events, subscription confirmations, element reposition notices and
+frame-presented telemetry are removed. Their envelope and handshake tags and names
+stay reserved. Keyboard, pointer, focus, portal input/ACK and scroll remain local
+runtime behavior. The runtime retains its internal input-to-present measurements;
+it sends no resident frame receipt.
 
 Composer editing is local to native portals. Only accepted submissions enter the
 portal input queue returned by `hud_input`; resident sessions receive no draft
-snapshots, submit or cancel events. `InputEnvelope` fields 23–25 and names
-`composer_draft_state`, `composer_draft_submit`, `composer_draft_cancel` are
-reserved; their three event messages are removed. Old wire fields are ignored
-and cannot enable the internal native composer flag.
-
+snapshots, submit or cancel events. The retired resident event messages cannot
+activate the internal native composer flag.
 
 - **Every `RequestResult` carries `code` + `hint`.** Scene validation hints
   reach the agent rather than being flattened to `MUTATION_REJECTED`.

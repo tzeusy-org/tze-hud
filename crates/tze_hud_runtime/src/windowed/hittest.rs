@@ -938,7 +938,7 @@ mod tests {
         let controls = scene.overlay.zone_hit_regions.clone();
         assert_eq!(controls.len(), 2, "dismiss and action were generated");
         let tile_bounds = scene.tiles[&tile_id].bounds;
-        let (mut app, mut rx) =
+        let mut app =
             make_windowed_keyboard_test_app(scene, FocusManager::new(), InputProcessor::new());
         app.state.cursor_x = handle.bounds.x + handle.bounds.width / 2.0;
         app.state.cursor_y = handle.bounds.y + handle.bounds.height / 2.0;
@@ -1795,7 +1795,7 @@ mod tests {
             tile,
         ));
         let snapshot = crate::pipeline::HitTestSnapshot::from_scene(&scene);
-        let (mut app, _rx) =
+        let mut app =
             make_windowed_keyboard_test_app(scene, FocusManager::new(), InputProcessor::new());
         app.state
             .pipeline
@@ -1812,7 +1812,7 @@ mod tests {
     fn admin_cursor_is_null_while_the_app_beneath_owns_the_pointer() {
         use super::super::test_support::make_windowed_keyboard_test_app;
         use tze_hud_input::{FocusManager, InputProcessor};
-        let (mut app, _rx) = make_windowed_keyboard_test_app(
+        let mut app = make_windowed_keyboard_test_app(
             SceneGraph::new(1920.0, 1080.0),
             FocusManager::new(),
             InputProcessor::new(),
@@ -1843,7 +1843,7 @@ mod tests {
             Rect::new(2000.0, 100.0, 80.0, 24.0),
             SceneId::new(),
         ));
-        let (mut app, _rx) =
+        let mut app =
             make_windowed_keyboard_test_app(scene, FocusManager::new(), InputProcessor::new());
         app.state.cursor_window = Some(secondary);
         assert_eq!(cursor_at(&mut app, 2020.0, 110.0), PortalCursor::Pointer);
@@ -1891,7 +1891,7 @@ mod tests {
             Rect::new(100.0, 100.0, 80.0, 24.0),
             card,
         );
-        let (mut app, _rx) = make_windowed_keyboard_test_app(
+        let mut app = make_windowed_keyboard_test_app(
             SceneGraph::new(1920.0, 1080.0),
             FocusManager::new(),
             InputProcessor::new(),

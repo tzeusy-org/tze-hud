@@ -96,7 +96,6 @@ async fn test_session_registration_rejections_carry_recovery_hints() {
         let payload = ClientPayload::SessionInit(SessionInit {
             agent_id: "rejected-agent".to_string(),
             auth_credential: Some(crate::auth::psk_credential("test-key")),
-            ..Default::default()
         });
         let (live_agents, closer) = (agents.clone().shared(), Default::default());
         let ctx = HandshakeCtx {
@@ -182,10 +181,11 @@ async fn test_handshake_init_established_and_current_degradation() {
 
     let mut legacy_init = SessionInit {
         agent_id: "test-agent".into(),
-        initial_subscriptions: vec!["SCENE_TOPOLOGY".into()],
+
         auth_credential: Some(crate::auth::psk_credential("test-key")),
     }
     .encode_to_vec();
+    legacy_init.extend_from_slice(&[0x2a, 3, 1, 2, 3]); // Retired subscriptions, tag 5.
     legacy_init.extend_from_slice(&[0x32, 3, 1, 2, 3]); // Retired SessionInit.resume_token, tag 6.
     let (tx, rx) = tokio::sync::mpsc::channel(64);
     tx.send(ClientMessage {
@@ -233,25 +233,6 @@ async fn test_handshake_init_established_and_current_degradation() {
                 established.heartbeat_interval_ms,
                 DEFAULT_HEARTBEAT_INTERVAL_MS
             );
-            // SCENE_TOPOLOGY is granted because agent has read_scene_topology capability
-            assert!(
-                established
-                    .active_subscriptions
-                    .contains(&"SCENE_TOPOLOGY".to_string()),
-                "SCENE_TOPOLOGY should be active (agent has read_scene_topology)"
-            );
-            // Mandatory subscriptions always present
-            assert!(
-                established
-                    .active_subscriptions
-                    .contains(&"DEGRADATION_NOTICES".to_string()),
-                "DEGRADATION_NOTICES must always be active"
-            );
-            // denied_subscriptions must be empty (all requested categories granted)
-            assert!(
-                established.denied_subscriptions.is_empty(),
-                "no subscriptions should be denied"
-            );
         }
         other => panic!("Expected SessionEstablished, got: {other:?}"),
     }
@@ -290,7 +271,7 @@ async fn test_handshake_auth_failure() {
             timestamp_wall_us: now_wall_us(),
             payload: Some(ClientPayload::SessionInit(SessionInit {
                 agent_id: "bad-agent".to_string(),
-                initial_subscriptions: Vec::new(),
+
                 auth_credential: Some(crate::auth::psk_credential("wrong-key".to_string())),
             })),
         })
@@ -622,7 +603,7 @@ async fn test_graceful_disconnect_session_close() {
     fn init(agent: &str) -> ClientPayload {
         ClientPayload::SessionInit(SessionInit {
             agent_id: agent.to_string(),
-            initial_subscriptions: vec!["SCENE_TOPOLOGY".to_string()],
+
             auth_credential: Some(crate::auth::psk_credential("test-key")),
         })
     }
@@ -888,7 +869,7 @@ async fn test_auth_structured_psk_credential_accepted() {
         timestamp_wall_us: now_wall_us(),
         payload: Some(ClientPayload::SessionInit(SessionInit {
             agent_id: "psk-agent".to_string(),
-            initial_subscriptions: Vec::new(),
+
             auth_credential: Some(crate::proto::session::AuthCredential {
                 credential: Some(
                     crate::proto::session::auth_credential::Credential::PreSharedKey(
@@ -932,7 +913,6 @@ async fn test_auth_structured_psk_credential_wrong_key() {
             payload: Some(ClientPayload::SessionInit(SessionInit {
                 agent_id: "bad-psk-agent".to_string(),
                 auth_credential: credential,
-                ..Default::default()
             })),
         })
         .await
@@ -957,65 +937,24 @@ fn test_capability_set_covers_wildcard_grants() {
     assert!(!capability_set_covers(&caps, "create_tiles"));
 }
 
-/// Scenario: PSK agent with access_input_events capability successfully subscribes to
-/// INPUT_EVENTS.
-/// WHEN a PSK-authenticated agent requests INPUT_EVENTS subscription AND includes
-/// access_input_events in requested_capabilities,
-/// THEN SessionEstablished includes INPUT_EVENTS in active_subscriptions and
-/// denied_subscriptions is empty.
-///
-/// Subscription gating uses the agent's explicitly granted capabilities.
-/// Agents must request the required capability to subscribe to gated categories.
+/// Removed resident notices and subscription confirmations decode as absent.
+/// Removed client requests decode to empty payloads and get correlated rejections.
 #[tokio::test]
-async fn test_psk_with_capability_allows_input_events_subscription() {
-    let (mut client, _server) = setup_test().await;
-
-    let (tx, rx) = tokio::sync::mpsc::channel::<ClientMessage>(64);
-    let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
-
-    // PSK agent requesting INPUT_EVENTS subscription WITH the required capability
-    tx.send(ClientMessage {
-        sequence: 1,
-        timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::SessionInit(SessionInit {
-            agent_id: "sub-test-agent".to_string(),
-            initial_subscriptions: vec!["INPUT_EVENTS".to_string()],
-            auth_credential: Some(crate::auth::psk_credential("test-key".to_string())),
-        })),
-    })
-    .await
-    .unwrap();
-
-    let mut response_stream = client.session(stream).await.unwrap().into_inner();
-    let msg = response_stream.next().await.unwrap().unwrap();
-    match &msg.payload {
-        Some(ServerPayload::SessionEstablished(established)) => {
-            // Agent with access_input_events capability should have INPUT_EVENTS active
-            assert!(
-                established
-                    .active_subscriptions
-                    .contains(&"INPUT_EVENTS".to_string()),
-                "Agent with access_input_events should have INPUT_EVENTS in active_subscriptions; \
-                     active={:?}, denied={:?}",
-                established.active_subscriptions,
-                established.denied_subscriptions
-            );
-            assert!(
-                established.denied_subscriptions.is_empty(),
-                "Agent with required capability should have no denied subscriptions"
-            );
-        }
-        other => panic!("Expected SessionEstablished, got: {other:?}"),
-    }
-}
-
-/// Removed client requests (subscription change, input focus/capture, widget
-/// asset register, element listing, mutation batches and tile claims) are reserved
-/// field numbers: a peer that still sends one decodes to an empty payload and
-/// gets a correlated rejection.
-#[tokio::test]
-async fn removed_client_request_numbers_decode_to_empty_payload() {
+async fn retired_wire_fields_decode_as_absent() {
     use prost::Message;
+    for field in [34u64, 51, 52] {
+        let mut wire = vec![0x08, 0x07];
+        prost::encoding::encode_varint(field << 3 | 2, &mut wire);
+        wire.push(0);
+        let message = ServerMessage::decode(wire.as_slice()).unwrap();
+        assert_eq!(message.sequence, 7);
+        assert!(message.payload.is_none(), "removed server field {field}");
+    }
+    assert_eq!(
+        SessionEstablished::decode([0x4a, 1, b'a', 0x52, 1, b'b'].as_slice()).unwrap(),
+        SessionEstablished::default(),
+        "retired active/denied subscription confirmations are ignored"
+    );
     let mut removed = Vec::new();
     for field in [20u64, 24, 27, 28, 29, 34, 39, 40] {
         // tag = field << 3 | length-delimited, then an empty message body.
@@ -1205,7 +1144,7 @@ async fn degradation_notice_send_failure_unregisters_session() {
             timestamp_wall_us: now_wall_us(),
             payload: Some(ClientPayload::SessionInit(SessionInit {
                 agent_id: "doomed".to_string(),
-                initial_subscriptions: Vec::new(),
+
                 auth_credential: Some(crate::auth::psk_credential("test-key".to_string())),
             })),
         })
@@ -1258,7 +1197,6 @@ async fn test_handshake_unpaired_mid_flight_is_refused_at_registration() {
     let init = SessionInit {
         agent_id: "late".to_string(),
         auth_credential: Some(crate::auth::psk_credential("test-key")),
-        ..Default::default()
     };
     assert!(handle_session_init(ctx, &tx, &init).await.is_none());
     let status = rx.recv().await.unwrap().expect_err("the stream ends");

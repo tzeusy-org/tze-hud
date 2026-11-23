@@ -19,7 +19,6 @@ pub(super) struct StreamSession {
     pub(super) capabilities: Vec<String>,
     /// Ownership of publications from this physical resident stream.
     pub(super) publication_origin: SceneId,
-    pub(super) subscriptions: Vec<String>,
     pub(super) server_sequence: u64,
 
     /// Current lifecycle state.

@@ -6,7 +6,6 @@ use tze_hud_scene::types::{DragHandleElementKind, GeometryPolicy, ZoneInteractio
 use tze_hud_scene::{HitResult, Rect, SceneGraph, SceneId};
 
 use super::WinitApp;
-use super::input_dispatch::dispatch_portal_geometry_event;
 use super::lifecycle::{INTERACTION_LOCK_BUDGET, spin_acquire};
 
 /// Captured definition identity; a zone is a slot, never an agent tile.
@@ -189,7 +188,7 @@ pub(super) struct DragReleasedData {
     bounds: Rect,
     /// Primary canvas dimensions for relative geometry normalization.
     display: (f32, f32),
-    /// Agent namespace that owns the tile, used for `ElementRepositionedEvent` routing.
+    /// Agent namespace that owns the tile, used for geometry persistence.
     namespace: String,
     /// Final whole-portal member bounds, including the grabbed tile; empty
     /// for single tiles. [`write_member_geometry_overrides`] owns the id-keyed
@@ -203,7 +202,7 @@ pub(super) struct DragReleasedData {
 ///
 /// A portal is composed of several constituent surfaces; a single resize step
 /// scales all of them, so the outcome carries one snapshot per member for the
-/// caller to broadcast.
+/// caller to persist at gesture completion.
 pub(super) struct PortalMemberGeometry {
     /// Constituent-surface tile whose bounds were updated.
     pub(super) tile_id: tze_hud_scene::SceneId,
@@ -212,10 +211,9 @@ pub(super) struct PortalMemberGeometry {
 }
 
 /// Outcome of a pointer-driven portal resize step, carried out of the scene
-/// lock so that [`dispatch_portal_geometry_event`] can be called without
-/// holding locks (fire-and-forget gRPC send).
+/// lock for optional terminal geometry persistence.
 pub(super) struct PortalResizePointerOutcome {
-    /// Per-member geometry updates to broadcast (includes the anchor/frame,
+    /// Per-member geometry updates to persist (includes the anchor/frame,
     /// whose snapshot carries the whole-portal rect).
     pub(super) members: Vec<PortalMemberGeometry>,
     /// Display width at the time of the event (for geometry normalisation).
@@ -888,13 +886,12 @@ fn write_member_geometry_overrides(
 
 /// Apply a resolved whole-portal resize to the scene: write each member's scaled
 /// bounds, bump the scene version once if any geometry changed, and build the
-/// per-member geometry snapshots to broadcast.
+/// per-member geometry snapshots for terminal persistence.
 ///
 /// `primary` is the whole-portal geometry snapshot produced by the resize state
 /// machine (its `rect` is the new anchor/frame rect). Each returned member
 /// snapshot carries the same sequence / gesture flag but with that member's own
-/// scaled rect, so per-member `ElementRepositionedEvent`s report correct
-/// geometry.
+/// scaled rect for the persisted geometry override.
 fn commit_portal_group_resize(
     scene: &mut tze_hud_scene::graph::SceneGraph,
     group: &PortalGroup,
@@ -1055,14 +1052,13 @@ fn translate_portal_group_on_drag(
 /// the non-scrollable frame under the affordance corner, so a focus-gated resize
 /// never starts under real OS pointer input. If the pointer lands on
 /// an affordance, starts the gesture and returns a [`PortalResizePointerOutcome`]
-/// with the initial snapshot so the caller can apply local bounds and broadcast
-/// the geometry event.
+/// with the initial snapshot after applying local bounds.
 ///
 /// On **PointerMove**: if a gesture is active for `device_id`, computes the new
 /// intermediate rect and applies it to the scene immediately (local-first).
 ///
 /// On **PointerUp**: ends the gesture, applies the final clamped rect, and
-/// returns an outcome the caller must broadcast.
+/// returns the final geometry for durable persistence.
 ///
 /// Returns `None` when there is nothing to do (no portal under the pointer,
 /// pointer outside affordances, no gesture active, or lock contention).
@@ -1434,8 +1430,7 @@ impl WinitApp {
             .map(std::sync::Arc::downgrade)
     }
 
-    /// Persist the geometry override for a completed drag and broadcast an
-    /// `ElementRepositionedEvent`.
+    /// Persist the geometry override for a completed drag.
     ///
     /// Called after all scene locks are released to avoid holding locks during
     /// disk I/O (element store atomic write + fsync).
@@ -1445,7 +1440,7 @@ impl WinitApp {
         };
         use tze_hud_scene::element_store::ElementType;
 
-        let (store_snapshot, persist_file, new_geometry) = {
+        let (store_snapshot, persist_file) = {
             let Ok(mut state) = self.state.shared_state.try_lock() else {
                 tracing::warn!("persist_drag_release: could not acquire shared_state lock");
                 return;
@@ -1481,37 +1476,15 @@ impl WinitApp {
 
             let store_snapshot = state.element_store.clone();
             let persist_file = state.element_store_file.clone();
-            (store_snapshot, persist_file, new_geometry)
+            (store_snapshot, persist_file)
         };
 
         // Persist element store on a background thread (avoids blocking the
         // winit event loop with sync disk I/O).
         persist_element_store_in_background(store_snapshot, persist_file);
-
-        // Broadcast ElementRepositionedEvent so gRPC subscribers are notified.
-        if let Some(ref tx) = self.state.element_repositioned_tx {
-            let event = tze_hud_protocol::proto::ElementRepositionedEvent {
-                element_id: released.element_id.as_uuid().as_bytes().to_vec(),
-                new_geometry: Some(tze_hud_protocol::convert::geometry_policy_to_proto(
-                    &new_geometry,
-                )),
-                previous_geometry: None,
-            };
-            // Errors (no receivers, channel lagged) are silently ignored —
-            // ElementRepositionedEvent is an ephemeral-realtime notification;
-            // subscribers that are not present at the moment of a drag release
-            // will learn the final geometry on next subscription refresh.
-            tx.send(event).unwrap_or_default();
-            tracing::debug!(
-                element_id = %released.element_id,
-                final_x = released.bounds.x,
-                final_y = released.bounds.y,
-                "ElementRepositionedEvent broadcast after drag release"
-            );
-        }
     }
 
-    /// Complete resize notifications and optional terminal persistence after unlock.
+    /// Complete optional terminal geometry persistence after unlocking.
     pub(super) fn finish_portal_resize_members(
         &mut self,
         members: &[PortalMemberGeometry],
@@ -1519,21 +1492,16 @@ impl WinitApp {
         display_h: f32,
         persist: bool,
     ) {
-        let mut bounds = Vec::with_capacity(members.len());
-        for member in members {
-            dispatch_portal_geometry_event(
-                &self.state.element_repositioned_tx,
-                member.tile_id,
-                &member.snapshot,
-                display_w,
-                display_h,
-            );
-            let r = member.snapshot.rect;
-            bounds.push((
-                member.tile_id,
-                tze_hud_scene::Rect::new(r.x, r.y, r.width, r.height),
-            ));
-        }
+        let bounds: Vec<_> = members
+            .iter()
+            .map(|member| {
+                let r = member.snapshot.rect;
+                (
+                    member.tile_id,
+                    tze_hud_scene::Rect::new(r.x, r.y, r.width, r.height),
+                )
+            })
+            .collect();
         if persist {
             self.persist_portal_member_overrides(&bounds, display_w, display_h);
         }
@@ -1717,10 +1685,7 @@ impl WinitApp {
     ///
     /// Looks up the currently focused tile in `tab_id`. If the focused tile is
     /// a portal tile (has a registered scroll config), applies the resize step
-    /// locally (local-first ), updates the scene tile bounds, and
-    /// broadcasts an `ElementRepositionedEvent` on the `SCENE_TOPOLOGY` channel
-    /// via `element_repositioned_tx` so gRPC subscribers receive the updated
-    /// portal geometry (relative %).
+    /// locally, updates the scene tile bounds, and persists the geometry override.
     ///
     /// Returns `true` when the hotkey was consumed (applied to a focused portal
     /// tile) so the caller knows to stop propagating the key event.
@@ -1860,7 +1825,7 @@ impl WinitApp {
         };
 
         // A hotkey is a discrete committed step; pointer completion passes its
-        // terminal flag to the same post-lock broadcast/persistence seam.
+        // terminal flag to the same post-lock persistence seam.
         self.finish_portal_resize_members(&members, display_w, display_h, true);
 
         tracing::debug!(
@@ -2505,11 +2470,11 @@ mod tests {
         );
     }
 
-    /// A pointer-up ends the gesture and broadcasts the final geometry snapshot.
+    /// A pointer-up ends the gesture and returns its final geometry snapshot.
     ///   - After pointer-up, `gesture_active()` becomes false.
     ///   - The final snapshot's `gesture_active` is false.
     ///   - Tile bounds reflect the final clamped position.
-    ///   - A geometry event outcome is returned (for broadcasting).
+    ///   - The final geometry is returned for persistence.
     #[test]
     fn pointer_up_ends_gesture_and_returns_geometry_event() {
         let (mut scene, tab_id, tile_id, fm) = portal_scene_with_focus();
@@ -3107,7 +3072,7 @@ mod tests {
 
         let (scene, tab_id, frame_id, transcript_id, composer_id, shield_id, fm) =
             multi_surface_portal_scene();
-        let (mut app, _rx) = make_windowed_keyboard_test_app(scene, fm, InputProcessor::new());
+        let mut app = make_windowed_keyboard_test_app(scene, fm, InputProcessor::new());
 
         let read = |app: &WinitApp, id: tze_hud_scene::SceneId| {
             let shared = app.state.shared_state.try_lock().unwrap();
@@ -3248,7 +3213,7 @@ mod tests {
             transcript_id,
             tze_hud_scene::Rect::new(0.0, 0.0, 180.0, 280.0),
         );
-        let (mut app, _rx) = make_windowed_keyboard_test_app(scene, fm, InputProcessor::new());
+        let mut app = make_windowed_keyboard_test_app(scene, fm, InputProcessor::new());
 
         let read = |app: &WinitApp, id: tze_hud_scene::SceneId| {
             let shared = app.state.shared_state.try_lock().unwrap();
@@ -3327,7 +3292,7 @@ mod tests {
             multi_surface_portal_scene();
         let attach = tze_hud_scene::Rect::new(0.0, 0.0, 180.0, 280.0);
         let _first = attach_text_node(&mut scene, transcript_id, attach);
-        let (mut app, _rx) = make_windowed_keyboard_test_app(scene, fm, InputProcessor::new());
+        let mut app = make_windowed_keyboard_test_app(scene, fm, InputProcessor::new());
 
         // Width SHRINK: one 32px step narrows the 400px frame → the 180px
         // transcript pane drops below its attach-time node width.
@@ -3383,7 +3348,7 @@ mod tests {
         // Fresh FocusManager with the tab but NO focus owner.
         let mut fm = FocusManager::new();
         fm.add_tab(tab_id);
-        let (mut app, _rx) = make_windowed_keyboard_test_app(scene, fm, InputProcessor::new());
+        let mut app = make_windowed_keyboard_test_app(scene, fm, InputProcessor::new());
 
         let before = {
             let shared = app.state.shared_state.try_lock().unwrap();
@@ -3421,7 +3386,7 @@ mod tests {
 
         let (scene, tab_id, frame_id, _transcript_id, _composer_id, _shield_id, fm) =
             multi_surface_portal_scene();
-        let (mut app, _rx) = make_windowed_keyboard_test_app(scene, fm, InputProcessor::new());
+        let mut app = make_windowed_keyboard_test_app(scene, fm, InputProcessor::new());
         let display_w = app.state.config.window.width as f32;
 
         // Grow far past the display bound; each step clamps.
@@ -3485,7 +3450,7 @@ mod tests {
 
         let (scene, tab_id, frame_id, transcript_id, composer_id, _shield_id, fm) =
             multi_surface_portal_scene();
-        let (mut app, _rx) = make_windowed_keyboard_test_app(scene, fm, InputProcessor::new());
+        let mut app = make_windowed_keyboard_test_app(scene, fm, InputProcessor::new());
 
         // Seed store entries for the members (as the runtime does on tile
         // creation) so the id-keyed override write has a target.
@@ -3533,7 +3498,7 @@ mod tests {
 
         let (scene, _tab, frame_id, transcript_id, composer_id, shield_id, fm) =
             multi_surface_portal_scene();
-        let (mut app, _rx) = make_windowed_keyboard_test_app(scene, fm, InputProcessor::new());
+        let mut app = make_windowed_keyboard_test_app(scene, fm, InputProcessor::new());
         seed_tile_entries(
             &app,
             &[frame_id, transcript_id, composer_id, shield_id],
@@ -3608,7 +3573,7 @@ mod tests {
             &scene,
         );
 
-        let (mut app, _rx) = make_windowed_keyboard_test_app(scene, fm, InputProcessor::new());
+        let mut app = make_windowed_keyboard_test_app(scene, fm, InputProcessor::new());
 
         let read = |app: &WinitApp, id: tze_hud_scene::SceneId| {
             let shared = app.state.shared_state.try_lock().unwrap();
@@ -4720,7 +4685,7 @@ mod tests {
         outside_handle.hit_region.interaction_id = outside_handle.interaction_id.clone();
         outside_handle.is_header_band = false;
         scene.overlay.drag_handle_hit_regions.push(outside_handle);
-        let (mut app, _rx) =
+        let mut app =
             make_windowed_keyboard_test_app(scene, FocusManager::new(), InputProcessor::new());
         seed_tile_entries(
             &app,
@@ -4962,10 +4927,9 @@ mod tests {
                 handle.bounds.x + handle.bounds.width / 2.0,
                 handle.bounds.y + handle.bounds.height / 2.0,
             );
-            let (mut app, _rx) =
+            let mut app =
                 make_windowed_keyboard_test_app(scene, FocusManager::new(), InputProcessor::new());
-            let (tx, mut events) = tokio::sync::broadcast::channel(4);
-            app.state.element_repositioned_tx = Some(tx);
+
             app.state.cursor_x = x;
             app.state.cursor_y = y;
             app.enqueue_pointer_event(PointerEventKind::Down);
@@ -5024,7 +4988,7 @@ mod tests {
             let scene = shared.scene.try_lock().unwrap();
             assert!(!scene.is_drag_active(id));
             assert!(shared.element_store.entries.is_empty());
-            assert!(events.try_recv().is_err(), "zone completion is owner-local");
+
             assert_eq!(
                 scene.overlay.zone_placements.contains_key(&id),
                 !matches!(terminal, "removed" | "definition")
@@ -5255,7 +5219,7 @@ mod tests {
         let pip = Rect::new(1300.0, 100.0, 480.0, 270.0); // grip bottom-left: ╱
         let (scene, id, grip) = pip_grip_scene(pip);
         let snapshot = crate::pipeline::HitTestSnapshot::from_scene(&scene);
-        let (mut app, _rx) =
+        let mut app =
             make_windowed_keyboard_test_app(scene, FocusManager::new(), InputProcessor::new());
         app.state
             .pipeline
@@ -5291,7 +5255,7 @@ mod tests {
     fn an_unhovered_grip_press_still_shows_the_resize_cursor() {
         let pip = Rect::new(100.0, 100.0, 400.0, 225.0); // grip bottom-right: ╲
         let (scene, _, grip) = pip_grip_scene(pip);
-        let (mut app, _rx) =
+        let mut app =
             make_windowed_keyboard_test_app(scene, FocusManager::new(), InputProcessor::new());
         app.state.cursor_x = grip.x + 12.0;
         app.state.cursor_y = grip.y + 12.0;
@@ -5311,7 +5275,7 @@ mod tests {
     fn a_retained_grip_release_finishes_the_resize() {
         let pip = Rect::new(1300.0, 700.0, 480.0, 270.0);
         let (scene, id, grip) = pip_grip_scene(pip);
-        let (mut app, _rx) =
+        let mut app =
             make_windowed_keyboard_test_app(scene, FocusManager::new(), InputProcessor::new());
         app.state.cursor_x = grip.x + 12.0;
         app.state.cursor_y = grip.y + 12.0;
@@ -5580,7 +5544,7 @@ mod tests {
                     2,
                 )
                 .unwrap();
-            let (mut app, _rx) = make_windowed_keyboard_test_app(scene, fm, InputProcessor::new());
+            let mut app = make_windowed_keyboard_test_app(scene, fm, InputProcessor::new());
             for id in [live, stale] {
                 app.state
                     .portal_resize_states

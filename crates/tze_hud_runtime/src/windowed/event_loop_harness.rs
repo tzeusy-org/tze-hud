@@ -38,8 +38,8 @@ use std::sync::Arc;
 #[cfg(test)]
 use tze_hud_input::PointerEvent;
 use tze_hud_input::{
-    FocusManager, InputProcessor, KeyboardModifiers, KeyboardProcessor, PointerEventKind,
-    RawCharacterEvent, RawKeyDownEvent, RawKeyUpEvent,
+    FocusManager, InputProcessor, KeyboardModifiers, PointerEventKind, RawCharacterEvent,
+    RawKeyDownEvent, RawKeyUpEvent,
 };
 use tze_hud_scene::graph::SceneGraph;
 #[cfg(test)]
@@ -64,7 +64,7 @@ impl WindowedRuntimeState {
     ///
     /// - `window` / `window_surface` / `compositor` / `compositor_handle` — `None`.
     /// - `network_rt` / `network_handles` — no gRPC/MCP servers are spawned.
-    /// - the broadcast channels (`element_repositioned_tx`, `input_event_tx`) — `None`.
+    /// - `degradation_notices` — `None` until networking is explicitly enabled.
     /// - portal state is an empty synchronous Hub; no network ingress is spawned.
     ///
     /// The `safe_mode_atomic` and `active_tab_mirror` `Arc`s are shared between
@@ -122,12 +122,12 @@ impl WindowedRuntimeState {
             frame_ready_rx,
             deferred_present: false,
             frame_ready_tx: Some(frame_ready_tx),
-            frame_presented_tx: None,
+
             degradation_notices: None,
             window_surface: None,
             input_processor: InputProcessor::new(),
             focus_manager: FocusManager::new(),
-            keyboard_processor: KeyboardProcessor::new(),
+
             pipeline: crate::pipeline::FramePipeline::new(),
             shutdown: crate::threads::ShutdownToken::new(),
             quiescent_failed: Arc::new(AtomicBool::new(false)),
@@ -182,8 +182,7 @@ impl WindowedRuntimeState {
             tokens_seen: 0,
             capture_seen: 0,
             _config_watch: None,
-            element_repositioned_tx: None,
-            input_event_tx: None,
+
             composer_pointer_drag_anchor: None,
             reading_cursor: None,
             pressable_regions: Vec::new(),
@@ -1524,8 +1523,6 @@ mod tests {
     mod press_guard;
     mod question_displays;
     use tze_hud_input::{KeyboardModifiers, RawCharacterEvent, RawKeyDownEvent, RawKeyUpEvent};
-    use tze_hud_protocol::proto::input_envelope::Event as ProtoInputEvent;
-    use tze_hud_protocol::proto::{CommandAction, CommandSource};
     use tze_hud_scene::MonoUs;
 
     #[tokio::test]
@@ -4628,8 +4625,7 @@ mod tests {
                     scene.tiles.extend(fixture.tiles.clone());
                     id
                 };
-                let (tx, mut repositioned) = tokio::sync::broadcast::channel(4);
-                harness.app.state.element_repositioned_tx = Some(tx);
+
                 harness.app.enqueue_pointer_event(PointerEventKind::Down);
                 harness.app.state.cursor_y += 1.0;
                 harness.app.enqueue_pointer_event(PointerEventKind::Move);
@@ -4765,7 +4761,7 @@ mod tests {
                     placement,
                     "late ordinary or retained terminal cannot move cancelled placement"
                 );
-                assert!(repositioned.try_recv().is_err());
+
                 assert!(shared.blocking_lock().element_store.entries.is_empty());
                 assert!(take_action_ids(&harness).is_empty());
                 assert_eq!(harness.zone_publication_count("notification-area"), 1);
@@ -7872,11 +7868,7 @@ mod tests {
     fn install_button(
         harness: &mut HeadlessEventLoopHarness,
         initially_focused: bool,
-    ) -> (
-        SceneId,
-        SceneId,
-        tze_hud_protocol::session_server::InputEventReceiver,
-    ) {
+    ) -> (SceneId, SceneId) {
         // Populate the authoritative scene rather than replacing its injected clock.
         let scene_handle = Arc::clone(&harness.app.state.shared_state.blocking_lock().scene);
         let mut scene = scene_handle.blocking_lock();
@@ -7924,10 +7916,7 @@ mod tests {
         drop(scene);
         *harness.app.state.active_tab_mirror.lock().unwrap() = Some(tab_id);
 
-        let tx = tze_hud_protocol::session_server::InputEventSender::new(16);
-        let rx = tx.subscribe_all();
-        harness.app.state.input_event_tx = Some(tx);
-        (tile_id, node_id, rx)
+        (tile_id, node_id)
     }
 
     #[test]
@@ -7955,7 +7944,7 @@ mod tests {
                 let scene_handle = Arc::clone(&shared_handle.blocking_lock().scene);
                 *scene_handle.blocking_lock() =
                     SceneGraph::new_with_clock(1920.0, 1080.0, clock.clone());
-                let (tile_id, node_id, _rx) = install_button(&mut harness, true);
+                let (tile_id, node_id) = install_button(&mut harness, true);
                 let (tab_id, lease_id, other_tab, other_tile, other_lease, grace_ms) = {
                     let mut scene = scene_handle.blocking_lock();
                     assert_eq!(scene.now_millis(), clock.now_millis());
@@ -8125,32 +8114,12 @@ mod tests {
         }
     }
 
-    fn received_events(
-        rx: &mut tze_hud_protocol::session_server::InputEventReceiver,
-    ) -> Vec<(String, ProtoInputEvent)> {
-        let mut events = Vec::new();
-        while let Ok((namespace, batch)) = rx.try_recv() {
-            events.extend(
-                batch
-                    .events
-                    .into_iter()
-                    .filter_map(|envelope| envelope.event)
-                    .map(|event| (namespace.clone(), event)),
-            );
-        }
-        events
-    }
-
     /// Install two scrollable tiles with keyboard focus on the first while the
     /// cursor is over the second. This is the adversarial setup for keyboard
     /// scroll ownership: focus and pointer location deliberately disagree.
     fn install_conflicting_focus_and_pointer_scroll_tiles(
         harness: &mut HeadlessEventLoopHarness,
-    ) -> (
-        SceneId,
-        SceneId,
-        tze_hud_protocol::session_server::InputEventReceiver,
-    ) {
+    ) -> (SceneId, SceneId) {
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
         let lease_id = scene.grant_lease("scroll-agent", 60_000);
@@ -8199,10 +8168,7 @@ mod tests {
         }
         *harness.app.state.active_tab_mirror.lock().unwrap() = Some(tab_id);
 
-        let tx = tze_hud_protocol::session_server::InputEventSender::new(16);
-        let rx = tx.subscribe_all();
-        harness.app.state.input_event_tx = Some(tx);
-        (focused_tile, pointer_tile, rx)
+        (focused_tile, pointer_tile)
     }
 
     /// / system-shell "Tab Keyboard Shortcuts": the runtime
@@ -8213,7 +8179,7 @@ mod tests {
     #[test]
     fn ctrl_tab_switches_scene_and_key_down_never_reaches_agent() {
         let mut harness = HeadlessEventLoopHarness::new();
-        let (_tile_id, _node_id, mut rx) = install_button(&mut harness, true);
+        let (_tile_id, _node_id) = install_button(&mut harness, true);
         let second_tab = {
             let shared = harness.app.state.shared_state.blocking_lock();
             let mut scene = shared.scene.blocking_lock();
@@ -8250,10 +8216,6 @@ mod tests {
             assert_eq!(chrome.tabs[0].name, "Configured One");
             assert_eq!(chrome.tabs[1].name, "Configured Two");
         }
-        assert!(
-            received_events(&mut rx).is_empty(),
-            "a shell-reserved KeyDown must never reach an agent"
-        );
     }
 
     /// Runtime tab topology can grow after chrome labels are configured. The
@@ -8262,7 +8224,7 @@ mod tests {
     #[test]
     fn ctrl_tab_preserves_configured_chrome_label_when_scene_adds_tab() {
         let mut harness = HeadlessEventLoopHarness::new();
-        let (_tile_id, _node_id, mut rx) = install_button(&mut harness, true);
+        let (_tile_id, _node_id) = install_button(&mut harness, true);
         let second_tab = {
             let shared = harness.app.state.shared_state.blocking_lock();
             let mut scene = shared.scene.blocking_lock();
@@ -8280,10 +8242,6 @@ mod tests {
         let chrome = harness.app.state.chrome_state.read().unwrap();
         assert_eq!(chrome.tabs[0].name, "Configured One");
         assert_eq!(chrome.tabs[1].name, "Tab 2");
-        assert!(
-            received_events(&mut rx).is_empty(),
-            "the shell-owned tab shortcut must remain agent-inaccessible"
-        );
     }
 
     /// A shell-owned KeyDown consumes its physical sequence. Its matching
@@ -8299,7 +8257,7 @@ mod tests {
         ] {
             for modifiers_held in [false, true] {
                 let mut harness = HeadlessEventLoopHarness::new();
-                let (_tile_id, _node_id, mut rx) = install_button(&mut harness, true);
+                let (_tile_id, _node_id) = install_button(&mut harness, true);
                 let active_tab = *harness.app.state.active_tab_mirror.lock().unwrap();
                 let chrome_tabs = harness.app.state.chrome_state.read().unwrap().tabs.len();
 
@@ -8313,10 +8271,7 @@ mod tests {
                 }
                 harness.drain();
                 assert_eq!(harness.pending_len(), 0);
-                assert!(
-                    received_events(&mut rx).is_empty(),
-                    "shell-reserved {down_key} KeyDown must never reach an agent"
-                );
+
                 if key_code == "KeyM" {
                     let shared = harness.app.state.shared_state.blocking_lock();
                     assert_eq!(shared.scene.blocking_lock().active_tab, active_tab);
@@ -8349,10 +8304,7 @@ mod tests {
                 }));
                 harness.drain();
                 assert_eq!(harness.pending_len(), 0);
-                assert!(
-                    received_events(&mut rx).is_empty(),
-                    "matching {up_key} KeyUp must never reach an agent"
-                );
+
                 assert!(
                     harness
                         .app
@@ -8361,46 +8313,6 @@ mod tests {
                         .is_empty()
                 );
             }
-        }
-    }
-
-    /// The shell intercept is an exact reserved-set match, not a blanket Ctrl
-    /// filter. Ordinary focused-agent shortcuts keep their raw down/up route.
-    #[test]
-    fn non_reserved_ctrl_key_sequence_still_reaches_focused_agent() {
-        for (key_code, key, shift, alt) in [
-            ("KeyA", "a", false, false),
-            ("KeyM", "m", false, false),
-            ("KeyM", "M", true, true),
-        ] {
-            let mut harness = HeadlessEventLoopHarness::new();
-            let (_tile_id, _node_id, mut rx) = install_button(&mut harness, true);
-            let mut down = ctrl_key_down(key_code, key, shift, 1_000);
-            let mut up = ctrl_key_up(key_code, key, shift, 1_100);
-            if let PendingKeyboardEvent::KeyDown(raw) = &mut down {
-                raw.modifiers.alt = alt;
-            }
-            if let PendingKeyboardEvent::KeyUp(raw) = &mut up {
-                raw.modifiers.alt = alt;
-            }
-            harness.enqueue(down);
-            harness.enqueue(up);
-            harness.drain();
-            assert_eq!(harness.pending_len(), 0);
-
-            let events = received_events(&mut rx);
-            assert!(
-                events
-                    .iter()
-                    .any(|(_, event)| matches!(event, ProtoInputEvent::KeyDown(_))),
-                "non-reserved {key} KeyDown must retain raw agent routing; got {events:?}"
-            );
-            assert!(
-                events
-                    .iter()
-                    .any(|(_, event)| matches!(event, ProtoInputEvent::KeyUp(_))),
-                "non-reserved {key} KeyUp must retain raw agent routing; got {events:?}"
-            );
         }
     }
 
@@ -8427,9 +8339,7 @@ mod tests {
         ] {
             let mut harness = HeadlessEventLoopHarness::new();
             harness.focus_composer();
-            let tx = tze_hud_protocol::session_server::InputEventSender::new(16);
-            let mut rx = tx.subscribe_all();
-            harness.app.state.input_event_tx = Some(tx);
+
             if !draft.is_empty() {
                 harness.enqueue(character(draft, 100));
             }
@@ -8455,11 +8365,7 @@ mod tests {
             harness.drain();
             let case = format!("{draft:?} select={select} {modifiers:?}");
             // Leaving reports an ordinary FocusLost; no key or command leaks.
-            let leaked: Vec<_> = received_events(&mut rx)
-                .into_iter()
-                .filter(|(_, e)| !matches!(e, ProtoInputEvent::FocusLost(_)))
-                .collect();
-            assert_eq!(leaked, [], "{case}: no Escape reaches the agent");
+
             let texts: Vec<_> = harness
                 .app
                 .state
@@ -8880,9 +8786,7 @@ mod tests {
                     .unwrap()
                     .ends_with(":0")
             );
-            let tx = tze_hud_protocol::session_server::InputEventSender::new(128);
-            let mut rx = tx.subscribe_all();
-            harness.app.state.input_event_tx = Some(tx);
+
             harness.enqueue(key_down(code, key, 200));
             let mut repeat = key_down(code, key, 201);
             if let PendingKeyboardEvent::KeyDown(raw) = &mut repeat {
@@ -8902,13 +8806,7 @@ mod tests {
             harness.enqueue(key_up(code, key, 203));
             harness.drain();
             assert!(harness.app.state.answer_keyboard.return_key.is_none());
-            assert!(received_events(&mut rx).iter().all(|(_, event)| !matches!(
-                event,
-                ProtoInputEvent::KeyDown(_)
-                    | ProtoInputEvent::KeyUp(_)
-                    | ProtoInputEvent::Character(_)
-                    | ProtoInputEvent::CommandInput(_)
-            )));
+
             assert!(
                 take_action_ids(&harness).is_empty(),
                 "repeat and release cannot answer twice"
@@ -9435,9 +9333,7 @@ mod tests {
                 );
             }
             assert!(harness.tick());
-            let tx = tze_hud_protocol::session_server::InputEventSender::new(128);
-            let mut rx = tx.subscribe_all();
-            harness.app.state.input_event_tx = Some(tx);
+
             // Existing portal stop order is preserved before the card's X.
             for expected in &controls {
                 press(&mut harness, "Tab", "Tab", false);
@@ -9498,7 +9394,7 @@ mod tests {
             harness.app.enqueue_pointer_event(PointerEventKind::Down);
             // Pointer clears local focus. Re-enter reverse from the composer's boundary.
             press(&mut harness, "Tab", "Tab", true);
-            let _ = received_events(&mut rx);
+
             let down = key_down(code, key, 3_000);
             harness.enqueue(down);
             let mut repeated = key_down(code, key, 3_100);
@@ -9511,13 +9407,7 @@ mod tests {
             harness.drain();
             harness.app.enqueue_pointer_event(PointerEventKind::Up);
             assert_eq!(take_action_ids(&harness), ["details"]);
-            assert!(received_events(&mut rx).iter().all(|(_, event)| !matches!(
-                event,
-                ProtoInputEvent::KeyDown(_)
-                    | ProtoInputEvent::KeyUp(_)
-                    | ProtoInputEvent::Character(_)
-                    | ProtoInputEvent::CommandInput(_)
-            )));
+
             assert!(harness.scene().overlay.notification_focus.is_none());
             harness.enqueue(character("y", 4_000));
             harness.drain();
@@ -9563,9 +9453,7 @@ mod tests {
                     assert!(harness.tick());
                     harness.enqueue(character("kept", 5_000));
                     harness.drain();
-                    let tx = tze_hud_protocol::session_server::InputEventSender::new(128);
-                    let mut rx = tx.subscribe_all();
-                    harness.app.state.input_event_tx = Some(tx);
+
                     let mut tab_down = key_down("Tab", "Tab", 5_100);
                     if let PendingKeyboardEvent::KeyDown(raw) = &mut tab_down {
                         raw.modifiers.shift = true;
@@ -9597,12 +9485,7 @@ mod tests {
                     harness.enqueue(key_up("Tab", "Tab", 5_200));
                     harness.drain();
                     assert!(harness.app.state.notification_keydowns.is_empty());
-                    assert!(
-                        received_events(&mut rx)
-                            .iter()
-                            .all(|(_, event)| !matches!(event, ProtoInputEvent::KeyUp(_))),
-                        "focus loss preserves the consumed physical Tab release"
-                    );
+
                     assert_eq!(harness.app.state.focus_manager.current_owner(tab), &owner);
                     // A returned activation key has no stale card target. Editing
                     // resumes at the preserved owner until deliberate navigation.
@@ -9771,29 +9654,14 @@ mod tests {
 
     /// production proof: keyboard is a concrete pointer-free
     /// command source, not merely a library/test fixture. Drive the real pending
-    /// keyboard drain and require ACTIVATE to emerge on the runtime broadcast.
+    /// keyboard drain and require ACTIVATE pressed feedback and matching release.
     #[test]
-    fn real_keyboard_drain_dispatches_activate_command_and_local_feedback() {
+    fn real_keyboard_drain_applies_activate_feedback_and_matching_release() {
         let mut harness = HeadlessEventLoopHarness::new();
-        let (tile_id, node_id, mut rx) = install_button(&mut harness, true);
+        let (_tile_id, node_id) = install_button(&mut harness, true);
 
         harness.enqueue(key_down("Enter", "Enter", 1_000));
         harness.drain();
-
-        let events = received_events(&mut rx);
-        let command = events.iter().find_map(|(namespace, event)| match event {
-            ProtoInputEvent::CommandInput(command) => Some((namespace, command)),
-            _ => None,
-        });
-        let (namespace, command) = command.unwrap_or_else(|| {
-            panic!("production keyboard drain must emit CommandInputEvent; got {events:?}")
-        });
-        assert_eq!(namespace, "command-agent");
-        assert_eq!(command.tile_id, tile_id.as_uuid().as_bytes());
-        assert_eq!(command.node_id, node_id.as_uuid().as_bytes());
-        assert_eq!(command.interaction_id, "primary-action");
-        assert_eq!(command.action, CommandAction::Activate as i32);
-        assert_eq!(command.source, CommandSource::Keyboard as i32);
 
         let shared = harness.app.state.shared_state.blocking_lock();
         let scene = shared.scene.blocking_lock();
@@ -9802,7 +9670,7 @@ mod tests {
                 .hit_region_states
                 .get(&node_id)
                 .is_some_and(|state| state.pressed),
-            "ACTIVATE must set local pressed feedback before agent delivery"
+            "ACTIVATE must set local pressed feedback"
         );
         drop(scene);
         drop(shared);
@@ -9823,11 +9691,11 @@ mod tests {
 
     /// PageDown is focus-routed command input, not a
     /// pointer-position scroll. The focused tile must receive both local scroll
-    /// feedback and the command even when the cursor rests over another tile.
+    /// feedback even when the cursor rests over another tile.
     #[test]
     fn page_down_scrolls_focused_tile_not_tile_under_pointer() {
         let mut harness = HeadlessEventLoopHarness::new();
-        let (focused_tile, pointer_tile, mut rx) =
+        let (focused_tile, pointer_tile) =
             install_conflicting_focus_and_pointer_scroll_tiles(&mut harness);
 
         harness.enqueue(key_down("PageDown", "PageDown", 1_000));
@@ -9848,28 +9716,6 @@ mod tests {
         );
         drop(scene);
         drop(shared);
-
-        let events = received_events(&mut rx);
-        assert_eq!(
-            events.len(),
-            2,
-            "PageDown must deliver one command then one resulting offset; got {events:?}"
-        );
-        let (command_namespace, ProtoInputEvent::CommandInput(command)) = &events[0] else {
-            panic!("PageDown must deliver CommandInputEvent first; got {events:?}")
-        };
-        assert_eq!(command_namespace, "scroll-agent");
-        assert_eq!(command.tile_id, focused_tile.as_uuid().as_bytes());
-        assert_eq!(command.action, CommandAction::ScrollDown as i32);
-        assert_eq!(command.source, CommandSource::Keyboard as i32);
-        let (scroll_namespace, ProtoInputEvent::ScrollOffsetChanged(scroll)) = &events[1] else {
-            panic!(
-                "PageDown must deliver resulting ScrollOffsetChangedEvent second; got {events:?}"
-            )
-        };
-        assert_eq!(scroll_namespace, "scroll-agent");
-        assert_eq!(scroll.tile_id, focused_tile.as_uuid().as_bytes());
-        assert_eq!(scroll.offset_y, tze_hud_input::KEYBOARD_PAGE_SCROLL_PX);
     }
 
     /// PageUp shares the focus-routed ownership contract with PageDown. Seed
@@ -9877,7 +9723,7 @@ mod tests {
     #[test]
     fn page_up_scrolls_focused_tile_not_tile_under_pointer() {
         let mut harness = HeadlessEventLoopHarness::new();
-        let (focused_tile, pointer_tile, mut rx) =
+        let (focused_tile, pointer_tile) =
             install_conflicting_focus_and_pointer_scroll_tiles(&mut harness);
         let shared_state = Arc::clone(&harness.app.state.shared_state);
         {
@@ -9894,7 +9740,6 @@ mod tests {
                 &mut scene,
             );
         }
-        let _ = received_events(&mut rx);
 
         harness.enqueue(key_down("PageUp", "PageUp", 1_000));
         harness.drain();
@@ -9914,17 +9759,6 @@ mod tests {
         );
         drop(scene);
         drop(shared);
-
-        let events = received_events(&mut rx);
-        assert!(
-            events.iter().any(|(_, event)| matches!(
-                event,
-                ProtoInputEvent::CommandInput(command)
-                    if command.tile_id == focused_tile.as_uuid().as_bytes()
-                        && command.action == CommandAction::ScrollUp as i32
-            )),
-            "PageUp must retain focused SCROLL_UP command delivery; got {events:?}"
-        );
     }
 
     /// The keyboard correction must not alter wheel ownership: wheel input is
@@ -9932,7 +9766,7 @@ mod tests {
     #[test]
     fn wheel_scroll_still_targets_tile_under_pointer_not_focused_tile() {
         let mut harness = HeadlessEventLoopHarness::new();
-        let (focused_tile, pointer_tile, _rx) =
+        let (focused_tile, pointer_tile) =
             install_conflicting_focus_and_pointer_scroll_tiles(&mut harness);
 
         harness
@@ -9962,7 +9796,7 @@ mod tests {
         use std::time::{Duration, Instant};
 
         let mut harness = HeadlessEventLoopHarness::new();
-        let (tile_id, node_id, _rx) = install_button(&mut harness, false);
+        let (tile_id, node_id) = install_button(&mut harness, false);
         {
             let shared = harness.app.state.shared_state.blocking_lock();
             shared
@@ -10051,7 +9885,7 @@ mod tests {
         use std::time::{Duration, Instant};
 
         let mut harness = HeadlessEventLoopHarness::new();
-        let (_tile_id, _node_id, _rx) = install_button(&mut harness, false);
+        let (_tile_id, _node_id) = install_button(&mut harness, false);
         let scene_handle = Arc::clone(&harness.app.state.shared_state.blocking_lock().scene);
         let held = scene_handle.blocking_lock();
         let main_work_before = harness.app.state.wake.main_work_generation();
@@ -10102,8 +9936,8 @@ mod tests {
         use std::time::{Duration, Instant};
 
         let mut harness = HeadlessEventLoopHarness::new();
-        let (_tile_id, node_id, mut rx) = install_button(&mut harness, false);
-        received_events(&mut rx);
+        let (_tile_id, node_id) = install_button(&mut harness, false);
+
         let scene_handle = Arc::clone(&harness.app.state.shared_state.blocking_lock().scene);
         let held = scene_handle.blocking_lock();
         let main_work_before = harness.app.state.wake.main_work_generation();
@@ -10164,24 +9998,18 @@ mod tests {
             (900.0, 900.0),
             "replay restores the live cursor"
         );
-        let kinds: Vec<&str> = received_events(&mut rx)
-            .iter()
-            .filter_map(|(_, event)| match event {
-                ProtoInputEvent::FocusGained(_) => Some("focus"),
-                ProtoInputEvent::PointerDown(_) => Some("down"),
-                ProtoInputEvent::Character(_) => Some("char"),
-                _ => None,
-            })
-            .collect();
-        // The same agent-visible events as an uncontended click on this
-        // button, and the key typed after it reaches the focus it gave.
-        assert_eq!(
-            kinds,
-            ["focus", "down", "char"],
-            "the retained press focuses the button where it was made, then the typing follows"
-        );
         let shared = harness.app.state.shared_state.blocking_lock();
         let scene = shared.scene.blocking_lock();
+        assert_eq!(
+            harness
+                .app
+                .state
+                .focus_manager
+                .current_owner(scene.active_tab.unwrap())
+                .node_id(),
+            Some(node_id),
+            "the retained click focuses its original button after the cursor moves away"
+        );
         assert!(
             !scene.hit_region_states[&node_id].pressed,
             "the replayed release ends the press"
@@ -10195,7 +10023,7 @@ mod tests {
     #[test]
     fn held_scene_lock_retained_move_yields_to_context_menu_press() {
         let mut harness = HeadlessEventLoopHarness::new();
-        let (_tile_id, _node_id, _rx) = install_button(&mut harness, false);
+        let (_tile_id, _node_id) = install_button(&mut harness, false);
         let scene_handle = Arc::clone(&harness.app.state.shared_state.blocking_lock().scene);
         let held = scene_handle.blocking_lock();
         harness.app.state.cursor_x = 50.0;
@@ -10219,7 +10047,7 @@ mod tests {
     #[test]
     fn held_scene_lock_retained_wheel_keeps_a_reversal_after_the_tail() {
         let mut harness = HeadlessEventLoopHarness::new();
-        let (tile_id, _node_id, _rx) = install_button(&mut harness, false);
+        let (tile_id, _node_id) = install_button(&mut harness, false);
         {
             let shared = harness.app.state.shared_state.blocking_lock();
             shared
@@ -10283,7 +10111,7 @@ mod tests {
     #[test]
     fn arrow_down_command_does_not_apply_page_scroll_side_effect() {
         let mut harness = HeadlessEventLoopHarness::new();
-        let (focused_tile, pointer_tile, mut rx) =
+        let (focused_tile, pointer_tile) =
             install_conflicting_focus_and_pointer_scroll_tiles(&mut harness);
 
         harness.enqueue(key_down("ArrowDown", "ArrowDown", 1_000));
@@ -10303,59 +10131,13 @@ mod tests {
         );
         drop(scene);
         drop(shared);
-
-        let events = received_events(&mut rx);
-        assert!(
-            events.iter().any(|(_, event)| matches!(
-                event,
-                ProtoInputEvent::CommandInput(command)
-                    if command.tile_id == focused_tile.as_uuid().as_bytes()
-                        && command.action == CommandAction::ScrollDown as i32
-            )),
-            "ArrowDown must retain its focused SCROLL_DOWN command; got {events:?}"
-        );
-        assert!(
-            events
-                .iter()
-                .all(|(_, event)| !matches!(event, ProtoInputEvent::ScrollOffsetChanged(_))),
-            "ArrowDown must not emit a page-scroll offset event; got {events:?}"
-        );
     }
 
-    /// A command binding replaces the raw key sequence, not just the
-    /// key-down. A focused agent must never receive a raw release without the
-    /// matching raw press after the Context Menu key was translated to CONTEXT.
+    /// The real keyboard drain must apply Tab navigation to the focused owner.
     #[test]
-    fn command_binding_swallows_matching_raw_key_up() {
+    fn real_keyboard_drain_moves_focus_to_next_owner() {
         let mut harness = HeadlessEventLoopHarness::new();
-        let (_tile_id, _node_id, mut rx) = install_button(&mut harness, true);
-
-        harness.enqueue(key_down("ContextMenu", "ContextMenu", 1_000));
-        harness.enqueue(key_up("ContextMenu", "ContextMenu", 1_100));
-        harness.drain();
-
-        let events = received_events(&mut rx);
-        assert!(
-            events
-                .iter()
-                .any(|(_, event)| matches!(event, ProtoInputEvent::CommandInput(command) if command.action == CommandAction::Context as i32)),
-            "ContextMenu must be translated to the CONTEXT command; got {events:?}"
-        );
-        assert!(
-            !events
-                .iter()
-                .any(|(_, event)| matches!(event, ProtoInputEvent::KeyUp(_))),
-            "a command binding must swallow its matching raw KeyUp; got {events:?}"
-        );
-    }
-
-    /// Bare Tab already moved focus in production, but it skipped the abstract
-    /// command pipeline. Require the real drain to deliver NAVIGATE_NEXT to the
-    /// newly focused owner after local focus movement.
-    #[test]
-    fn real_keyboard_drain_dispatches_navigate_next_to_new_focus_owner() {
-        let mut harness = HeadlessEventLoopHarness::new();
-        let (_tile_id, node_id, mut rx) = install_button(&mut harness, false);
+        let (_tile_id, node_id) = install_button(&mut harness, false);
 
         harness.enqueue(key_down("Tab", "Tab", 1_000));
         harness.drain();
@@ -10377,27 +10159,15 @@ mod tests {
                 )
                 .node_id(),
             Some(node_id),
-            "Tab must move focus locally before command delivery"
+            "Tab must move focus locally"
         );
-        let events = received_events(&mut rx);
-        let command = events.iter().find_map(|(_, event)| match event {
-            ProtoInputEvent::CommandInput(command) => Some(command),
-            _ => None,
-        });
-        let command = command.unwrap_or_else(|| {
-            panic!("Tab must emit NAVIGATE_NEXT CommandInputEvent; got {events:?}")
-        });
-        assert_eq!(command.action, CommandAction::NavigateNext as i32);
-        assert_eq!(command.source, CommandSource::Keyboard as i32);
-        assert_eq!(command.node_id, node_id.as_uuid().as_bytes());
     }
 
-    /// Composer-less Escape retains the existing focus-recovery behavior while
-    /// also delivering the CANCEL command to the owner that had focus.
+    /// Composer-less Escape must clear the focused control through the real drain.
     #[test]
-    fn real_keyboard_drain_dispatches_cancel_before_focus_owner_is_lost() {
+    fn real_keyboard_drain_clears_composerless_focus_on_cancel() {
         let mut harness = HeadlessEventLoopHarness::new();
-        let (_tile_id, node_id, mut rx) = install_button(&mut harness, true);
+        let (_tile_id, _node_id) = install_button(&mut harness, true);
 
         harness.enqueue(key_down("Escape", "Escape", 1_000));
         harness.drain();
@@ -10414,18 +10184,6 @@ mod tests {
             tze_hud_input::FocusOwner::None,
             "Escape recovery must still clear the composer-less focus stop"
         );
-
-        let events = received_events(&mut rx);
-        let command = events.iter().find_map(|(_, event)| match event {
-            ProtoInputEvent::CommandInput(command) => Some(command),
-            _ => None,
-        });
-        let command = command.unwrap_or_else(|| {
-            panic!("Escape must emit CANCEL before its focus target is lost; got {events:?}")
-        });
-        assert_eq!(command.action, CommandAction::Cancel as i32);
-        assert_eq!(command.source, CommandSource::Keyboard as i32);
-        assert_eq!(command.node_id, node_id.as_uuid().as_bytes());
     }
 
     /// headline: the keyboard-drain full path runs end-to-end through

@@ -647,7 +647,6 @@ mod tests {
                         && (next.starts_with(".to_string()")
                             || next.starts_with(',')
                             || next.starts_with(')'))
-                        && !KNOWN_NON_CODES.contains(&lit)
                     {
                         out.push(lit.to_string());
                     }
@@ -657,13 +656,4 @@ mod tests {
             out
         }
     }
-
-    /// Subscription category names, which share the SHOUTY_SNAKE style.
-    const KNOWN_NON_CODES: &[&str] = &[
-        "SCENE_TOPOLOGY",
-        "INPUT_EVENTS",
-        "FOCUS_EVENTS",
-        "DEGRADATION_NOTICES",
-        "TELEMETRY_FRAMES",
-    ];
 }

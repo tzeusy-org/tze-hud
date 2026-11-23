@@ -7,7 +7,7 @@ use crate::window::WindowMode;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
-use tze_hud_input::{InputProcessor, KeyboardProcessor};
+use tze_hud_input::InputProcessor;
 
 use tokio::sync::Mutex as TokioMutex;
 use tze_hud_input::{FocusManager, FocusRequest};
@@ -223,17 +223,12 @@ pub(super) fn make_windowed_keyboard_test_app(
     scene: tze_hud_scene::graph::SceneGraph,
     focus_manager: FocusManager,
     input_processor: InputProcessor,
-) -> (
-    WinitApp,
-    tze_hud_protocol::session_server::InputEventReceiver,
-) {
+) -> WinitApp {
     let cfg = WindowedConfig::default();
     let portals =
         tze_hud_mcp::PortalHandle::new(tze_hud_portal::hub::PortalHub::default(), scene.clock());
     let shared_state = make_shared_state();
     let (frame_ready_tx, frame_ready_rx) = frame_ready_channel();
-    let input_event_tx = tze_hud_protocol::session_server::InputEventSender::new(8);
-    let input_event_rx = input_event_tx.subscribe_all();
     let safe_mode_atomic = {
         let state = shared_state
             .try_lock()
@@ -278,12 +273,10 @@ pub(super) fn make_windowed_keyboard_test_app(
         frame_ready_rx,
         deferred_present: false,
         frame_ready_tx: Some(frame_ready_tx),
-        frame_presented_tx: None,
         degradation_notices: None,
         window_surface: None,
         input_processor,
         focus_manager,
-        keyboard_processor: KeyboardProcessor::new(),
         pipeline: FramePipeline::new(),
         shutdown: ShutdownToken::new(),
         quiescent_failed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -336,8 +329,6 @@ pub(super) fn make_windowed_keyboard_test_app(
         tokens_seen: 0,
         capture_seen: 0,
         _config_watch: None,
-        element_repositioned_tx: None,
-        input_event_tx: Some(input_event_tx),
         composer_pointer_drag_anchor: None,
         reading_cursor: None,
         pressable_regions: Vec::new(),
@@ -369,7 +360,7 @@ pub(super) fn make_windowed_keyboard_test_app(
         interaction_feedback_lock_misses: std::sync::atomic::AtomicU64::new(0),
     };
 
-    (WinitApp { state }, input_event_rx)
+    WinitApp { state }
 }
 
 /// Construct a portal scene: one tile rooted at a composer node with a

@@ -9,7 +9,6 @@ use crate::lease::{DEFAULT_LEASE_CORRELATION_CACHE_CAPACITY, LeaseCorrelationCac
 use crate::proto::session::server_message::Payload as ServerPayload;
 use crate::proto::session::*;
 use crate::session::{SessionCloser, SharedState};
-use crate::subscriptions;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tonic::Status;
@@ -183,12 +182,6 @@ pub(super) async fn handle_session_init(
     };
     let granted_capabilities = identity.permissions;
 
-    // ── Step 3: Subscription filtering ──────────────────────
-    // Mandatory categories are always active; gated categories need the
-    // matching permission from the agent's `allow` list.
-    let sub_result =
-        subscriptions::filter_subscriptions(&init.initial_subscriptions, &granted_capabilities);
-
     let session_uuid = uuid::Uuid::now_v7();
     let namespace = identity.agent_id.clone();
     let scene_session_id = tze_hud_scene::SceneId::from_uuid(session_uuid);
@@ -254,7 +247,6 @@ pub(super) async fn handle_session_init(
         agent_name: namespace.clone(),
         capabilities: granted_capabilities,
         publication_origin: scene_session_id,
-        subscriptions: sub_result.active.clone(),
         server_sequence: 0,
         state: SessionState::Handshaking,
         last_client_sequence: 1, // SessionInit is sequence 1; start validation from next
@@ -283,8 +275,6 @@ pub(super) async fn handle_session_init(
             heartbeat_interval_ms: DEFAULT_HEARTBEAT_INTERVAL_MS,
             server_sequence: seq,
             compositor_timestamp_wall_us: compositor_ts,
-            active_subscriptions: sub_result.active,
-            denied_subscriptions: sub_result.denied,
         })),
     };
 

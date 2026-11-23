@@ -24,10 +24,6 @@ use tze_hud_telemetry::{
 
 use crate::window::WindowMode;
 
-use super::input_dispatch::{
-    dispatch_capture_released_event, dispatch_focus_event, dispatch_pointer_event,
-    dispatch_scroll_offset_event,
-};
 use super::portal::{
     DragRelease, DragTarget, PortalResizePointerOutcome, PrimaryDragGesture,
     apply_drag_handle_pointer_event, apply_portal_resize_pointer_event, drag_feedback_target,
@@ -3115,8 +3111,7 @@ impl WinitApp {
         // disk I/O in the `DragEventOutcome::Released` path).
         //
         // `portal_resize_outcome` carries the geometry snapshot from a pointer-driven
-        // portal resize step so that `dispatch_portal_geometry_event` can be called
-        // without holding the scene lock.
+        // portal resize step for terminal persistence after releasing the scene lock.
         let mut pending_notification_outcomes = Vec::new();
         let drag_released: Option<DragRelease>;
         let portal_resize_outcome: Option<PortalResizePointerOutcome>;
@@ -3211,9 +3206,8 @@ impl WinitApp {
                 // pointer-down on a focusable HitRegionNode transfers keyboard
                 // focus before the AgentDispatch is produced.  The returned
                 // FocusTransition carries the lost/gained events and a
-                // compositor ring-update hint; we log the transition below and
-                // broadcast FocusGainedEvent / FocusLostEvent to agents via
-                // dispatch_focus_event on the input_event_tx channel.
+                // compositor ring-update hint; local focus state is already
+                // updated, and we log the transition below.
                 // Resolve the tab that should receive focus for this pointer
                 // event. Click-to-focus is per-tab, so the
                 // authoritative tab is the one that OWNS the tile under the
@@ -3278,8 +3272,7 @@ impl WinitApp {
                                 matches!(&node.data, tze_hud_scene::NodeData::HitRegion(hit)
                                     if hit.accepts_composer_input)));
 
-                // Log focus transitions and broadcast FocusGainedEvent /
-                // FocusLostEvent over the FOCUS_EVENTS gRPC channel.
+                // Log the local focus transition.
                 // Local state is already updated in focus_manager above.
                 if let Some(ref transition) = focus_transition {
                     if let Some((ev, ns)) = &transition.gained {
@@ -3305,9 +3298,6 @@ impl WinitApp {
                         // Cleared below after the lock is released.
                         composer_focus_lost = true;
                     }
-                }
-                if let Some(transition) = focus_transition {
-                    dispatch_focus_event(&self.state.input_event_tx, transition);
                 }
 
                 // ── Composer pointer-selection routing  ──
@@ -3718,8 +3708,7 @@ impl WinitApp {
                 // drag gesture (gesture_active = true → adapter publishes blocked).
                 // On PointerMove/Up while a gesture is active, updates tile bounds
                 // immediately (local-first) and carries a snapshot out of the lock
-                // so the caller can broadcast an ElementRepositionedEvent after
-                // releasing the scene lock.
+                // for terminal persistence after releasing the scene lock.
                 let portal_part = tze_hud_config::resolve_portal_tokens(&self.state.global_tokens);
                 let portal_tokens = PortalWindowTokens {
                     min_width_px: portal_part.window_min_width_px,
@@ -3748,31 +3737,6 @@ impl WinitApp {
                     input_started_at,
                     result.local_ack_us,
                 );
-
-                // ── Pointer event dispatch to subscribed portal agents ────────
-                // Broadcast PointerDown / PointerMove / PointerUp to agents
-                // that have subscribed to INPUT_EVENTS (requires
-                // `access_input_events` capability).  Only dispatches for
-                // portal-owned hit regions (NodeHit / TileHit) — the
-                // AgentDispatch is only populated by the InputProcessor when a
-                // named hit region matches.  Chrome / ZoneInteraction / Passthrough
-                // hits produce no AgentDispatch and are silently skipped.
-                //
-                // primary dispatch
-                if let Some(d) = result.dispatch {
-                    dispatch_pointer_event(&self.state.input_event_tx, d);
-                }
-                // secondary dispatches (e.g. CaptureReleased following PointerUp)
-                for d in result.extra_dispatches {
-                    if d.kind == tze_hud_input::AgentDispatchKind::CaptureReleased {
-                        // CaptureReleased is a focus/lease lifecycle event, not a pointer
-                        // event.  Route it through the FOCUS_EVENTS channel so subscribed
-                        // agents receive a CaptureReleasedEvent proto envelope.
-                        dispatch_capture_released_event(&self.state.input_event_tx, d);
-                    } else {
-                        dispatch_pointer_event(&self.state.input_event_tx, d);
-                    }
-                }
             } else {
                 drag_released = None;
                 portal_resize_outcome = None;
@@ -3838,19 +3802,14 @@ impl WinitApp {
         // ── Post-lock: persist geometry override after drag release ───────────
         // The drag state machine has already updated tile.bounds for live visual
         // feedback.  Here we also write the geometry_override to the element store
-        // (durable) and broadcast an ElementRepositionedEvent so subscribers know
-        // the tile moved.
+        // for durable restoration on the next launch.
         if let Some(released) = drag_released {
             self.persist_drag_release(released);
         }
 
-        // ── Post-lock: broadcast geometry event after pointer-affordance resize ─
-        // Tile bounds were already updated inside the lock (local-first).  We
-        // broadcast an ElementRepositionedEvent here so adapter subscribers see
-        // intermediate (move) and final (up) geometry changes.  GestureStarted
-        // (down) events are also emitted so adapters can observe gesture
-        // lifecycle.  Fire-and-forget (best-effort coalescible state-stream
-        // delivery ).
+        // ── Post-lock: persist completed pointer-affordance resize ────────────
+        // Live tile bounds were updated inside the lock. Only terminal outcomes
+        // persist the completed member geometry to the element store.
         if let Some(outcome) = portal_resize_outcome {
             self.finish_portal_resize_members(
                 &outcome.members,
@@ -3892,9 +3851,7 @@ impl WinitApp {
 
     /// Enqueue and process a local-first scroll event.
     ///
-    /// Applies the offset locally (< 4ms p99 path) and, if the tile owner is
-    /// subscribed, dispatches a `ScrollOffsetChangedEvent` to the agent via the
-    /// `INPUT_EVENTS` channel. A busy scene lock retains the delta instead of
+    /// Applies the offset locally (< 4ms p99 path). A busy scene lock retains the delta instead of
     /// dropping it; it applies, in order, on the next successful
     /// lock via one coalesced availability wake.
     /// `delta_y` is in `step` units (hud-ljhku.13); the target sizes lines
@@ -3984,7 +3941,7 @@ impl WinitApp {
                 }
                 continue;
             }
-            if let Some(ev) = self.state.input_processor.process_wheel_event(
+            self.state.input_processor.process_wheel_event(
                 &tze_hud_input::ScrollEvent {
                     x: retained.x,
                     y: retained.y,
@@ -3993,9 +3950,7 @@ impl WinitApp {
                 },
                 retained.step,
                 &mut scene,
-            ) {
-                dispatch_scroll_offset_event(&self.state.input_event_tx, &scene, ev);
-            }
+            );
         }
         Some(true)
     }
@@ -4892,7 +4847,7 @@ mod tests {
     fn empty_portal_ingress_drain_does_not_create_a_compositor_generation() {
         let mut scene = tze_hud_scene::SceneGraph::new(1920.0, 1080.0);
         scene.create_tab("Main", 0).unwrap();
-        let (mut app, _rx) =
+        let mut app =
             make_windowed_keyboard_test_app(scene, FocusManager::new(), InputProcessor::new());
         app.state.wake.main_work_notifier().notify();
         let checkpoint = app.state.wake.main_work_checkpoint();
@@ -5101,7 +5056,7 @@ mod tests {
     fn cancelled_wait_claims_a_deadline_crossed_before_settle_checkpoint() {
         let mut scene = tze_hud_scene::SceneGraph::new(1920.0, 1080.0);
         scene.create_tab("Main", 0).unwrap();
-        let (mut app, _rx) =
+        let mut app =
             make_windowed_keyboard_test_app(scene, FocusManager::new(), InputProcessor::new());
         let deadline_at = std::time::Instant::now() + std::time::Duration::from_millis(10);
         app.state.scheduled_main_deadline = Some(crate::windowed::wake::Deadline::new(
@@ -5274,7 +5229,7 @@ mod tests {
             "focus must start on the scrollable composer pane"
         );
 
-        let (mut app, _rx) = make_windowed_keyboard_test_app(scene, fm, InputProcessor::new());
+        let mut app = make_windowed_keyboard_test_app(scene, fm, InputProcessor::new());
 
         let read = |app: &WinitApp, id: tze_hud_scene::SceneId| {
             let shared = app.state.shared_state.try_lock().unwrap();
@@ -5323,7 +5278,7 @@ mod tests {
         let (scene, tab_id) = scene_with_pointer_composer();
         let mut fm = FocusManager::new();
         fm.add_tab(tab_id);
-        let (mut app, _rx) = make_windowed_keyboard_test_app(scene, fm, InputProcessor::new());
+        let mut app = make_windowed_keyboard_test_app(scene, fm, InputProcessor::new());
         app.state.cursor_x = 200.0;
         app.state.cursor_y = 50.0;
         app.enqueue_pointer_event(PointerEventKind::Down);
@@ -5413,7 +5368,7 @@ mod tests {
         let (scene, tab_id) = scene_with_pointer_composer();
         let mut fm = FocusManager::new();
         fm.add_tab(tab_id);
-        let (mut app, _rx) = make_windowed_keyboard_test_app(scene, fm, InputProcessor::new());
+        let mut app = make_windowed_keyboard_test_app(scene, fm, InputProcessor::new());
         app.state.cursor_x = 200.0;
         app.state.cursor_y = 50.0;
         app.enqueue_pointer_event(PointerEventKind::Down);
@@ -5465,7 +5420,7 @@ mod tests {
         let tile_id = *scene.tiles.keys().next().unwrap();
         let mut fm = FocusManager::new();
         fm.add_tab(tab_id);
-        let (mut app, _rx) = make_windowed_keyboard_test_app(scene, fm, InputProcessor::new());
+        let mut app = make_windowed_keyboard_test_app(scene, fm, InputProcessor::new());
 
         app.state.cursor_x = 200.0;
         app.state.cursor_y = 50.0;
@@ -5521,7 +5476,7 @@ mod tests {
         processor.recover_composer_focus(&mut fm, &mut scene, tab_id, peer_tile, peer_id);
         processor.route_character_to_composer("live peer text");
         scene.delete_tile(old_tile.id, "agent").unwrap();
-        let (mut app, _rx) = make_windowed_keyboard_test_app(scene, fm, processor);
+        let mut app = make_windowed_keyboard_test_app(scene, fm, processor);
         app.push_local_composer_echo(std::time::Instant::now());
         app.clear_focus_on_removed_tile();
         assert_eq!(
@@ -5575,7 +5530,7 @@ mod tests {
         let tile_id = *scene.tiles.keys().next().unwrap();
         let mut fm = FocusManager::new();
         fm.add_tab(tab_id);
-        let (mut app, _rx) = make_windowed_keyboard_test_app(scene, fm, InputProcessor::new());
+        let mut app = make_windowed_keyboard_test_app(scene, fm, InputProcessor::new());
 
         app.state.cursor_x = 200.0;
         app.state.cursor_y = 50.0;
@@ -5631,7 +5586,7 @@ mod tests {
         let mut fm = FocusManager::new();
         fm.add_tab(tab_id);
         let processor = InputProcessor::new();
-        let (mut app, _rx) = make_windowed_keyboard_test_app(scene, fm, processor);
+        let mut app = make_windowed_keyboard_test_app(scene, fm, processor);
 
         // ── Focus the composer (empty draft) via an initial click+release. ──
         app.state.cursor_x = 200.0;
@@ -5805,7 +5760,7 @@ mod tests {
         let mut fm = FocusManager::new();
         fm.add_tab(tab_id);
         let processor = InputProcessor::new();
-        let (mut app, _rx) = make_windowed_keyboard_test_app(scene, fm, processor);
+        let mut app = make_windowed_keyboard_test_app(scene, fm, processor);
 
         app.state.cursor_x = 200.0;
         app.state.cursor_y = 50.0;
@@ -5873,7 +5828,7 @@ mod tests {
             .expect("publish accepted");
 
         scene.create_tab("Main", 0).unwrap();
-        let (mut app, _rx) =
+        let mut app =
             make_windowed_keyboard_test_app(scene, FocusManager::new(), InputProcessor::new());
         app.state.portal_projection_driver = driver;
         app

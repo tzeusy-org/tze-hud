@@ -368,16 +368,10 @@ pub struct RuntimeOverlayState {
     /// Ephemeral: skipped during serialization.
     #[serde(skip, default)]
     pub recently_removed_tile_ids: Vec<SceneId>,
-    /// Committed publication IDs since the last present drain.
+    /// Committed publication IDs since the last local render drain.
     ///
-    /// Populated by [`SceneGraph::publish`] on every accepted publication,
-    /// in application order. Drained by the render loop at frame present via
-    /// [`SceneGraph::drain_present_ack_batch_ids`], which stamps them with the
-    /// presented frame number + present wall-clock and emits a `FramePresented`
-    /// event to TELEMETRY_FRAMES subscribers. This is the batch → on-screen-present
-    /// correlation primitive: a batch whose commit changed the scene is reflected
-    /// by the next composited frame, so recording batch_ids here and draining at
-    /// present pairs each batch with the frame that carried it.
+    /// Kept in application order for runtime input-to-present measurement. This
+    /// is internal frame correlation, with no resident receipt or display proof.
     ///
     /// Ephemeral: skipped during serialization.
     #[serde(skip, default)]
@@ -481,22 +475,12 @@ impl SceneGraph {
         self.overlay.recently_removed_tile_ids.drain(..).collect()
     }
 
-    /// Record an accepted publication ID as pending on-screen present.
-    ///
-    /// Called by [`SceneGraph::publish`] for each committed publication. The id
-    /// is drained at the next frame present by [`Self::drain_present_ack_batch_ids`]
-    /// and paired with the presented frame number + present wall-clock to form a
-    /// `FramePresented` acknowledgment.
+    /// Record an accepted publication ID for local input-response correlation.
     pub fn record_present_ack_batch(&mut self, batch_id: SceneId) {
         self.overlay.present_ack_pending_batch_ids.push(batch_id);
     }
 
-    /// Drain the batch_ids applied since the last present.
-    ///
-    /// Returns them in application order. The render loop calls this once per
-    /// presented frame; a non-empty result is stamped with the frame number and
-    /// present wall-clock and emitted as a `FramePresented` event to
-    /// TELEMETRY_FRAMES subscribers.
+    /// Drain committed IDs in order for the runtime's local render measurement.
     pub fn drain_present_ack_batch_ids(&mut self) -> Vec<SceneId> {
         self.overlay
             .present_ack_pending_batch_ids
