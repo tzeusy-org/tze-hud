@@ -13,6 +13,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use tze_hud_scene::scope::SessionLabel;
+use tze_hud_scene::{Clock, SystemClock};
 
 /// Live scopes one agent may hold; opening one more releases the
 /// least-recently-called, preferring one with nothing on screen.
@@ -30,7 +31,17 @@ pub struct Scope {
     pub namespace: String,
     label: Mutex<Option<SessionLabel>>,
     last_call: AtomicU64,
+    last_call_ms: AtomicU64,
+    presence: Mutex<Option<ScopePresence>>,
     released: AtomicBool,
+}
+
+/// The last reported state of a live primary session.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct ScopePresence {
+    pub state: &'static str,
+    pub reason: Option<&'static str>,
+    pub since_ms: u64,
 }
 
 impl Scope {
@@ -63,30 +74,81 @@ pub struct ScopeSummary {
     pub agent: String,
     pub label: Option<String>,
     pub namespace: String,
+    pub last_call_ms: u64,
+    pub presence: Option<ScopePresence>,
 }
 
 /// Every live scope, by session id.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Scopes {
     live: Mutex<HashMap<String, Arc<Scope>>>,
-    clock: AtomicU64,
+    call_order: AtomicU64,
+    clock: Arc<dyn Clock>,
+}
+
+impl Default for Scopes {
+    fn default() -> Self {
+        Self::with_clock(Arc::new(SystemClock::new()))
+    }
 }
 
 impl Scopes {
+    pub(crate) fn with_clock(clock: Arc<dyn Clock>) -> Self {
+        Self {
+            live: Mutex::new(HashMap::new()),
+            call_order: AtomicU64::new(0),
+            clock,
+        }
+    }
+
+    pub(crate) fn set_clock(&mut self, clock: Arc<dyn Clock>) {
+        self.clock = clock;
+    }
+
     fn live(&self) -> std::sync::MutexGuard<'_, HashMap<String, Arc<Scope>>> {
         self.live.lock().unwrap_or_else(|p| p.into_inner())
     }
 
     fn tick(&self) -> u64 {
-        self.clock.fetch_add(1, Ordering::Relaxed) + 1
+        self.call_order.fetch_add(1, Ordering::Relaxed) + 1
     }
 
     /// The live scope `id` of `agent`, marked as just called. Another
     /// agent's id is unknown to this one.
     pub fn touch(&self, agent: &str, id: &str) -> Option<Arc<Scope>> {
         let scope = self.live().get(id).filter(|s| s.agent == agent).cloned()?;
-        scope.last_call.store(self.tick(), Ordering::Relaxed);
+        scope.last_call.fetch_max(self.tick(), Ordering::Relaxed);
+        scope
+            .last_call_ms
+            .fetch_max(self.clock.now_millis(), Ordering::Relaxed);
         Some(scope)
+    }
+
+    pub(crate) fn report_presence(&self, scope: &Scope, params: &serde_json::Value) {
+        let (state, reason) = match (
+            params.get("state").and_then(serde_json::Value::as_str),
+            params.get("reason"),
+        ) {
+            (Some("working"), None) => ("working", None),
+            (Some("done"), None) => ("done", None),
+            (Some("blocked"), Some(reason)) => match reason.as_str() {
+                Some("question") => ("blocked", Some("question")),
+                Some("permission") => ("blocked", Some("permission")),
+                Some("input") => ("blocked", Some("input")),
+                _ => return,
+            },
+            _ => return,
+        };
+        let mut current = scope.presence.lock().unwrap_or_else(|p| p.into_inner());
+        if !scope.is_released()
+            && !current.is_some_and(|presence| presence.state == state && presence.reason == reason)
+        {
+            *current = Some(ScopePresence {
+                state,
+                reason,
+                since_ms: self.clock.now_millis(),
+            });
+        }
     }
 
     /// Open a scope for `agent` with a sanitized, de-duplicated `label`.
@@ -132,6 +194,8 @@ impl Scopes {
             agent: agent.to_owned(),
             label: Mutex::new(label),
             last_call: AtomicU64::new(self.tick()),
+            last_call_ms: AtomicU64::new(self.clock.now_millis()),
+            presence: Mutex::new(None),
             released: AtomicBool::new(false),
         });
         live.insert(id, Arc::clone(&scope));
@@ -165,6 +229,8 @@ impl Scopes {
                 agent: s.agent.clone(),
                 label: s.label(),
                 namespace: s.namespace.clone(),
+                last_call_ms: s.last_call_ms.load(Ordering::Relaxed),
+                presence: *s.presence.lock().unwrap_or_else(|p| p.into_inner()),
             })
             .collect();
         all.sort_by(|a, b| {
@@ -297,5 +363,44 @@ mod tests {
         // With nothing idle, the least-recently-called goes.
         let (_, evicted) = scopes.open("claude", None, |_| false);
         assert_eq!(evicted.unwrap().id, busy);
+    }
+
+    #[test]
+    fn presence_is_scoped_and_its_timestamp_is_the_last_transition() {
+        let clock = tze_hud_scene::clock::TestClock::new(100);
+        let scopes = Scopes::with_clock(Arc::new(clock.clone()));
+        let (scope, _) = scopes.open("claude", None, |_| true);
+        let (sibling_client, _) = scopes.open("claude", None, |_| true);
+        let working = serde_json::json!({"state": "working"});
+        for absent in [
+            serde_json::json!({"state": "unknown"}),
+            serde_json::json!({"state": "blocked"}),
+            serde_json::json!({"state": "done", "reason": "permission"}),
+        ] {
+            scopes.report_presence(&scope, &absent);
+        }
+        assert!(scopes.list().iter().all(|row| row.presence.is_none()));
+        clock.advance(25);
+        scopes.touch("claude", &scope.id).unwrap();
+        scopes.report_presence(&scope, &working);
+        clock.advance(25);
+        scopes.touch("claude", &scope.id).unwrap();
+        scopes.report_presence(&scope, &working);
+        let rows = scopes.list();
+        let report = rows
+            .iter()
+            .find(|row| row.namespace == scope.namespace)
+            .unwrap();
+        assert_eq!(report.last_call_ms, 150);
+        assert_eq!(report.presence.unwrap().since_ms, 125);
+        assert!(
+            rows.iter()
+                .find(|row| row.namespace == sibling_client.namespace)
+                .unwrap()
+                .presence
+                .is_none()
+        );
+        scopes.close("claude", &scope.id).unwrap();
+        assert_eq!(scopes.list().len(), 1);
     }
 }

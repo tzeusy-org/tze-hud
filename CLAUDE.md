@@ -59,6 +59,7 @@ publish attaches), `hud_input` (replies, acked in the same call), and
 The PSK stays in `~/.config/tze-hud/<hostname>.psk`; a private nonsecret endpoint
 record retains the actual pairing port. The project MCP stdio adapter discovers
 one paired host without `HUD_HOST`; multiple hosts require explicit `HUD_HOST`.
+Claude hook state uses the same adapter scope. Set `TZE_HUD_MIRROR=1` in workspace settings to opt into its portal mirror.
 An old key without metadata uses 9090; an old custom port needs re-pairing or
 explicit selection. Ordinary Python clients still use `HUD_HOST`. Each adapter
 is its own HUD session: it owns only its cards, portals and input, captions

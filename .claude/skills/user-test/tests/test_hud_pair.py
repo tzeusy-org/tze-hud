@@ -5,9 +5,11 @@ import hashlib
 import os
 import selectors
 import signal
+import socket
 import stat
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from decimal import Decimal
@@ -216,7 +218,8 @@ def child_live(pid, identity):
 
 class AdapterProcess:
     """One real shipped entry or private same-loop injection, isolated fake HOME."""
-    def __init__(self, home, *, host=None, config=".mcp.json", short=None, stall=None):
+    def __init__(self, home, *, host=None, config=".mcp.json", short=None, stall=None,
+                 runtime=None, mirror=False):
         project = SCRIPTS.parents[3]
         self.home = home
         self.short = short
@@ -225,6 +228,12 @@ class AdapterProcess:
         self.short_deadline_marker.unlink(missing_ok=True)
         self.env = {**os.environ, "HOME": str(home), "CLAUDE_PROJECT_DIR": str(project)}
         self.env.pop("HUD_HOST", None)
+        self.env.pop("XDG_RUNTIME_DIR", None)
+        self.env.pop("TZE_HUD_MIRROR", None)
+        if runtime is not None:
+            self.env["XDG_RUNTIME_DIR"] = str(runtime)
+        if mirror:
+            self.env["TZE_HUD_MIRROR"] = "1"
         if host is not None:
             self.env["HUD_HOST"] = host
         entry = json.loads((project / config).read_text())["mcpServers"]["tze-hud"]
@@ -360,6 +369,123 @@ def pair(host, home, code=CODE, *extra):
 
 def psk_file(home):
     return home / ".config" / "tze-hud" / "127.0.0.1.psk"
+
+
+HOOK = SCRIPTS.parents[1] / "hud-projection/scripts/portal_hook.py"
+PROMPT = "e53cb2ed-891a-4c88-9a7b-c64a41f06cf2"
+STATE_METHOD = "notifications/tze/session_state"
+
+
+def hook_event(adapter, event, **fields):
+    payload = {"hook_event_name": event, "session_id": "fixture",
+               "prompt_id": PROMPT, **fields}
+    result = subprocess.run([sys.executable, str(HOOK)], input=json.dumps(payload).encode(),
+                            capture_output=True, timeout=2, env=adapter.env)
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"", b"")
+
+
+def wait_call(predicate, timeout=3):
+    with FakeHud.condition:
+        assert FakeHud.condition.wait_for(lambda: any(map(predicate, FakeHud.requests)), timeout)
+        return next(filter(predicate, FakeHud.requests))
+
+
+def wait_state(state, session=None):
+    return wait_call(lambda entry: entry["body"]["method"] == STATE_METHOD
+                     and entry["body"]["params"]["state"] == state
+                     and (session is None or entry["session"] == session))
+
+
+def test_live_hook_state_and_mirror_share_the_primary_scope(hud):
+    host, home = hud
+    assert pair(host, home).returncode == 0
+    with tempfile.TemporaryDirectory(prefix="hud-hook-") as runtime:
+        with AdapterProcess(home, host=host, runtime=runtime, mirror=True) as adapter:
+            adapter.ready()
+            path = Path(runtime) / "tze-hud" / f"claude-{os.getpid()}.sock"
+            assert path.is_socket()
+            hook_event(adapter, "UserPromptSubmit")
+            primary = wait_state("working")["session"]
+            assert primary is not None
+            hook_event(adapter, "PreToolUse", tool_name="AskUserQuestion",
+                       tool_use_id="tool-q", tool_input={"body": "ignored private canary"})
+            assert wait_state("blocked")["body"]["params"] == {"state": "blocked", "reason": "question"}
+            hook_event(adapter, "PostToolUse", tool_name="AskUserQuestion", tool_use_id="tool-q")
+            hook_event(adapter, "Stop", last_assistant_message="Fixture finished.")
+            assert wait_state("done")["session"] == primary
+            final = wait_call(lambda entry: entry["body"].get("params", {}).get("arguments", {}).get("content")
+                              == "Fixture finished.")
+            assert final["session"] == primary
+            assert final["body"]["params"]["arguments"]["surface"] == "portal:fixture"
+            assert "private canary" not in json.dumps(FakeHud.requests)
+            adapter.send("ping", 100)
+            assert adapter.receive()["id"] == 100
+        assert not path.exists()
+        assert [sid for sid, _ in FakeHud.deletes] == [primary]
+
+
+def test_malformed_packets_and_unsafe_listener_leave_model_calls_intact(hud):
+    host, home = hud
+    assert pair(host, home).returncode == 0
+    with tempfile.TemporaryDirectory(prefix="hud-hook-") as runtime:
+        directory = Path(runtime) / "tze-hud"
+        directory.mkdir(mode=0o750)
+        with AdapterProcess(home, host=host, runtime=runtime) as adapter:
+            adapter.ready()
+            assert list(directory.iterdir()) == []
+        directory.chmod(0o700)
+        with AdapterProcess(home, host=host, runtime=runtime) as adapter:
+            adapter.ready()
+            path = directory / f"claude-{os.getpid()}.sock"
+            for packet in (b"{", b"*" * (16 * 1024 + 1)):
+                with socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET) as peer:
+                    peer.settimeout(2)
+                    peer.connect(str(path))
+                    peer.sendall(packet)
+                    assert peer.recv(1) == b""
+            assert all(entry["body"]["method"] != STATE_METHOD for entry in FakeHud.requests)
+            hook_event(adapter, "UserPromptSubmit")
+            assert wait_state("working")["session"] is not None
+            adapter.send("ping", 100)
+            assert adapter.receive()["id"] == 100
+            assert all(entry["body"]["method"] != "tools/call" for entry in FakeHud.requests)
+
+
+def test_internal_state_404_reinitializes_once_and_resends_current_state(hud):
+    host, home = hud
+    assert pair(host, home).returncode == 0
+    with tempfile.TemporaryDirectory(prefix="hud-hook-") as runtime:
+        with AdapterProcess(home, host=host, runtime=runtime) as adapter:
+            adapter.ready()
+            original, = FakeHud.sessions
+            with FakeHud.condition:
+                FakeHud.sessions.clear()
+            hook_event(adapter, "UserPromptSubmit")
+            started = wait_state("working", original)
+            assert started["session"] == original
+            wait_state("working", "session-2")
+            adapter.send("ping", 100)
+            assert adapter.receive()["id"] == 100
+            assert FakeHud.opened == 2
+
+
+def test_hook_lane_does_not_take_one_of_the_four_model_workers(hud):
+    host, home = hud
+    assert pair(host, home).returncode == 0
+    with tempfile.TemporaryDirectory(prefix="hud-hook-") as runtime:
+        with AdapterProcess(home, host=host, runtime=runtime) as adapter:
+            adapter.ready()
+            ids = ["model-1", "model-2", "model-3", "model-4"]
+            FakeHud.modes.update({request_id: "hold" for request_id in [*ids, None]})
+            hook_event(adapter, "UserPromptSubmit")
+            wait_state("working")
+            for request_id in ids:
+                adapter.send("ping", request_id)
+                wait_request(request_id)
+            assert len(owned_children(adapter.process.pid)) == 5
+            assert not adapter.selector.select(0)
+            FakeHud.release.set()
+            assert {adapter.receive()["id"] for _ in ids} == set(ids)
 
 
 def test_pair_writes_0600_file_and_never_prints_the_psk(hud):
@@ -1576,7 +1702,7 @@ def reinit_adapter(monkeypatch):
     client.__dict__.update(endpoint={}, selector=Mock(), tasks=[], output=bytearray(), retry=[],
                            output_registered=False, initialized=True, protocol="2025-06-18",
                            initializing=False, stop=False, fatal=False, owner=None,
-                           had_session=True, session=None,
+                           had_session=True, session=None, presence=module["SessionPresence"](False),
                            init_request={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})
     exits = {}  # pid -> exit code once the worker has exited
     workers = []
@@ -1665,7 +1791,7 @@ def test_a_reinitialize_refused_for_capacity_fails_the_waiting_call(monkeypatch)
     assert client.reap() and abandoned.cancelled and abandoned in client.tasks
     client.output.clear()
     busy = [SimpleNamespace(request={"jsonrpc": "2.0", "id": f"busy-{n}", "method": "ping"},
-                            internal=False, cancelled=False)
+                            internal=False, cancelled=False, presence=None)
             for n in range(module["MAX_WORKERS"] - 1)]
     client.tasks.extend(busy)
 

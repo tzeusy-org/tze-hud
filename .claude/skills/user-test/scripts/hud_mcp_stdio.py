@@ -45,6 +45,8 @@ from urllib.parse import urlsplit
 # runpy's project-root launcher does not add this script directory to sys.path.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import hud_env
+import hud_hook_socket
+from hud_session import SessionPresence, STATE_METHOD
 
 REQUEST_SECONDS = 60.0
 INITIALIZE_SECONDS = 3.0
@@ -57,6 +59,8 @@ SESSION_HEADER = "Mcp-Session-Id"
 KILL_SECONDS = 1.0
 OUTPUT_STALL_SECONDS = 5.0
 MAX_WORKERS = 4
+HOOK_PEERS = 64
+PRESENCE_SECONDS = 1.0
 MAX_REQUEST = 60 * 1024  # Leave room for headers under the runtime's whole 64KiB cap.
 MAX_RESPONSE = 1024 * 1024
 MAX_OUTPUT = 4 * MAX_RESPONSE
@@ -184,6 +188,7 @@ class Task:
         self.result_seen = False
         self.retried = False
         self.internal = False
+        self.presence = None
 
 
 class Adapter:
@@ -219,6 +224,63 @@ class Adapter:
         os.set_blocking(sys.stdout.fileno(), False)
         self.selector.register(sys.stdin.fileno(), selectors.EVENT_READ, ("input", None))
         self.selector.register(self.wake_read, selectors.EVENT_READ, ("wake", None))
+        self.hooks = hud_hook_socket.HookListener.open(self.owner)
+        self.peers = {}
+        self.presence = SessionPresence(os.environ.get("TZE_HUD_MIRROR") == "1")
+        if self.hooks is not None:
+            self.selector.register(self.hooks.socket, selectors.EVENT_READ, ("hook_listener", None))
+
+    def accept_hook(self):
+        try:
+            peer, _ = self.hooks.socket.accept()
+        except OSError:
+            return
+        if len(self.peers) >= HOOK_PEERS:
+            peer.close()
+            return
+        self.peers[peer] = time.monotonic() + PRESENCE_SECONDS
+        self.selector.register(peer, selectors.EVENT_READ, ("hook_peer", peer))
+
+    def close_peer(self, peer):
+        self.unregister(peer)
+        self.peers.pop(peer, None)
+        peer.close()
+
+    def hook_ready(self, peer):
+        try:
+            event = hud_hook_socket.receive_event(peer)
+        except BlockingIOError:
+            return
+        self.close_peer(peer)
+        if event is None or not self.initialized or not self.had_session:
+            return
+        if (event["event"] == "SessionEnd" and not event["clear"]
+                and event["session"] == self.presence.session):
+            self.stop = True
+            return
+        self.presence.event(event)
+
+    def close_hooks(self):
+        for peer in list(self.peers):
+            self.close_peer(peer)
+        if self.hooks is not None:
+            self.unregister(self.hooks.socket)
+            self.hooks.close()
+            self.hooks = None
+
+    def start_presence(self):
+        if self.stop or self.session is None or self.reinitializing:
+            return
+        if any(task.presence is not None for task in self.tasks):
+            return
+        op = self.presence.take()
+        if op is None:
+            return
+        request = {"jsonrpc": "2.0", "method": op.method, "params": op.params}
+        if op.method != STATE_METHOD:
+            request.update(id="tze-hud-presence", method="tools/call",
+                           params={"name": op.method, "arguments": op.params})
+        self.admit(request, time.monotonic() + PRESENCE_SECONDS, presence=op)
 
     def terminate(self, *_):
         self.stop = True
@@ -274,7 +336,7 @@ class Adapter:
             # reports here: the abandoned worker's exit no longer does.
             self.reinitialized(False)
 
-    def admit(self, request, deadline=None, *, retried=False, internal=False):
+    def admit(self, request, deadline=None, *, retried=False, internal=False, presence=None):
         if not isinstance(request, dict) or request.get("jsonrpc") != "2.0" or not isinstance(request.get("method"), str):
             self.queue(failure(None, "Invalid JSON-RPC message"))
             return
@@ -288,7 +350,8 @@ class Adapter:
             if not has_id and isinstance(params, dict):
                 wanted = params.get("requestId")
                 if valid_id(wanted):
-                    self.abort([t for t in self.tasks if "id" in t.request and t.request["id"] == wanted
+                    self.abort([t for t in self.tasks if t.presence is None
+                                and "id" in t.request and t.request["id"] == wanted
                                 and t.request["method"] != "initialize" and not t.result_seen])
             return
         if method == "notifications/initialized" and not has_id:
@@ -311,24 +374,27 @@ class Adapter:
             self.reinitialize()
             return
         # An abandoned re-initialize can still be exiting; its id is not live.
-        if has_id and any("id" in t.request and t.request["id"] == request_id
+        if presence is None and has_id and any(t.presence is None
+                          and "id" in t.request and t.request["id"] == request_id
                           and not (internal and t.cancelled) for t in self.tasks):
             self.queue(failure(request_id, "Request ID is already pending"))
             return
         seconds = INITIALIZE_SECONDS if method == "initialize" else REQUEST_SECONDS
         deadline = deadline if deadline is not None else time.monotonic() + seconds
-        if len(self.tasks) >= MAX_WORKERS or time.monotonic() >= deadline:
-            if has_id and not internal:  # The internal id never reaches the client.
+        model = not internal and presence is None
+        model_tasks = sum(task.presence is None for task in self.tasks)
+        if (presence is None and model_tasks >= MAX_WORKERS) or time.monotonic() >= deadline:
+            if has_id and model:
                 self.queue(failure(request_id, "HUD request deadline or capacity exceeded"))
             return
-        if internal:
+        if internal or presence is not None:
             permitted = True
         elif method == "initialize":
             permitted = not self.initializing and self.protocol is None and has_id
         else:
             permitted = self.initialized
         if not permitted:
-            if has_id:
+            if has_id and model:
                 self.queue(failure(request_id, "HUD session not ready; reconnect the tze-hud MCP server"))
             return
         if method == "initialize":
@@ -340,7 +406,7 @@ class Adapter:
                                   "session": None if method == "initialize" else self.session},
                                  ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode()
         except (TypeError, ValueError):
-            if has_id:
+            if has_id and model:
                 self.queue(failure(request_id))
             return
         process = subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "--worker", str(os.getpid()), str(deadline)],
@@ -357,6 +423,7 @@ class Adapter:
             return
         task = Task(process, pidfd, request, deadline, payload)
         task.retried, task.internal = retried, internal
+        task.presence = presence
         task.session = None if method == "initialize" else self.session
         self.tasks.append(task)
         os.set_blocking(process.stdin.fileno(), False)
@@ -367,19 +434,21 @@ class Adapter:
         if method == "initialize" and not internal:
             self.initializing = True
 
-    def reinitialize(self):
+    def reinitialize(self, presence=None):
         """One internal initialize replaying the client's own, never forwarded."""
         if self.reinitializing or self.stop:
             return
         self.reinitializing = True
         request = dict(self.init_request or {"jsonrpc": "2.0", "method": "initialize", "params": {}})
         request["id"] = REINIT_ID
-        self.admit(request, time.monotonic() + INITIALIZE_SECONDS, internal=True)
+        self.admit(request, time.monotonic() + INITIALIZE_SECONDS, internal=True, presence=presence)
         if not any(t.internal and not t.cancelled for t in self.tasks):
             self.reinitialized(False)
 
     def reinitialized(self, ok):
         self.reinitializing = False
+        if ok:
+            self.presence.resend_state()
         waiting, self.retry = self.retry, []
         for request, deadline, retried in waiting:
             if ok and not retried and not self.stop:
@@ -466,6 +535,11 @@ class Adapter:
                 if task.internal:
                     self.reinitialized(False)
                     return
+                if task.presence is not None:
+                    if not self.stop and task.session == self.session:
+                        self.set_session(None)
+                        self.reinitialize(presence=task.presence)
+                    return
                 if task.retried or self.stop:
                     if "id" in task.request:
                         self.queue(failure(task.request["id"], "HUD session ended; reconnect the tze-hud MCP server"))
@@ -499,6 +573,14 @@ class Adapter:
             if ok:
                 self.set_session(opened)
             self.reinitialized(ok)
+            return
+        if task.presence is not None:
+            if not task.cancelled and task.session == self.session and not self.stop:
+                ok = task.process.returncode == 0
+                if "id" in task.request:
+                    result = response.get("result") if isinstance(response, dict) else None
+                    ok = ok and isinstance(result, dict) and result.get("isError") is not True
+                self.presence.acknowledged(task.presence, ok, time.monotonic())
             return
         if task.cancelled:
             return
@@ -550,7 +632,7 @@ class Adapter:
                 if task.internal:
                     self.abort([task])
                     continue
-                if "id" in task.request:
+                if task.presence is None and "id" in task.request:
                     message = INITIALIZE_TIMEOUT if task.request["method"] == "initialize" else "HUD request deadline exceeded"
                     self.queue(failure(task.request["id"], message))
                 if task.request["method"] == "initialize":
@@ -564,6 +646,7 @@ class Adapter:
                 if self.output and time.monotonic() - self.output_progress >= OUTPUT_STALL_SECONDS:
                     self.stop = self.fatal = True
                 if self.stop:
+                    self.close_hooks()
                     self.end_session()
                     self.abort(self.tasks)
                     self.output.clear()
@@ -572,7 +655,13 @@ class Adapter:
                 if self.stop and not self.tasks:
                     break
                 self.frames()
+                self.start_presence()
+                now = time.monotonic()
+                for peer, expires in list(self.peers.items()):
+                    if now >= expires:
+                        self.close_peer(peer)
                 deadlines = [t.abort_deadline or t.deadline for t in self.tasks]
+                deadlines.extend(self.peers.values())
                 if self.output and not self.stop:
                     deadlines.append(self.output_progress + OUTPUT_STALL_SECONDS)
                 wait = max(0.0, min(deadlines) - time.monotonic()) if deadlines else None
@@ -584,6 +673,10 @@ class Adapter:
                         os.read(self.wake_read, CHUNK)
                     elif kind == "input" and not self.stop:
                         self.input_ready()
+                    elif kind == "hook_listener" and not self.stop:
+                        self.accept_hook()
+                    elif kind == "hook_peer" and not self.stop and task in self.peers:
+                        self.hook_ready(task)
                     elif kind == "output" and not self.stop:
                         try:
                             size = os.write(sys.stdout.fileno(), self.output[:CHUNK])
@@ -613,6 +706,7 @@ class Adapter:
                                 self.queue(failure(task.request["id"]))
                             self.abort([task])
         finally:
+            self.close_hooks()
             self.end_session()
             # Ordinary exceptions use the same ONE global TERM and ONE global KILL deadlines.
             self.abort(self.tasks)

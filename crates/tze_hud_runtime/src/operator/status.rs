@@ -500,7 +500,17 @@ impl StatusSource {
         }
         live.into_iter()
             .zip(held)
-            .map(|(s, holdings)| json!({"agent": s.agent, "label": s.label, "holdings": holdings}))
+            .map(|(s, holdings)| {
+                json!({
+                    "agent": s.agent,
+                    "label": s.label,
+                    "holdings": holdings,
+                    "last_call_ms": s.last_call_ms,
+                    "state": s.presence.map(|presence| presence.state),
+                    "reason": s.presence.and_then(|presence| presence.reason),
+                    "since_ms": s.presence.map(|presence| presence.since_ms),
+                })
+            })
             .collect()
     }
 

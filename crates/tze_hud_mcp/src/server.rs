@@ -2,7 +2,7 @@
 //!
 //! Standard MCP over JSON-RPC 2.0: `initialize`, `notifications/initialized`,
 //! `tools/list`, and `tools/call` for the five `hud_*` tools in
-//! [`crate::tools`]. There is no other method.
+//! [`crate::tools`], plus the adapter's internal `notifications/tze/session_state`.
 //!
 //! ## Authentication
 //!
@@ -456,6 +456,9 @@ impl McpServer {
     /// Share the runtime's portal hub; no main-thread round trip is needed.
     pub fn with_portals(mut self, portals: PortalHandle) -> Self {
         self.input_notifiers = portals.input_notifiers.clone();
+        if let Some(scopes) = Arc::get_mut(&mut self.scopes) {
+            scopes.set_clock(Arc::clone(&portals.clock));
+        }
         self.portals = Some(portals);
         self
     }
@@ -679,6 +682,14 @@ impl McpServer {
                     *opened = Some(self.open_scope(&identity.agent_id, label).await);
                 }
                 respond(McpResponse::ok(id, crate::schema::initialize_result()))
+            }
+            "notifications/tze/session_state" => {
+                if id.is_none()
+                    && let Some(scope) = scope
+                {
+                    self.scopes.report_presence(scope, &request.params);
+                }
+                String::new()
             }
             // Notifications get no response.
             m if m.starts_with("notifications/") => String::new(),
