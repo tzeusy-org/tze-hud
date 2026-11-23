@@ -1489,6 +1489,27 @@ impl SceneGraph {
             ZoneInteractionKind::Action { index } => {
                 let action = payload.actions.get(*index)?;
                 action.validate().ok()?;
+                if action.reply.is_some() {
+                    if self
+                        .overlay
+                        .notification_reply
+                        .as_ref()
+                        .is_none_or(|reply| reply.publication_id != key)
+                        && !self.set_notification_reply_view(Some(
+                            super::overlay::NotificationReplyView {
+                                publication_id: key,
+                                action_index: *index,
+                                text: String::new(),
+                                cursor_byte: 0,
+                                selection_anchor: 0,
+                                at_capacity: false,
+                            },
+                        ))
+                    {
+                        return None;
+                    }
+                    return Some(super::NotificationActivation::Reply(region.clone()));
+                }
                 if let Some(text) = &action.copy {
                     return Some(super::NotificationActivation::Copy {
                         text: text.clone(),

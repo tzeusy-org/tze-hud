@@ -174,6 +174,7 @@ impl WindowedRuntimeState {
             context_menu_dismiss_pending: false,
             notification_keydowns: Default::default(),
             answer_keyboard: Default::default(),
+            notification_reply: Default::default(),
             primary_drag_gesture: None,
             global_tokens: HashMap::new(),
             resize_affordance_px: Default::default(),

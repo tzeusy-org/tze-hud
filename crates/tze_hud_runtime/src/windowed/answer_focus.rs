@@ -151,7 +151,10 @@ pub(super) fn route_answer_key(
     outcome.activation = scene.activate_notification(target, duration);
     if matches!(
         outcome.activation,
-        Some(tze_hud_scene::graph::NotificationActivation::GoTo { .. })
+        Some(
+            tze_hud_scene::graph::NotificationActivation::GoTo { .. }
+                | tze_hud_scene::graph::NotificationActivation::Reply(_)
+        )
     ) {
         return outcome;
     }
@@ -365,33 +368,42 @@ impl WinitApp {
             }
             scene.prune_notification_feedback();
             let now = scene.now_wall_us();
-            let newest =
-                scene
-                    .overlay
-                    .zone_hit_regions
-                    .iter()
-                    .filter(|region| {
-                        let ZoneInteractionKind::Action { index } = region.kind else {
-                            return false;
-                        };
-                        !scene.overlay.notification_choices.contains_key(&region.publication_id)
-                    && scene.zone_registry.active_for_zone(&region.zone_name).iter().any(|record| {
-                        record.publication_id == region.publication_id
-                            && record.publisher_namespace == region.publisher_namespace
-                            && record.expires_at_wall_us.is_none_or(|expiry| expiry > now)
-                            && matches!(&record.content, ZoneContent::Notification(payload)
+            let newest = scene
+                .overlay
+                .zone_hit_regions
+                .iter()
+                .filter(|region| {
+                    let ZoneInteractionKind::Action { index } = region.kind else {
+                        return false;
+                    };
+                    !scene
+                        .overlay
+                        .notification_choices
+                        .contains_key(&region.publication_id)
+                        && scene
+                            .zone_registry
+                            .active_for_zone(&region.zone_name)
+                            .iter()
+                            .any(|record| {
+                                record.publication_id == region.publication_id
+                                    && record.publisher_namespace == region.publisher_namespace
+                                    && scene
+                                        .zone_publication_expiry(record)
+                                        .is_none_or(|expiry| expiry > now)
+                                    && matches!(&record.content, ZoneContent::Notification(payload)
                                 if payload.actions.get(index).is_some_and(|action|
-                                    action.callback_id.is_some() && action.validate().is_ok()))
-                    })
-                    })
-                    .max_by_key(|region| {
-                        (
-                            region.published_at_wall_us,
-                            region.publication_id.to_bytes_le(),
-                            &region.publisher_namespace,
-                            &region.zone_name,
-                        )
-                    });
+                                    (action.callback_id.is_some() || action.reply.is_some())
+                                        && action.validate().is_ok()))
+                            })
+                })
+                .max_by_key(|region| {
+                    (
+                        region.published_at_wall_us,
+                        region.publication_id.to_bytes_le(),
+                        &region.publisher_namespace,
+                        &region.zone_name,
+                    )
+                });
             let Some(newest) = newest else {
                 return Ok(false);
             };

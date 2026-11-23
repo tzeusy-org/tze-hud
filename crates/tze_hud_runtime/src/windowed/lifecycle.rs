@@ -2439,6 +2439,9 @@ impl WinitApp {
     ) {
         match outcome {
             tze_hud_scene::graph::NotificationActivation::Callback(wake) => wake.notify(),
+            tze_hud_scene::graph::NotificationActivation::Reply(region) => {
+                self.open_notification_reply(region);
+            }
             tze_hud_scene::graph::NotificationActivation::Copy {
                 text,
                 publication_id,
@@ -2792,6 +2795,7 @@ impl WinitApp {
             } else {
                 self.state.answer_keyboard.focus = None;
                 self.state.answer_keyboard.return_key = None;
+                self.blur_notification_reply();
                 self.cancel_chrome_feedback();
             }
         }

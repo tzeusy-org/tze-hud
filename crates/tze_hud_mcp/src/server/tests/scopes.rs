@@ -156,7 +156,10 @@ async fn typed_reply_reaches_only_its_exact_wait_or_publishing_session() {
         let (ready, waits) = {
             let mut scene = server.scene.lock().await;
             let region = render_card_control(&mut scene, id, Some(0));
-            assert!(scene.activate_notification(&region, 0).is_none());
+            assert!(matches!(
+                scene.activate_notification(&region, 0),
+                Some(tze_hud_scene::graph::NotificationActivation::Reply(_))
+            ));
             for rejected in [String::new(), "é".repeat(141), "two\nlines".into()] {
                 assert!(
                     scene

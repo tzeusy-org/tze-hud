@@ -196,6 +196,7 @@ mod monitor_identity;
 mod network;
 mod notification_copy;
 mod notification_hold;
+mod notification_reply;
 mod notification_reveal;
 mod panel_input;
 mod portal;
@@ -477,6 +478,7 @@ struct WindowedRuntimeState {
     notification_keydowns: std::collections::HashSet<String>,
     /// Coalesced WM_HOTKEY intent; only the main thread resolves a live card.
     answer_keyboard: answer_focus::AnswerKeyboardState,
+    notification_reply: notification_reply::NotificationReplyState,
     /// Original primary drag identity and, only on a missed Up, its terminal event.
     primary_drag_gesture: Option<portal::PrimaryDragGesture>,
     /// Global design token map from scene startup.
@@ -1057,6 +1059,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
             return;
         }
         self.sync_panel_focus();
+        self.sync_notification_reply();
         self.sync_answer_focus();
         self.sync_design_tokens();
         self.sync_capture_exclusion();
@@ -3393,6 +3396,7 @@ impl WindowedRuntime {
             context_menu_dismiss_pending: false,
             notification_keydowns: Default::default(),
             answer_keyboard,
+            notification_reply: Default::default(),
             primary_drag_gesture: None,
             global_tokens: startup_compositor_tokens,
             resize_affordance_px: Default::default(),

@@ -12,6 +12,8 @@ use std::sync::Arc;
 /// An accepted notification outcome, delivered only after unlocking the scene.
 pub enum NotificationActivation {
     Callback(RenderWakeNotifier),
+    /// Open the exact action's local inline editor.
+    Reply(ZoneHitRegion),
     /// A real owner input requested a match recheck and window activation.
     GoTo {
         publication_id: SceneId,
