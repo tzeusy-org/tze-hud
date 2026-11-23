@@ -41,10 +41,6 @@ pub use element_store::{
 pub use graph::{
     MAX_MARKDOWN_BYTES,
     MAX_NODES_PER_TILE,
-    MAX_TAB_NAME_BYTES,
-    // scene-level capacity constants
-    MAX_TABS,
-    MAX_TILES_PER_TAB,
     PendingAction,
     Publication,
     Publisher,

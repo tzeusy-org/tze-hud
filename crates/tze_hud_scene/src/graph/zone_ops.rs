@@ -37,7 +37,7 @@ impl SceneGraph {
         })
     }
     /// Notification routing keys are exact UTF-8 bytes, with empty meaning absent.
-    pub const MAX_NOTIFICATION_KEY_BYTES: usize = 256;
+    const MAX_NOTIFICATION_KEY_BYTES: usize = 256;
 
     pub fn validate_notification_key(key: Option<&str>) -> Result<(), ValidationError> {
         if key.is_some_and(|key| key.len() > Self::MAX_NOTIFICATION_KEY_BYTES) {

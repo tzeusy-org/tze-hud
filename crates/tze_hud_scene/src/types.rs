@@ -482,7 +482,7 @@ pub struct PortalPart {
 pub struct PortalIdentity {
     /// Stable adapter-assigned session id (max [`PORTAL_SESSION_ID_MAX_BYTES`]).
     pub session_id: String,
-    /// Human-readable display name (max [`PORTAL_DISPLAY_NAME_MAX_BYTES`]).
+    /// Human-readable display name, limited to 128 UTF-8 bytes.
     pub display_name: String,
     /// Optional peer class of the far side of the stream.
     pub peer_class: PortalPeerClass,
@@ -518,7 +518,7 @@ pub const PORTAL_MAX_PARTS: usize = 8;
 /// Maximum UTF-8 byte length of [`PortalIdentity::session_id`].
 pub const PORTAL_SESSION_ID_MAX_BYTES: usize = 256;
 /// Maximum UTF-8 byte length of [`PortalIdentity::display_name`].
-pub const PORTAL_DISPLAY_NAME_MAX_BYTES: usize = 128;
+const PORTAL_DISPLAY_NAME_MAX_BYTES: usize = 128;
 
 impl PortalSurface {
     /// Validate the structural invariants of a portal surface descriptor:
@@ -2023,7 +2023,7 @@ pub struct NotificationPayload {
 impl NotificationPayload {
     /// No title and no body: it would render as an empty card. Both publish
     /// planes reject it with `INVALID_ARGUMENT`.
-    pub fn is_blank(&self) -> bool {
+    fn is_blank(&self) -> bool {
         self.title.trim().is_empty() && self.text.trim().is_empty()
     }
 
@@ -2053,7 +2053,7 @@ impl NotificationPayload {
 }
 
 /// Hint for a rejected blank notification, shared by both planes.
-pub const BLANK_NOTIFICATION_HINT: &str = "notification needs a title or body";
+const BLANK_NOTIFICATION_HINT: &str = "notification needs a title or body";
 
 /// Maximum number of action buttons accepted and rendered per notification slot.
 pub const MAX_NOTIFICATION_ACTIONS: usize = 4;
@@ -3344,7 +3344,7 @@ impl ZoneRegistry {
     ///
     /// In v1, zone defaults are represented by `ZoneDefinition.geometry_policy`.
     /// When `config_override` is `None`, the zone default remains the fallback.
-    pub fn resolve_geometry_policy_for_zone(
+    pub(crate) fn resolve_geometry_policy_for_zone(
         &self,
         zone_name: &str,
         user_override: Option<&GeometryPolicy>,
