@@ -61,6 +61,7 @@ unreachable or rejects the call, continue in chat and report the limitation once
 |---|---|
 | `text` | `"Build passed"` as `content` |
 | `notification` | `{"title":"Tests","body":"Passed","urgency":0}` as `content` |
+| Short typed answer | `{"body":"Which database?","actions":[{"label":"Other…","reply":"session-a:db:other"}]}` as `content` |
 | `status_bar` | `{"entries":{"session-a":"testing"}}` as `content`, with a work `key` |
 | `solid_color` | `{"r":0.05,"g":0.1,"b":0.2,"a":1.0}` as `content` |
 | Widget `params` declaration | `{"progress":0.5,"label":"Tests"}` as `params`, using discovered names/types |
@@ -82,6 +83,10 @@ unreachable or rejects the call, continue in chat and report the limitation once
   `{"label":"Copy command","copy":"cargo test -p example"}`. Copy text is
   limited to 2048 UTF-8 bytes without NUL. The card stays and the button
   queues no reply.
+- For a short typed answer, use `{"label":"Other…","reply":"session-a:question:other"}`.
+  One reply action fits within the four-action limit. Enter sends up to 280
+  UTF-8 bytes as `action` and `text`. The card keeps an unsent draft when the
+  owner collapses the field.
 - Zone TTL defaults to 60000 ms. Action cards instead default to the owner's
   live answer window (currently 60000 ms by default). Explicit `ttl_ms`, including
   `0` for held content, wins; later settings changes do not retime admitted cards.
@@ -110,8 +115,9 @@ notification-capable zones. Never use a broad clear on a shared pairing's zone.
 ## Questions and input ownership
 
 Offer buttons only with safe answer routing and an active consumer. Notifications
-accept at most **four** `{label, callback_id}` actions; both strings must be
-nonempty. Use explicit labels such as Yes / No / Later. Callback ids must identify
+accept at most **four** actions, including one reply action. A fixed answer
+needs nonempty `label` and `callback_id` strings. Use explicit labels such as
+Yes / No / Later. Callback ids must identify
 the session, question and fresh generation; a reusable visual key is not a nonce.
 
 <!-- tool: hud_publish -->
@@ -121,7 +127,8 @@ the session, question and fresh generation; a reusable visual key is not a nonce
 
 `hud_input {"wait_ms":30000,"max_items":20}` returns `items` and `remaining`.
 Items have `id`, `s`, and `action` (or portal `text`); keyed notification events
-also carry `key`. A human × has `action:"dismiss", kind:"dismiss"`; a callback
+also carry `key`. Typed replies carry both `action` and `text`. A human × has
+`action:"dismiss", kind:"dismiss"`; a callback
 named `dismiss` has no `kind`. Timeout, silence, expiry and dismiss are not consent.
 
 On a running build that discovers `hud_publish.wait_ms`, prefer a one-call
