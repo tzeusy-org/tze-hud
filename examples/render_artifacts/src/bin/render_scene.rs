@@ -345,12 +345,9 @@ async fn settle(server: &McpServer, at_ms: u64) -> Result<()> {
     tokio::time::sleep(Duration::from_millis(at_ms)).await;
     let handle = server.scene_handle();
     let mut scene = handle.lock().await;
-    for result in scene.apply_due_batches() {
-        if !result.applied {
-            return Err(error(format!(
-                "scheduled fixture rejected: {:?}",
-                result.error
-            )));
+    for due in scene.apply_due_publications() {
+        if let Err(rejected) = due.result {
+            return Err(error(format!("scheduled fixture rejected: {rejected:?}")));
         }
     }
     scene.drain_expired_zone_publications();

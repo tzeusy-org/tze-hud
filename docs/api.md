@@ -358,8 +358,8 @@ with the same cancellation and idle semantics as a `hud_input` wait.
   Safe mode freezes widget publication TTL and the owner's auto-clear allowance,
   while the absolute countdown keeps passing; resume displays current wall time.
   An already accepted delayed widget stays pending through safe mode, without
-  an overdue retry wake. Its whole batch presents after resume; its deadline
-  snapshot and relative TTL start at that actual presentation.
+  an overdue retry wake. The queued publication presents after resume. Its
+  deadline snapshot and relative TTL start at that presentation.
   Hover remains runtime-local. SVG `threshold` bindings compare f32 `>= k`
   into opacity 0/1; optional `attr_min`/`attr_max` in 0..1 select below/above
   outputs for mutually exclusive dot branches, without an expression language.
@@ -506,9 +506,10 @@ portal is degraded after 30 s with no publish, poll, or hold, and reclaimed
 instance, or a portal (detach). With a nonempty key, it clears only that
 publisher's matching notification in a notification-capable zone, including
 matching delayed notification publishes. Sibling keys, foreign publishers and
-nonnotification content in mixed zones or scheduled batches survive. A missing
-match succeeds; emptied batches leave no wake deadline. Missing or empty keys
-retain clear-all-own behavior, including the caller's delayed publishes.
+nonnotification content in mixed zones or other scheduled publications survive.
+A missing match succeeds. Cancelled publications leave no wake deadline.
+Missing or empty keys clear all of the caller's content on the surface,
+including delayed publications.
 The same exact 256-byte key bound applies before mutation. Nonempty keys on
 widget, portal or nonnotification-zone clears return `INVALID_ARGUMENT`.
 The gRPC `Hold` and `Clear` behave the same on zones. An internal scene
@@ -947,9 +948,9 @@ Handshake and resume send no scene content, foreign portal transcript or draft.
 
 `FramePresented` remains optional server metadata at `ServerMessage` field 52:
 `frame_number` (1), `present_wall_us` (2) and ordered raw 16-byte internal
-scene `batch_ids` (3). These ids come from `SceneGraph::apply_batch`, not
-the `ClientMessage.sequence` envelope or `RequestResult.seq`; the public mutation route
-is removed. `RequestResult` reports acceptance separately from GPU work.
+scene `batch_ids` (3). Each ID identifies a publication committed by
+`SceneGraph::publish` or the scene scheduler. `RequestResult.seq` separately
+correlates request acceptance to the original `ClientMessage.sequence`.
 Delivery requires both internal `read_telemetry` permission and explicit
 `TELEMETRY_FRAMES` subscription. Through `agents.toml`, only an owner-chosen
 `*` supplies that permission; narrow zone/widget/portal grants do not.
@@ -964,15 +965,16 @@ optional sender, absent by default, and a no-op surface present. Neither path
 proves physical on-screen or per-monitor completion; subtracting a remote
 client timestamp does not establish synchronized one-way latency.
 
-Several accepted internal batches may share a sample; rejected batches add
-no correlation id, and no pending ids means no event. Windowed drains before
-submission, so a failed primary attempt may consume ids without a sample;
-headless retains them on a skipped submission and drains after successful
-GPU work even without a sender. No receivers is an ordinary broadcast miss.
-Lag and Simplified-mode cadence can drop delivery, with no replay or per-batch
-guarantee; a closed producer feed ends the session. A missing sample means
-neither zero latency nor rejection. Existing producer and session tests do
-not establish external opt-in adoption or Windows owner acceptance.
+Several committed publications may share a sample. Only a successful scene
+commit adds a correlation ID. The producer emits an event when IDs are
+pending. Windowed drains before submission, so a failed primary attempt may
+consume IDs without a sample. Headless retains IDs on skipped submissions and
+drains after successful GPU work, even without a sender. No receivers is an
+ordinary broadcast miss. Lag and Simplified-mode cadence can drop delivery.
+Delivery is best effort, and a closed producer feed ends the session. Use
+`RequestResult` to determine acceptance and an observed frame sample to
+measure local submission. External opt-in adoption and Windows owner
+acceptance remain separate evidence.
 
 Composer editing is local to native portals. Only accepted submissions enter the
 portal input queue returned by `hud_input`; resident sessions receive no draft

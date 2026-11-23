@@ -134,7 +134,6 @@ impl SceneGraph {
                 opacity: 1.0,
                 input_mode: InputMode::Capture,
                 present_at: None,
-                expires_at: None,
                 resource_budget: ResourceBudget::default(),
                 root_node: None,
                 visual_hint: crate::lease::TileVisualHint::None,
@@ -416,8 +415,21 @@ impl SceneGraph {
             .get(&tile_id)
             .and_then(|id| self.hit_region_states.get(id).cloned());
 
-        // Remove old root and its subtree if present
+        // Keep registered images used by the replacement alive while the
+        // old tree releases its references.
+        let mut retained_resources = Vec::new();
         if let Some(old_root_id) = old_root {
+            for incoming in all_incoming() {
+                if let NodeData::StaticImage(image) = &incoming.data
+                    && self
+                        .registered_resources
+                        .get(&image.resource_id)
+                        .is_some_and(|count| *count > 0)
+                {
+                    self.inc_resource_ref(image.resource_id);
+                    retained_resources.push(image.resource_id);
+                }
+            }
             self.remove_node_tree(old_root_id);
         }
 
@@ -429,6 +441,9 @@ impl SceneGraph {
         let descendant_map: std::collections::HashMap<SceneId, Node> =
             descendants.into_iter().map(|n| (n.id, n)).collect();
         self.insert_node_tree(&node, &descendant_map);
+        for id in retained_resources {
+            self.dec_resource_ref(&id);
+        }
 
         // Set the new root on the tile
         let tile = self

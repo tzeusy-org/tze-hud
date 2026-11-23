@@ -35,7 +35,6 @@ use tze_hud_scene::lease::TileVisualHint;
 use tze_hud_scene::{
     Clock, TestClock,
     graph::SceneGraph,
-    mutation::{MutationBatch, SceneMutation},
     test_scenes::{ClockMs, TestSceneRegistry, assert_layer0_invariants},
     types::{LayerAttachment, LeaseState, Node, NodeData, Rect, Rgba, SceneId, SolidColorNode},
 };
@@ -112,43 +111,15 @@ fn apply_create_tile(
     bounds: Rect,
     z_order: u32,
 ) -> SceneId {
-    let batch = MutationBatch {
-        batch_id: SceneId::new(),
-        agent_namespace: namespace.to_string(),
-        mutations: vec![SceneMutation::CreateTile {
-            tab_id,
-            namespace: namespace.to_string(),
-            lease_id,
-            bounds,
-            z_order,
-        }],
-        timing_hints: None,
-        lease_id: None,
-    };
-    let result = scene.apply_batch(&batch);
-    assert!(result.applied, "CreateTile should succeed");
-    assert_eq!(
-        result.created_ids.len(),
-        1,
-        "CreateTile should produce exactly one created_id"
-    );
-    result.created_ids[0]
+    scene
+        .create_tile_checked(tab_id, namespace, lease_id, bounds, z_order)
+        .unwrap()
 }
 
 fn apply_set_tile_root(scene: &mut SceneGraph, tile_id: SceneId, namespace: &str, node: Node) {
-    let batch = MutationBatch {
-        batch_id: SceneId::new(),
-        agent_namespace: namespace.to_string(),
-        mutations: vec![SceneMutation::SetTileRoot {
-            tile_id,
-            node,
-            descendants: vec![],
-        }],
-        timing_hints: None,
-        lease_id: None,
-    };
-    let result = scene.apply_batch(&batch);
-    assert!(result.applied, "SetTileRoot should succeed");
+    scene
+        .set_tile_root_checked(tile_id, node, namespace)
+        .unwrap();
 }
 
 // ─── Test 1: Full session lifecycle state transitions ────────────────────────
@@ -269,21 +240,17 @@ fn test_full_session_lifecycle_state_transitions() {
     );
 
     // Mutations must be rejected while suspended
-    let rejected_batch = MutationBatch {
-        batch_id: SceneId::new(),
-        agent_namespace: "agent.alpha".to_string(),
-        mutations: vec![SceneMutation::CreateTile {
-            tab_id,
-            namespace: "agent.alpha".to_string(),
-            lease_id,
-            bounds: Rect::new(100.0, 100.0, 200.0, 200.0),
-            z_order: 2,
-        }],
-        timing_hints: None,
-        lease_id: None,
-    };
-    let rejected = scene.apply_batch(&rejected_batch);
-    assert!(!rejected.applied, "mutations must be rejected in safe mode");
+    let rejected = scene.create_tile_checked(
+        tab_id,
+        "agent.alpha",
+        lease_id,
+        Rect::new(100.0, 100.0, 200.0, 200.0),
+        2,
+    );
+    assert!(
+        rejected.is_err(),
+        "tile operations must be rejected in safe mode"
+    );
     assert_eq!(
         scene.tile_count(),
         1,
@@ -671,22 +638,15 @@ fn test_safe_mode_suspends_all_leases() {
         ("agent.b", lease_b),
         ("agent.c", lease_c),
     ] {
-        let batch = MutationBatch {
-            batch_id: SceneId::new(),
-            agent_namespace: ns.to_string(),
-            mutations: vec![SceneMutation::CreateTile {
-                tab_id,
-                namespace: ns.to_string(),
-                lease_id,
-                bounds: Rect::new(0.0, 500.0, 100.0, 100.0),
-                z_order: 10,
-            }],
-            timing_hints: None,
-            lease_id: None,
-        };
-        let result = scene.apply_batch(&batch);
+        let result = scene.create_tile_checked(
+            tab_id,
+            ns,
+            lease_id,
+            Rect::new(0.0, 500.0, 100.0, 100.0),
+            10,
+        );
         assert!(
-            !result.applied,
+            result.is_err(),
             "mutations for {ns} must be rejected in safe mode"
         );
     }
@@ -852,23 +812,9 @@ fn test_freeze_plus_safe_mode_interaction() {
         ("agent.echo", lease_active),
         ("agent.echo.frozen", lease_frozen),
     ] {
-        let batch = MutationBatch {
-            batch_id: SceneId::new(),
-            agent_namespace: ns.to_string(),
-            mutations: vec![SceneMutation::CreateTile {
-                tab_id,
-                namespace: ns.to_string(),
-                lease_id: lid,
-                bounds: Rect::new(0.0, 500.0, 100.0, 100.0),
-                z_order: 10,
-            }],
-            timing_hints: None,
-            lease_id: None,
-        };
-        assert!(
-            !scene.apply_batch(&batch).applied,
-            "{ns} must not mutate during safe mode"
-        );
+        let result =
+            scene.create_tile_checked(tab_id, ns, lid, Rect::new(0.0, 500.0, 100.0, 100.0), 10);
+        assert!(result.is_err(), "{ns} must not mutate during safe mode");
     }
 
     // Safe mode exit: resume all suspended leases
@@ -1033,24 +979,15 @@ fn test_disconnect_reclaim_multiagent_scene() {
     // agent.two and agent.three can still mutate
     let active_tab = scene.active_tab.expect("active tab must exist");
     for (ns, _lid) in [("agent.two", lease_two), ("agent.three", lease_three)] {
-        let batch = MutationBatch {
-            batch_id: SceneId::new(),
-            agent_namespace: ns.to_string(),
-            mutations: vec![SceneMutation::UpdateTileBounds {
-                tile_id: *scene
-                    .tiles
-                    .values()
-                    .find(|t| t.namespace == ns)
-                    .map(|t| &t.id)
-                    .expect("tile must exist"),
-                bounds: Rect::new(0.0, 0.0, 300.0, 250.0),
-            }],
-            timing_hints: None,
-            lease_id: None,
-        };
-        let result = scene.apply_batch(&batch);
+        let tile_id = scene
+            .tiles
+            .values()
+            .find(|tile| tile.namespace == ns)
+            .expect("tile must exist")
+            .id;
+        let result = scene.update_tile_bounds(tile_id, Rect::new(0.0, 0.0, 300.0, 250.0), ns);
         assert!(
-            result.applied,
+            result.is_ok(),
             "{ns} must be able to mutate while agent.one is disconnected"
         );
     }

@@ -1,5 +1,6 @@
 use super::notification_wait::is_unanswered_question;
 use super::*;
+use std::collections::hash_map::Entry;
 
 impl SceneGraph {
     /// Agent writes cannot change owner configuration or runtime-local widget state.
@@ -396,12 +397,7 @@ impl SceneGraph {
         };
         let mut record = record;
 
-        let publishes = self
-            .zone_registry
-            .active_publishes
-            .entry(zone_name.to_string())
-            .or_default();
-
+        let publishes = self.zone_registry.active_for_zone(zone_name);
         let replacement = notification.then_some(()).and_then(|()| {
             merge_key.as_ref().and_then(|key| {
                 publishes.iter().position(|old| {
@@ -426,11 +422,15 @@ impl SceneGraph {
             }
             None => None,
         };
-        let publishes = self
+        let mut new_records = Vec::new();
+        let mut slot = self
             .zone_registry
             .active_publishes
-            .get_mut(zone_name)
-            .expect("entry created above");
+            .entry(zone_name.to_string());
+        let publishes = match &mut slot {
+            Entry::Occupied(entry) => entry.get_mut(),
+            Entry::Vacant(_) => &mut new_records,
+        };
         let mut trimmed = Vec::new();
         if let Some(index) = replacement {
             // Keep the visual slot, but never transfer the old activation or
@@ -460,6 +460,10 @@ impl SceneGraph {
                 // A full notification stack spares unanswered questions.
                 |r| is_unanswered_question(r, choices, now_us),
             )?;
+        }
+
+        if let Entry::Vacant(entry) = slot {
+            entry.insert(new_records);
         }
 
         if let Some(wait) = self.notification_waits.get_mut(&publication_id) {
@@ -894,11 +898,15 @@ impl SceneGraph {
             publication_origin: publication_origin.filter(|_| lease_id.is_none()),
         };
 
-        let publishes = self
+        let mut new_records = Vec::new();
+        let mut slot = self
             .widget_registry
             .active_publishes
-            .entry(widget_name.to_string())
-            .or_default();
+            .entry(widget_name.to_string());
+        let publishes = match &mut slot {
+            Entry::Occupied(entry) => entry.get_mut(),
+            Entry::Vacant(_) => &mut new_records,
+        };
 
         apply_contention(
             publishes,
@@ -911,6 +919,10 @@ impl SceneGraph {
             },
             |_| false,
         )?;
+
+        if let Entry::Vacant(entry) = slot {
+            entry.insert(new_records);
+        }
 
         // ── Step 4: Update current_params on the instance ─────────────────────
         // Merge new validated params over existing current_params.
@@ -1583,9 +1595,9 @@ impl SceneGraph {
                 .flatten()
                 .any(|r| r.lease_id.is_none() && r.publication_origin == Some(origin))
             || self
-                .scheduled_batches
+                .scheduled_publications
                 .iter()
-                .any(|s| s.batch.lease_id.is_none() && s.publication_origin == Some(origin))
+                .any(|s| s.has_origin(origin))
     }
 
     /// Keep orphan state bounded by the current publications, never request history.
@@ -1624,10 +1636,10 @@ impl SceneGraph {
                 r.publication_origin = None;
             }
         }
-        for s in &mut self.scheduled_batches {
-            if s.batch.lease_id.is_none() && s.publication_origin == Some(origin) {
-                s.batch.lease_id = Some(lease_id);
-                s.publication_origin = None;
+        for s in &mut self.scheduled_publications {
+            if s.has_origin(origin) {
+                s.publisher.lease_id = Some(lease_id);
+                s.publisher.origin = None;
             }
         }
         self.publication_orphans.remove(&origin);
@@ -1656,15 +1668,15 @@ impl SceneGraph {
             self.refresh_widget_current_params(&name);
         }
         let pending_waits: Vec<_> = self
-            .scheduled_batches
+            .scheduled_publications
             .iter()
             .filter_map(|s| s.notification_publication)
             .collect();
-        self.scheduled_batches
-            .retain(|s| s.publication_origin != Some(origin) || s.batch.lease_id.is_some());
+        self.scheduled_publications
+            .retain(|s| !s.has_origin(origin));
         for id in pending_waits {
             if !self
-                .scheduled_batches
+                .scheduled_publications
                 .iter()
                 .any(|s| s.notification_publication == Some(id))
             {
@@ -1678,28 +1690,28 @@ impl SceneGraph {
         self.version += 1;
     }
 
-    /// Clear active publications and whole scheduled batches owned by `lease_id`.
+    /// Clear active and scheduled publications owned by `lease_id`.
     ///
     /// Called when a lease reaches a terminal state (expired after grace,
     /// revoked). Publications by the same namespace under another lease
     /// (e.g. an operator session's MCP notifications) are untouched.
     pub fn clear_publications_for_lease(&mut self, lease_id: SceneId) {
-        let pending_before = self.scheduled_batches.len();
+        let pending_before = self.scheduled_publications.len();
         let pending_waits: Vec<_> = self
-            .scheduled_batches
+            .scheduled_publications
             .iter()
-            .filter(|batch| batch.batch.lease_id == Some(lease_id))
-            .filter_map(|batch| batch.notification_publication)
+            .filter(|s| s.publisher.lease_id == Some(lease_id))
+            .filter_map(|s| s.notification_publication)
             .collect();
-        self.scheduled_batches
-            .retain(|scheduled| scheduled.batch.lease_id != Some(lease_id));
+        self.scheduled_publications
+            .retain(|s| s.publisher.lease_id != Some(lease_id));
         for id in pending_waits {
             self.finish_notification_wait(
                 id,
                 super::NotificationOutcome::Gone(super::NotificationGone::Cleared),
             );
         }
-        let pending_changed = self.scheduled_batches.len() != pending_before;
+        let pending_changed = self.scheduled_publications.len() != pending_before;
         let mut zone_changed = false;
         for publishes in self.zone_registry.active_publishes.values_mut() {
             let before = publishes.len();

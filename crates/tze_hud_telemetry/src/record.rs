@@ -50,11 +50,11 @@ pub struct FrameTelemetry {
     pub stage2_local_feedback_us: u64,
 
     /// Stage 3 — Mutation Intake (compositor thread). p99 budget: 1ms.
-    /// Drain MutationBatch channel, apply agent envelope limits. Each batch is atomic.
+    /// Intake work queued for the frame and associate any local input response.
     pub stage3_mutation_intake_us: u64,
 
     /// Stage 4 — Scene Commit (compositor thread). p99 budget: 1ms.
-    /// Apply validated batches with all-or-nothing semantics; publish hit-test snapshot.
+    /// Apply due publications and local state changes. Publish the hit-test snapshot.
     pub stage4_scene_commit_us: u64,
 
     /// Stage 5 — Layout Resolve (compositor thread). p99 budget: 1ms.

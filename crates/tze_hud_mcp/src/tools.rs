@@ -23,14 +23,13 @@ use tze_hud_portal::hub::{
     MAX_NAME_BYTES, PortalError, PortalHub, PortalKey, PortalStatus, Publish,
 };
 use tze_hud_scene::{
-    SceneId, ValidationError,
+    Publication, Publisher, SceneId, ValidationError,
     config::AgentIdentity,
     graph::{NotificationOutcome, PendingActionKind, SceneGraph},
-    mutation::{MutationBatch, SceneMutation},
     render_wake::RenderWakeNotifier,
     types::{
         ActionRole, LeaseState, NotificationAction, NotificationPayload, Rgba, StatusBarPayload,
-        WidgetParamType, WidgetParameterValue, ZoneContent, ZoneMediaType, ZonePublishToken,
+        WidgetParamType, WidgetParameterValue, ZoneContent, ZoneMediaType,
     },
 };
 
@@ -871,28 +870,25 @@ async fn publish_zone<'a>(
     let present_at = now.saturating_add(delay_ms.saturating_mul(1_000));
     let expires_at = (ttl_ms > 0).then(|| present_at.saturating_add(ttl_ms.saturating_mul(1_000)));
     if delay_ms > 0 {
-        let batch = MutationBatch {
-            batch_id: SceneId::new(),
-            agent_namespace: ns.clone(),
-            mutations: vec![SceneMutation::PublishToZone {
-                zone_name: zone.to_string(),
-                content,
-                publish_token: ZonePublishToken { token: Vec::new() },
-                merge_key: p.key,
-                expires_at_wall_us: expires_at,
-                content_classification: None,
-                breakpoints: Vec::new(),
-                held: expires_at.is_none(),
-            }],
-            timing_hints: None,
+        let publisher = Publisher {
+            namespace: ns.clone(),
             lease_id: Some(lease_id),
+            origin: None,
         };
-        let batch_id = batch.batch_id;
-        if let Some(claim) = &claim {
-            scene.schedule_notification_batch(present_at, batch, claim.id);
+        let publication = Publication::Zone {
+            zone_name: zone.to_string(),
+            content,
+            merge_key: p.key,
+            expires_at_wall_us: expires_at,
+            content_classification: None,
+            breakpoints: Vec::new(),
+            held: expires_at.is_none(),
+        };
+        let batch_id = if let Some(claim) = &claim {
+            scene.schedule_notification(present_at, publisher, publication, claim.id)
         } else {
-            scene.schedule_batch(present_at, batch);
-        }
+            scene.schedule_publication(present_at, publisher, publication)
+        };
         if zone == "subtitle"
             && tracing::enabled!(target: "tze_hud_delay_diagnostic", tracing::Level::DEBUG)
         {
@@ -985,15 +981,14 @@ async fn publish_zone<'a>(
                 .map(|r| r.expires_at_wall_us)
                 .or_else(|| {
                     scene
-                        .scheduled_batches
+                        .scheduled_publications
                         .iter()
-                        .find(|b| b.notification_publication == Some(claim.id))
-                        .and_then(|b| b.batch.mutations.first())
-                        .and_then(|m| match m {
-                            SceneMutation::PublishToZone {
+                        .find(|s| s.notification_publication == Some(claim.id))
+                        .and_then(|s| match &s.publication {
+                            Publication::Zone {
                                 expires_at_wall_us, ..
                             } => Some(*expires_at_wall_us),
-                            _ => None,
+                            Publication::Widget { .. } => None,
                         })
                 })
                 .unwrap_or(expires_at);
@@ -1092,21 +1087,20 @@ async fn publish_widget(ctx: &ToolCtx<'_>, widget: &str, p: PublishParams) -> Mc
         }
         .map(|ttl| present_at.saturating_add(ttl));
         let transition_ms = widget_transition_ms(&scene, ctx);
-        scene.schedule_batch(
+        scene.schedule_publication(
             present_at,
-            MutationBatch {
-                batch_id: SceneId::new(),
-                agent_namespace: ns,
-                mutations: vec![SceneMutation::PublishToWidget {
-                    widget_name: widget.into(),
-                    params: typed,
-                    merge_key: p.key,
-                    transition_ms,
-                    ttl_us,
-                    expires_at_wall_us: None,
-                }],
-                timing_hints: None,
+            Publisher {
+                namespace: ns,
                 lease_id: Some(lease_id),
+                origin: None,
+            },
+            Publication::Widget {
+                widget_name: widget.into(),
+                params: typed,
+                merge_key: p.key,
+                transition_ms,
+                ttl_us,
+                expires_at_wall_us: None,
             },
         );
         return Ok(with_clipped(

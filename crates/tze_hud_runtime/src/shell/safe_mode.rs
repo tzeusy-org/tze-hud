@@ -391,7 +391,7 @@ mod tests {
     }
 
     /// While safe mode is active `SharedState.safe_mode_atomic` is set, which
-    /// makes the session server reject MutationBatch with SAFE_MODE_ACTIVE.
+    /// makes the session server reject Publish with SAFE_MODE_ACTIVE.
     #[tokio::test]
     async fn test_mutations_rejected_via_shared_state_flag() {
         let fx = Fixture::new();

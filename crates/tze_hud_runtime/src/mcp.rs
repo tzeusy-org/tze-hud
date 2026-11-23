@@ -1420,8 +1420,7 @@ mod tests {
         use crate::operator::diagnostics::{self, StartupDiagnostics};
         use tze_hud_portal::{PortalHub, PortalKey, PortalLimits, Publish};
         use tze_hud_scene::clock::{Clock, TestClock};
-        use tze_hud_scene::mutation::{MutationBatch, SceneMutation};
-        use tze_hud_scene::{Rect, SceneId, ZoneContent};
+        use tze_hud_scene::{Publication, Publisher, Rect, SceneId, ZoneContent};
         let clock = Arc::new(TestClock::new(1_000));
         let mut graph = SceneGraph::new_with_clock(1920.0, 1080.0, clock.clone());
         let raw = toml::from_str(
@@ -1616,21 +1615,16 @@ mod tests {
         {
             let mut s = scene.lock().await;
             s.set_widget_auto_clear("diagnostic-gauge", Some(1_000));
-            s.schedule_batch(
+            s.schedule_publication(
                 clock.now_us() + 1_000,
-                MutationBatch {
-                    batch_id: SceneId::new(),
-                    agent_namespace: "scheduled-owner".into(),
-                    mutations: vec![SceneMutation::PublishToWidget {
-                        widget_name: "diagnostic-gauge".into(),
-                        params: Default::default(),
-                        merge_key: None,
-                        transition_ms: 0,
-                        ttl_us: Some(5_000_000),
-                        expires_at_wall_us: Some(clock.now_us() + 3_600_000_000),
-                    }],
-                    timing_hints: None,
-                    lease_id: None,
+                Publisher::namespace("scheduled-owner"),
+                Publication::Widget {
+                    widget_name: "diagnostic-gauge".into(),
+                    params: Default::default(),
+                    merge_key: None,
+                    transition_ms: 0,
+                    ttl_us: Some(5_000_000),
+                    expires_at_wall_us: Some(clock.now_us() + 3_600_000_000),
                 },
             );
         }
@@ -1639,8 +1633,8 @@ mod tests {
         assert_eq!(pending["expiry_kind"], "unknown");
         assert!(pending["expires_in_ms"].is_null());
         clock.advance(10_000);
-        let applied = scene.lock().await.apply_due_batches();
-        assert!(applied[0].applied, "{:?}", applied[0]);
+        let applied = scene.lock().await.apply_due_publications();
+        assert!(applied[0].result.is_ok(), "{:?}", applied[0]);
         assert_eq!(
             find(&snapshot().0, "widget:diagnostic-gauge")["expires_in_ms"],
             1_000
@@ -1722,28 +1716,24 @@ mod tests {
             s.expire_leases();
             assert!(s.zone_registry.active_publishes.values().all(Vec::is_empty));
             let origin = SceneId::new();
-            s.schedule_batch_for_origin(
+            s.schedule_publication(
                 clock.now_us(),
-                MutationBatch {
-                    batch_id: SceneId::new(),
-                    agent_namespace: "preclaim".into(),
-                    lease_id: None,
-                    timing_hints: None,
-                    mutations: vec![SceneMutation::PublishToZone {
-                        zone_name: "notification-area".into(),
-                        content: ZoneContent::Notification(tze_hud_scene::NotificationPayload {
-                            text: private.into(),
-                            ..Default::default()
-                        }),
-                        publish_token: tze_hud_scene::ZonePublishToken { token: vec![] },
-                        merge_key: None,
-                        expires_at_wall_us: None,
-                        content_classification: None,
-                        breakpoints: vec![],
-                        held: false,
-                    }],
+                Publisher {
+                    origin: Some(origin),
+                    ..Publisher::namespace("preclaim")
                 },
-                Some(origin),
+                Publication::Zone {
+                    zone_name: "notification-area".into(),
+                    content: ZoneContent::Notification(tze_hud_scene::NotificationPayload {
+                        text: private.into(),
+                        ..Default::default()
+                    }),
+                    merge_key: None,
+                    expires_at_wall_us: None,
+                    content_classification: None,
+                    breakpoints: vec![],
+                    held: false,
+                },
             );
             let mut pending = Vec::new();
             s.visit_holdings(|row| {
@@ -1754,7 +1744,7 @@ mod tests {
                 ))
             });
             assert_eq!(pending, vec![("scheduled".into(), "unknown".into(), None)]);
-            assert!(s.apply_due_batches()[0].applied);
+            assert!(s.apply_due_publications()[0].result.is_ok());
             assert!(s.orphan_publications(origin, clock.now_millis(), 1));
             let shared = Arc::new(Mutex::new(s));
             let observed = diagnostics::render(Some(&shared), None, None).0;
@@ -2514,8 +2504,8 @@ mod tests {
         let response = http_post(addr, delayed, Some("test-key")).await;
         assert!(response.contains(r#"{\"expires_in_ms\":23000,\"ok\":true}"#));
         let scene_guard = scene.lock().await;
-        let batch = &scene_guard.scheduled_batches[0];
-        let (hi, lo) = batch.batch.batch_id.as_uuid().as_u64_pair();
+        let batch = &scene_guard.scheduled_publications[0];
+        let (hi, lo) = batch.id.as_uuid().as_u64_pair();
         let records: Vec<serde_json::Value> =
             String::from_utf8(crate::pairing::tests::captured_logs())
                 .unwrap()

@@ -8,7 +8,7 @@
 use std::collections::BTreeSet;
 
 use super::SceneGraph;
-use crate::mutation::SceneMutation;
+use super::publish::Publication;
 use crate::scope::owner_agent;
 use crate::types::{LeaseExpiry, LeaseState, SceneId};
 
@@ -48,7 +48,7 @@ impl SceneGraph {
     }
 
     /// Every agent that holds something under any of its scopes: a live
-    /// lease, a zone or widget publication, or a scheduled batch.
+    /// lease, a zone or widget publication, or a scheduled publication.
     pub fn agent_namespaces(&self) -> BTreeSet<String> {
         self.holding_namespaces()
             .into_iter()
@@ -76,9 +76,9 @@ impl SceneGraph {
             .flatten()
             .map(|r| &r.publisher_namespace);
         let scheduled = self
-            .scheduled_batches
+            .scheduled_publications
             .iter()
-            .map(|s| &s.batch.agent_namespace);
+            .map(|s| &s.publisher.namespace);
         leases
             .chain(zones)
             .chain(widgets)
@@ -113,19 +113,16 @@ impl SceneGraph {
             .filter(|(_, records)| records.iter().any(|r| owns(&r.publisher_namespace)))
             .map(|(widget, _)| widget.as_str())
             .collect();
-        for scheduled in &self.scheduled_batches {
-            if !owns(&scheduled.batch.agent_namespace) {
+        for scheduled in &self.scheduled_publications {
+            if !owns(&scheduled.publisher.namespace) {
                 continue;
             }
-            for mutation in &scheduled.batch.mutations {
-                match mutation {
-                    SceneMutation::PublishToZone { zone_name, .. } => {
-                        zones.insert(zone_name);
-                    }
-                    SceneMutation::PublishToWidget { widget_name, .. } => {
-                        widgets.insert(widget_name);
-                    }
-                    _ => {}
+            match &scheduled.publication {
+                Publication::Zone { zone_name, .. } => {
+                    zones.insert(zone_name);
+                }
+                Publication::Widget { widget_name, .. } => {
+                    widgets.insert(widget_name);
                 }
             }
         }
@@ -145,7 +142,7 @@ impl SceneGraph {
     /// The owner's Clear: remove everything `namespace` shows, now, with no
     /// agent veto. Every live lease (active, orphaned or suspended) ends
     /// `Revoked` with its tiles; every zone and widget publication the agent
-    /// made, under any lease or none, goes; its scheduled batches are dropped.
+    /// made, under any lease or none, goes; its scheduled publications are dropped.
     ///
     /// Clear is not a block: the agent's next publish or lease request is
     /// served as usual. Every scope of the agent is cleared.
@@ -204,15 +201,15 @@ impl SceneGraph {
         }
 
         let pending_waits: Vec<_> = self
-            .scheduled_batches
+            .scheduled_publications
             .iter()
             .filter_map(|s| s.notification_publication)
             .collect();
-        self.scheduled_batches
-            .retain(|s| !owns(&s.batch.agent_namespace));
+        self.scheduled_publications
+            .retain(|s| !owns(&s.publisher.namespace));
         for id in pending_waits {
             if !self
-                .scheduled_batches
+                .scheduled_publications
                 .iter()
                 .any(|s| s.notification_publication == Some(id))
             {
@@ -234,10 +231,8 @@ mod tests {
 
     use super::super::test_helpers::scene_with_gauge;
     use super::*;
-    use crate::mutation::MutationBatch;
     use crate::types::{
-        ContentionPolicy, Rect, Rgba, WidgetParameterValue, ZoneContent, ZonePublishToken,
-        ZoneRegistry,
+        ContentionPolicy, Rect, Rgba, WidgetParameterValue, ZoneContent, ZoneRegistry,
     };
 
     fn note(text: &str) -> ZoneContent {
@@ -311,23 +306,17 @@ mod tests {
             .publish_to_widget("gauge", level(0.5), "agent", None, 0, None)
             .unwrap();
         let later = scene.now_wall_us() + 60_000_000;
-        scene.schedule_batch(
+        scene.schedule_publication(
             later,
-            MutationBatch {
-                batch_id: SceneId::new(),
-                agent_namespace: "agent".into(),
-                mutations: vec![SceneMutation::PublishToZone {
-                    zone_name: "status-bar".into(),
-                    content: ZoneContent::StreamText("later".into()),
-                    publish_token: ZonePublishToken { token: vec![1] },
-                    merge_key: None,
-                    expires_at_wall_us: None,
-                    content_classification: None,
-                    breakpoints: Vec::new(),
-                    held: false,
-                }],
-                timing_hints: None,
-                lease_id: None,
+            crate::Publisher::namespace("agent"),
+            Publication::Zone {
+                zone_name: "status-bar".into(),
+                content: ZoneContent::StreamText("later".into()),
+                merge_key: None,
+                expires_at_wall_us: None,
+                content_classification: None,
+                breakpoints: Vec::new(),
+                held: false,
             },
         );
 
@@ -369,7 +358,7 @@ mod tests {
         assert!(scene.agent_holdings("agent").is_empty());
         assert!(!scene.agent_namespaces().contains("agent"));
         assert!(
-            scene.scheduled_batches.is_empty(),
+            scene.scheduled_publications.is_empty(),
             "the pending publish is gone"
         );
         assert!(
@@ -510,23 +499,17 @@ mod tests {
                 key: None,
             });
         }
-        scene.schedule_batch(
+        scene.schedule_publication(
             u64::MAX,
-            MutationBatch {
-                batch_id: SceneId::new(),
-                agent_namespace: a.clone(),
-                mutations: vec![SceneMutation::PublishToZone {
-                    zone_name: "subtitle".into(),
-                    content: ZoneContent::StreamText("later".into()),
-                    publish_token: ZonePublishToken { token: Vec::new() },
-                    merge_key: None,
-                    expires_at_wall_us: None,
-                    content_classification: None,
-                    breakpoints: Vec::new(),
-                    held: false,
-                }],
-                timing_hints: None,
-                lease_id: None,
+            crate::Publisher::namespace(a.clone()),
+            Publication::Zone {
+                zone_name: "subtitle".into(),
+                content: ZoneContent::StreamText("later".into()),
+                merge_key: None,
+                expires_at_wall_us: None,
+                content_classification: None,
+                breakpoints: Vec::new(),
+                held: false,
             },
         );
         let wait = SceneId::new();
@@ -538,7 +521,7 @@ mod tests {
             released.cleared.zones, 2,
             "the card and the delayed publish"
         );
-        assert!(scene.scheduled_batches.is_empty());
+        assert!(scene.scheduled_publications.is_empty());
         assert_eq!(
             scene.notification_wait_outcome(wait),
             Some(super::super::NotificationOutcome::Gone(

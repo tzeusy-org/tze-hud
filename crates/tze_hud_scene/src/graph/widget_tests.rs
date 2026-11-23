@@ -2034,67 +2034,6 @@ fn clear_publications_for_lease_removes_only_that_leases_widget_pubs() {
     }
 }
 
-/// WHEN ClearWidget is sent as a scene mutation batch
-/// THEN it removes the agent's publications via the standard pipeline.
-#[test]
-fn clear_widget_via_mutation_batch() {
-    use crate::mutation::{MutationBatch, SceneMutation};
-
-    let (mut scene, _tab) = scene_with_gauge(ContentionPolicy::Stack { max_depth: 4 });
-
-    // Publish as two agents
-    scene
-        .publish_to_widget(
-            "gauge",
-            std::collections::HashMap::from([(
-                "level".to_string(),
-                WidgetParameterValue::F32(0.5),
-            )]),
-            "agent.a",
-            None,
-            0,
-            None,
-        )
-        .unwrap();
-    scene
-        .publish_to_widget(
-            "gauge",
-            std::collections::HashMap::from([(
-                "level".to_string(),
-                WidgetParameterValue::F32(0.3),
-            )]),
-            "agent.b",
-            None,
-            0,
-            None,
-        )
-        .unwrap();
-    assert_eq!(scene.widget_registry.active_for_widget("gauge").len(), 2);
-
-    // Send ClearWidget from "agent.a"
-    let batch = MutationBatch {
-        batch_id: SceneId::new(),
-        agent_namespace: "agent.a".to_string(),
-        mutations: vec![SceneMutation::ClearWidget {
-            widget_name: "gauge".to_string(),
-            instance_id: None,
-        }],
-        timing_hints: None,
-        lease_id: None,
-    };
-    let result = scene.apply_batch(&batch);
-    assert!(result.applied, "ClearWidget batch should be accepted");
-
-    // Only "agent.b"'s publication should remain
-    let remaining = scene.widget_registry.active_for_widget("gauge");
-    assert_eq!(
-        remaining.len(),
-        1,
-        "agent.a's publication should be cleared"
-    );
-    assert_eq!(remaining[0].publisher_namespace, "agent.b");
-}
-
 /// The owner's auto-clear limit clears a publication that has no expiry of its
 /// own, applies to what is showing when it is set, and never extends an
 /// earlier agent expiry.
@@ -2355,44 +2294,41 @@ fn widget_elapsed_presentation_retention_cadence_and_safe_mode() {
 
 #[test]
 fn scheduled_widget_snapshots_at_late_apply_and_clear_cancels_only_its_publisher() {
-    use crate::mutation::{MutationBatch, SceneMutation};
-    use crate::{Clock, WidgetDeadline};
+    use crate::{Clock, Publication, Publisher, WidgetDeadline};
     let (mut scene, _, clock) = scene_with_gauge_and_clock(ContentionPolicy::LatestWins);
     add_test_deadline(&mut scene);
-    let make_batch = |namespace: &str| MutationBatch {
-        batch_id: SceneId::new(),
-        agent_namespace: namespace.into(),
-        lease_id: None,
-        timing_hints: None,
-        mutations: vec![SceneMutation::PublishToWidget {
-            widget_name: "gauge".into(),
-            params: HashMap::from([(
-                "ends_in_ms".into(),
-                WidgetParameterValue::Deadline(WidgetDeadline::relative(300_000)),
-            )]),
-            merge_key: None,
-            transition_ms: 0,
-            ttl_us: Some(10_000_000),
-            expires_at_wall_us: None,
-        }],
+    let gauge = || Publication::Widget {
+        widget_name: "gauge".into(),
+        params: HashMap::from([(
+            "ends_in_ms".into(),
+            WidgetParameterValue::Deadline(WidgetDeadline::relative(300_000)),
+        )]),
+        merge_key: None,
+        transition_ms: 0,
+        ttl_us: Some(10_000_000),
+        expires_at_wall_us: None,
     };
     let due = clock.now_us() + 10_000_000;
     let origin = SceneId::new();
-    scene.schedule_batch_for_origin(due, make_batch("a"), Some(origin));
-    scene.schedule_batch(due, make_batch("b"));
+    let from_session = Publisher {
+        origin: Some(origin),
+        ..Publisher::namespace("a")
+    };
+    scene.schedule_publication(due, from_session, gauge());
+    scene.schedule_publication(due, Publisher::namespace("b"), gauge());
     assert_eq!(scene.agent_holdings("a").widgets, 1);
     assert!(scene.hold_widget_publications("gauge", "a", Some(clock.now_us() + 20_000_000)));
     scene.pause_widget_ttls();
     scene.clear_widget_for_publisher("gauge", "b").unwrap();
-    assert_eq!(scene.scheduled_batches.len(), 1);
+    assert_eq!(scene.scheduled_publications.len(), 1);
     assert_eq!(scene.next_widget_deadline_wall_us(), None);
     clock.advance(15_000);
-    assert!(scene.apply_due_batches().is_empty());
-    assert_eq!(scene.scheduled_batches.len(), 1);
+    assert!(scene.apply_due_publications().is_empty());
+    assert_eq!(scene.scheduled_publications.len(), 1);
     assert_eq!(scene.next_timed_content_wall_us(), None);
     scene.resume_widget_ttls();
-    let results = scene.apply_due_batches();
-    assert!(results.iter().all(|r| r.applied));
+    let results = scene.apply_due_publications();
+    assert!(results.iter().all(|r| r.result.is_ok()));
     let record = &scene.widget_registry.active_for_widget("gauge")[0];
     assert_eq!(record.publication_origin, Some(origin));
     assert_eq!(record.expires_at_wall_us, Some(clock.now_us() + 20_000_000));
@@ -2401,26 +2337,29 @@ fn scheduled_widget_snapshots_at_late_apply_and_clear_cancels_only_its_publisher
     };
     assert_eq!(d.at_wall_us, Some(clock.now_us() + 300_000_000));
     assert_eq!(d.display_at(clock.now_us()), "5 min");
-    // Due admission is atomic even if the schema changes after enqueue.
-    let mut invalid = make_batch("a");
-    invalid.mutations.push(SceneMutation::PublishToWidget {
+    // A due publication that no longer validates changes nothing.
+    let invalid = Publication::Widget {
         widget_name: "missing".into(),
         params: HashMap::new(),
         merge_key: None,
         transition_ms: 0,
         ttl_us: None,
         expires_at_wall_us: None,
-    });
+    };
     let before = record.clone();
-    scene.schedule_batch(clock.now_us(), invalid);
-    assert!(!scene.apply_due_batches()[0].applied);
+    scene.schedule_publication(clock.now_us(), Publisher::namespace("a"), invalid);
+    assert!(scene.apply_due_publications()[0].result.is_err());
     assert_eq!(
         scene.widget_registry.active_for_widget("gauge")[0].params,
         before.params
     );
-    scene.schedule_batch(clock.now_us() + 10_000_000, make_batch("a"));
+    scene.schedule_publication(
+        clock.now_us() + 10_000_000,
+        Publisher::namespace("a"),
+        gauge(),
+    );
     scene.clear_widget_for_publisher("gauge", "a").unwrap();
-    assert!(scene.scheduled_batches.is_empty());
+    assert!(scene.scheduled_publications.is_empty());
     assert_eq!(scene.next_timed_content_wall_us(), None);
 
     // Terminal ownership ends even while a due batch is waiting for resume.
@@ -2429,14 +2368,18 @@ fn scheduled_widget_snapshots_at_late_apply_and_clear_cancels_only_its_publisher
         let (mut scene, _, clock) = scene_with_gauge_and_clock(ContentionPolicy::LatestWins);
         add_test_deadline(&mut scene);
         let lease = scene.grant_lease("a", 86_400_000);
-        let mut owned = make_batch("a");
-        owned.lease_id = Some(lease);
-        let peer = make_batch("b");
-        let peer_id = peer.batch_id;
+        let owned = Publisher {
+            lease_id: Some(lease),
+            ..Publisher::namespace("a")
+        };
         let peer_origin = SceneId::new();
+        let peer = Publisher {
+            origin: Some(peer_origin),
+            ..Publisher::namespace("b")
+        };
         let due = clock.now_us() + 10_000_000;
-        scene.schedule_batch(due, owned);
-        scene.schedule_batch_for_origin(due, peer, Some(peer_origin));
+        scene.schedule_publication(due, owned, gauge());
+        let peer_id = scene.schedule_publication(due, peer, gauge());
         scene.pause_widget_ttls();
         scene.suspend_all_leases(clock.now_millis());
         clock.advance(if suspension_timeout {
@@ -2444,8 +2387,8 @@ fn scheduled_widget_snapshots_at_late_apply_and_clear_cancels_only_its_publisher
         } else {
             10_000
         });
-        assert!(scene.apply_due_batches().is_empty());
-        assert_eq!(scene.scheduled_batches.len(), 2);
+        assert!(scene.apply_due_publications().is_empty());
+        assert_eq!(scene.scheduled_publications.len(), 2);
         if suspension_timeout {
             let expired = scene.expire_leases();
             assert_eq!(expired.len(), 1);
@@ -2453,21 +2396,21 @@ fn scheduled_widget_snapshots_at_late_apply_and_clear_cancels_only_its_publisher
         } else {
             scene.revoke_lease(lease).unwrap();
         }
-        assert_eq!(scene.scheduled_batches.len(), 1);
-        assert_eq!(scene.scheduled_batches[0].batch.batch_id, peer_id);
+        assert_eq!(scene.scheduled_publications.len(), 1);
+        assert_eq!(scene.scheduled_publications[0].id, peer_id);
         assert_eq!(scene.agent_holdings("a").widgets, 0);
         assert_eq!(scene.agent_holdings("b").widgets, 1);
         assert_eq!(scene.next_timed_content_wall_us(), None);
         scene.resume_all_leases(clock.now_millis());
         scene.resume_widget_ttls();
-        let results = scene.apply_due_batches();
+        let results = scene.apply_due_publications();
         assert_eq!(results.len(), 1);
-        assert!(results[0].applied);
+        assert!(results[0].result.is_ok());
         let records = scene.widget_registry.active_for_widget("gauge");
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].publisher_namespace, "b");
         assert_eq!(records[0].publication_origin, Some(peer_origin));
-        assert!(scene.apply_due_batches().is_empty());
+        assert!(scene.apply_due_publications().is_empty());
         assert_eq!(scene.agent_holdings("a").widgets, 0);
     }
 }

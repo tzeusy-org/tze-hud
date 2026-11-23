@@ -120,16 +120,16 @@ pub struct SceneGraph {
     /// re-prime the caches.
     #[serde(default)]
     pub geometry_epoch: u64,
-    /// Monotonically increasing sequence number assigned to each committed batch.
+    /// Monotonically increasing sequence number assigned to each committed publication.
     ///
     /// Incremented by `SceneGraph::next_sequence_number` on every successful
-    /// [`crate::mutation::MutationBatch`] commit.
+    /// [`SceneGraph::publish`] commit.
     pub sequence_number: u64,
-    /// Batches held until their `present_at` time (see [`timed`]).
+    /// Publications held until their `present_at` time (see [`timed`]).
     #[serde(skip, default)]
-    pub scheduled_batches: Vec<timed::ScheduledBatch>,
+    pub scheduled_publications: Vec<timed::ScheduledPublication>,
     /// Existing resume-grace deadlines for disconnected, unleased publications.
-    /// Entries exist only while current content or scheduled batches own the origin.
+    /// Entries exist only while current content or scheduled publications own the origin.
     #[serde(skip, default)]
     publication_orphans: HashMap<SceneId, u64>,
     /// Notification action presses and displaced receipts waiting for their
@@ -210,6 +210,8 @@ pub mod budget;
 pub mod holdings;
 pub mod leases;
 pub mod node_tree;
+pub mod publish;
+pub use publish::{Publication, Publisher};
 pub mod queries;
 pub mod resources;
 pub mod snapshot;
@@ -287,7 +289,7 @@ impl SceneGraph {
             version: 0,
             geometry_epoch: 0,
             sequence_number: 0,
-            scheduled_batches: Vec::new(),
+            scheduled_publications: Vec::new(),
             publication_orphans: HashMap::new(),
             pending_actions: HashMap::new(),
             pending_action_notifiers: HashMap::new(),
@@ -445,6 +447,8 @@ mod tests;
 mod behavior_tests;
 #[cfg(test)]
 mod limits_tests;
+#[cfg(test)]
+mod portal_tests;
 #[cfg(test)]
 mod stack_trim_tests;
 #[cfg(test)]

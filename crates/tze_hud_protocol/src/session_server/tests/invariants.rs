@@ -303,12 +303,17 @@ async fn grpc_disconnect_orphans_publications_without_touching_peer() {
         assert!(subtitle_texts(&scene).contains(&"MCP".to_string()));
         assert_lifetime_owner(&scene, peer.session_id, None);
         assert_eq!(
-            scene.scheduled_batches.len(),
+            scene.scheduled_publications.len(),
             1,
             "only the connected peer keeps its delayed publication"
         );
         clock.advance(60_000);
-        assert!(scene.apply_due_batches().iter().all(|r| r.applied));
+        assert!(
+            scene
+                .apply_due_publications()
+                .iter()
+                .all(|r| r.result.is_ok())
+        );
         assert!(
             !scene.zone_registry.active_publishes["subtitle"]
                 .iter()
@@ -347,7 +352,7 @@ async fn grpc_resume_within_grace_restores_publication_origin() {
         clock.advance(2);
         scene.expire_leases();
         assert_lifetime_owner(&scene, origin, None);
-        assert_eq!(scene.scheduled_batches.len(), 1);
+        assert_eq!(scene.scheduled_publications.len(), 1);
         assert_eq!(
             scene.next_lease_deadline_ms(SceneGraph::DEFAULT_MAX_SUSPENSION_MS),
             None
@@ -374,7 +379,7 @@ async fn grpc_resume_within_grace_restores_publication_origin() {
         let mut scene = st.scene.lock().await;
         clock.advance(DEFAULT_GRACE_PERIOD_MS);
         scene.expire_leases();
-        assert!(scene.scheduled_batches.is_empty());
+        assert!(scene.scheduled_publications.is_empty());
         assert!(
             !scene
                 .widget_registry
@@ -449,7 +454,7 @@ async fn grpc_grace_expiry_reclaims_publications_and_rejects_resume() {
             .unwrap();
         clock.advance(crate::token::DEFAULT_GRACE_PERIOD_MS);
         // Production applies due batches before lease expiry; grace cancellation still wins.
-        assert!(scene.apply_due_batches().is_empty());
+        assert!(scene.apply_due_publications().is_empty());
         scene.expire_leases();
         assert_eq!(
             scene.zone_registry.active_publishes["subtitle"][0].publication_origin,
@@ -466,9 +471,9 @@ async fn grpc_grace_expiry_reclaims_publications_and_rejects_resume() {
             scene.widget_registry.instances["gauge"].current_params["level"],
             tze_hud_scene::WidgetParameterValue::F32(0.0)
         );
-        assert!(scene.scheduled_batches.is_empty());
+        assert!(scene.scheduled_publications.is_empty());
         clock.advance(60_000);
-        assert!(scene.apply_due_batches().is_empty());
+        assert!(scene.apply_due_publications().is_empty());
         assert_eq!(scene.zone_registry.active_publishes["subtitle"].len(), 1);
     }
     let (_tx, mut expired) = send_resume(&mut client, "never-claim", token).await;
@@ -522,12 +527,12 @@ async fn grpc_grace_expiry_reclaims_publications_and_rejects_resume() {
                 .get("status-bar")
                 .is_none_or(Vec::is_empty)
         );
-        assert_eq!(scene.scheduled_batches.len(), 2);
+        assert_eq!(scene.scheduled_publications.len(), 2);
         assert!(
             scene
-                .scheduled_batches
+                .scheduled_publications
                 .iter()
-                .all(|s| s.batch.lease_id.is_none())
+                .all(|s| s.publisher.lease_id.is_none())
         );
         let grace_deadline = scene.now_wall_us() / 1_000 + crate::token::DEFAULT_GRACE_PERIOD_MS;
         assert_eq!(
@@ -547,10 +552,10 @@ async fn grpc_grace_expiry_reclaims_publications_and_rejects_resume() {
             )
             .unwrap();
         clock.advance(1_000);
-        let results = scene.apply_due_batches();
+        let results = scene.apply_due_publications();
         assert_eq!(results.len(), 2);
-        assert!(results.iter().all(|r| r.applied), "{results:?}");
-        assert!(scene.scheduled_batches.is_empty());
+        assert!(results.iter().all(|r| r.result.is_ok()), "{results:?}");
+        assert!(scene.scheduled_publications.is_empty());
         let records = &scene.zone_registry.active_publishes["status-bar"];
         assert_eq!(records.len(), 3);
         for origin in origins {
@@ -573,7 +578,7 @@ async fn grpc_grace_expiry_reclaims_publications_and_rejects_resume() {
         assert_eq!(remaining[0].publication_origin, None);
         assert_eq!(remaining[0].lease_id, None);
         assert_eq!(remaining[0].expires_at_wall_us, None);
-        assert!(scene.apply_due_batches().is_empty());
+        assert!(scene.apply_due_publications().is_empty());
         assert_eq!(
             scene.next_lease_deadline_ms(SceneGraph::DEFAULT_MAX_SUSPENSION_MS),
             None
@@ -732,11 +737,11 @@ async fn grpc_zone_publish_ttl_sets_expiry_and_is_swept() {
             let mut scene = st.scene.lock().await;
             if scheduled {
                 clock.advance(4_999);
-                assert!(scene.apply_due_batches().is_empty(), "still not due");
+                assert!(scene.apply_due_publications().is_empty(), "still not due");
                 clock.advance(1);
-                let applied = scene.apply_due_batches();
+                let applied = scene.apply_due_publications();
                 assert_eq!(applied.len(), 1);
-                assert!(applied[0].applied);
+                assert!(applied[0].result.is_ok());
             }
             let records = &scene.zone_registry.active_publishes["notification-area"];
             assert_eq!(records.len(), 1);
@@ -812,9 +817,9 @@ async fn grpc_zone_publish_ttl_sets_expiry_and_is_swept() {
             assert!(cleared.ok, "{cleared:?}");
             let st = state.lock().await;
             let mut scene = st.scene.lock().await;
-            assert!(scene.scheduled_batches.is_empty());
+            assert!(scene.scheduled_publications.is_empty());
             clock.advance(5_001);
-            assert!(scene.apply_due_batches().is_empty());
+            assert!(scene.apply_due_publications().is_empty());
             assert!(
                 scene
                     .zone_registry
@@ -917,12 +922,12 @@ async fn grpc_zone_publish_present_at_is_held_until_due() {
     assert!(subtitle_texts(&scene).is_empty(), "not shown early");
     assert_eq!(scene.next_timed_content_wall_us(), Some(present_at));
     clock.advance(4_999);
-    assert!(scene.apply_due_batches().is_empty());
+    assert!(scene.apply_due_publications().is_empty());
     assert!(subtitle_texts(&scene).is_empty(), "still not due");
     clock.advance(1);
-    let applied = scene.apply_due_batches();
+    let applied = scene.apply_due_publications();
     assert_eq!(applied.len(), 1);
-    assert!(applied[0].applied);
+    assert!(applied[0].result.is_ok());
     assert_eq!(subtitle_texts(&scene), vec!["later".to_string()]);
     assert_eq!(
         scene.zone_registry.active_publishes["subtitle"][0].expires_at_wall_us,
@@ -959,8 +964,8 @@ async fn grpc_zone_publish_present_at_is_held_until_due() {
     {
         let st = state.lock().await;
         let mut scene = st.scene.lock().await;
-        let admitted_expiry = match &scene.scheduled_batches[0].batch.mutations[0] {
-            tze_hud_scene::SceneMutation::PublishToZone {
+        let admitted_expiry = match &scene.scheduled_publications[0].publication {
+            tze_hud_scene::Publication::Zone {
                 expires_at_wall_us, ..
             } => *expires_at_wall_us,
             other => panic!("expected scheduled zone publish, got {other:?}"),
@@ -969,9 +974,9 @@ async fn grpc_zone_publish_present_at_is_held_until_due() {
         clock.advance(6_000);
         assert!(
             scene
-                .apply_due_batches()
+                .apply_due_publications()
                 .iter()
-                .all(|result| result.applied)
+                .all(|result| result.result.is_ok())
         );
         assert_eq!(
             scene.zone_registry.active_publishes["notification-area"][0].expires_at_wall_us,

@@ -451,7 +451,7 @@ impl HudSession for HudSessionImpl {
                         // ── FramePresented broadcast ─────────────────────
                         //
                         // Batch-correlated present acknowledgment: pairs the accepted
-                        // MutationBatch.batch_ids composited into a presented frame with
+                        // publication IDs composited into a presented frame with
                         // that frame's present wall-clock. Delivered to agents subscribed
                         // to TELEMETRY_FRAMES (requires read_telemetry). State-stream —
                         // coalesced/droppable under backpressure. Agent cannot reject.

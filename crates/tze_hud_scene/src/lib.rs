@@ -11,7 +11,6 @@ pub mod clock;
 pub mod element_store;
 pub mod error_codes;
 pub mod graph;
-pub mod mutation;
 pub mod perf_budget;
 pub mod portal_defaults;
 pub mod portal_reading;
@@ -47,15 +46,14 @@ pub use graph::{
     MAX_TABS,
     MAX_TILES_PER_TAB,
     PendingAction,
+    Publication,
+    Publisher,
     RuntimeOverlayState,
     SceneGraph,
     // zone band reservation
     ZONE_TILE_Z_MIN,
     // Node data validation
     validate_text_markdown_node_data,
-};
-pub use mutation::{
-    BatchTimingHints, MAX_BATCH_SIZE, MutationBatch, MutationResult, SceneMutation,
 };
 pub use portal_reading::{
     LinkFeedbackState, LinkFeedbackTarget, PortalCopyButton, PortalGlyph, PortalLink,
@@ -72,7 +70,7 @@ pub use test_scenes::{
 pub use text_fit::TextFit;
 pub use timing::{MonoUs, WallUs};
 pub use types::*;
-pub use validation::{BatchRejected, BatchValidationError, ValidationError, ValidationErrorCode};
+pub use validation::ValidationError;
 pub use widget_deadline::WidgetDeadline;
 
 // ── Lease governance public API ───────────────────────────────────────────────

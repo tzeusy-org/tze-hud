@@ -725,23 +725,21 @@ fn test_lease_expiry() {
     assert_eq!(scene.tile_count(), 0);
     scene.zone_registry = ZoneRegistry::with_defaults();
     let origin = SceneId::new();
-    let batch = crate::mutation::MutationBatch {
-        batch_id: SceneId::new(),
-        agent_namespace: "test".into(),
-        mutations: vec![crate::mutation::SceneMutation::PublishToZone {
-            zone_name: "subtitle".into(),
-            content: ZoneContent::StreamText("publication-only".into()),
-            publish_token: ZonePublishToken { token: Vec::new() },
-            merge_key: None,
-            expires_at_wall_us: None,
-            content_classification: None,
-            breakpoints: Vec::new(),
-            held: false,
-        }],
-        timing_hints: None,
+    let publisher = crate::Publisher {
+        namespace: "test".into(),
         lease_id: None,
+        origin: Some(origin),
     };
-    assert!(scene.apply_batch_for_origin(&batch, Some(origin)).applied);
+    let publication = crate::Publication::Zone {
+        zone_name: "subtitle".into(),
+        content: ZoneContent::StreamText("publication-only".into()),
+        merge_key: None,
+        expires_at_wall_us: None,
+        content_classification: None,
+        breakpoints: Vec::new(),
+        held: false,
+    };
+    scene.publish(&publisher, &publication).unwrap();
     let now = scene.now_millis();
     assert!(scene.orphan_publications(origin, now, SceneGraph::DEFAULT_GRACE_PERIOD_MS));
     assert_eq!(
@@ -923,12 +921,6 @@ fn make_status_bar_zone() -> ZoneDefinition {
         auto_clear_ms: None,
         ephemeral: false,
         layer_attachment: LayerAttachment::Chrome,
-    }
-}
-
-fn dummy_token() -> ZonePublishToken {
-    ZonePublishToken {
-        token: vec![0xDE, 0xAD, 0xBE, 0xEF],
     }
 }
 
@@ -1914,75 +1906,34 @@ fn test_zone_registry_snapshot() {
     assert_eq!(snap.active_publishes[0].zone_name, "subtitle");
 }
 
-#[test]
-fn test_zone_publish_via_mutation_batch() {
-    let mut scene = SceneGraph::new(1920.0, 1080.0);
-    scene.register_zone(make_subtitle_zone());
-
-    use crate::mutation::{MutationBatch, SceneMutation};
-
-    let batch = MutationBatch {
-        batch_id: SceneId::new(),
-        agent_namespace: "agent".to_string(),
-        mutations: vec![SceneMutation::PublishToZone {
-            zone_name: "subtitle".to_string(),
-            content: ZoneContent::StreamText("batch publish".to_string()),
-            publish_token: dummy_token(),
-            merge_key: None,
-            expires_at_wall_us: None,
-            content_classification: None,
-            breakpoints: Vec::new(),
-            held: false,
-        }],
-        timing_hints: None,
-        lease_id: None,
-    };
-
-    let result = scene.apply_batch(&batch);
-    assert!(result.applied, "batch should be applied");
-    let publishes = scene.zone_registry.active_for_zone("subtitle");
-    assert_eq!(publishes.len(), 1);
-    assert_eq!(
-        publishes[0].content,
-        ZoneContent::StreamText("batch publish".to_string())
-    );
-}
-
-/// A notification applied through a batch with no explicit expiry takes the
+/// A notification with no explicit expiry takes the
 /// urgency default (8 s for urgency 1); `held` leaves it until cleared.
 #[test]
-fn test_batch_notification_expiry_follows_held_flag() {
-    use crate::mutation::{MutationBatch, SceneMutation};
+fn test_notification_expiry_follows_held_flag() {
     for (held, expected_ttl) in [
         (false, Some(SceneGraph::NOTIFICATION_TTL_INFO_US)),
         (true, None),
     ] {
         let (mut scene, clock) = scene_with_test_clock();
         scene.register_zone(make_alert_banner_zone());
-        let batch = MutationBatch {
-            batch_id: SceneId::new(),
-            agent_namespace: "agent".to_string(),
-            mutations: vec![SceneMutation::PublishToZone {
-                zone_name: "alert-banner".to_string(),
-                content: ZoneContent::Notification(NotificationPayload {
-                    text: "n".to_string(),
-                    icon: String::new(),
-                    urgency: 1,
-                    ttl_ms: None,
-                    title: String::new(),
-                    actions: Vec::new(),
-                }),
-                publish_token: dummy_token(),
-                merge_key: None,
-                expires_at_wall_us: None,
-                content_classification: None,
-                breakpoints: Vec::new(),
-                held,
-            }],
-            timing_hints: None,
-            lease_id: None,
+        let publisher = crate::Publisher::namespace("agent");
+        let publication = crate::Publication::Zone {
+            zone_name: "alert-banner".to_string(),
+            content: ZoneContent::Notification(NotificationPayload {
+                text: "n".to_string(),
+                icon: String::new(),
+                urgency: 1,
+                ttl_ms: None,
+                title: String::new(),
+                actions: Vec::new(),
+            }),
+            merge_key: None,
+            expires_at_wall_us: None,
+            content_classification: None,
+            breakpoints: Vec::new(),
+            held,
         };
-        assert!(scene.apply_batch(&batch).applied);
+        scene.publish(&publisher, &publication).unwrap();
         let record = &scene.zone_registry.active_for_zone("alert-banner")[0];
         assert_eq!(
             record.expires_at_wall_us,
@@ -1992,49 +1943,35 @@ fn test_batch_notification_expiry_follows_held_flag() {
     }
 }
 
-/// A batch `ClearZone` (the replace pattern's first half) clears active
+/// The active-only zone clear clears active
 /// publications only; the agent's later scheduled publish still presents.
 #[test]
-fn batch_clear_zone_does_not_cancel_later_pending_publish() {
-    use crate::mutation::{MutationBatch, SceneMutation};
+fn active_zone_clear_does_not_cancel_later_pending_publish() {
     let (mut scene, clock) = scene_with_test_clock();
     scene.register_zone(make_subtitle_zone());
-    let batch = |mutation| MutationBatch {
-        batch_id: SceneId::new(),
-        agent_namespace: "agent".to_string(),
-        mutations: vec![mutation],
-        timing_hints: None,
-        lease_id: None,
-    };
     let now = scene.now_wall_us();
-    scene.schedule_batch(
-        now + 1_000,
-        batch(SceneMutation::ClearZone {
-            zone_name: "subtitle".to_string(),
-            publish_token: dummy_token(),
-        }),
-    );
-    scene.schedule_batch(
+    scene.schedule_publication(
         now + 5_000_000,
-        batch(SceneMutation::PublishToZone {
+        crate::Publisher::namespace("agent"),
+        crate::Publication::Zone {
             zone_name: "subtitle".to_string(),
             content: ZoneContent::StreamText("B".to_string()),
-            publish_token: dummy_token(),
             merge_key: None,
             expires_at_wall_us: None,
             content_classification: None,
             breakpoints: Vec::new(),
             held: true,
-        }),
+        },
     );
+    scene.clear_zone_for_publisher("subtitle", "agent").unwrap();
     clock.advance(1);
-    assert_eq!(scene.apply_due_batches().len(), 1);
-    assert_eq!(scene.scheduled_batches.len(), 1, "B stays scheduled");
+    assert!(scene.apply_due_publications().is_empty());
+    assert_eq!(scene.scheduled_publications.len(), 1, "B stays scheduled");
 }
 
 #[test]
-fn test_clear_zone_via_mutation_batch() {
-    // ClearZone clears publications by THIS agent (batch.agent_namespace).
+fn test_clear_zone_for_publisher() {
+    // ClearZone clears publications by this publisher.
     // Publish as "agent", then clear as "agent" — should clear.
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     scene.register_zone(make_subtitle_zone());
@@ -2050,21 +1987,7 @@ fn test_clear_zone_via_mutation_batch() {
         .unwrap();
     assert_eq!(scene.zone_registry.active_for_zone("subtitle").len(), 1);
 
-    use crate::mutation::{MutationBatch, SceneMutation};
-
-    let batch = MutationBatch {
-        batch_id: SceneId::new(),
-        agent_namespace: "agent".to_string(),
-        mutations: vec![SceneMutation::ClearZone {
-            zone_name: "subtitle".to_string(),
-            publish_token: dummy_token(),
-        }],
-        timing_hints: None,
-        lease_id: None,
-    };
-
-    let result = scene.apply_batch(&batch);
-    assert!(result.applied);
+    scene.clear_zone_for_publisher("subtitle", "agent").unwrap();
     // "agent" published, "agent" cleared — should be 0
     assert_eq!(scene.zone_registry.active_for_zone("subtitle").len(), 0);
 }
@@ -2856,7 +2779,7 @@ fn expire_lease_scoped_reaps_only_the_named_grace_expired_lease() {
     );
 }
 
-/// SetTileRoot replacement: old resource loses a ref, new resource gains one.
+/// Root replacement preserves reused image resources and releases unused ones.
 #[test]
 fn resource_refs_updated_on_set_tile_root_replacement() {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
@@ -2901,6 +2824,14 @@ fn resource_refs_updated_on_set_tile_root_replacement() {
         Some(0),
         "res_b registered but not yet referenced by any node"
     );
+
+    let old_root = scene.tiles[&tile_id].root_node.unwrap();
+    let mut reused_image = scene.nodes[&old_root].clone();
+    reused_image.id = SceneId::new();
+    scene
+        .set_tile_root_checked(tile_id, reused_image, "agent")
+        .unwrap();
+    assert_eq!(scene.resource_ref_count(&res_a), Some(1));
 
     // Replace tile root with a node referencing res_b.
     scene
@@ -2973,58 +2904,6 @@ fn resource_refs_updated_on_update_node_content_resource_swap() {
         scene.resource_ref_count(&new_resource_id),
         Some(1),
         "new resource must have ref count 1 after node is updated"
-    );
-}
-
-#[test]
-fn aggregate_budget_delta_tracks_sequential_updates_within_one_batch() {
-    let (mut scene, lease_id, tile_id, node_id, old_bytes) = scene_with_static_image_node(32, 32);
-    let first_bytes = 64_u64 * 64 * 4;
-    let final_bytes = 128_u64 * 128 * 4;
-    let image = |width, decoded_bytes| {
-        NodeData::StaticImage(StaticImageNode {
-            resource_id: make_test_image_resource(width, width).0,
-            width,
-            height: width,
-            decoded_bytes,
-            fit_mode: ImageFitMode::Contain,
-            bounds: Rect::new(0.0, 0.0, 400.0, 300.0),
-        })
-    };
-    let batch = crate::mutation::MutationBatch {
-        batch_id: SceneId::new(),
-        agent_namespace: "agent".to_string(),
-        mutations: vec![
-            crate::mutation::SceneMutation::UpdateNodeContent {
-                tile_id,
-                node_id,
-                data: image(64, first_bytes),
-            },
-            crate::mutation::SceneMutation::UpdateNodeContent {
-                tile_id,
-                node_id,
-                data: image(128, final_bytes),
-            },
-        ],
-        timing_hints: None,
-        lease_id: Some(lease_id),
-    };
-
-    let delta = scene.mutation_budget_delta(&lease_id, &batch);
-    assert_eq!(
-        delta.delta_texture_bytes,
-        i64::try_from(final_bytes - old_bytes).unwrap(),
-        "aggregate admission must charge the final batch state, not compare every update to the pre-batch state"
-    );
-    scene
-        .leases
-        .get_mut(&lease_id)
-        .expect("lease exists")
-        .resource_budget
-        .max_texture_bytes = final_bytes;
-    assert!(
-        scene.check_budget(&lease_id, &batch).is_ok(),
-        "per-session admission must evaluate the same final virtual batch state"
     );
 }
 
@@ -3275,139 +3154,6 @@ fn test_lease_is_expired_not_when_suspended() {
     assert!(!scene.leases[&lease_id].is_expired(clock.now_millis()));
 }
 
-// ─── Budget Enforcement Tests ───────────────────────────────────────
-
-#[test]
-fn test_budget_tile_count_within_limit() {
-    let mut scene = SceneGraph::new(1920.0, 1080.0);
-    let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease("test", 60_000);
-
-    // Default budget: max_tiles = 8. Create 1 tile — should be fine.
-    let batch = crate::mutation::MutationBatch {
-        batch_id: SceneId::new(),
-        agent_namespace: "test".to_string(),
-        mutations: vec![crate::mutation::SceneMutation::CreateTile {
-            tab_id,
-            namespace: "test".to_string(),
-            lease_id,
-            bounds: Rect::new(0.0, 0.0, 100.0, 100.0),
-            z_order: 1,
-        }],
-        timing_hints: None,
-        lease_id: None,
-    };
-    let result = scene.apply_batch(&batch);
-    assert!(result.applied);
-    assert!(!result.budget_warning);
-}
-
-#[test]
-fn test_budget_tile_count_exceeds_limit() {
-    let mut scene = SceneGraph::new(1920.0, 1080.0);
-    let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease("test", 60_000);
-
-    // Set budget to max 2 tiles
-    scene
-        .leases
-        .get_mut(&lease_id)
-        .unwrap()
-        .resource_budget
-        .max_tiles = 2;
-
-    // Create 2 tiles (OK)
-    for i in 0..2 {
-        let batch = crate::mutation::MutationBatch {
-            batch_id: SceneId::new(),
-            agent_namespace: "test".to_string(),
-            mutations: vec![crate::mutation::SceneMutation::CreateTile {
-                tab_id,
-                namespace: "test".to_string(),
-                lease_id,
-                bounds: Rect::new(i as f32 * 120.0, 0.0, 100.0, 100.0),
-                z_order: i + 1,
-            }],
-            timing_hints: None,
-            lease_id: None,
-        };
-        let result = scene.apply_batch(&batch);
-        assert!(result.applied);
-    }
-
-    // Create a 3rd tile — should be rejected
-    let batch = crate::mutation::MutationBatch {
-        batch_id: SceneId::new(),
-        agent_namespace: "test".to_string(),
-        mutations: vec![crate::mutation::SceneMutation::CreateTile {
-            tab_id,
-            namespace: "test".to_string(),
-            lease_id,
-            bounds: Rect::new(240.0, 0.0, 100.0, 100.0),
-            z_order: 3,
-        }],
-        timing_hints: None,
-        lease_id: None,
-    };
-    let result = scene.apply_batch(&batch);
-    assert!(!result.applied);
-    assert!(result.error.is_some());
-    assert_eq!(scene.tile_count(), 2);
-}
-
-#[test]
-fn test_budget_soft_limit_warning() {
-    let mut scene = SceneGraph::new(1920.0, 1080.0);
-    let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease("test", 60_000);
-
-    // Set budget to max 5 tiles; soft limit at 80% = 4 tiles
-    scene
-        .leases
-        .get_mut(&lease_id)
-        .unwrap()
-        .resource_budget
-        .max_tiles = 5;
-
-    // Create 4 tiles (should trigger soft limit warning on the 4th)
-    for i in 0..4 {
-        let batch = crate::mutation::MutationBatch {
-            batch_id: SceneId::new(),
-            agent_namespace: "test".to_string(),
-            mutations: vec![crate::mutation::SceneMutation::CreateTile {
-                tab_id,
-                namespace: "test".to_string(),
-                lease_id,
-                bounds: Rect::new(i as f32 * 120.0, 0.0, 100.0, 100.0),
-                z_order: i + 1,
-            }],
-            timing_hints: None,
-            lease_id: None,
-        };
-        scene.apply_batch(&batch);
-    }
-
-    assert!(scene.is_lease_budget_warning(&lease_id));
-
-    // 5th tile should succeed (within hard limit) but with budget_warning
-    let batch = crate::mutation::MutationBatch {
-        batch_id: SceneId::new(),
-        agent_namespace: "test".to_string(),
-        mutations: vec![crate::mutation::SceneMutation::CreateTile {
-            tab_id,
-            namespace: "test".to_string(),
-            lease_id,
-            bounds: Rect::new(480.0, 0.0, 100.0, 100.0),
-            z_order: 5,
-        }],
-        timing_hints: None,
-        lease_id: None,
-    };
-    let result = scene.apply_batch(&batch);
-    assert!(result.applied);
-    assert!(result.budget_warning);
-}
-
 // ─── Suspension Tests ───────────────────────────────────────────────
 
 #[test]
@@ -3421,21 +3167,14 @@ fn test_suspend_blocks_mutations() {
     scene.suspend_lease(&lease_id, clock.now_millis()).unwrap();
 
     // Try to create a tile — should fail
-    let batch = crate::mutation::MutationBatch {
-        batch_id: SceneId::new(),
-        agent_namespace: "test".to_string(),
-        mutations: vec![crate::mutation::SceneMutation::CreateTile {
-            tab_id,
-            namespace: "test".to_string(),
-            lease_id,
-            bounds: Rect::new(0.0, 0.0, 100.0, 100.0),
-            z_order: 1,
-        }],
-        timing_hints: None,
-        lease_id: None,
-    };
-    let result = scene.apply_batch(&batch);
-    assert!(!result.applied);
+    let result = scene.create_tile_checked(
+        tab_id,
+        "test",
+        lease_id,
+        Rect::new(0.0, 0.0, 100.0, 100.0),
+        1,
+    );
+    assert!(result.is_err());
     assert_eq!(scene.tile_count(), 0);
 }
 
@@ -3452,21 +3191,14 @@ fn test_resume_allows_mutations_again() {
     scene.resume_lease(&lease_id, clock.now_millis()).unwrap();
 
     // Create a tile — should succeed
-    let batch = crate::mutation::MutationBatch {
-        batch_id: SceneId::new(),
-        agent_namespace: "test".to_string(),
-        mutations: vec![crate::mutation::SceneMutation::CreateTile {
-            tab_id,
-            namespace: "test".to_string(),
-            lease_id,
-            bounds: Rect::new(0.0, 0.0, 100.0, 100.0),
-            z_order: 1,
-        }],
-        timing_hints: None,
-        lease_id: None,
-    };
-    let result = scene.apply_batch(&batch);
-    assert!(result.applied);
+    let result = scene.create_tile_checked(
+        tab_id,
+        "test",
+        lease_id,
+        Rect::new(0.0, 0.0, 100.0, 100.0),
+        1,
+    );
+    assert!(result.is_ok());
     assert_eq!(scene.tile_count(), 1);
 }
 
@@ -4730,7 +4462,7 @@ fn tile_font_scale_cleared_on_tile_removal() {
 // ─── Lifecycle-accent lease gate ─────────────────────────────────
 //
 // The in-process portal scene-apply path (`portal::apply_render`)
-// bypasses the `apply_batch` Stage-1 lease check, so it must reach the accent
+// applies directly, so the path must reach the accent
 // overlay through the *checked* variants. These prove the checked variants gate
 // the mutation on lease state exactly like the sibling `set_tile_root_checked`
 // content paint: a suspended/orphaned lease is rejected (and `scene.version` is

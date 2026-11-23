@@ -134,9 +134,9 @@ restart and signed-update semantics belong in the
 
 **Operator diagnostics.** [`graph/holdings`](../crates/tze_hud_scene/src/graph/holdings.rs)
 visits borrowed ownership metadata beside the scene's real publication, lease,
-scheduled-batch and orphan owners. `PortalHub::visit_holdings` exposes only live
-authenticated keys and reclaim metadata. Neither reader copies payloads or runs
-cleanup. Runtime [`operator/diagnostics`](../crates/tze_hud_runtime/src/operator/diagnostics.rs)
+scheduled publication and orphan owners. `PortalHub::visit_holdings` exposes
+only live authenticated keys and reclaim metadata. Both readers work from
+metadata they borrow and leave cleanup to the runtime. Runtime [`operator/diagnostics`](../crates/tze_hud_runtime/src/operator/diagnostics.rs)
 collects them through separate nonblocking locks into the bounded admin-only
 projection; ordinary agent discovery stays unchanged.
 
@@ -233,9 +233,8 @@ reposition events. The human grip menu clears live Zone placement directly;
 the agent service reset and saved element-store contracts remain unchanged.
 
 Scene `graph/zone_ops.rs` owns notification-key validation, publisher-scoped
-replacement and selective clear; `graph/timed.rs` cancels matching delayed
-notifications while retaining mixed-batch remainder. Central
-`SceneGraph::activate_notification` validates the exact publication and snapshots
+replacement and selective clear. `graph/timed.rs` cancels matching delayed
+notifications. `SceneGraph::activate_notification` validates the exact publication and snapshots
 its existing `merge_key` into `PendingAction` for callback activation before
 removal or finite exit. URL activation resolves the same indexed live action
 and returns its parsed serialization without changing publication lifetime.

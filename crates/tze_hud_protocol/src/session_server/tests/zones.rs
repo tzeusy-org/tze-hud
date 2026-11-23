@@ -113,9 +113,9 @@ async fn test_zone_publish_result() {
             format!("{:?}", scene.pending_actions),
             serde_json::to_value(scene).unwrap(),
             scene
-                .scheduled_batches
+                .scheduled_publications
                 .iter()
-                .map(|s| (s.present_at_wall_us, s.batch.batch_id))
+                .map(|s| (s.present_at_wall_us, s.id))
                 .collect::<Vec<_>>(),
             scene.next_timed_content_wall_us(),
         )
@@ -210,11 +210,8 @@ async fn test_zone_publish_result() {
                             .unwrap()
                             .content
                     } else {
-                        match &scene.scheduled_batches.last().unwrap().batch.mutations[0] {
-                            tze_hud_scene::mutation::SceneMutation::PublishToZone {
-                                content,
-                                ..
-                            } => content,
+                        match &scene.scheduled_publications.last().unwrap().publication {
+                            tze_hud_scene::Publication::Zone { content, .. } => content,
                             _ => panic!("expected zone publication"),
                         }
                     };
@@ -344,10 +341,8 @@ async fn test_zone_publish_result() {
                         .unwrap()
                         .content
                 } else {
-                    match &scene.scheduled_batches.last().unwrap().batch.mutations[0] {
-                        tze_hud_scene::mutation::SceneMutation::PublishToZone {
-                            content, ..
-                        } => content,
+                    match &scene.scheduled_publications.last().unwrap().publication {
+                        tze_hud_scene::Publication::Zone { content, .. } => content,
                         _ => panic!("publish"),
                     }
                 };
@@ -445,7 +440,7 @@ async fn test_zone_publish_result() {
             let scene = scene.lock().await;
             (
                 scene.zone_registry.active_publishes.clone(),
-                scene.scheduled_batches.len(),
+                scene.scheduled_publications.len(),
             )
         };
         for delay in [0, 60_000_000] {
@@ -469,7 +464,7 @@ async fn test_zone_publish_result() {
         assert_eq!(
             (
                 scene.zone_registry.active_publishes.clone(),
-                scene.scheduled_batches.len()
+                scene.scheduled_publications.len()
             ),
             before
         );

@@ -93,8 +93,8 @@ async fn test_safe_mode_rejects_mutations() {
     let snapshot = |scene: &SceneGraph| {
         serde_json::json!({
             "scene": scene,
-            "pending": scene.scheduled_batches.iter().map(|scheduled|
-                (scheduled.present_at_wall_us, &scheduled.batch)).collect::<Vec<_>>(),
+            "pending": scene.scheduled_publications.iter().map(|scheduled|
+                (scheduled.present_at_wall_us, format!("{:?}", (&scheduled.publisher, &scheduled.publication)))).collect::<Vec<_>>(),
         })
     };
     let mut sequence = 2;
@@ -157,7 +157,7 @@ async fn test_safe_mode_rejects_mutations() {
         scene.pause_widget_ttls();
         let now = scene.now_millis();
         scene.suspend_all_leases(now);
-        assert_eq!(scene.scheduled_batches.len(), 2);
+        assert_eq!(scene.scheduled_publications.len(), 2);
     }
     let mut failures = Vec::new();
     for surface in ["zone:notification-area", "widget:gauge"] {
@@ -228,20 +228,17 @@ async fn test_safe_mode_rejects_mutations() {
                 .expires_at_wall_us
                 .is_none()
         );
-        for pending in &scene.scheduled_batches {
-            match &pending.batch.mutations[0] {
-                tze_hud_scene::mutation::SceneMutation::PublishToZone {
-                    expires_at_wall_us,
-                    ..
+        for pending in &scene.scheduled_publications {
+            match &pending.publication {
+                tze_hud_scene::Publication::Zone {
+                    expires_at_wall_us, ..
                 }
-                | tze_hud_scene::mutation::SceneMutation::PublishToWidget {
-                    expires_at_wall_us,
-                    ..
+                | tze_hud_scene::Publication::Widget {
+                    expires_at_wall_us, ..
                 } => assert!(
                     expires_at_wall_us.is_none(),
                     "resumed Hold0 reaches pending content"
                 ),
-                other => panic!("unexpected pending mutation: {other:?}"),
             }
         }
     }

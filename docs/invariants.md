@@ -111,9 +111,8 @@ input; it never adds a periodic poll to an idle runtime.
 A notification key names one exact-byte slot within a zone and authenticated
 publisher. Replacing it retains its position and zone enter progress while
 issuing fresh publication identity. Selective clear removes only matching active
-and delayed notifications, never sibling keys, foreign publishers or mixed-batch
-remainder. Neither operation retracts accepted input: the activation snapshots
-its original optional key before removal, and its FIFO record and stable ACK id
+and delayed notifications while preserving sibling keys and foreign
+publications. Activation snapshots its original optional key before removal, and its FIFO record and stable ACK id
 survive replacement, clear and expiry. A reused key is not a generation nonce;
 owner option D permits stale cancellation, never a stale answer. The broker
 owns per-request callback routing and its accepted-race proof.
@@ -403,7 +402,7 @@ one composer node across root replacements. Regression owners:
 [`composer_focus_lost_on_blur_preserves_keyed_draft`](../crates/tze_hud_input/src/lib.rs),
 [`removing_focused_composer_tile_clears_local_echo`](../crates/tze_hud_runtime/src/windowed/lifecycle.rs),
 [`streamed_output_keeps_the_focused_draft`](../crates/tze_hud_runtime/src/windowed/keyboard.rs),
-and [`composer_interaction_hit_region_survives_consecutive_transcript_republishes`](../crates/tze_hud_scene/src/mutation.rs).
+and [`composer_interaction_hit_region_survives_consecutive_transcript_republishes`](../crates/tze_hud_scene/src/graph/portal_tests.rs).
 No wire message carries a node, so no agent can mark a hit region as a
 composer: [`removed_client_request_numbers_decode_to_empty_payload`](../crates/tze_hud_protocol/src/session_server/tests/session_handshake.rs).
 
@@ -581,7 +580,7 @@ moving their original publication timestamp. Countdown and elapsed parameter
 deadlines are absolute wall time: they keep passing, retain their last pixels
 without retries while paused, and refresh to the current time on resume
 ([`widget_elapsed_presentation_retention_cadence_and_safe_mode`](../crates/tze_hud_scene/src/graph/widget_tests.rs)).
-Already accepted widget-containing scheduled batches wait atomically through
+Already accepted scheduled widget publications wait through
 pause, without an overdue wake or materializing under a suspended lease. On
 resume their deadline and relative TTL start at actual presentation; new incoming
 updates remain rejected while paused. Fresh zone/widget Hold is also refused
@@ -590,8 +589,9 @@ leases, including a request queued behind pause at the scene lock. A suspended
 MCP lease refuses Hold before mutation even if its early pause flag was false.
 An already completed gRPC sequence replays its cached result without retiming
 content; normal finite and indefinite Hold work again after resume.
-Terminal lease cleanup still removes its queued batches during pause, including
-revocation at the maximum suspension bound; other owners' queued work survives.
+Terminal lease cleanup still removes its queued publications during pause,
+including revocation at the maximum suspension bound. Other owners' queued
+publications survive.
 
 - `tze_hud_runtime` [`test_ttl_excluded_during_suspension`](../crates/tze_hud_runtime/src/shell/safe_mode.rs),
   [`test_lease_identity_preserved_across_suspend_resume`](../crates/tze_hud_runtime/src/shell/safe_mode.rs),
@@ -676,7 +676,6 @@ Refusals name the field and limit to fix, and no hint carries an internal id.
 - Refusal hints: `tze_hud_mcp` [`portal_refusals_name_the_field_and_its_limit`](../crates/tze_hud_mcp/src/server/tests.rs),
   [`scene_refusal_hints_are_fixed_id_free_and_short`](../crates/tze_hud_mcp/src/server/tests.rs)
 
-- `tze_hud_scene` [`batch_size_exceeded`](../crates/tze_hud_scene/tests/batch_atomicity.rs)
 - `tze_hud_mcp` [`test_structured_error_has_hint_field`](../crates/tze_hud_mcp/src/server/tests.rs), [`error_codes_are_unique_and_documented`](../crates/tze_hud_mcp/src/error.rs),
   [`every_returned_code_is_in_the_closed_set`](../crates/tze_hud_mcp/src/server/tests.rs)
 - `tze_hud_resource` `store_behavior`: [`rejections_carry_stable_wire_code_and_actionable_detail`](../crates/tze_hud_resource/tests/store_behavior.rs),

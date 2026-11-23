@@ -36,7 +36,6 @@ pub fn validation_error_code(e: &ValidationError) -> &'static str {
         V::ZoneMediaTypeMismatch { .. }
         | V::ZoneMaxPublishersReached { .. }
         | V::ZoneMaxKeysReached { .. }
-        | V::ZonePublishTokenInvalid { .. }
         | V::WidgetMaxPublishersReached { .. } => "CONTENT_REJECTED",
         V::ZonePublishSafeModeActive { .. } => "SAFE_MODE_ACTIVE",
         V::LeaseNotFound { .. }
@@ -44,9 +43,7 @@ pub fn validation_error_code(e: &ValidationError) -> &'static str {
         | V::ZonePublishLeaseNotFound { .. }
         | V::ZonePublishLeaseNotActive { .. }
         | V::ZonePublishLeaseOrphaned { .. } => "LEASE_NOT_ACTIVE",
-        V::BudgetExceeded { .. } | V::NodeCountExceeded { .. } | V::BatchSizeExceeded { .. } => {
-            "BUDGET_EXCEEDED"
-        }
+        V::BudgetExceeded { .. } | V::NodeCountExceeded { .. } => "BUDGET_EXCEEDED",
         V::TileNotFound { .. } | V::NamespaceMismatch { .. } => "NOT_HELD",
         _ => "INVALID_ARGUMENT",
     }

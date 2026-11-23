@@ -46,14 +46,14 @@ use gpu_init::serialized_headless_init;
 mod pixels;
 use tze_hud_input::{PointerEvent, PointerEventKind};
 use tze_hud_runtime::HeadlessRuntime;
-use tze_hud_runtime::headless::HeadlessConfig;
+use tze_hud_runtime::headless::{HeadlessConfig, InputResponse};
 use tze_hud_scene::graph::SceneGraph;
-use tze_hud_scene::mutation::{MutationBatch, SceneMutation};
 use tze_hud_scene::perf_budget::test_budget;
 use tze_hud_scene::types::{
     FontFamily, HitRegionNode, Node, NodeData, Rect, Rgba, SceneId, SolidColorNode, TextAlign,
     TextMarkdownNode, TextOverflow,
 };
+use tze_hud_scene::{Publication, Publisher, ZoneContent, ZoneRegistry};
 use tze_hud_telemetry::LatencyBucket;
 
 // ─── Timing-assertion gate ─────────────────────────────────────
@@ -340,45 +340,34 @@ async fn test_input_to_scene_commit_p99_within_budget() {
         timestamp: None,
     };
     let mut bucket = LatencyBucket::new("input_to_scene_commit");
-    let mut cached = None;
     for index in 0..CYCLE_COUNT {
-        let batch_id = SceneId::new();
         let color = if index % 2 == 0 {
             Rgba::new(1.0, 0.0, 0.0, 1.0)
         } else {
             Rgba::new(0.0, 1.0, 0.0, 1.0)
         };
         let (telemetry, input, response) = runtime
-            .render_frame_with_input_response(&event, |dispatch, scene| {
+            .render_frame_with_input_response(&event, |dispatch| {
                 assert_eq!(dispatch.namespace, "test-agent");
                 assert_eq!(dispatch.tile_id, target.0);
                 assert_eq!(dispatch.node_id, target.1);
                 assert_eq!(dispatch.interaction_id, "input-response");
                 assert_eq!(dispatch.kind, tze_hud_input::AgentDispatchKind::PointerDown);
-                let batch = MutationBatch {
-                    batch_id,
-                    agent_namespace: dispatch.namespace.clone(),
-                    mutations: vec![SceneMutation::UpdateNodeContent {
-                        tile_id: dispatch.tile_id,
-                        node_id: target.2,
-                        data: NodeData::SolidColor(SolidColorNode {
-                            color,
-                            bounds: Rect::new(0.0, 0.0, 200.0, 200.0),
-                            radius: None,
-                        }),
-                    }],
-                    timing_hints: None,
-                    lease_id: Some(target.3),
-                };
-                let result = scene.apply_batch(&batch);
-                cached = Some((batch.clone(), result.clone()));
-                Some((batch, result))
+                Some(InputResponse {
+                    namespace: dispatch.namespace.clone(),
+                    tile_id: dispatch.tile_id,
+                    node_id: target.2,
+                    content: NodeData::SolidColor(SolidColorNode {
+                        color,
+                        bounds: Rect::new(0.0, 0.0, 200.0, 200.0),
+                        radius: None,
+                    }),
+                })
             })
             .await;
-        let response = response.expect("controlled response");
-        assert!(response.applied);
-        assert_eq!(response.batch_id, batch_id);
-        assert!(response.sequence_number.is_some());
+        response
+            .expect("controlled response")
+            .expect("content updated");
         assert_eq!(input.dispatch.as_ref().unwrap().tile_id, target.0);
         assert!(telemetry.input_to_scene_commit_us > 0);
         assert!(telemetry.input_to_scene_commit_us >= telemetry.input_to_local_ack_us);
@@ -417,49 +406,33 @@ async fn test_input_to_scene_commit_p99_within_budget() {
         );
     }
 
-    // These real inputs/operations are deliberately excluded from the population.
-    // A cached accepted reply returns its old result without another apply_batch.
-    for case in 0..7 {
+    // Unrelated or rejected updates still accompany real pointer input.
+    for case in 0..5 {
         let (telemetry, _, response) = runtime
-            .render_frame_with_input_response(&event, |dispatch, scene| {
-                if case == 0 {
-                    return None;
-                }
-                if case == 1 {
-                    return cached.clone();
-                }
-                let (tile, node, lease, namespace) = match case {
-                    3 => (unrelated.0, unrelated.2, unrelated.3, "test-agent"),
-                    6 => (foreign.0, foreign.2, foreign.3, "other-agent"),
-                    _ => (target.0, target.2, target.3, dispatch.namespace.as_str()),
+            .render_frame_with_input_response(&event, |dispatch| {
+                let (tile_id, node_id, namespace) = match case {
+                    0 => return None,
+                    1 => (target.0, target.2, "wrong-owner"),
+                    2 => (unrelated.0, unrelated.2, "test-agent"),
+                    3 => (target.0, SceneId::new(), dispatch.namespace.as_str()),
+                    _ => (foreign.0, foreign.2, "other-agent"),
                 };
-                let batch = MutationBatch {
-                    batch_id: SceneId::new(),
-                    agent_namespace: if case == 2 { "wrong-owner" } else { namespace }.to_string(),
-                    mutations: if case == 4 {
-                        vec![]
-                    } else {
-                        vec![SceneMutation::UpdateNodeContent {
-                            tile_id: tile,
-                            node_id: if case == 5 { SceneId::new() } else { node },
-                            data: NodeData::SolidColor(SolidColorNode {
-                                color: Rgba::WHITE,
-                                bounds: Rect::new(0.0, 0.0, 100.0, 100.0),
-                                radius: None,
-                            }),
-                        }]
-                    },
-                    timing_hints: None,
-                    lease_id: Some(lease),
-                };
-                let result = scene.apply_batch(&batch);
-                Some((batch, result))
+                Some(InputResponse {
+                    namespace: namespace.to_string(),
+                    tile_id,
+                    node_id,
+                    content: NodeData::SolidColor(SolidColorNode {
+                        color: Rgba::WHITE,
+                        bounds: Rect::new(0.0, 0.0, 100.0, 100.0),
+                        radius: None,
+                    }),
+                })
             })
             .await;
         if case == 0 {
             assert!(response.is_none());
         } else {
-            assert_eq!(response.unwrap().applied, matches!(case, 1 | 3 | 4 | 6));
+            assert_eq!(response.unwrap().is_ok(), matches!(case, 2 | 4));
         }
         assert_eq!(
             telemetry.input_to_scene_commit_us, 0,
@@ -518,42 +491,33 @@ async fn test_input_to_next_present_p99_within_budget() {
     };
     let mut bucket = LatencyBucket::new("input_to_next_present");
     for index in 0..FRAME_COUNT {
-        let batch_id = SceneId::new();
         let color = if index % 2 == 0 {
             Rgba::new(1.0, 0.0, 0.0, 1.0)
         } else {
             Rgba::new(0.0, 1.0, 0.0, 1.0)
         };
         let (telemetry, input, response) = runtime
-            .render_frame_with_input_response(&event, |dispatch, scene| {
+            .render_frame_with_input_response(&event, |dispatch| {
                 assert_eq!(dispatch.namespace, "test-agent");
                 assert_eq!(dispatch.tile_id, target.0);
                 assert_eq!(dispatch.node_id, target.1);
                 assert_eq!(dispatch.interaction_id, "input-response");
                 assert_eq!(dispatch.kind, tze_hud_input::AgentDispatchKind::PointerDown);
-                let batch = MutationBatch {
-                    batch_id,
-                    agent_namespace: dispatch.namespace.clone(),
-                    mutations: vec![SceneMutation::UpdateNodeContent {
-                        tile_id: dispatch.tile_id,
-                        node_id: target.2,
-                        data: NodeData::SolidColor(SolidColorNode {
-                            color,
-                            bounds: Rect::new(0.0, 0.0, 200.0, 100.0),
-                            radius: None,
-                        }),
-                    }],
-                    timing_hints: None,
-                    lease_id: Some(target.3),
-                };
-                let result = scene.apply_batch(&batch);
-                Some((batch, result))
+                Some(InputResponse {
+                    namespace: dispatch.namespace.clone(),
+                    tile_id: dispatch.tile_id,
+                    node_id: target.2,
+                    content: NodeData::SolidColor(SolidColorNode {
+                        color,
+                        bounds: Rect::new(0.0, 0.0, 200.0, 100.0),
+                        radius: None,
+                    }),
+                })
             })
             .await;
-        let response = response.expect("controlled response");
-        assert!(response.applied);
-        assert_eq!(response.batch_id, batch_id);
-        assert!(response.sequence_number.is_some());
+        response
+            .expect("controlled response")
+            .expect("content updated");
         assert_eq!(input.dispatch.as_ref().unwrap().tile_id, target.0);
         assert!(telemetry.input_to_scene_commit_us > 0);
         assert!(telemetry.input_to_next_present_us > 0);
@@ -691,55 +655,33 @@ async fn test_hit_test_p99_within_budget() {
 
 /// Assert that transaction validation p99 is under the 200µs budget.
 ///
-/// Applies a large sample of single-mutation `UpdateTileBounds` batches against
-/// a fixed-size scene and records the round-trip latency of each `apply_batch`
-/// call including validation and scene mutation.
+/// Measures validation and commit of a supported agent publication.
 #[test]
 fn test_transaction_validation_p99_within_budget() {
     use tze_hud_scene::perf_budget::budgets::TRANSACTION_VALIDATION_BUDGET_US;
 
     let budget_us = test_budget(TRANSACTION_VALIDATION_BUDGET_US);
-    // Keep a larger sample window so p99 is not effectively the max sample.
-    const BATCH_COUNT: usize = 200;
+    const SAMPLE_COUNT: usize = 200;
 
     let mut scene = SceneGraph::new(1920.0, 1080.0);
-    let tab = scene.create_tab("Main", 0).unwrap();
-    let lease = scene.grant_lease("agent", 60_000);
-    // Raise tile budget so budget enforcement doesn't reject batches in this timing test
-    if let Some(l) = scene.leases.get_mut(&lease) {
-        l.resource_budget.max_tiles = 256;
-    }
-
-    // Build a stable baseline scene once; each timed batch updates this tile.
-    // This keeps the benchmark focused on transaction validation throughput
-    // instead of allocator pressure from unbounded tile growth.
-    let tile_id = scene
-        .create_tile(tab, "agent", lease, Rect::new(0.0, 0.0, 80.0, 60.0), 1)
-        .expect("baseline tile should be created");
-
+    scene.zone_registry = ZoneRegistry::with_defaults();
+    let publisher = Publisher::namespace("agent");
     let mut validation_bucket = LatencyBucket::new("validation");
 
-    for i in 0..BATCH_COUNT {
-        let start = std::time::Instant::now();
-        let batch = MutationBatch {
-            batch_id: SceneId::new(),
-            agent_namespace: "agent".to_string(),
-            mutations: vec![SceneMutation::UpdateTileBounds {
-                tile_id,
-                bounds: Rect::new(
-                    (i as f32 * 2.5) % 1600.0,
-                    (i as f32 * 1.5) % 950.0,
-                    80.0,
-                    60.0,
-                ),
-            }],
-            timing_hints: None,
-            lease_id: None,
+    for i in 0..SAMPLE_COUNT {
+        let publication = Publication::Zone {
+            zone_name: "subtitle".into(),
+            content: ZoneContent::StreamText(format!("Publication {i}")),
+            merge_key: None,
+            expires_at_wall_us: None,
+            content_classification: None,
+            breakpoints: Vec::new(),
+            held: false,
         };
-        let result = scene.apply_batch(&batch);
-        let elapsed_us = start.elapsed().as_micros() as u64;
-        validation_bucket.record(elapsed_us);
-        assert!(result.applied, "batch {i} should have applied");
+        let start = std::time::Instant::now();
+        let result = scene.publish(&publisher, &publication);
+        validation_bucket.record(start.elapsed().as_micros() as u64);
+        result.expect("subtitle publication accepted");
     }
 
     // Timing assertion: gated — wall-clock budget.
@@ -843,14 +785,9 @@ async fn test_texture_upload_p99_within_budget() {
                 }),
             };
             let _ = scene.set_tile_root(tile_id, node);
-            let batch = MutationBatch {
-                batch_id: SceneId::new(),
-                agent_namespace: "upload-test".to_string(),
-                mutations: vec![SceneMutation::DeleteTile { tile_id }],
-                timing_hints: None,
-                lease_id: None,
-            };
-            let _ = scene.apply_batch(&batch);
+            scene
+                .delete_tile(tile_id, "upload-test")
+                .expect("free warm-up tile");
         }
     }
 
@@ -882,19 +819,9 @@ async fn test_texture_upload_p99_within_budget() {
                 };
                 let _ = scene.set_tile_root(tile_id, node);
                 // Delete the tile to free up the slot for next round.
-                let batch = MutationBatch {
-                    batch_id: SceneId::new(),
-                    agent_namespace: "upload-test".to_string(),
-                    mutations: vec![SceneMutation::DeleteTile { tile_id }],
-                    timing_hints: None,
-                    lease_id: None,
-                };
-                let result = scene.apply_batch(&batch);
-                assert!(
-                    result.applied,
-                    "DeleteTile mutation was not applied during texture upload budget test (round {}): {:?}",
-                    i, result.error
-                );
+                scene
+                    .delete_tile(tile_id, "upload-test")
+                    .expect("free measurement tile");
             }
         }
         upload_bucket.record(start.elapsed().as_micros() as u64);

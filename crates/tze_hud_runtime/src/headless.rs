@@ -54,9 +54,17 @@ use tze_hud_resource::{
 };
 use tze_hud_scene::config::{AgentDirectory, SharedAgents};
 use tze_hud_scene::graph::SceneGraph;
-use tze_hud_scene::mutation::{MutationBatch, MutationResult, SceneMutation};
+use tze_hud_scene::{NodeData, SceneId, ValidationError};
 use tze_hud_telemetry::{FrameTelemetry, TelemetryCollector};
 use wgpu::TextureFormat;
+
+/// A controlled local response used to measure input through submit.
+pub struct InputResponse {
+    pub namespace: String,
+    pub tile_id: SceneId,
+    pub node_id: SceneId,
+    pub content: NodeData,
+}
 
 /// Configuration for the headless runtime.
 pub struct HeadlessConfig {
@@ -373,30 +381,28 @@ impl HeadlessRuntime {
     /// `render_frame_headless()`, which includes the `copy_to_buffer` step so
     /// that `read_pixels()` returns actual rendered pixel data after this call.
     pub async fn render_frame(&mut self) -> FrameTelemetry {
-        self.render_frame_inner::<
-            fn(&AgentDispatch, &mut SceneGraph) -> Option<(MutationBatch, MutationResult)>,
-        >(None)
-        .await
-        .0
+        self.render_frame_inner::<fn(&AgentDispatch) -> Option<InputResponse>>(None)
+            .await
+            .0
     }
 
     /// Process actual pointer input, a controlled in-process response, and its frame.
     ///
-    /// The handler receives the real dispatch and applies its response through
-    /// `SceneGraph::apply_batch`, returning that batch and result. Only a newly
-    /// applied content/opacity response for this dispatch's owner and tile is
-    /// associated. Cached replies, unrelated work and rejected responses are not
-    /// input-to-response measurements. The scene lock covers processing through
-    /// submit, so this frame contains the accepted response without an intervening
-    /// agent mutation. This is a local submit boundary, not a network roundtrip or
-    /// Windows surface present/scanout; it is not an authentication boundary.
+    /// The handler receives the real dispatch and can return one content update.
+    /// Scene commit time is associated only with a successful update for the
+    /// dispatch owner and tile. The scene lock covers the input through submit.
+    /// This measures local GPU submission.
     pub async fn render_frame_with_input_response<F>(
         &mut self,
         event: &PointerEvent,
         respond: F,
-    ) -> (FrameTelemetry, InputResult, Option<MutationResult>)
+    ) -> (
+        FrameTelemetry,
+        InputResult,
+        Option<Result<SceneId, ValidationError>>,
+    )
     where
-        F: FnOnce(&AgentDispatch, &mut SceneGraph) -> Option<(MutationBatch, MutationResult)>,
+        F: FnOnce(&AgentDispatch) -> Option<InputResponse>,
     {
         let (telemetry, input) = self.render_frame_inner(Some((event, respond))).await;
         let (input, response) = input.expect("the supplied pointer event was processed");
@@ -408,10 +414,10 @@ impl HeadlessRuntime {
         input: Option<(&PointerEvent, F)>,
     ) -> (
         FrameTelemetry,
-        Option<(InputResult, Option<MutationResult>)>,
+        Option<(InputResult, Option<Result<SceneId, ValidationError>>)>,
     )
     where
-        F: FnOnce(&AgentDispatch, &mut SceneGraph) -> Option<(MutationBatch, MutationResult)>,
+        F: FnOnce(&AgentDispatch) -> Option<InputResponse>,
     {
         // Stamp the actual input entry, including scene-lock wait. Ordinary frames
         // have no input timestamp and cannot become input measurements.
@@ -459,33 +465,32 @@ impl HeadlessRuntime {
                 let response = input.and_then(|(_, respond)| {
                     let result = input_result.as_ref()?;
                     let dispatch = result.dispatch.as_ref()?;
-                    let sequence_before = scene_guard.sequence_number;
-                    let (batch, response) = respond(dispatch, scene_guard)?;
-                    let matches_target = batch.agent_namespace == dispatch.namespace
-                        && !batch.mutations.is_empty()
-                        && batch.mutations.iter().all(|mutation| match mutation {
-                            SceneMutation::UpdateNodeContent { tile_id, .. }
-                            | SceneMutation::UpdateTileOpacity { tile_id, .. } => {
-                                *tile_id == dispatch.tile_id
+                    let response = respond(dispatch)?;
+                    let matches_target = response.namespace == dispatch.namespace
+                        && response.tile_id == dispatch.tile_id;
+                    let applied = scene_guard
+                        .update_node_content_checked(
+                            response.tile_id,
+                            response.node_id,
+                            response.content,
+                            &response.namespace,
+                        )
+                        .map(|()| {
+                            let id = SceneId::new();
+                            scene_guard.record_present_ack_batch(id);
+                            if matches_target {
+                                record_committed_input_response(
+                                    &self.pending_input_latency,
+                                    input_started_at.expect("input entry has a timestamp"),
+                                    result.local_ack_us,
+                                    id,
+                                    Instant::now(),
+                                );
+                                associated_response = true;
                             }
-                            _ => false,
+                            id
                         });
-                    let newly_applied = response.applied
-                        && response.batch_id == batch.batch_id
-                        && response.sequence_number.is_some_and(|sequence| {
-                            sequence > sequence_before && sequence == scene_guard.sequence_number
-                        });
-                    if matches_target && newly_applied {
-                        record_committed_input_response(
-                            &self.pending_input_latency,
-                            input_started_at.expect("input entry has a timestamp"),
-                            result.local_ack_us,
-                            batch.batch_id,
-                            Instant::now(),
-                        );
-                        associated_response = true;
-                    }
-                    Some(response)
+                    Some(applied)
                 });
                 if let Some(result) = &input_result
                     && !associated_response
@@ -558,7 +563,7 @@ impl HeadlessRuntime {
                 frame_number: compositor_telemetry.frame_number,
                 present_wall_us,
                 // 16-byte big-endian UUID, matching the scene_id_to_bytes /
-                // bytes_to_scene_id wire contract used for MutationBatch.batch_id.
+                // bytes_to_scene_id wire contract.
                 batch_ids: present_ack_batch_ids
                     .iter()
                     .map(|id| id.as_uuid().as_bytes().to_vec())
@@ -833,7 +838,6 @@ mod tests {
             "error, unwind and cancellation must leave admission available"
         );
     }
-    use tze_hud_scene::{MutationBatch, SceneMutation};
 
     #[tokio::test]
     async fn text_update_shapes_only_changed_content_and_preserves_unrelated_pixels() {
@@ -936,13 +940,11 @@ mod tests {
 
         {
             let mut scene = scene_arc.lock().await;
-            let update = MutationBatch {
-                batch_id: SceneId::new(),
-                agent_namespace: "change-efficiency-agent".into(),
-                mutations: vec![SceneMutation::UpdateNodeContent {
-                    tile_id: changed_tile_id,
-                    node_id: changed_node_id,
-                    data: NodeData::TextMarkdown(TextMarkdownNode {
+            scene
+                .update_node_content_checked(
+                    changed_tile_id,
+                    changed_node_id,
+                    NodeData::TextMarkdown(TextMarkdownNode {
                         content: "BA".into(),
                         bounds: Rect::new(0.0, 0.0, 96.0, 92.0),
                         font_size_px: 18.0,
@@ -953,15 +955,9 @@ mod tests {
                         overflow: TextOverflow::Clip,
                         color_runs: Box::default(),
                     }),
-                }],
-                timing_hints: None,
-                lease_id: Some(lease_id),
-            };
-            let update_result = scene.apply_batch(&update);
-            assert!(
-                update_result.applied,
-                "UpdateNodeContent applies: {update_result:#?}"
-            );
+                    "change-efficiency-agent",
+                )
+                .expect("changed text root");
         }
 
         // Observe the actual full-frame renderer after the scene mutation.
@@ -1026,29 +1022,21 @@ mod tests {
         // Reuse this real 50-tile scene for the duplicate-key vector: all AB.
         {
             let mut scene = scene_arc.lock().await;
-            let mutations = tile_nodes
-                .iter()
-                .map(|&(tile_id, node_id)| {
-                    let mut text = match &scene.nodes[&node_id].data {
-                        NodeData::TextMarkdown(text) => text.clone(),
-                        other => panic!("expected text root, got {other:?}"),
-                    };
-                    text.content = "AB".into();
-                    SceneMutation::UpdateNodeContent {
+            for &(tile_id, node_id) in &tile_nodes {
+                let mut text = match &scene.nodes[&node_id].data {
+                    NodeData::TextMarkdown(text) => text.clone(),
+                    other => panic!("expected text root, got {other:?}"),
+                };
+                text.content = "AB".into();
+                scene
+                    .update_node_content_checked(
                         tile_id,
                         node_id,
-                        data: NodeData::TextMarkdown(text),
-                    }
-                })
-                .collect();
-            let result = scene.apply_batch(&MutationBatch {
-                batch_id: SceneId::new(),
-                agent_namespace: "change-efficiency-agent".into(),
-                mutations,
-                timing_hints: None,
-                lease_id: Some(lease_id),
-            });
-            assert!(result.applied, "50 duplicate AB roots apply: {result:#?}");
+                        NodeData::TextMarkdown(text),
+                        "change-efficiency-agent",
+                    )
+                    .expect("duplicate AB root");
+            }
         }
         runtime.render_frame().await;
         let duplicate_pixels = runtime.read_pixels();
@@ -1098,21 +1086,14 @@ mod tests {
                 other => panic!("expected text root, got {other:?}"),
             };
             text.content = "BA".into();
-            let result = scene.apply_batch(&MutationBatch {
-                batch_id: SceneId::new(),
-                agent_namespace: "change-efficiency-agent".into(),
-                mutations: vec![SceneMutation::UpdateNodeContent {
-                    tile_id: changed_tile_id,
-                    node_id: changed_node_id,
-                    data: NodeData::TextMarkdown(text),
-                }],
-                timing_hints: None,
-                lease_id: Some(lease_id),
-            });
-            assert!(
-                result.applied,
-                "duplicate-vector AB -> BA applies: {result:#?}"
-            );
+            scene
+                .update_node_content_checked(
+                    changed_tile_id,
+                    changed_node_id,
+                    NodeData::TextMarkdown(text),
+                    "change-efficiency-agent",
+                )
+                .expect("duplicate-vector AB -> BA");
         }
         runtime.render_frame().await;
         let duplicate_updated_pixels = runtime.read_pixels();
@@ -1337,27 +1318,21 @@ mod tests {
                 .disconnect_lease(&lease_id, now_ms)
                 .expect("orphan the lease");
             scene.zone_registry = tze_hud_scene::ZoneRegistry::with_defaults();
-            let batch = tze_hud_scene::mutation::MutationBatch {
-                batch_id: SceneId::new(),
-                agent_namespace: "publication-only".into(),
-                mutations: vec![tze_hud_scene::mutation::SceneMutation::PublishToZone {
-                    zone_name: "subtitle".into(),
-                    content: tze_hud_scene::ZoneContent::StreamText("held".into()),
-                    publish_token: tze_hud_scene::ZonePublishToken { token: Vec::new() },
-                    merge_key: None,
-                    expires_at_wall_us: None,
-                    content_classification: None,
-                    breakpoints: Vec::new(),
-                    held: false,
-                }],
-                timing_hints: None,
+            let publisher = tze_hud_scene::Publisher {
+                namespace: "publication-only".into(),
                 lease_id: None,
+                origin: Some(publication_origin),
             };
-            assert!(
-                scene
-                    .apply_batch_for_origin(&batch, Some(publication_origin))
-                    .applied
-            );
+            let publication = tze_hud_scene::Publication::Zone {
+                zone_name: "subtitle".into(),
+                content: tze_hud_scene::ZoneContent::StreamText("held".into()),
+                merge_key: None,
+                expires_at_wall_us: None,
+                content_classification: None,
+                breakpoints: Vec::new(),
+                held: false,
+            };
+            scene.publish(&publisher, &publication).unwrap();
             scene.orphan_publications(
                 publication_origin,
                 now_ms,
