@@ -240,6 +240,22 @@ pub(super) fn canonical_color(key: &str) -> Option<Rgba> {
     tze_hud_config::tokens::canonical_default(key).and_then(parse_hex_color)
 }
 
+pub(super) fn resolve_hit_region_tint(
+    tokens: &HashMap<String, String>,
+    color: &str,
+    opacity: &str,
+) -> Rgba {
+    let mut tint = resolve_token_color(tokens, color)
+        .or_else(|| canonical_color(color))
+        .expect("hit-region tint has a canonical color");
+    tint.a *= tokens
+        .get(opacity)
+        .and_then(|value| tze_hud_config::tokens::parse_numeric(value))
+        .filter(|value| (0.0..=1.0).contains(value))
+        .unwrap_or_else(|| canonical_number(opacity));
+    tint
+}
+
 /// Ceiling on the opacity of a zone's own fill or image: `opacity.ambient.max`
 /// for `ambient-background`, whose full-display fill would otherwise hide the
 /// whole desktop under the topmost overlay; 1.0 for every other zone.

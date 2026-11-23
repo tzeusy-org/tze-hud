@@ -15,6 +15,7 @@
 use std::sync::Arc;
 
 use glyphon::FontSystem;
+use tze_hud_config::tokens::DesignTokenMap;
 use tze_hud_input::{DRAG_OPACITY_BOOST, DRAG_Z_ORDER_BOOST};
 use tze_hud_scene::DegradationLevel;
 use tze_hud_scene::graph::SceneGraph;
@@ -33,9 +34,10 @@ use super::image_cache::{
 use super::token_colors::{
     ComposerOverlayTokens, ComposerVerticalAnchor, TILE_BG_DEFAULT, TILE_BG_STATIC_IMAGE,
     TILE_BG_TEXT_MARKDOWN, linear_to_srgb, resolve_composer_overlay_tokens,
-    resolve_disconnect_badge_tokens, resolve_focus_ring_tokens, resolve_resize_grip_tokens,
-    resolve_section_gap_px, resolve_tile_bg_token, resolve_tile_close_tokens,
-    resolve_tile_spacing_tokens, srgb_to_linear, tile_close_button_bounds,
+    resolve_disconnect_badge_tokens, resolve_focus_ring_tokens, resolve_hit_region_tint,
+    resolve_resize_grip_tokens, resolve_section_gap_px, resolve_tile_bg_token,
+    resolve_tile_close_tokens, resolve_tile_spacing_tokens, srgb_to_linear,
+    tile_close_button_bounds,
 };
 use super::{Compositor, CompositorDegradationPolicy, LocalComposerState};
 
@@ -43,23 +45,89 @@ fn hit_region_tint(
     region: &HitRegionNode,
     node_id: SceneId,
     scene: &SceneGraph,
+    tokens: &DesignTokenMap,
 ) -> Option<[f32; 4]> {
-    match scene.hit_region_states.get(&node_id) {
-        Some(state) if state.pressed => Some(
-            region
-                .local_style
-                .pressed_tint
-                .map(|color| color.to_array())
-                .unwrap_or([0.0, 0.0, 0.0, 0.15]),
-        ),
-        Some(state) if state.hovered => Some(
-            region
-                .local_style
-                .hover_tint
-                .map(|color| color.to_array())
-                .unwrap_or([1.0, 1.0, 1.0, 0.1]),
-        ),
-        _ => None,
+    let state = scene.hit_region_states.get(&node_id)?;
+    let (local, color, opacity) = if state.pressed {
+        (
+            region.local_style.pressed_tint,
+            "tile.hit_region.pressed.color",
+            "tile.hit_region.pressed.opacity",
+        )
+    } else if state.hovered {
+        (
+            region.local_style.hover_tint,
+            "tile.hit_region.hover.color",
+            "tile.hit_region.hover.opacity",
+        )
+    } else {
+        return None;
+    };
+    let tint = local.unwrap_or_else(|| resolve_hit_region_tint(tokens, color, opacity));
+    // A transparent replace quad would erase the pixels beneath it.
+    (tint.a != 0.0).then_some(tint.to_array())
+}
+
+#[cfg(test)]
+mod hit_region_tint_tests {
+    use super::*;
+
+    #[test]
+    fn hit_region_tints_use_state_tokens_and_respect_local_overrides() {
+        let node_id = SceneId::new();
+        let mut region = HitRegionNode::default();
+        let mut scene = SceneGraph::new(320.0, 200.0);
+        let mut tokens = DesignTokenMap::new();
+        assert_eq!(hit_region_tint(&region, node_id, &scene, &tokens), None);
+
+        scene.hit_region_states.insert(
+            node_id,
+            HitRegionLocalState {
+                hovered: true,
+                ..HitRegionLocalState::new(node_id)
+            },
+        );
+        assert_eq!(
+            hit_region_tint(&region, node_id, &scene, &tokens),
+            Some([1.0, 1.0, 1.0, 0.1]),
+        );
+
+        tokens.extend(
+            [
+                ("tile.hit_region.hover.color", "#00FF00"),
+                ("tile.hit_region.hover.opacity", "0.6"),
+                ("tile.hit_region.pressed.color", "#FF0000"),
+                ("tile.hit_region.pressed.opacity", "0.35"),
+            ]
+            .map(|(key, value)| (key.to_owned(), value.to_owned())),
+        );
+        assert_eq!(
+            hit_region_tint(&region, node_id, &scene, &tokens),
+            Some([0.0, 1.0, 0.0, 0.6]),
+        );
+
+        scene.hit_region_states.get_mut(&node_id).unwrap().pressed = true;
+        assert_eq!(
+            hit_region_tint(&region, node_id, &scene, &tokens),
+            Some([1.0, 0.0, 0.0, 0.35]),
+        );
+
+        region.local_style.pressed_tint = Some(Rgba::new(0.0, 0.0, 1.0, 0.0));
+        assert_eq!(hit_region_tint(&region, node_id, &scene, &tokens), None);
+        region.local_style.pressed_tint = None;
+
+        tokens.insert("tile.hit_region.pressed.opacity".into(), "0".into());
+        assert_eq!(hit_region_tint(&region, node_id, &scene, &tokens), None);
+        tokens.insert("tile.hit_region.pressed.opacity".into(), "0.35".into());
+        tokens.insert("tile.hit_region.pressed.color".into(), "#FF000000".into());
+        assert_eq!(hit_region_tint(&region, node_id, &scene, &tokens), None);
+
+        tokens.insert("tile.hit_region.pressed.color".into(), "invalid".into());
+        tokens.insert("tile.hit_region.pressed.opacity".into(), "NaN".into());
+        assert_eq!(
+            hit_region_tint(&region, node_id, &scene, &tokens),
+            Some([0.0, 0.0, 0.0, 0.15]),
+        );
     }
 }
 
@@ -68,6 +136,7 @@ pub(super) fn composer_backdrop_color(
     tile_id: SceneId,
     bounds: Rect,
     backdrop: Rgba,
+    tokens: &DesignTokenMap,
 ) -> Option<Rgba> {
     // A transparent pane has no coverage to tint. In Simplified mode its
     // rounded fill is skipped; adding a zero-alpha REPLACE quad erases the root.
@@ -81,10 +150,7 @@ pub(super) fn composer_backdrop_color(
     if region.bounds != bounds {
         return None;
     }
-    let tint = hit_region_tint(region, node_id, scene)?;
-    if tint[3] == 0.0 {
-        return None;
-    }
+    let tint = hit_region_tint(region, node_id, scene, tokens)?;
     // Tint the existing pane before its ordinary fade/alpha conversion. An
     // additional overlay changes coverage and can escape the pane's z-order.
     Some(Rgba {
@@ -994,9 +1060,10 @@ impl Compositor {
                         );
                         Rgba { a: 1.0, ..color }
                     });
-                    let mut c = composer_backdrop_color(scene, tile.id, tm.bounds, bg)
-                        .unwrap_or(bg)
-                        .to_array();
+                    let mut c =
+                        composer_backdrop_color(scene, tile.id, tm.bounds, bg, &self.token_map)
+                            .unwrap_or(bg)
+                            .to_array();
                     c[3] *= opacity;
                     return Some(c);
                 }
@@ -2019,7 +2086,8 @@ impl Compositor {
 
         match &node.data {
             NodeData::SolidColor(sc) => {
-                let feedback = composer_backdrop_color(scene, tile.id, sc.bounds, sc.color);
+                let feedback =
+                    composer_backdrop_color(scene, tile.id, sc.bounds, sc.color, &self.token_map);
                 if !sc.radius.is_some_and(|r| r > 0.0)
                     || (feedback.is_some()
                         && self.degradation_policy.level >= DegradationLevel::Simplified)
@@ -2047,7 +2115,8 @@ impl Compositor {
                 if self.text_rasterizer.is_some() {
                     if let Some(bg) = tm.background {
                         let bg =
-                            composer_backdrop_color(scene, tile.id, tm.bounds, bg).unwrap_or(bg);
+                            composer_backdrop_color(scene, tile.id, tm.bounds, bg, &self.token_map)
+                                .unwrap_or(bg);
                         Self::append_clipped_rect_vertices(
                             tile,
                             Rect::new(
@@ -2204,7 +2273,9 @@ impl Compositor {
                     // Fallback when glyphon is unavailable: preserve the old
                     // placeholder treatment so text tiles remain visible.
                     let bg = tm.background.unwrap_or(TILE_BG_TEXT_MARKDOWN);
-                    let bg = composer_backdrop_color(scene, tile.id, tm.bounds, bg).unwrap_or(bg);
+                    let bg =
+                        composer_backdrop_color(scene, tile.id, tm.bounds, bg, &self.token_map)
+                            .unwrap_or(bg);
                     Self::append_clipped_rect_vertices(
                         tile,
                         Rect::new(
@@ -2248,18 +2319,11 @@ impl Compositor {
                 }
             }
             NodeData::HitRegion(hr) => {
-                // HitRegion is an invisible interaction primitive. Default (no
-                // state) paints nothing so siblings show through. Hover + press
-                // emit sibling-over tints:
-                //   hover:   add 0.1 white overlay (lightening)
-                //   pressed: multiply by 0.85 (~15% darken; approximated with
-                //            a black overlay at 0.15 alpha against the sibling)
-                // Per-node overrides come from `local_style.hover_tint` /
-                // `pressed_tint` when set.
-                // The separately installed composer tints its existing pane;
-                // a second REPLACE quad would erase it and turn hover white.
+                // Idle hit regions are invisible. Hover and press draw the
+                // local tint or its design-token fallback over the sibling.
+                // The composer tints its existing pane to preserve coverage.
                 let tint = (scene.overlay.tile_composer_nodes.get(&tile.id) != Some(&node_id))
-                    .then(|| hit_region_tint(hr, node_id, scene))
+                    .then(|| hit_region_tint(hr, node_id, scene, &self.token_map))
                     .flatten();
                 if let Some(color) = tint {
                     Self::append_clipped_rect_vertices(

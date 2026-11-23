@@ -858,7 +858,11 @@ impl super::Compositor {
                 if let Some(clipped) = Self::clip_rect_to_tile(tile, rect) {
                     let max_r = (rect.width * 0.5).min(rect.height * 0.5).max(0.0);
                     let color = super::tile_render::composer_backdrop_color(
-                        scene, tile.id, sc.bounds, sc.color,
+                        scene,
+                        tile.id,
+                        sc.bounds,
+                        sc.color,
+                        &self.token_map,
                     )
                     .unwrap_or(sc.color);
                     cmds.push(crate::pipeline::RoundedRectDrawCmd {
