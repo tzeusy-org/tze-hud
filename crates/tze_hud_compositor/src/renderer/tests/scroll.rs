@@ -44,15 +44,18 @@ async fn scroll_viewports_and_truncation_cache_select_the_same_edge() {
     let (mut compositor, _surface) = require_gpu!(make_text_compositor(720, 360).await);
     let content = "FIRST\nbbbb\ncccc\ndddd\neeee\nffff\ngggg\nLAST";
     let mut observed = Vec::new();
-    for (zone, overflow, at_tail, viewport) in [
-        (false, TextOverflow::Ellipsis, false, HeadAnchored),
-        (false, TextOverflow::Ellipsis, true, TailAnchored),
-        (false, TextOverflow::Clip, true, HeadAnchored),
-        (true, TextOverflow::Ellipsis, false, HeadAnchored),
-        (true, TextOverflow::Ellipsis, true, TailAnchored),
+    for (zone, overflow, opt_in, viewport) in [
+        (false, TextOverflow::Ellipsis, Some(false), HeadAnchored),
+        (false, TextOverflow::Ellipsis, Some(true), TailAnchored),
+        (false, TextOverflow::Clip, Some(true), HeadAnchored),
+        (true, TextOverflow::Ellipsis, None, HeadAnchored),
+        (true, TextOverflow::Ellipsis, Some(true), TailAnchored),
+        (true, TextOverflow::Ellipsis, Some(false), HeadAnchored),
+        (true, TextOverflow::Clip, Some(true), TailAnchored),
     ] {
+        let at_tail = opt_in == Some(true);
         let scene = if zone {
-            make_stream_zone_scene(Some(overflow), at_tail.then_some(true), content)
+            make_stream_zone_scene(Some(overflow), opt_in, content)
         } else {
             let mut scene = SceneGraph::new(720.0, 360.0);
             let bounds = Rect::new(0.0, 0.0, 200.0, 40.0);
@@ -766,6 +769,28 @@ async fn expanded_portal_chrome_stays_fixed_while_document_content_scrolls_after
         }
         reading = Some((marker_y, input_offset));
         let (viewport, document_height) = (layout.viewport, layout.height);
+        let output_left = tile_bounds.x + viewport.x;
+        let (_, labels) = compositor.collect_scroll_affordances(&scene);
+        let [badge] = labels.as_slice() else {
+            panic!("native OUTPUT should have one unread badge at step {step}");
+        };
+        assert_eq!(badge.text.as_ref(), "3 unread", "step {step}");
+        assert!(
+            badge.pixel_x >= output_left,
+            "badge is in OUTPUT at step {step}"
+        );
+        compositor.populate_zone_hit_regions(&mut scene, 800.0, 520.0);
+        let jump = scene
+            .overlay
+            .zone_hit_regions
+            .iter()
+            .find(|region| region.kind == (ZoneInteractionKind::JumpToLatest { tile_id }))
+            .expect("native OUTPUT should have a jump-to-latest hit target");
+        assert!(
+            jump.bounds.x >= output_left,
+            "jump target is in OUTPUT at step {step}"
+        );
+
         let epoch = scene.geometry_epoch;
         processor.reconcile_portal_document_layouts(&mut scene);
         assert_eq!(
