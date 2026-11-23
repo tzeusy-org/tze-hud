@@ -37,7 +37,7 @@ use unicode_segmentation::UnicodeSegmentation;
 pub const MAX_DRAFT_BYTES: usize = 65_535;
 
 /// Default lower draft cap (suitable for typical composer inputs).
-pub const DEFAULT_DRAFT_CAP: usize = 4_096;
+pub(crate) const DEFAULT_DRAFT_CAP: usize = 4_096;
 
 // ─── Outcome types ────────────────────────────────────────────────────────────
 
@@ -71,7 +71,6 @@ pub enum EditOutcome {
 pub enum ComposerOutcome {
     Edited,
     Submitted(String),
-    Cancelled,
     Unchanged,
 }
 
@@ -268,7 +267,7 @@ impl ComposerVisualLayout {
     /// `goal_x` (px). `up` selects the previous row; otherwise the next. On the
     /// first row an upward step goes to byte 0; on the last row a downward step
     /// goes to `text_len`. Returns `None` when already at that boundary.
-    pub fn vertical_target(&self, cursor: usize, up: bool, goal_x: f32) -> Option<usize> {
+    fn vertical_target(&self, cursor: usize, up: bool, goal_x: f32) -> Option<usize> {
         let cur = self.line_of(cursor)?;
         if up {
             if cur == 0 {
@@ -354,10 +353,10 @@ impl ComposerVisualLayout {
 /// Runtime-owned bounded plain-text draft buffer.
 ///
 /// One `ComposerDraft` per focused composer region. The runtime creates it on
-/// focus-in and destroys it on focus-out (or on submit/cancel).
+/// focus-in; the manager keeps an unsent draft across focus-out.
 ///
 /// Editing methods retain capacity and suspension detail in [`EditOutcome`].
-/// Submit and cancel return a direct [`ComposerOutcome`].
+/// Submit returns a direct [`ComposerOutcome`].
 ///
 /// # Invariants
 ///
@@ -365,7 +364,7 @@ impl ComposerVisualLayout {
 /// - `cursor` and `selection_anchor` are valid byte offsets into `text`
 /// - `cursor <= text.len()` and `selection_anchor <= text.len()`
 ///
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ComposerDraft {
     text: String,
     /// Cursor position in bytes (insert/caret position).
@@ -426,7 +425,7 @@ impl ComposerDraft {
     }
 
     /// Whether the draft is at or exceeds the byte cap.
-    pub fn is_at_capacity(&self) -> bool {
+    pub(crate) fn is_at_capacity(&self) -> bool {
         self.text.len() >= self.cap
     }
 
@@ -436,7 +435,8 @@ impl ComposerDraft {
     }
 
     /// Whether the draft is suspended under safe mode.
-    pub fn is_suspended(&self) -> bool {
+    #[cfg(test)]
+    fn is_suspended(&self) -> bool {
         self.suspended
     }
 
@@ -503,7 +503,7 @@ impl ComposerDraft {
     /// is deleted first, then a single `\n` is inserted, honoring the byte cap
     /// (`\n` is one byte). Newline is subject to the same suspend/cap governance
     /// as any other edit; the submitted draft carries embedded newlines verbatim.
-    pub fn insert_newline(&mut self) -> EditOutcome {
+    fn insert_newline(&mut self) -> EditOutcome {
         if self.suspended {
             return EditOutcome::Suspended;
         }
@@ -604,7 +604,7 @@ impl ComposerDraft {
     /// Word-wise backspace: delete from cursor to the start of the preceding word.
     ///
     /// Mirrors the behaviour of Ctrl/Alt + Backspace in the exemplar adapter.
-    pub fn word_backspace(&mut self) -> EditOutcome {
+    fn word_backspace(&mut self) -> EditOutcome {
         if self.suspended {
             return EditOutcome::Suspended;
         }
@@ -622,7 +622,7 @@ impl ComposerDraft {
     }
 
     /// Word-wise forward delete: delete from cursor to the end of the next word.
-    pub fn word_delete_forward(&mut self) -> EditOutcome {
+    fn word_delete_forward(&mut self) -> EditOutcome {
         if self.suspended {
             return EditOutcome::Suspended;
         }
@@ -673,7 +673,7 @@ impl ComposerDraft {
     }
 
     /// Move the cursor to the start of the preceding word (collapsing selection).
-    pub fn move_word_left(&mut self) -> EditOutcome {
+    fn move_word_left(&mut self) -> EditOutcome {
         let target = word_delete_start(&self.text, self.cursor);
         if target == self.cursor && !self.has_selection() {
             return EditOutcome::Unchanged;
@@ -684,7 +684,7 @@ impl ComposerDraft {
     }
 
     /// Move the cursor to the end of the next word (collapsing selection).
-    pub fn move_word_right(&mut self) -> EditOutcome {
+    fn move_word_right(&mut self) -> EditOutcome {
         let target = word_delete_end(&self.text, self.cursor);
         if target == self.cursor && !self.has_selection() {
             return EditOutcome::Unchanged;
@@ -727,7 +727,7 @@ impl ComposerDraft {
     /// The caret's current column: grapheme clusters from the start of its
     /// logical line (the byte after the preceding '\n', or 0). Used to seed the
     /// vertical goal column.
-    pub fn current_col(&self) -> usize {
+    fn current_col(&self) -> usize {
         let line_start = logical_line_start(&self.text, self.cursor);
         grapheme_count(&self.text[line_start..self.cursor])
     }
@@ -777,7 +777,7 @@ impl ComposerDraft {
     }
 
     /// Move the caret up one logical line at `goal_col`, collapsing any selection.
-    pub fn move_up(&mut self, goal_col: usize) -> EditOutcome {
+    fn move_up(&mut self, goal_col: usize) -> EditOutcome {
         match self.vertical_target(true, goal_col) {
             Some(target) => {
                 self.cursor = target;
@@ -789,7 +789,7 @@ impl ComposerDraft {
     }
 
     /// Move the caret down one logical line at `goal_col`, collapsing any selection.
-    pub fn move_down(&mut self, goal_col: usize) -> EditOutcome {
+    fn move_down(&mut self, goal_col: usize) -> EditOutcome {
         match self.vertical_target(false, goal_col) {
             Some(target) => {
                 self.cursor = target;
@@ -802,7 +802,7 @@ impl ComposerDraft {
 
     /// Extend the selection up one logical line at `goal_col` (Shift+ArrowUp):
     /// moves the caret without collapsing the anchor.
-    pub fn select_up(&mut self, goal_col: usize) -> EditOutcome {
+    fn select_up(&mut self, goal_col: usize) -> EditOutcome {
         match self.vertical_target(true, goal_col) {
             Some(target) if target != self.cursor => {
                 self.cursor = target;
@@ -813,7 +813,7 @@ impl ComposerDraft {
     }
 
     /// Extend the selection down one logical line at `goal_col` (Shift+ArrowDown).
-    pub fn select_down(&mut self, goal_col: usize) -> EditOutcome {
+    fn select_down(&mut self, goal_col: usize) -> EditOutcome {
         match self.vertical_target(false, goal_col) {
             Some(target) if target != self.cursor => {
                 self.cursor = target;
@@ -828,7 +828,7 @@ impl ComposerDraft {
     /// byte from the compositor's wrapped-line layout. The byte is clamped to
     /// `text.len()` and snapped down to a char boundary so a stale layout can
     /// never place the caret mid-character.
-    pub fn move_to_byte(&mut self, byte: usize) -> EditOutcome {
+    fn move_to_byte(&mut self, byte: usize) -> EditOutcome {
         let target = self.snap_byte(byte);
         if target == self.cursor && !self.has_selection() {
             return EditOutcome::Unchanged;
@@ -840,7 +840,7 @@ impl ComposerDraft {
 
     /// Extend the selection to an absolute byte offset without collapsing the
     /// anchor (Shift + visual vertical move).
-    pub fn select_to_byte(&mut self, byte: usize) -> EditOutcome {
+    fn select_to_byte(&mut self, byte: usize) -> EditOutcome {
         let target = self.snap_byte(byte);
         if target == self.cursor {
             return EditOutcome::Unchanged;
@@ -941,7 +941,7 @@ impl ComposerDraft {
     /// (Shift+Ctrl+Left / Shift+Alt+Left). Moves the cursor to the word
     /// boundary **without** collapsing the selection anchor, so the highlighted
     /// range grows by a whole word rather than a single grapheme.
-    pub fn select_word_left(&mut self) -> EditOutcome {
+    fn select_word_left(&mut self) -> EditOutcome {
         let target = word_delete_start(&self.text, self.cursor);
         if target == self.cursor {
             return EditOutcome::Unchanged;
@@ -953,7 +953,7 @@ impl ComposerDraft {
     /// Extend the selection to the end of the next word
     /// (Shift+Ctrl+Right / Shift+Alt+Right). Moves the cursor to the word
     /// boundary **without** collapsing the selection anchor.
-    pub fn select_word_right(&mut self) -> EditOutcome {
+    fn select_word_right(&mut self) -> EditOutcome {
         let target = word_delete_end(&self.text, self.cursor);
         if target == self.cursor {
             return EditOutcome::Unchanged;
@@ -986,7 +986,7 @@ impl ComposerDraft {
         EditOutcome::Mutated
     }
 
-    // ── Submit / Cancel ───────────────────────────────────────────────────
+    // ── Submit ────────────────────────────────────────────────────────────
 
     /// Submit exact non-whitespace text and reset the local draft.
     pub fn submit(&mut self) -> ComposerOutcome {
@@ -997,17 +997,6 @@ impl ComposerDraft {
         self.cursor = 0;
         self.selection_anchor = 0;
         ComposerOutcome::Submitted(text)
-    }
-
-    /// Clear the draft without producing portal input.
-    pub fn cancel(&mut self) -> ComposerOutcome {
-        if self.suspended {
-            return ComposerOutcome::Unchanged;
-        }
-        self.text.clear();
-        self.cursor = 0;
-        self.selection_anchor = 0;
-        ComposerOutcome::Cancelled
     }
 
     // ── Internal helpers ──────────────────────────────────────────────────
@@ -1170,7 +1159,7 @@ fn word_delete_end(text: &str, cursor: usize) -> usize {
 
 // ─── ComposerDraftManager ─────────────────────────────────────────────────────
 
-/// Owns the focused local composer and one keyed retained unsent draft.
+/// Owns the focused local composer and each composer's kept unsent draft.
 /// Portal submission is returned directly; local editing never waits for an agent.
 #[derive(Debug, Default)]
 pub struct ComposerDraftManager {
@@ -1187,8 +1176,8 @@ pub struct ComposerDraftManager {
     /// focused node's config and supplies it via `set_focused_placeholder`
     /// immediately afterward.
     focused_placeholder: Option<String>,
-    /// One keyed unsent draft retained alongside the active draft.
-    retained_draft: Option<(SceneId, ComposerDraft)>,
+    /// Unsent drafts of unfocused composers, one per composer node.
+    kept: std::collections::HashMap<SceneId, ComposerDraft>,
     /// Goal column (grapheme count from the logical-line start) preserved across
     /// a run of consecutive vertical caret moves (ArrowUp/ArrowDown), so the
     /// caret tracks the same column when passing through shorter lines — standard
@@ -1219,20 +1208,9 @@ impl ComposerDraftManager {
         Self::default()
     }
 
-    /// Restore only a matching retained draft, adopting current governance.
+    /// Restore this node's kept draft, adopting current governance.
     pub fn on_focus_gained(&mut self, node_id: SceneId, suspended: bool) {
-        let mut draft = if self
-            .retained_draft
-            .as_ref()
-            .is_some_and(|(id, _)| *id == node_id)
-        {
-            self.retained_draft
-                .take()
-                .expect("matching retained draft")
-                .1
-        } else {
-            ComposerDraft::new(DEFAULT_DRAFT_CAP)
-        };
+        let mut draft = self.kept.remove(&node_id).unwrap_or_default();
         draft.set_suspended(suspended);
         self.draft = Some(draft);
         self.focused_node = Some(node_id);
@@ -1250,30 +1228,23 @@ impl ComposerDraftManager {
     /// focused node's placeholder config. No-op in the sense that it does
     /// not validate a composer is actually focused — callers only invoke it
     /// from the focus-gained path.
-    pub fn set_focused_placeholder(&mut self, placeholder: Option<String>) {
+    pub(crate) fn set_focused_placeholder(&mut self, placeholder: Option<String>) {
         self.focused_placeholder = placeholder;
     }
 
     /// The composer-placeholder override for the currently focused composer
     /// node, if one was set via `set_focused_placeholder`. See
     /// `HitRegionNode::composer_placeholder` for the three-state convention.
-    pub fn focused_placeholder(&self) -> Option<String> {
+    pub(crate) fn focused_placeholder(&self) -> Option<String> {
         self.focused_placeholder.clone()
     }
 
-    /// Retain a nonempty draft on blur, replacing the previous retained slot.
-    /// An empty peer does not erase another node's unsent text.
-    pub fn on_focus_lost(&mut self) {
-        if let (Some(node_id), Some(draft)) = (self.focused_node.take(), self.draft.take()) {
-            if !draft.text().is_empty() {
-                self.retained_draft = Some((node_id, draft));
-            } else if self
-                .retained_draft
-                .as_ref()
-                .is_some_and(|(id, _)| *id == node_id)
-            {
-                self.retained_draft = None;
-            }
+    /// Keep a nonempty draft on blur; other composers' drafts are untouched.
+    pub(crate) fn on_focus_lost(&mut self) {
+        if let (Some(node_id), Some(draft)) = (self.focused_node.take(), self.draft.take())
+            && !draft.text().is_empty()
+        {
+            self.kept.insert(node_id, draft);
         }
         self.focused_placeholder = None;
         self.vertical_goal_col = None;
@@ -1283,13 +1254,7 @@ impl ComposerDraftManager {
 
     /// Removed scene nodes must never restore an old draft into a new incarnation.
     pub(crate) fn retain_existing_nodes(&mut self, scene: &tze_hud_scene::SceneGraph) {
-        if self
-            .retained_draft
-            .as_ref()
-            .is_some_and(|(id, _)| !scene.nodes.contains_key(id))
-        {
-            self.retained_draft = None;
-        }
+        self.kept.retain(|id, _| scene.nodes.contains_key(id));
         if self
             .focused_node
             .is_some_and(|id| !scene.nodes.contains_key(&id))
@@ -1337,7 +1302,7 @@ impl ComposerDraftManager {
     /// Returns `EditOutcome::Unchanged` when no composer is focused.
     ///
     /// pointer selection into the runtime-owned draft buffer.
-    pub fn route_pointer_selection(&mut self, anchor: usize, cursor: usize) -> EditOutcome {
+    pub(crate) fn route_pointer_selection(&mut self, anchor: usize, cursor: usize) -> EditOutcome {
         let Some(draft) = self.draft.as_mut() else {
             return EditOutcome::Unchanged;
         };
@@ -1364,7 +1329,6 @@ impl ComposerDraftManager {
     /// - `Space` → insert literal space
     /// - `Enter` / `NumpadEnter` → submit the draft (non-empty, non-whitespace)
     /// - `Ctrl+Enter` / `Shift+Enter` → insert a newline into the draft (multi-line)
-    /// - `Escape` → cancel without portal input
     ///
     /// Returns an independent consumed flag and high-level local outcome.
     /// `consumed = true` means the keystroke was handled by the draft (do NOT
@@ -1390,7 +1354,7 @@ impl ComposerDraftManager {
         };
 
         let enter_key = is_enter_key(key_code, key);
-        let result = match key_code {
+        match key_code {
             "Backspace" => {
                 let o = if ctrl || alt {
                     draft.word_backspace()
@@ -1503,7 +1467,6 @@ impl ComposerDraftManager {
                 }
                 (true, draft.submit())
             }
-            "Escape" => (true, draft.cancel()),
             "KeyV" if ctrl && !alt => {
                 // Ctrl+V (paste shortcut): consume the KeyDown so it is never
                 // forwarded to the agent as a raw KeyDownEvent while a composer
@@ -1539,18 +1502,7 @@ impl ComposerDraftManager {
                 // to agent if needed).
                 (false, ComposerOutcome::Unchanged)
             }
-        };
-        if matches!(
-            &result.1,
-            ComposerOutcome::Submitted(_) | ComposerOutcome::Cancelled
-        ) && self
-            .retained_draft
-            .as_ref()
-            .is_some_and(|(id, _)| Some(*id) == self.focused_node)
-        {
-            self.retained_draft = None;
         }
-        result
     }
 
     /// Called when safe mode activates or deactivates.
@@ -1567,7 +1519,7 @@ impl ComposerDraftManager {
     /// from the compositor (before dispatching an ArrowUp/ArrowDown). `None`
     /// clears it (no multi-line composer active), reverting to hard-newline
     /// vertical movement.
-    pub fn set_visual_layout(&mut self, layout: Option<ComposerVisualLayout>) {
+    pub(crate) fn set_visual_layout(&mut self, layout: Option<ComposerVisualLayout>) {
         self.latest_visual_layout = layout;
     }
 
@@ -1577,13 +1529,21 @@ impl ComposerDraftManager {
     }
 
     /// Returns the node_id of the currently focused composer region, if any.
-    pub fn focused_node(&self) -> Option<SceneId> {
+    pub(crate) fn focused_node(&self) -> Option<SceneId> {
         self.focused_node
     }
 
     /// True when a composer region is currently focused (draft buffer present).
     pub fn is_active(&self) -> bool {
         self.draft.is_some()
+    }
+
+    /// Every unsent draft by composer node: the focused one and each kept one.
+    pub fn drafts(&self) -> impl Iterator<Item = (SceneId, &ComposerDraft)> {
+        let focused = self.focused_node.zip(self.draft.as_ref());
+        focused
+            .into_iter()
+            .chain(self.kept.iter().map(|(id, d)| (*id, d)))
     }
 }
 
@@ -1809,7 +1769,7 @@ mod tests {
         assert_eq!(draft.text(), "hello");
     }
 
-    // ─── Submit / Cancel ──────────────────────────────────────────────────
+    // ─── Submit ───────────────────────────────────────────────────────────
 
     /// submit-content fidelity — submitted text equals local buffer.
     #[test]
@@ -1820,14 +1780,6 @@ mod tests {
         assert_eq!(sub, "send me");
         assert_eq!(draft.text(), "");
         assert_eq!(draft.cursor(), 0);
-    }
-
-    #[test]
-    fn cancel_clears_without_submission() {
-        let mut draft = ComposerDraft::new(DEFAULT_DRAFT_CAP);
-        draft.insert("typed stuff");
-        assert_eq!(draft.cancel(), ComposerOutcome::Cancelled);
-        assert_eq!(draft.text(), "");
     }
 
     // ─── Governance: safe-mode suspension ────────────────────────────────
@@ -3141,22 +3093,17 @@ mod tests {
             "a different composer node must not inherit node_a's draft"
         );
 
-        // An empty peer must leave the one retained draft alone.
-        mgr.on_focus_lost();
-        mgr.on_focus_gained(node_a, false);
-        assert_eq!(mgr.draft().unwrap().text(), "unsent reply");
-        mgr.on_focus_lost();
-        mgr.on_focus_gained(node_b, false);
+        // Each composer keeps its own draft: a peer's draft never displaces it.
         mgr.route_character("new peer draft");
         mgr.on_focus_lost();
+        mgr.on_focus_lost(); // repeated blur cannot erase a kept draft
+        let mut kept: Vec<_> = mgr.drafts().map(|(id, d)| (id, d.text().len())).collect();
+        kept.sort_by_key(|&(_, len)| len);
+        assert_eq!(kept, [(node_a, 12), (node_b, 14)]);
         mgr.on_focus_gained(node_a, false);
-        assert_eq!(
-            mgr.draft().unwrap().text(),
-            "",
-            "nonempty peer blur replaces the single retained slot"
-        );
+        assert_eq!(mgr.draft().unwrap().text(), "unsent reply");
+        assert_eq!(mgr.drafts().count(), 2, "the focused draft is listed once");
         mgr.on_focus_lost();
-        mgr.on_focus_lost(); // repeated blur cannot erase B's slot
         mgr.on_focus_gained(node_b, true);
         mgr.set_focused_placeholder(Some("current B hint".into()));
         assert_eq!(mgr.draft().unwrap().text(), "new peer draft");
@@ -3178,12 +3125,10 @@ mod tests {
             None,
             "regain uses the new node config"
         );
-        // Empty matching blur clears a stale same-key slot, never a peer slot.
-        mgr.retained_draft = Some((node_b, ComposerDraft::default()));
-        mgr.route_key_down("Escape", "Escape", false, false, false);
-        assert!(mgr.retained_draft.is_none());
-        mgr.on_focus_lost();
-        assert!(mgr.retained_draft.is_none());
+        // Escape is the runtime's: the draft neither consumes nor changes on it.
+        let key = mgr.route_key_down("Escape", "Escape", false, false, false);
+        assert_eq!(key, (false, ComposerOutcome::Unchanged));
+        assert_eq!(mgr.draft().unwrap().text(), "new peer draft");
     }
 
     /// A submitted draft is empty and must NOT be resurrected on re-focus.
@@ -3195,29 +3140,16 @@ mod tests {
         for ch in "send me".chars() {
             mgr.route_character(&ch.to_string());
         }
-        mgr.retained_draft = Some((node_id, ComposerDraft::default()));
         // Submit, then blur, then re-focus — must be a clean empty draft.
         let (_, batch) = mgr.route_key_down("Enter", "Enter", false, false, false);
         assert_eq!(batch, ComposerOutcome::Submitted("send me".into()));
-        assert!(mgr.retained_draft.is_none());
         mgr.on_focus_lost();
+        assert_eq!(mgr.drafts().count(), 0, "an empty draft is not kept");
         mgr.on_focus_gained(node_id, false);
         assert_eq!(
             mgr.draft().expect("draft").text(),
             "",
             "a submitted draft must not be restored on re-focus"
-        );
-        mgr.route_character("cancel me");
-        assert_eq!(
-            mgr.route_key_down("Escape", "Escape", false, false, false),
-            (true, ComposerOutcome::Cancelled)
-        );
-        mgr.on_focus_lost();
-        mgr.on_focus_gained(node_id, false);
-        assert_eq!(
-            mgr.draft().unwrap().text(),
-            "",
-            "cancelled text cannot resurrect"
         );
     }
 

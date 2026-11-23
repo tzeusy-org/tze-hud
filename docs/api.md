@@ -37,7 +37,11 @@ attaches afresh and reports `reattached: true`.
 
 Standard MCP over JSON-RPC 2.0 (HTTP POST): `initialize`,
 `notifications/initialized` (no response), `tools/list`, and `tools/call`.
-`ping` answers `{}`. There are no other methods. A result is one text content block of compact
+`ping` answers `{}`. The paired stdio adapter also sends the internal
+`notifications/tze/session_state` on its live scope for `/admin/status`.
+The runtime ignores other `notifications/*`; the paired stdio adapter consumes
+`notifications/initialized` locally and does not forward it, so the runtime
+must not require it. A result is one text content block of compact
 JSON. Agents never send geometry, styling, or z-order. Times are
 milliseconds, named `*_ms`, everywhere.
 
@@ -48,7 +52,7 @@ milliseconds, named `*_ms`, everywhere.
   {"s":"zone:subtitle","accepts":"text","one":true},
   {"s":"zone:notification-area","accepts":"notification","max":5,"held":true,"expires_in_ms":4200},
   {"s":"widget:gauge","params":{"level":"number 0..1","label":"string<=12"}},
-  {"s":"portal:claude-main","state":"attached","pending_input":1}
+  {"s":"portal:claude-main","state":"attached","pending_input":1,"unread":3}
 ]}
 ```
 
@@ -65,11 +69,17 @@ card trimmed. The rule is the same on MCP and gRPC admission. Regular
 notification stacks present unanswered questions first, newest-first within
 the question and other-card groups, so a retained question stays reachable
 during a burst. Answered, expired and URL-only cards have no question priority;
-alert banners keep their severity ordering. `busy:true` appears only when
-another agent currently occupies a single-occupant zone.
+alert banners keep their severity ordering. A portal entry carries
+`unread:N` when the viewer has N output units it has not yet scrolled to; it
+is omitted at zero. Check it before re-notifying. `busy:true` appears only
+when another agent currently occupies a single-occupant zone.
 MCP accepts lists omit `static_image`: resource upload is on gRPC. Strings with
 an explicit positive byte limit appear as `string<=N`; others as `string`. Numeric discovery hints use JSON `number` with the
 declared bounds (for example `number 0..1`); admission still enforces finite f32.
+A whole-number count (`f32_integer = true` in the manifest) appears as
+`integer lo..hi` (for example `"step":"integer 0..12"`). `2` and `2.0` are the
+same count; a fraction is refused on both planes, never floored, and every
+refusal of such a count reads `<widget>.<param> must be an integer in lo..hi`.
 Widget discovery includes only parameters with `audience = "model"` (the
 manifest default). `owner` and `runtime` parameters remain declared for local
 configuration/rendering but are rejected atomically on both agent transports.
@@ -81,7 +91,7 @@ and `hud_clear` have `idempotentHint:true`; publish/input make neither claim.
 **`hud_publish`** `{surface*, content | params, ttl_ms?, delay_ms?, key?, wait_ms?, status?, expects_reply?, display_name?}`
 
 For a one-shot notification with actions, add `wait_ms` (default 0, clamped to
-30000). The card is admitted and rendering wakes before the call waits; the
+55000). The card is admitted and rendering wakes before the call waits; the
 absolute wait includes admission and `delay_ms`. An answer returns in this call
 as `action:"<callback_id>"`; a human × adds `action:"dismiss",kind:"dismiss"`.
 It is consumed only after the reply is encoded and needs no ACK. A cancelled
@@ -92,8 +102,9 @@ answer. Acceptance uses the scene's monotonic clock: an answer accepted before
 this deadline stays reserved even if the request resumes later; a press at or
 after the deadline goes to ordinary input. HTTPS link presses do not fabricate
 a callback answer. Post-admission scene acquisition uses the remaining wait
-window; contention at its end returns the existing bounded `INTERNAL` error
-with a `retry hud_input` hint, releasing the reservation without consuming input.
+window, or 500 ms when that is longer; contention past it returns the existing
+bounded `INTERNAL` error with a `retry hud_input` hint, releasing the
+reservation without consuming input.
 
 An unanswered card removed during the wait returns `gone:"expired"`,
 `"replaced"` (same key), `"displaced"` (contention), or `"cleared"`. These endings
@@ -108,10 +119,28 @@ with the same cancellation and idle semantics as a `hud_input` wait.
 
 - Zone: `content` is a string, or a typed object for structured zones
   (`notification` with optional `title`, `body`, integer `urgency` 0–3
-  (default 1), and optional `actions: [{label, callback_id|url}]`). Each
-  action has exactly one target. MCP requires a non-empty label; a callback string must be
-  non-empty when supplied. Supplying both target members (even empty) or neither rejects with
-  `INVALID_ARGUMENT` and hint `action needs callback_id or url, not both`.
+  (default 1), and optional `actions: [{label, callback_id?|url, role?}]`). Each
+  action has one target. MCP requires a non-empty label; an MCP action with
+  neither member is a callback whose id is its label, byte for byte, and its
+  answer is that label. A callback string must be non-empty when supplied.
+  Supplying both target members (even empty) rejects with `INVALID_ARGUMENT`
+  and hint `action needs callback_id or url, not both`. A label-only action
+  whose label equals another action's callback id on the same card rejects
+  with hint `notification.actions[<i>] label repeats actions[<j>]; add a
+  callback_id`; a label-only `dismiss` rejects with
+  `notification.actions[<i>] label dismiss needs a callback_id`. Two explicit
+  equal ids stay accepted, and a label shared with a URL action is accepted.
+  `role` is optional and MCP-only: `"destructive"` marks an irreversible
+  callback answer (explicit or label-only). Any other value rejects with
+  `notification.actions[<i>].role must be destructive`; on a `url` action,
+  `notification.actions[<i>].role needs a callback action`. A role is meaning,
+  not styling: the theme draws a destructive action's label and outline in
+  `color.error` (on caution and error cards the label keeps that tone's text
+  color and the outline is the cue), never filled at rest. The **primary**
+  action is the first action that is not destructive: it is the filled button
+  and the answer chord's initial focus, so put the answer you recommend first.
+  It is never taken automatically. A card whose actions are all destructive
+  has no primary. gRPC actions carry no role.
   An empty URL gets `action url must be https`; an empty callback retains
   its existing non-empty argument error. gRPC plain-string defaults map empty
   targets to absence: both empty or both non-empty reject; existing gRPC label
@@ -147,7 +176,37 @@ with the same cancellation and idle semantics as a `hud_input` wait.
   Notification TTL belongs at the publish's top-level `ttl_ms`; an inner
   `content.ttl_ms` is rejected with a hint to move it.
   Activating a callback action queues its unchanged `hud_input` callback once and
-  immediately disables all controls on that exact publication. Runtime identity
+  immediately disables all controls on that exact publication. A destructive
+  action activates only after a press (pointer, Enter/Space, or its chord
+  digit) is held for `notification.action.hold.ms` (default 600, integer
+  0–3000; 0 turns the hold off): a `color.error.container` fill sweeps across
+  the button (shown at once when Windows animations are off; on a card whose
+  fill it would not stand out from at 3:1, such as the error card, the pair
+  inverts to a `color.on_error.container` sweep under a
+  `color.error.container` label; only the swept part of the label takes the
+  sweep's label colour, the rest keeps its resting colour) and the action
+  fires once when the hold completes, without waiting for release; an armed
+  `wait_ms` returns it then. Releasing early, the pointer leaving the button,
+  capture loss, key-up, Esc or another key, HUD keyboard-focus loss or safe
+  mode ends the hold with no callback and the fill drains over
+  `motion.state.ms`; hide-all, or the card being replaced, cleared or
+  expiring, ends it with no callback and no drain. Key repeat is ignored. Frames are drawn only during a hold or its drain.
+  A card an agent puts under a resting pointer (published there, shifted
+  there by another card's publish, trim or expiry, or replaced by key with
+  different action labels) ignores pointer presses on its actions and × for
+  `notification.press_guard.ms` (default 400, integer 0–3000; 0 turns it
+  off; Windows animations off leave it unchanged) and until its enter motion
+  ends: no pressed fill, answer, dismiss, link launch, hold or queued item,
+  and nothing tells the agent. While guarded its controls show no hover fill
+  and the cursor stays the arrow; when the guard ends under a still pointer
+  one wake brings both back. A dropped press restarts the interval, but a
+  guard never lasts more than five intervals (2 s at the default) from when
+  it began. Each agent-caused shift starts a fresh guard, so in a busy stack
+  a card under a resting pointer can be re-guarded; moving the pointer off
+  the card ends a guard, and the keyboard (answer chord, Tab, Enter/Space) is
+  never guarded. A pointer that moved onto a card, the re-layout after the
+  owner's own answer or ×, and a same-key update that keeps the action
+  labels start no guard. Runtime identity
   keeps same-tick publications and replacements independent without changing
   their wall-clock timestamps or TTLs. The chosen button keeps its pressed fill during the finite `motion.exit.ms` fade
   (`motion.exit.easing`); zero exit duration removes it instantly. Explicit
@@ -157,12 +216,18 @@ with the same cancellation and idle semantics as a `hud_input` wait.
   answered card's exit. Waiting cards add no timer, countdown or periodic
   reshape/repaint; existing Stack TTL fade is the only waiting time cue.
   Bare Tab/Shift+Tab joins visible notification controls at the content focus
-  cycle's wrap boundary, in dismiss-then-publication-action order. HUD keyboard
+  cycle's wrap boundary in the order ×, Go to when shown, then publisher
+  actions. Cards
+  placed on several displays are visited in the one stack order they would
+  draw in on a single display (unanswered questions first, newest first);
+  stepping onto a card on another display moves keyboard focus to that
+  display's overlay window. HUD keyboard
   focus loss to another app clears card focus even when the pointer is over
   another overlay; moving keyboard focus between HUD monitors preserves it.
-  Enter/Space uses the same exact-publication activation as pointer release. Publication
-  never activates an OS window or steals editor focus; Escape, completion and
-  removal release local card focus. Panel and shell routing retain precedence.
+  Enter/Space uses the same exact-publication activation as pointer release.
+  Publication never activates an OS window or steals editor focus. Only the
+  owner's press on Go to may activate one matching window. Escape, completion
+  and removal release local card focus. Panel and shell routing retain precedence.
   Link actions use that same pointer/keyboard operation and exact live
   publication plus zero-based action index. A link leaves the card, lifetime,
   hold and controls in place (ordinary Tab focus also stays): no callback, readiness event, human-X or
@@ -179,6 +244,39 @@ with the same cancellation and idle semantics as a `hud_input` wait.
   color and scale; layout reserves its shaped width separately from the
   clipped label. Browser foreground and card-stays behavior remain a
   separate Windows owner acceptance check.
+  Press feedback is local: a counted press shows "Opening…" in the
+  button's label box within a frame, then "Opened" or "Couldn't open" (in
+  `color.error`) for `link.feedback.ms` (default 1500), then the label
+  again. A worker that cannot start shows "Couldn't open" at once and does
+  not count. "Opened" means Windows accepted the request, not that the page
+  loaded. The worker reports once through a completion flag and one wake; a
+  handoff that never returns keeps "Opening…" without a timer. A refused
+  repeat inside 2 s changes nothing, the newest press replaces older
+  feedback, removing the card clears it, and keyboard activation (Enter,
+  Space, an answer-chord digit) shows the same states. Nothing reaches the
+  agent.
+- **Go to session (Windows).** A card's caption row gains **Go to** if a
+  one-shot lookup at presentation finds exactly one visible, unowned,
+  uncloaked, non-tool top-level window from `[runtime].go_to_apps`. The
+  caption uses the scoped session's `display_name` or folder label at publish
+  time. Matching ignores case and HUD-added duplicate suffixes and requires
+  the full label or phrase in the window title, bounded by title ends or
+  characters outside `[A-Za-z0-9._-]`. Unscoped or gRPC cards, alert banners
+  without a caption row and labels cut at 32 bytes have no Go to control.
+  The card presents immediately and the result stays fixed until replacement.
+  A click or Enter/Space on the focused control repeats the lookup. One
+  matched window can be foregrounded and restored from minimized to its own
+  placement. The card, its TTL and its actions stay, and success clears any
+  saved foreground for the card keyboard visit. Digits still pick publisher
+  actions. A missing or ambiguous target or a refused switch shows a local
+  cue for `notification.goto.feedback.ms` (default 1200), with one attempt
+  per card every two monotonic seconds. Activation sends no `hud_input` event.
+  Windows Terminal exposes the active tab's title. A tmux session can raise
+  its matching terminal window and cannot select a pane. A session with no
+  visible window on the HUD machine has no match. A local SSH terminal can
+  match when its title carries the label. Set
+  `CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1` to keep a shell's folder-based
+  title, which also turns off Claude Code's conversation titles and status glyph.
 - `zone:ambient-background` draws its fill or image at most
   `opacity.ambient.max` (0.9 by default) opaque, so the desktop under the
   overlay always shows through.
@@ -190,6 +288,12 @@ with the same cancellation and idle semantics as a `hud_input` wait.
   `info|warning|error`: info uses the owner fill or `color.primary`, warning
   uses `color.caution`, error uses `color.error`; the gauge colors its ring
   arc and card hairline by severity.
+  For LatestWins, Stack and MergeByKey, omitted model fields in a partial
+  update retain values from the same namespace, exact key, lease and preclaim
+  origin; supplied fields win. The stored publication retains them too, so
+  occupancy and later peer cleanup restore the same values. Other identities
+  do not seed that record from shared instance values. Replace keeps only the
+  latest ordinary model map; the deadline snapshot rules below remain separate.
   Unknown audience values reject the bundle with its name, parameter and
   allowed audiences. Hidden parameter errors name owner-set/runtime-set;
   `fill_color` errors direct agents to severity. Enum errors list allowed values;
@@ -218,11 +322,12 @@ with the same cancellation and idle semantics as a `hud_input` wait.
   exit duration/curve without extending authoritative expiry.
   Shipped bundles also include `countdown` (`ends_in_ms`, `label<=24`,
   `severity`), `kpi` (`value<=12`, `label<=24`, `trend=up|down|flat`,
-  `severity`), and `stepper` (`step` 0..12, `total` 1..12,
-  `state=active|blocked|done`, `label<=24`). Production config instantiates
-  only `main-countdown` from these additions; KPI and stepper are available
-  for owner configuration. Stepper dots floor fractional steps and clamp to
-  total; the current dot uses primary/caution/success for active/blocked/done.
+  `severity`), `elapsed` (`started_ms_ago`, `label<=24`, `severity`: the
+  countdown's card, counting up), and `stepper` (integer `step` 0..12,
+  integer `total` 1..12, `state=active|blocked|done`, `label<=24`). Production
+  config instantiates only `main-countdown` from these additions; elapsed, KPI
+  and stepper are available for owner configuration. A fractional count is rejected; a step above total
+  fills every dot; the current dot uses primary/caution/success for active/blocked/done.
 
   `deadline` appears in discovery as `deadline<=24h`. Send integer relative
   milliseconds 0..86400000 (`ends_in_ms` in the countdown bundle); gRPC uses
@@ -232,15 +337,30 @@ with the same cancellation and idle semantics as a `hud_input` wait.
   presents, including a late delayed drain. A label-only republish under the
   same publisher/key preserves it; explicitly resending the duration resets it.
   Remaining time rounds up: `125 min` → `2 h 05`, `30 min` → `30 min`,
-  `90 s` → `1:30`. Only a visible published countdown schedules its next
-  display change: minute granularity above two minutes, second granularity
-  in the last two minutes. At `0:00` it retains severity and stops waking.
-  Hidden, cleared, absent and safe-mode countdowns schedule no countdown wake.
+  `90 s` → `1:30`.
+
+  A deadline declared `deadline_counts = "up"` appears as `elapsed<=24h`: the
+  same integer milliseconds 0..86400000 (gRPC `deadline_ms`), read as "started
+  this long ago", with the same snapshot, republish and reset rules and that
+  bound in every refusal. One publish such as
+  `{"surface":"widget:<instance>","params":{"started_ms_ago":0,"label":"Tests"}}`
+  keeps running with no further call. Elapsed time rounds down, so it never
+  shows time not yet passed: `0:00`…`1:59` (each second), `2 min`…`59 min`,
+  `1 h 00`…`23 h 59` (each minute), then `1 d 00 h` onward (each hour); at
+  `99 d 23 h` it holds and stops waking, and a backwards clock step shows
+  `0:00`.
+
+  Only a visible published countdown or elapsed timer schedules its next
+  display change: for a countdown, minute granularity above two minutes and
+  second granularity in the last two minutes; at `0:00` it retains severity
+  and stops waking. Hidden, cleared, absent and safe-mode countdowns and
+  elapsed timers schedule no wake; showing or resuming draws the current
+  time once.
   Safe mode freezes widget publication TTL and the owner's auto-clear allowance,
   while the absolute countdown keeps passing; resume displays current wall time.
   An already accepted delayed widget stays pending through safe mode, without
-  an overdue retry wake. Its whole batch presents after resume; its deadline
-  snapshot and relative TTL start at that actual presentation.
+  an overdue retry wake. The queued publication presents after resume. Its
+  deadline snapshot and relative TTL start at that presentation.
   Hover remains runtime-local. SVG `threshold` bindings compare f32 `>= k`
   into opacity 0/1; optional `attr_min`/`attr_max` in 0..1 select below/above
   outputs for mutually exclusive dot branches, without an expression language.
@@ -250,7 +370,11 @@ with the same cancellation and idle semantics as a `hud_input` wait.
   (`active` or `degraded`), and `expects_reply` arms the composer. `key`
   replaces the newest output
   with the same key (progress lines). Portals are per agent: another agent's
-  `portal:<id>` with the same id is a separate portal. Fresh expanded portals
+  `portal:<id>` with the same id is a separate portal. Within one agent, a
+  portal id belongs to the session that attached it until it detaches or the
+  runtime reclaims it; another session's publish is `NOT_ALLOWED` naming the
+  owner's label, and attaching after a reclaim reports `reattached: false`
+  (it is that session's first attachment). Fresh expanded portals
   request 1440×1080 before fitting each dimension to the display, subject to
   the existing scaled legibility minima. Fitting adds reading room at the same
   base font; compact portals remain 420×96. Existing live geometry and saved
@@ -271,7 +395,10 @@ with the same cancellation and idle semantics as a `hud_input` wait.
   moved within the system drag threshold (`SM_CXDRAG`/`SM_CYDRAG`; 4 px off
   Windows), through the same browser handoff as card links, once
   per 2 s per link; a double-click opens it once and selects nothing, and a
-  press-drag on a link selects instead. Dragging selects text (double-click a
+  press-drag on a link selects instead. While the pressed link is hovered or
+  focused, its hint pill shows the card links' press feedback ("Opening…",
+  then "Opened" or "Couldn't open") in place of the host; "Opened" means
+  Windows accepted the request, not that the page loaded. Dragging selects text (double-click a
   word, triple-click a paragraph); the selection keeps its bytes across
   appends and head trims (it clears once its text is trimmed or rewritten)
   and stops follow-tail until it is cleared. Ctrl+C copies the selection as
@@ -280,8 +407,19 @@ with the same cancellation and idle semantics as a `hud_input` wait.
   shows a Copy button that copies the block. Tab from a focused composer moves
   through visible links and Copy buttons (Enter/Space activates, Shift+Tab off
   the first returns to the composer); the focused stop survives new output
-  while its text and target remain. None of this reaches the agent: no
-  `hud_input` item, no MCP or gRPC change.
+  while its text and target remain. OUTPUT reading focus (hud-ohgc9.4) means
+  the HUD holds the keyboard for a portal, the caret is not in its composer,
+  and an OUTPUT selection exists, a link or Copy stop is focused, or the
+  portal tile is focused. An OUTPUT selection takes reading focus from the
+  caret, so Home and End scroll OUTPUT until the selection is cleared. With
+  reading focus, Home scrolls OUTPUT to its first retained line, End to the
+  tail (as jump-to-latest does), and PageDown/Space and PageUp/Shift+Space
+  page down and up by one keyboard page. Space on a focused link or Copy stop
+  still activates it, paging keeps the focused stop or selection, and a key
+  that moves nothing draws no frame. With the caret in the composer these
+  remain text keys. With only the portal tile focused, PageUp/PageDown also
+  still deliver the tile's existing ScrollUp/ScrollDown command; otherwise
+  none of this reaches the agent: no `hud_input` item, no MCP or gRPC change.
 - Omitted zone `ttl_ms` uses 60000, except a notification with actions uses
   the owner's live `[runtime] answer_window_ms` (default 60000). An explicit
   `ttl_ms` always wins, including 0 (held until cleared); the owner window is
@@ -304,16 +442,34 @@ with the same cancellation and idle semantics as a `hud_input` wait.
 - Returns `{"ok":true,"expires_in_ms":8000}` when a TTL is set. Portal
   publishes also return `reattached` (true when this call replaces a
   runtime-reclaimed portal) and `pending_input` (queued replies). First attach,
-  live update, and attach after explicit clear report false. The response
+  live update, and attach after explicit clear report false. A portal publish
+  adds `unread:N` when N output units the viewer had not reached existed
+  before this publish; it is omitted at zero. The response
   describes the completed publish; it does not echo content.
-- `clipped` names text the renderer would cut, measured at admission with the
-  drawing shaper, current design tokens and display geometry. Notifications
+- `clipped` reports text the renderer would cut, measured at admission with
+  the drawing shaper, current design tokens and display geometry, as an
+  object from field name to the number of characters (Unicode scalar values)
+  of the sent string that are drawn, not counting the ellipsis:
+  `{"clipped":{"body":58},"expires_in_ms":60000,"ok":true}`. Notifications
   report any of `"title"`, `"body"` and `"actions"` (a label wider than its
-  button); widgets report the string parameters set in this call whose drawn
-  text overflows the widget. The field is omitted when everything fits, so
-  replies are unchanged byte for byte, and never appears for stream-text zones
-  or portals. It also rides on wait replies (`action`, `gone`, deadline). React
-  by shortening, or by moving detail behind a link action.
+  button; the count is the smallest among the cut labels, and stops before a
+  label's first line break); widgets report the string parameters set in this
+  call whose drawn text overflows the widget; a status-bar publish reports
+  each entry it sets whose value is cut, by entry key, measured against the
+  merged bar as it draws right after this publish (0 when the full bar does
+  not draw that entry; removals and values that fit report nothing; a cut
+  entry key is not reported). The first N characters of what
+  was sent always fit; a rewrite of N characters usually fits, but glyph
+  widths differ, so it may report again. The field is omitted when everything
+  fits, so replies are unchanged byte for byte, and never appears for
+  stream-text zones or portals. It also rides on wait replies (`action`,
+  `gone`, deadline). React by shortening to the count, or by moving detail
+  behind a link action. A HUD built before this shape returns a list of the
+  cut field names instead.
+
+  An immediate notification uses the bounds and scale of the display where
+  it draws at admission. Delayed notifications use the notification zone's
+  display for this estimate because their placement is decided at presentation.
 
 For example, publish a notification whose button arrives at `hud_input` as
 `{"action":"approve","s":"zone:notification-area",...}`:
@@ -338,6 +494,14 @@ the original deadline), and 0 holds until `hud_clear`. A delayed publish
 that has not presented yet counts as held: its new expiry counts from
 presentation. A visible
 notification's fade moves with it; a held one never fades.
+Positive zone/widget Hold TTLs use saturating millisecond conversion and absolute
+expiry arithmetic across the admitted `u64` range; they cannot wrap to a short
+lifetime. The widget owner's auto-clear limit still applies.
+While agents are paused, fresh MCP and gRPC Hold requests return
+`SAFE_MODE_ACTIVE` before changing active or delayed content, expiry or leases.
+A request waiting for the scene lock rechecks pause when it acquires it;
+resuming restores ordinary Hold behavior. Replaying an already completed gRPC
+sequence still returns its cached result without applying another Hold.
 On a portal, `ttl_ms` keeps it (and its transcript) attached for that long,
 or until `hud_clear` when 0, even with no other calls. Without a hold, a
 portal is degraded after 30 s with no publish, poll, or hold, and reclaimed
@@ -347,9 +511,10 @@ portal is degraded after 30 s with no publish, poll, or hold, and reclaimed
 instance, or a portal (detach). With a nonempty key, it clears only that
 publisher's matching notification in a notification-capable zone, including
 matching delayed notification publishes. Sibling keys, foreign publishers and
-nonnotification content in mixed zones or scheduled batches survive. A missing
-match succeeds; emptied batches leave no wake deadline. Missing or empty keys
-retain clear-all-own behavior, including the caller's delayed publishes.
+nonnotification content in mixed zones or other scheduled publications survive.
+A missing match succeeds. Cancelled publications leave no wake deadline.
+Missing or empty keys clear all of the caller's content on the surface,
+including delayed publications.
 The same exact 256-byte key bound applies before mutation. Nonempty keys on
 widget, portal or nonnotification-zone clears return `INVALID_ARGUMENT`.
 The gRPC `Hold` and `Clear` behave the same on zones. An internal scene
@@ -392,16 +557,18 @@ The gRPC `Hold` and `Clear` behave the same on zones. An internal scene
   `max_items` limits the result and `remaining` reports the retained backlog;
   zero returns the backlog without consuming it. Notification FIFO items precede
   portal replies in their existing chronological order.
-- `wait_ms` defaults to 0 and caps at 30000. The caller's armed readiness wait
+- `wait_ms` defaults to 0 and caps at 55000. The caller's armed readiness wait
   wakes on committed input and uses one absolute deadline with a final queue
   check. It neither polls every 150 ms nor changes the stdio adapter's 60 s cap.
   A finite active poll protects only its agent from idle degradation, including
   first attachment; completion/cancellation releases ownership without a future
   heartbeat. Explicit upstream loss, reclaim, holds and input TTL still apply.
-- Acquiring the scene or portal Hub waits within the same request deadline.
+- Acquiring the scene or portal Hub waits within the same request deadline,
+  or 500 ms from the attempt when that is later, so a poll with no `wait_ms`
+  or an ACK outlasts a transient holder (a frame turn) instead of failing.
   A contended Hub waits cooperatively without blocking the async executor;
-  ordinary empty input waits remain event-driven. If contention exhausts the
-  deadline, the call can return `INTERNAL` with `input state busy; retry hud_input`.
+  ordinary empty input waits remain event-driven. If contention outlasts that
+  bound, the call can return `INTERNAL` with `input state busy; retry hud_input`.
   Repeating the same ACK is safe:
   acknowledgements are idempotent and unacknowledged input keeps its stable id.
   The production `poc_demo` client retries only this exact typed input error,
@@ -490,6 +657,46 @@ agents until one is paired.
   and `hud_surfaces` lists only allowed surfaces.
 - An agent has whatever the allowlist says. There is no capability
   negotiation and no resident principal.
+- **Sessions.** `initialize` opens an MCP session: the response carries an
+  `Mcp-Session-Id` header (the result body is unchanged), and calls that send
+  it back act within that session. Each session of an agent owns its own
+  content, holdings, portals and input: `hud_input` returns and ACKs only its
+  items and `remaining` counts only its backlog; a keyless `hud_clear` clears
+  only its content; `hud_surfaces` marks `held` only for its holdings, lists
+  only its portals (with their `unread`), and shows another session's content in a single-occupant
+  zone as `busy`; a notification `key` names a slot per session; answers,
+  `wait_ms` waits and displaced receipts go to the publishing session; idle
+  portal liveness counts per session. Calls without the header are the
+  agent's one unscoped caller and behave as before among themselves (scripts,
+  gRPC publications); they are a session of their own toward scoped ones.
+  Unchanged per agent: the allowlist, budgets (a stack zone's publisher cap
+  counts the whole agent), and every human override (Clear, Hide, safe mode,
+  unpair act on all sessions). An optional label rides in `initialize`
+  `params._meta["tze-hud/label"]`, outside model context: the runtime strips
+  control characters, cuts it to 32 bytes on a character boundary (nothing
+  left means no label) and suffixes a duplicate live label with the lowest
+  free ` (2)`, ` (3)`. A labeled session's notification cards draw the label
+  as one ellipsized caption line above the title, in the body type role and
+  secondary text colour; the card grows by that line and the text column,
+  `clipped` counts and actions below are unchanged. A card keeps the label it
+  was published under; unscoped and unlabeled cards, and alert banners, draw
+  no caption. A
+  session's portal header shows its label until a `display_name` names it,
+  and `display_name` on a session's zone publish replaces its label for that
+  card and later ones (unscoped zone and all widget publishes still refuse
+  `display_name`). `DELETE /mcp` with the header ends the session as an
+  explicit release (`202`): its zone and widget content, delayed publishes
+  and portals clear, its un-ACKed input is discarded, and its armed waits
+  return at once (`hud_input` with its deadline reply, a `wait_ms` publish
+  with `"gone":"cleared"`). A crashed client sends nothing; its content
+  follows the ordinary TTL and portal idle rules. An unknown or ended id gets
+  a bare `404` before anything runs; the client re-initializes. An agent
+  holds at most 64 sessions; opening another releases the least-recently-
+  called one, preferring one with nothing held, as on `DELETE`. Session
+  start and end are logged, and `/admin/status` `sessions` lists each live
+  one as `{agent, label, holdings}`. A script that calls `initialize` but
+  never sends the header back opens a session it never uses; it shows there
+  unlabeled with no holdings, and the bound releases such sessions first.
 - `admin` is an operator entry, outside the model surface: it opens
   `GET /admin/status`, `GET /admin/logs`, and `GET /admin/screenshot` on the
   MCP port, and `*` does not grant it. `/admin/status` includes `tailnet_inbound` (`state`: `allowed`, `blocked`, `unknown`, `not_applicable`; `reason`, `rule` and `fix` when `blocked`; `error` when `unknown`): whether Windows Firewall lets remote agents reach the tailnet bind, and `safe_mode_hotkey`, `panel_hotkey`, `pairing_hotkey`, `answer_hotkey` and `hide_hotkey`
@@ -500,8 +707,11 @@ agents until one is paired.
   This policy-derived result is cached for five seconds, not a network probe.
   `/admin/status` `idle_since_ms` is the time since the last presented frame
   (since start before the first); a growing value means the HUD has settled.
-  A focused composer's caret blink presents about every 530 ms, so while a
-  composer has focus treat `idle_since_ms >= 300` as settled.
+  A focused composer's caret blinks at the Windows caret blink rate (530 ms off Windows), so while a
+  composer has focus treat `idle_since_ms >= 300` as settled; with Windows caret blinking off the caret is steady and presents nothing.
+  `os_prefs` is `{text_scale, caret_blink_ms}`, the Windows text size and
+  caret blink half-period (`0` = blinking off) the HUD is following
+  ([Windows preferences](#design-tokens-and-themes)); `null` without a config.
   `GET /admin/status?cpu=0` answers at once with `cpu_pct_2s` null instead of
   sampling CPU for 2 s, for harnesses that poll status.
   The additive `holdings` and `warnings` fields contain **admin-only,
@@ -584,27 +794,39 @@ agents until one is paired.
   cursor marker; `at_tail`
   is the follow-tail state new output obeys) and `input` `{at_tail,
   draft_chars}`; the visible lines and `input.at_tail` are `null` while their
-  document is being measured. Only the focused
-  composer's draft length is reported, never its text. It is computed per
+  document is being measured. The composer's draft length is reported,
+  whether it is focused or kept unfocused, never its text. It is computed per
   request; an idle HUD does no extra work.
   `notifications` and `widgets` share that single bounded scene acquisition:
   both are `null` before the windowed runtime starts or after 100 ms of scene
   contention, otherwise arrays (empty when nothing was drawn). Geometry comes
   from the compositor's last frame, with no diagnostic timer or redraw.
   A notification entry has `s` (`zone:<name>`), `key` (or `null`), `rect`,
-  `display`, `actions` (`{label, kind, rect}`, with `kind` `callback` or `url`),
-  `close` rect, `focus` (action index, `"close"`, or `null`), `chosen` (action
-  index or `null`) and `state` (`entering`, `shown`, `exiting`). Entries follow
+  `display` (index into `displays` of the monitor the card is drawn on,
+  which for a placed question is its placement), `actions` (`{label, kind, rect}`, with `kind` `callback` or `url`),
+  `close` rect, `goto` (Go to rect or `null`), `focus` (action index,
+  `"close"`, `"goto"` or `null`), `chosen` (action
+  index or `null`), `state` (`entering`, `shown`, `exiting`) and `guarded`
+  (presses on it are ignored by the fresh-card press guard). Entries follow
   drawn stack order; chosen cards retain their bounds during their exit even
   after their input targets disappear. Card bodies and link URLs are omitted.
   A widget entry has `s` (`widget:<instance>`), its snapped drawn `rect`,
   `display`, `hover_target` (the runtime's declared trigger rect, or `null`)
   and `tooltip_visible` (the current runtime parameter is at least 0.5).
   Rects use `{x, y, w, h}` in scene pixels, and `display` indexes `displays`.
+  `cursor` (top level) is the pointer shape the runtime last applied:
+  `arrow`, `hand`, `ibeam`, `grab`, `grabbing`, `ew-resize`, `ns-resize`,
+  `nesw-resize` or `nwse-resize`; `null` before the windowed runtime starts,
+  and in overlay mode while the overlay is click-through (the app beneath
+  owns the pointer).
+  `link_feedback` (top level) is the pressed link's local feedback:
+  `opening`, `opened`, `failed`, or `null`; never the URL.
   `link_launches` monotonically counts accepted runtime browser handoffs after
   the per-publication/action (card) or per-link (portal OUTPUT) 2 s limit. A failed worker spawn does not count;
   a browser navigation failure does. The non-Windows no-op counts too. Scene
-  contention leaves this counter readable. These diagnostics are admin-only;
+  contention leaves this counter readable. `window_activations` counts
+  successful owner-pressed Go to switches and remains readable during scene
+  contention. These diagnostics are admin-only;
   MCP/gRPC responses and their token budgets are unchanged.
   `clipboard_writes` monotonically counts HUD clipboard writes (pairing code,
   OUTPUT copy); the non-Windows stub counts too.
@@ -666,6 +888,12 @@ Only an unusable request (bad JSON, unknown method or tool, missing or
 unknown PSK) is a JSON-RPC error.
 
 - The message isn't repeated. The hint names the next call.
+- A portal argument refusal names the field and its limit: `portal id is
+  1..128 bytes`, `display_name is 1..128 bytes`, `portal key is 1..128
+  bytes; omit key to append` (`INVALID_ARGUMENT`), and `portal publish is at
+  most 16384 bytes; split it` (`CONTENT_REJECTED`). A scene refusal whose own
+  text is internal, and can carry ids, returns one fixed hint per code
+  instead, such as `request not accepted; call hud_surfaces and resend`.
 - Typed zone content is strict: an unknown or nested key is `INVALID_ARGUMENT` with the allowed keys in the hint, and so is empty content (a notification with no title or body, `stream_text` without text, `solid_color` missing r/g/b; over gRPC, a blank notification).
 - Invalid widget values return `WIDGET_PARAMETER_INVALID` with the parameter
   and its required type/range; invalid urgency/status entries/inner TTL return
@@ -680,7 +908,7 @@ unknown PSK) is a JSON-RPC error.
 | Code | Meaning |
 |---|---|
 | `INVALID_ARGUMENT` | Unknown field, wrong type, or bad surface string |
-| `NOT_ALLOWED` | The agent's `allow` list doesn't cover the surface |
+| `NOT_ALLOWED` | The agent's `allow` list doesn't cover the surface, or another of its sessions owns the portal id |
 | `NOT_HELD` | `hud_hold` with nothing to extend (including a portal the viewer dismissed); `hud_clear` on a portal this agent never attached (a dismissed portal's `hud_clear` is an ok no-op) |
 | `ZONE_NOT_FOUND` | No such zone |
 | `WIDGET_NOT_FOUND` | No such widget instance |
@@ -725,9 +953,9 @@ Handshake and resume send no scene content, foreign portal transcript or draft.
 
 `FramePresented` remains optional server metadata at `ServerMessage` field 52:
 `frame_number` (1), `present_wall_us` (2) and ordered raw 16-byte internal
-scene `batch_ids` (3). These ids come from `SceneGraph::apply_batch`, not
-the `ClientMessage.sequence` envelope or `RequestResult.seq`; the public mutation route
-is removed. `RequestResult` reports acceptance separately from GPU work.
+scene `batch_ids` (3). Each ID identifies a publication committed by
+`SceneGraph::publish` or the scene scheduler. `RequestResult.seq` separately
+correlates request acceptance to the original `ClientMessage.sequence`.
 Delivery requires both internal `read_telemetry` permission and explicit
 `TELEMETRY_FRAMES` subscription. Through `agents.toml`, only an owner-chosen
 `*` supplies that permission; narrow zone/widget/portal grants do not.
@@ -742,20 +970,20 @@ optional sender, absent by default, and a no-op surface present. Neither path
 proves physical on-screen or per-monitor completion; subtracting a remote
 client timestamp does not establish synchronized one-way latency.
 
-Several accepted internal batches may share a sample; rejected batches add
-no correlation id, and no pending ids means no event. Windowed drains before
-submission, so a failed primary attempt may consume ids without a sample;
-headless retains them on a skipped submission and drains after successful
-GPU work even without a sender. No receivers is an ordinary broadcast miss.
-Lag and Simplified-mode cadence can drop delivery, with no replay or per-batch
-guarantee; a closed producer feed ends the session. A missing sample means
-neither zero latency nor rejection. Existing producer and session tests do
-not establish external opt-in adoption or Windows owner acceptance.
+Several committed publications may share a sample. Only a successful scene
+commit adds a correlation ID. The producer emits an event when IDs are
+pending. Windowed drains before submission, so a failed primary attempt may
+consume IDs without a sample. Headless retains IDs on skipped submissions and
+drains after successful GPU work, even without a sender. No receivers is an
+ordinary broadcast miss. Lag and Simplified-mode cadence can drop delivery.
+Delivery is best effort, and a closed producer feed ends the session. Use
+`RequestResult` to determine acceptance and an observed frame sample to
+measure local submission. External opt-in adoption and Windows owner
+acceptance remain separate evidence.
 
 Composer editing is local to native portals. Only accepted submissions enter the
 portal input queue returned by `hud_input`; resident sessions receive no draft
-snapshots, submit or cancel events. `HitRegionNodeProto` field 7 and name
-`accepts_composer_input` are reserved. `InputEnvelope` fields 23–25 and names
+snapshots, submit or cancel events. `InputEnvelope` fields 23–25 and names
 `composer_draft_state`, `composer_draft_submit`, `composer_draft_cancel` are
 reserved; their three event messages are removed. Old wire fields are ignored
 and cannot enable the internal native composer flag.
@@ -791,11 +1019,9 @@ and cannot enable the internal native composer flag.
   notification can restore an expiry. Held content remains subject to
   clearing, human override and lease/session-origin reclamation (invariant 4);
   Hold does not make a lease immortal. There is no atomic held mode on Publish.
-- **Runtime-internal mutations.** `MutationBatch` / `TimingHints` containers
-  and `MutationProto` fields 1, 2 and 6–12 remain internal scene contracts.
-  Portal-only fields 13–17 and their names are reserved; their messages and
-  converters are removed. No public session route dispatches internal mutations.
-  Native portal rendering uses checked direct scene methods in-process.
+- **No wire mutations.** The protocol defines no node, mutation or batch
+  message; scene mutations exist only in-process. Native portal rendering uses
+  checked direct scene methods.
 
 ## Configuration
 
@@ -896,7 +1122,36 @@ the two different; `fps` (1-240, default 60); `log_level` for the log file
 (zone outlines, default false). `answer_window_ms` is the live saved default
 for action notifications (integer milliseconds, 1–300000 inclusive, default
 60000); invalid values fail configuration validation. It has no flag or
-variable override. For the launch settings, precedence, highest first: a command-line
+variable override. `go_to_apps` is a startup-only array of eligible Windows
+process executable names for Go to session. The default list is
+`WindowsTerminal.exe`, `Code.exe`, `Code - Insiders.exe`, `Cursor.exe`,
+`OpenConsole.exe`, `conhost.exe`, `wezterm-gui.exe`, `alacritty.exe` and
+`mintty.exe`. An explicit array replaces the defaults and `[]` disables
+lookup. `question_placement` (live, saved from the Layout card
+row "New questions appear on"; no flag or variable) chooses where a new
+question card (a notification with a callback action) appears: `focused`
+(default) is the monitor of the foreground window, or the pointer's monitor
+when there is none, it is the HUD itself, or it is the shell desktop;
+`pointer` is the monitor under the pointer; `fixed` is the notification
+display (the primary unless `[displays]` moves `notification-area`). Any
+other value fails configuration validation. The display is sampled once,
+when the question is presented (at `delay_ms` when it comes due), with no
+hook, timer or idle work; a monitor without an overlay means the
+notification display. With `focused`, a display the foreground window chose
+is covered when Windows reports a full-screen Direct3D app or presentation
+mode and that window fills its monitor: the question goes to the pointer's
+monitor if that differs, else the notification display if that differs,
+else (Direct3D only) the first other overlaid display, primary first;
+otherwise it stays. Each covered placement logs one info line
+(`question placement: DISPLAY1 covered (presentation_mode); placed on
+DISPLAY2`). Other cards, including url- and copy-only ones, use the
+notification display. A placed card draws at the notification-area position
+on its display's rect and scale, in that display's stack; it never moves,
+a same-key replacement keeps its display, and if its display disconnects it
+shows on the notification display until its assigned display reconnects. All
+displays share one `Stack{max_depth:5}`
+trim. A changed setting applies to the next question; no visible card moves.
+For the launch settings, precedence, highest first: a command-line
 flag (`--mcp-port`, `--grpc-port`, `--fps`, `--debug-zones`), an
 environment variable (`TZE_HUD_MCP_PORT`, `TZE_HUD_GRPC_PORT`,
 `TZE_HUD_FPS`, `TZE_HUD_DEBUG_ZONES=1`, `TZE_HUD_FILE_LOG`), `[runtime]`, the
@@ -917,14 +1172,23 @@ with an `error` naming both keys; set `hide_hotkey` to bind one):
 | Ctrl+Shift+F12 | `safe_mode_hotkey` | Pause agents and open the control panel; pressed again, resume and close |
 | Ctrl+Shift+F11 | `panel_hotkey` | Open or close the control panel with agents running |
 | Ctrl+Shift+F10 | `pairing_hotkey` | Open the control panel at Connect an agent, agents running |
-| Ctrl+Shift+F9 | `answer_hotkey` | Focus the newest unanswered question with callback actions |
+| Ctrl+Shift+F9 | `answer_hotkey` | Focus the newest unanswered question with callback actions, or else the composer of the portal waiting for a reply |
 | Ctrl+Shift+F8 | `hide_hotkey` | Hide all, or show all when everything is hidden, from any app; the panel and pause stay as they are |
 
 Windows also has one notification-area **tray icon**, even when no agent
-content is showing. Click it, or select it with Win+B and Enter, to toggle
-the control panel. Its native context menu offers **Open panel** (default),
-**Pause agents** / **Resume agents**, **Hide all** / **Show all**, and **Quit**.
-Every item supports keyboard navigation. Pause opens the panel and suspends
+content is showing. Click it, or select it with Win+B and Enter: while a
+question card is drawn, agents are running and zones are shown, this focuses
+the newest question (as the answer chord does) and afterwards returns focus to
+the app that was in front; otherwise it toggles the control panel. If the
+question goes before the click lands, the panel opens. The app in front is one
+look at the click: the first window, top to bottom, that is visible, not
+minimised or cloaked, not topmost, not a tool window, unowned, not the HUD's
+and not the taskbar or desktop; with none, Windows keeps focus. Its native
+context menu offers **Answer next question** (default) while a click would
+answer, then **Open panel** (otherwise the default), **Pause agents** /
+**Resume agents**, **Hide all** / **Show all**, and **Quit**; each item shows
+its chord, when one is bound, beside it. Every item supports keyboard
+navigation. Pause opens the panel and suspends
 agents; Resume closes it and resumes them. These commands run on the network
 runtime like global chords, independently of the window event loop or agents.
 Quit uses the normal clean shutdown path, without confirmation; relaunch
@@ -933,13 +1197,14 @@ through Win+R `tze_hud` when installed, or its executable.
 The glyph shows paused, hidden, questions waiting, or normal, in that priority.
 Its contrast follows the Windows taskbar's light/dark setting rather than the
 HUD theme. The two-line tooltip reports question count (or Paused / Everything
-hidden) and the names of agents connected or showing something, as in the
+hidden), followed by " · click to answer" while a left click would answer, and the names of agents connected or showing something, as in the
 panel header. Long names are ellipsized within the shell's UTF-16 limit.
 Windows 11 initially places new icons in overflow; pin this one through
 **Settings > Personalization > Taskbar > Other system tray icons**.
 
 `/admin/status` reports `tray` with `registered`, `glyph`, `tooltip`,
-`all_hidden`, `hidden_notice` (the pill's text, or null when no pill shows)
+`click` (`answer` or `panel`: what a left click does now), `all_hidden`,
+`hidden_notice` (the pill's text, or null when no pill shows)
 and native test identity, plus `session_locked`. `tray` is null
 and `session_locked` false off Windows. Failed watcher creation leaves
 `registered` and `session_locked` false; a missing icon can therefore be
@@ -948,6 +1213,10 @@ registration is logged and retried at the next Explorer restart. WTS lock,
 unlock and console/remote connection events update `session_locked` without
 polling. This observation alone does **not** freeze question deadlines or hold
 new cards; that separate desktop-presence delivery remains outstanding.
+
+`/admin/status` reports the normalized display name of the open control
+panel as `panel_display` (for example, `"DISPLAY3"`). It is `null` when
+the panel is closed or no overlay display is known.
 
 A global chord takes its keys from every other app while the HUD runs, so the
 defaults are F-key chords; rebind one that clashes (Ctrl+Shift+F10 is also
@@ -973,22 +1242,46 @@ inline at the caret with a token-colored underline
 caret at the IME's cursor. It never enters the draft: only the committed
 text does, and cancelling the composition leaves the draft as it was.
 
+The pointer is a hand exactly where a primary press would act on a HUD
+control: card action buttons and the card ×, each portal's × and unread
+badge, OUTPUT links and Copy buttons, and the control panel's chips, tiles,
+steppers, Reset and pressable rows (not its search or text fields). An
+answered card's controls and card controls in safe mode show the arrow, as a
+press there does nothing. Precedence, highest first: an active resize or
+drag, a resize grip or edge, a pressable control, a drag handle (open hand;
+a portal × in the header band shows the hand), OUTPUT or composer text
+(I-beam), the arrow. The shape follows controls that appear or leave under a
+resting pointer by the next frame, without pointer motion. The shape is
+applied to the overlay window under the pointer, so it also shows on a
+secondary display; the window the pointer left returns to the arrow.
+
 Overlay clicks on card buttons, badges and scroll panes act without taking
 Windows keyboard focus. Clicking a text editor (a portal composer or panel
 search/edit field) or starting a portal OUTPUT selection takes focus
 explicitly, so Ctrl+C reaches the HUD. The same rule applies to every
 monitor. Publication never takes focus. When the HUD takes focus, it remembers
 the external app that was active; nested HUD focus takes preserve that origin.
+A tray-started visit remembers the app sampled at the click instead, since the
+taskbar was active.
 A keyboard card answer or the outer Esc returns to it only while a HUD window
 still holds the foreground. Closing that app, or switching to a third app,
 never causes another window to be raised. Sending a portal reply keeps focus
 in its composer.
 
 The answer chord targets the newest visible unanswered card with callback
-actions. With no such card it changes nothing. It transfers input from an open
-running settings panel to the card; it does nothing in safe mode. Tab/Shift+Tab
-and arrows move among that card's actions; Enter/Space activates the focused
-action. Digits 1–4 activate the corresponding action, with token-styled digit
+actions, on whichever display it was placed; that display's overlay window
+takes keyboard focus. With no such card it focuses the composer of the newest portal
+waiting for a reply (shown, not degraded, its latest output published with
+`expects_reply: true`; newest by that output's time), exactly as a click there
+would: the draft and caret are kept and the origin app is remembered. With
+neither it changes nothing. It transfers input from an open running settings
+panel to the card or composer; it does nothing in safe mode. Tab/Shift+Tab
+and arrows move among that card's actions, starting on the primary action (the
+first that is not destructive, else the first); Enter/Space activates the
+focused action, so chord then Enter takes the primary (a `url` primary opens
+its link and ends the visit, without answering). Digits 1–4 activate the
+corresponding action; a destructive action's Enter, Space or digit must be
+held for `notification.action.hold.ms`, with token-styled digit
 hints only during this chord visit and no change to button or label geometry.
 A digit beyond the action count does nothing. Callback answers return focus;
 a URL digit uses the same two-second per-action limit, leaves the card visible,
@@ -996,21 +1289,34 @@ and finishes the keyboard visit. A replaced or expired card cannot redirect a
 held key to a different card or the composer.
 
 Esc unwinds one layer at a time: it leaves nested card/control focus, clears an
-OUTPUT selection or link/Copy focus, collapses a composer selection, or cancels its draft before the empty editor's outer
-Esc leaves the HUD. In settings it cancels an edit/section or clears search
+OUTPUT selection or link/Copy focus, or collapses a composer selection before
+the outer Esc leaves the HUD. Esc never changes a composer draft: the text is
+kept and returns when that composer is focused again. Each composer keeps its
+own unsent draft, shown as text without a caret while unfocused, until it is
+sent or its portal is cleared, reclaimed or dismissed. In settings it cancels an edit/section or clears search
 before closing. An answer-chord visit entered from another app uses Esc to
 leave without answering. Key repeats, text and matching releases from a card
 activation stay local; native focus returns after the activation key releases.
 
-The control panel is a full-width pane over the primary display: a search
-field, quick-action tiles, and section cards of settings that scroll
-vertically. Its header line counts the agents connected or showing
+The control panel opens on the foreground window's monitor at that display's
+scale. If the HUD or desktop is in front, or there is no foreground window,
+it uses the pointer's monitor. A tray open uses the monitor at the icon
+activation or context-menu invocation. The primary is the fallback when the
+chosen monitor has no overlay. The panel stays on its display until closed
+and chooses again on reopening. The hidden-content pill and pairing system
+card use the primary.
+
+The full-width pane contains a search field, quick-action tiles, and section
+cards that scroll vertically. Its header line counts the agents connected or showing
 something and what they hold ("3 agents · 2 portals · 5 zones · 1 widget")
 and says "restart pending" while a saved setting waits for a
-restart (Restart now is in System, Alt+8). It takes keyboard focus when it
-opens (if Windows refuses, the header says to click it) and returns focus
-on close. Typing searches every row; arrows, Tab, Enter and Space move and
-act; Esc clears the search, then closes. A row whose value differs from
+restart (Restart now is in System, Alt+8). The panel takes keyboard focus on
+that display (if Windows refuses, the header says to click it). On close it
+returns focus to the prior app if the HUD still owns focus. Typing searches
+every row; Space continues the query after automatic
+result focus. Arrows and Tab navigate, Enter acts on the best match, and Space
+acts on an explicitly selected control. Esc clears the search, then closes.
+A row whose value differs from
 its default (an override that matches the theme does not) shows Reset:
 clicking it, or Delete on the row (not while typing in a field or the
 search), puts the default back live and removes the key from the config
@@ -1018,6 +1324,23 @@ file. Visibility, Appearance, Advanced tokens, Input, Diagnostics and the
 Agents answer-window row offer it; ports and widget boxes take a typed value. Clicks outside the
 panel pass through to the desktop. Closing the panel always resumes
 agents. While paused, the pause tile and row turn caution-colored.
+
+Value fields edit locally. Clicking a field or pressing Enter on a field result
+selects its current value; typing replaces the selection. Left/Right move by
+Unicode grapheme, Home/End move to either end, and Shift extends the selection.
+Ctrl+A selects all; Ctrl+C copies; Ctrl+X cuts after a successful clipboard
+write; Ctrl+V pastes at the selection. Backspace/Delete edit the draft. Paste
+converts line breaks and tabs to spaces; Connect agent names keep their existing
+lowercase name alphabet and 32-byte limit. Other drafts are bounded at 65,535
+UTF-8 bytes; overflow is shown and saving waits for an edit that shortens or
+replaces it. Enter saves through the row's existing validation and confirmation;
+Esc cancels before clearing search or closing the panel. Moving away drops the
+draft. Automatic search-result focus keeps typing and clipboard shortcuts out
+of value editing until explicit selection. Clipboard access runs in the
+background with one operation at a time; a delayed result cannot modify a
+changed or reopened draft. Failed clipboard access leaves a cut intact and
+shows feedback beside the field. Caret and selection stay inside the value box;
+the caret stays steady so an idle panel needs no blink timer.
 
 The Visibility card hides portals, zones or widgets for
 the session; the Hide all tile (Alt+H) hides all of them and, when everything
@@ -1216,7 +1539,11 @@ text legible whatever an override does. Zoom steps `ui.scale` by 10%
 (−/+, Ctrl+− and Ctrl+= or Ctrl++ anywhere in the panel; Reset returns
 to 100%), resizes zone text and chrome, portals, widgets and the panel, applies live and
 saves; the panel itself stays between 0.75x and 3x so
-it remains readable and on screen.
+it remains readable and on screen. The row's value is always the owner's
+Zoom; when the Windows text size is not 100% its detail adds "Windows text
+size 125% · effective 125%" (text size × Zoom), with "(held at 300%)" when
+that product passes 3.0, and searching "text size" finds it. −/+ and Reset
+change Zoom only.
 
 A row whose value a flag or variable set is read-only and names it ("Set by
 --mcp-port"), because a restart reuses the same arguments and environment.
@@ -1238,9 +1565,8 @@ canonical keys, their descriptions, and their defaults are in
 
 **Sizes are logical (dp).** Every size token (font sizes, spacing,
 radii, strokes, portal and panel chrome, in canonical and
-`portal.*` keys alike) is drawn at the monitor's Windows scale factor ×
-`ui.scale` physical pixels: at 150% a 16 dp body is 24 px, and
-`"ui.scale" = "1.25"` makes it 30 px. `ui.scale` is a `[design_tokens]`
+`portal.*` keys alike) is drawn at the monitor's Windows scale factor × the Windows text size × `ui.scale` physical pixels (text size × `ui.scale` is held within 0.5–3.0): at 150% a 16 dp body is 24 px, and
+`"ui.scale" = "1.25"` (or Windows text size 125%) makes it 30 px. `ui.scale` is a `[design_tokens]`
 value (quoted, like every token) from 0.5 to 3.0, default 1; a value
 outside that range fails config validation with `TokenValueParseError`,
 and a theme that sets it is invalid, because it is the owner's preference
@@ -1250,7 +1576,7 @@ the primary's. A DPI change or a new monitor restyles zones, portals and
 the panel on the next frame. Hairlines (the transcript
 divider) round to whole pixels, at least one. Opacity, weights, ratios
 and timing do not scale. Zone boxes are fractions of the display and
-keep their size. A widget box is drawn at `ui.scale` times its configured
+keep their size. A widget box is drawn at the Windows text size × `ui.scale` times its configured
 size, grown about its centre and kept on the display (an edge-anchored
 widget keeps its edge); its SVG is rasterized at that size. The layout
 (the Layout card and `geometry`) stays at 100%. A monitor's own scale
@@ -1321,14 +1647,30 @@ widget publishes on both planes snap their transition to 0. The control
 panel's Advanced tokens rows show "Windows animations off" as the source of
 the zeroed motion values. No model-visible payload changes. Off Windows, and when the setting cannot be read, animations stay on.
 
+**Windows preferences.** With "Show animations", the runtime reads the
+Windows text size (Settings › Accessibility › Text size, HKCU
+`Software\Microsoft\Accessibility` `TextScaleFactor`, 100–225%) and the caret
+blink time (`GetCaretBlinkTime`) at startup and on each config reload,
+including a reload whose `[design_tokens]` are unchanged; there is no live OS
+watch. The text size scales the whole HUD as a factor under `ui.scale` (see
+sizes above), so at 225% the HUD cannot go below 112.5%. The blink time is
+the composer caret's half-period, clamped to 200–1200 ms; with Windows caret
+blinking off the caret is steady and schedules no frame. They are recorded as
+the reserved keys `runtime.text_scale` and `runtime.caret_blink_ms` (`0` =
+steady), which `[design_tokens]` rejects; unlike the motion layer, nothing in
+the config overrides either: Zoom is the only offset for size, and the caret
+has no HUD setting. Off Windows, or when unreadable, the text size is 100% and
+the blink 530 ms, and the token map is exactly as without them.
+`/admin/status` `os_prefs` reports both. No model-visible payload changes.
+
 **Live changes.** Editing `[design_tokens]` in the running HUD's config file
 (or using the control panel's Appearance and Advanced tokens cards) restyles
 it without a restart: zones, widgets (their SVGs re-resolve), portals and
 the panel take the new tokens on the next frame. The HUD watches the
 config's folder (no polling) and applies an edit 250 ms after the last
 write (at most 2 s after the first). A file whose table is unchanged since
-the HUD last read or saved it does nothing, so a panel change that could
-not be saved survives an unrelated edit. A
+the HUD last read or saved it only re-reads the Windows preferences, so a
+panel change that could not be saved survives an unrelated edit. A
 table that startup would refuse (an unknown theme, a reserved or malformed
 key) or a file that is not valid TOML keeps the current tokens and is
 reported in `/admin/status` `config_reload`. Still read once at startup: the MCP widget
@@ -1384,7 +1726,7 @@ color overrides still take precedence.
 | Gauge ring | `gauge.{width,height,edge.*,ring.*,caption.y,hover.delay_ms}`, `type.gauge.readout.size` (centred percent; family and weight follow `type.readout`) |
 | Progress card | `progress.{width,height,edge.*,content.x,text.y,label.width,track.*,readout.*,hover.delay_ms}`, `type.label.m`, `type.readout.family` |
 | Status pill | `status.{width,height,pill.*,edge.*,marker.*,name.x,text.*,separator.*,reason.*,tooltip.*,hover.*}`, `type.body.m`, `type.label.m` |
-| Choice actions | `notification.action.link_mark` |
+| Choice actions | `notification.action.link_mark`, `link.feedback.ms` (how long "Opened" or "Couldn't open" shows; default 1500), `notification.action.hold.ms` (destructive hold, integer ms 0–3000, default 600; 0 = no hold), `notification.press_guard.ms` (fresh-card press guard, integer ms 0–3000, default 400; 0 = off; not zeroed when Windows animations are off) |
 | Motion | `motion.{enter,exit,state}.ms`, `motion.{enter,exit}.easing` (`linear`, `standard`, `decelerate`, `accelerate`) |
 | Shape | `shape.{xs,s,m,l,xl,full}` (corner radius) |
 | Spacing | `space.{xs,s,m,l,xl,xxl}` (4 px grid) |
@@ -1552,86 +1894,43 @@ distinguishes arguments from responses and partial configuration examples.
 
 | Measure | Before T5 (wire) | Wire | Model-visible | Budget (model-visible) |
 |---|---|---|---|---|
-| `tools/list` | 4,418 | 659 | 622 | ≤ 900 |
+| `tools/list` | 4,418 | 664 | 627 | ≤ 900 |
 | Discover (default scene) | ~430 (`list_zones`) | 194 | 126 | ≤ 150 |
 | Zone publish | ~197 | 90 | 39 | ≤ 80 |
 | Four-option notification ask + returned answer + ACK | — | 273 | 114 | ≤ 120 |
 | Four-option notification ask-and-wait (`notification_choice_wait`) | — | 129 | 77 | ≤ 90 |
+| Four label-only options ask-and-wait (`notification_choice_labels`) | — | 117 | 65 | ≤ 85 |
 | Widget publish | ~168 | 73 | 22 | ≤ 80 |
 | Portal: attach+publish+hold, poll, ack, clear | ~575 over 5 round trips | 343 over 4 | 137 over 4 | ≤ 250 |
 | Discover (unheld `production.toml`: 6 zones, 4 widget instances) | n/a | 321 | 245 | ≤ 250 |
 | Error | up to ~212 | 101 | 45 | ≤ 60 |
 
-The new `notification_choice_wait` flow uses the same four callback options,
-`wait_ms:30000` and `ttl_ms:0`; the explicit hold makes its response independent
-of elapsed wall-clock milliseconds. It exercises real shared activation and
-returns the accepted Skip action in its only call, without polling or ACK.
-Its 77 model-visible tokens compare with 114 for the unchanged three-call flow.
-Advertising the optional argument changes `tools/list` from 590 to 622 tokens;
-all six other existing flows keep identical fingerprints, bytes and counts.
-The owner **accepted** the new bytes, the new 90-token row and this necessary
-discovery exception to the signed byte-identity criterion for PR1602 on
-2026-11-12 (Asia/Singapore); the prior PR1598 approval covers only the previous baseline. All existing
-ceilings, reply defaults, counting rules, tokenizer and flow versions remain.
+All rows use canonical flow version 4 and `tiktoken-rs` 0.12.0
+(`o200k_base`); the canonical gate requires two byte-identical final-source
+measurements. A change to any flow's bytes or ceiling is an owner decision,
+recorded on the PR that makes it; the current bytes and ceilings were last
+accepted with PR1676 (`tools/list`, 2026-11-21).
 
-All eight measurements use canonical flow version 4 and `tiktoken-rs` 0.12.0,
-`o200k_base`. The discovery-audience change (`hud-ljhku.7`, source `177e1096`)
-changes model-visible `tools/list` from 564 to 590 tokens and default discovery
-from 113 to 126. The five other flows retain identical request/response
-fingerprints and metrics: zone 39, widget 22, error 45, complete choice 114 and
-portal 137. At that baseline production discovery was 210, down from ~232; occupancy hints and all
-model-owned values/limits remain. The seven canonical flow ceilings are unchanged; the countdown package uses the signed 250-token production envelope. Numeric discovery
-says `number`; admission and error hints still enforce finite f32.
-
-The countdown (`hud-ljhku.9`) adds one production instance: the actual handler
-comparison measures model-visible 754 → 882 bytes / 210 → 245 tokens and wire
-1025 → 1171 bytes / 283 → 321 tokens. All prior discovery rows compare equal;
-KPI and stepper remain bundles without production instances. The new production
-bytes were **accepted by the owner** for PR1606 on 2026-11-12 (Asia/Singapore);
-the PR1598 approval below covers only the previous baseline.
-The seven canonical flow objects and ceilings remain unchanged in the baseline.
-
-The owner **accepted these concrete new baseline bytes** for PR1598 on
-2026-11-10 (Asia/Singapore). Earlier `hud-j7kxn` approval covered the old baseline
-only. The canonical gate still requires two byte-identical final-source
-measurements. Reply defaults `reattached`, `pending_input` and `remaining` stay
-byte-identical, including the unchanged full portal flow. The outcome receipts
-(`hud-ljhku.5`: `clipped` and displaced items) are omitted on every
-canonical flow, so the baseline bytes are unchanged.
-
-The `notification_choice` flow publishes Ship/Hold/Skip/Open, activates Skip through
-`SceneGraph::activate_notification` (the shared pointer/keyboard producer), polls
-its actual retained `hud_input` answer and acknowledges that returned id normally.
-All three calls count toward the owner-approved 120-token ceiling. That ceiling
-applies only to this new complete four-option flow; the six established flow
-ceilings and public serialization/accounting remain unchanged.
-
-Historical runtime-backed version-4 calibration measured 114 model-visible tokens:
-ask 69, answer 28, ACK 17. It failed the former 104-token ceiling and remains a historical failure. Fresh
-runtime measurements meet the amended 120-token ceiling. The owner separately
-accepted the measured version-4 baseline on 2026-11-08; the earlier approval
-of the choice ceiling alone did not approve those bytes.
-
-The calibration fixture waits for shared activation through a local readiness
-pipe before issuing the choice's default `hud_input {}` poll. `wait_ms` already
-defaults to zero; omitting it measures the supported concise form without a
-producer race. This fixture signal is outside MCP and carries no answer;
-the returned answer and its ACK still pass through the real MCP handler.
-The fixture injects its one fixed portal reply in the synchronous post-Hub-unlock
-callback for the exact canonical attachment, preserving the snapshotted publish
-response. It performs no scene probes or periodic Hub work through the portal's
-1000ms poll and default-zero ACK. Only that observed portal's subsequent clear
-allows choice probes, and layout waits for the actual choice publication.
-Fixture scene work stops before the old choice readiness, protecting its default-zero
-answer/ACK calls too. A second local driver barrier re-arms choice work only after
-those calls and the action-limit candidate finish, for the new in-band wait flow. This fixture ordering does not promise success under
-external scene contention or change the finite public input contract.
-
-The same calibration separately executes an over-limit notification publish.
-Its `notification_action_limit_error` candidate records full wire and
-model-visible transaction costs, and checks the returned `result_text` against
-the existing 60-token error ceiling. Caller-supplied action arguments retain
-their measured cost; the six canonical flow budgets above are unchanged.
+- `notification_choice` publishes Ship/Hold/Skip/Open, activates Skip through
+  `SceneGraph::activate_notification` (the shared pointer/keyboard producer),
+  polls the retained `hud_input` answer and acknowledges it; all three calls
+  count toward its 120-token ceiling.
+- `notification_choice_wait` asks the same question with `wait_ms:30000` and
+  `ttl_ms:0` and returns the accepted Skip in its only call, without polling
+  or ACK. `notification_choice_labels` uses label-only actions with
+  `ttl_ms:30000`, so the card leaves with the wait, and returns
+  `"action":"Skip"`; the calibration freezes the scene clock so the reply's
+  `expires_in_ms` is byte-stable.
+- The calibration also runs an over-limit notification publish
+  (`notification_action_limit_error`) and holds its `result_text` to the
+  60-token error ceiling.
+- Default reply fields (`reattached`, `pending_input`, `remaining`) stay
+  byte-identical, and outcome receipts (`clipped`, `unread`, displaced items)
+  are omitted on every canonical flow. Only a reply that reports them grows:
+  `"unread":N`, or about one token per clipped field.
+- The fixture signals shared activation through a local readiness pipe outside
+  MCP; answers and ACKs still pass through the real MCP handler. Its ordering
+  does not promise success under external scene contention.
 
 The portal flow takes 4 round trips in the canonical fixture because the
 first poll has nothing to ack; in a steady loop each `hud_input` both acks
@@ -1641,13 +1940,10 @@ the previous items and polls, so poll+ack is one round trip.
 acceptance flows (`docs/scope.md`), run end to end against `production.toml`.
 Its fresh, unheld discovery budget is the production row above: <=250 tokens,
 retaining model-owned parameter names, bounds and actionable occupancy hints.
-The live-state POC fixture envelope is 285 tokens (previously 250): it adds
-the same measured 35-token countdown row while retaining the prior 40-token
-allowance for holdings/portal state above the actual unheld baseline.
-This fixture-only change is included in the pending byte/budget review;
-none of the seven canonical flow ceilings changes. That
-fixture envelope is not a promise for arbitrary numbers of live portals;
-required state fields are never dropped to fit the unheld baseline.
+The live-state POC fixture envelope is 285 tokens: the unheld baseline plus a
+40-token allowance for holdings and portal state. It is not a promise for
+arbitrary numbers of live portals; required state fields are never dropped to
+fit the unheld baseline.
 
 The compact model schema retains `gauge.label` (metric name),
 `progress-bar.label` (32-byte task text), status `label`/`reason`, values and
@@ -1687,9 +1983,14 @@ Hover rectangles retain the normalized bounds check after token resolution.
    route is exposed.
 3. **Lease priority is dropped.** Chrome is structurally above agent
    content, and ties go to claim order.
-4. **Portal tile mutations are internal.** Accent, unread count, composer
-   interaction, and portal surface state stay inside the runtime; agents
-   drive the portal through `hud_publish`.
+4. **Portal tile mutations are internal.** Accent, composer interaction,
+   and portal surface state stay inside the runtime; agents drive the portal
+   through `hud_publish`. The one exception is the native unread count, which
+   agents read as `unread` on the portal's discovery entry and publish replies
+   (owner decision hud-ljhku.5 R5.4 = B, 2026-11-22). Because the count clears
+   only when the viewer frame reaches the OUTPUT tail, an agent can infer that
+   output was not presented, including while the panel is open or the portal
+   is hidden.
 
 
 Notification capture delivery (source proposal; Windows owner acceptance separate):
@@ -1707,16 +2008,3 @@ mismatched history or bounded-admission failure disable notification actions
 until a clean runtime restart. Valid reentrant histories may trigger that
 availability limit; its frequency has not been measured. Unrelated pointer input
 continues, and this source model does not replace held-press/release owner proof.
-
-Alert-banner restyle evidence: `docs/evidence/alert-banner/before.json` records
-three own-frame owner-host captures from build `24818c39` (info, caution and
-critical sequentially on display 1). The existing theme and settings were left
-unchanged; its theme/scale selection is not exposed by that status API. The
-shipped one-banner-per-publisher limit prevented a simultaneous stack from this
-single pairing. The exact severity payloads in `alert-banner-{info,caution,critical}-test.json`
-are captured separately under every theme by the existing Windows CI capture
-lane; headless tests retain distinct-publisher severity ordering coverage.
-The [evidence gallery](evidence/alert-banner/README.md) includes the nine
-branch captures with their source, fixture, token and PNG hashes. These use
-llvmpipe at 1920×1080 because the headless device rejects the owner's 4K
-dimensions; they do not establish owner hardware or visual acceptance.

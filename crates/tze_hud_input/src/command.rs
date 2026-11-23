@@ -23,11 +23,9 @@
 //!    Latency budget: `input_to_local_ack` p99 < 4ms (same as pointer).
 //!
 //! # NAVIGATE_NEXT with no focus
-//! When `action == CommandAction::NavigateNext` and focus is `FocusOwner::None`,
-//! `CommandProcessor::process` returns `None` (no dispatch). The caller is
-//! responsible for first driving `FocusManager::navigate_next` to advance focus
-//! to the first focusable element, then calling `process` again with the updated
-//! `FocusOwner` so routing can proceed for the newly focused element.
+//! With no focus, call [`crate::InputProcessor::navigate_focus`] with
+//! `reverse = false` to move to the first focusable element. Then pass the
+//! resulting focus owner to [`CommandProcessor::process`] for dispatch.
 //!
 
 use serde::{Deserialize, Serialize};
@@ -156,18 +154,12 @@ impl CommandProcessor {
     /// node has focus.
     ///
     /// Returns `None` when:
-    /// - Focus is `FocusOwner::None` **and** the action is not `NavigateNext`/
-    ///   `NavigatePrev` (those advance focus before routing, so the caller must
-    ///   call `FocusManager::navigate_next/prev` first then re-dispatch).
-    /// - Focus is on a chrome element.
+    /// - Focus is absent or on a chrome element.
     /// - The tile namespace cannot be resolved.
     ///
-    /// # NAVIGATE_NEXT with no focus
-    /// When focus is `None` and `action == NavigateNext`, the processor returns
-    /// `None`. The caller must first drive `FocusManager::navigate_next`, obtain
-    /// the newly focused element, and then call `process` again with the updated
-    /// focus owner. This two-step model keeps the processor decoupled from the
-    /// focus manager.
+    /// For `NavigateNext` or `NavigatePrev`, first move focus with
+    /// [`crate::InputProcessor::navigate_focus`]. Then get the updated owner with
+    /// [`crate::FocusManager::current_owner`] and pass it here for dispatch.
     pub fn process(
         &self,
         event: &RawCommandEvent,

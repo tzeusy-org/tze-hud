@@ -224,6 +224,30 @@ fn keyboard_page_scroll_delta(raw: &RawKeyDownEvent) -> Option<f32> {
     }
 }
 
+/// Home, End, Space/Shift+Space and PageDown/PageUp while OUTPUT holds reading focus.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum ReadingScroll {
+    Top,
+    Tail,
+    Page(f32),
+}
+
+fn reading_scroll_key(raw: &RawKeyDownEvent) -> Option<ReadingScroll> {
+    let m = &raw.modifiers;
+    if m.ctrl || m.alt || m.meta {
+        return None;
+    }
+    let page = tze_hud_input::KEYBOARD_PAGE_SCROLL_PX;
+    match (raw.key_code.as_str(), raw.key.as_str()) {
+        ("Home", _) | (_, "Home") => Some(ReadingScroll::Top),
+        ("End", _) | (_, "End") => Some(ReadingScroll::Tail),
+        ("Space", _) | (_, " " | "Space") => {
+            Some(ReadingScroll::Page(if m.shift { -page } else { page }))
+        }
+        _ => keyboard_page_scroll_delta(raw).map(ReadingScroll::Page),
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CommandDispatchOutcome {
     Done,
@@ -243,8 +267,9 @@ enum ShellShortcutOutcome {
     Busy,
 }
 
-/// A raw keyboard event deferred from the winit event-loop thread because the
-/// shared-state or scene Tokio mutex was busy at dispatch time.
+/// Keyboard work deferred from the winit event-loop thread because a required
+/// lock was busy. Post-edit history resets retain only the reset intent, since
+/// replaying their already accepted raw key would duplicate the draft or send.
 ///
 /// Stored in `WindowedRuntimeState::pending_keyboard_events` and retried once
 /// per `about_to_wait` iteration via `drain_pending_keyboard_events`, matching
@@ -254,6 +279,7 @@ pub(super) enum PendingKeyboardEvent {
     KeyDown(RawKeyDownEvent),
     KeyUp(RawKeyUpEvent),
     Character(RawCharacterEvent),
+    ResetInputHistory(tze_hud_scene::SceneId),
 }
 
 /// Outcome of a Tab / Shift+Tab keyboard focus-traversal attempt.
@@ -385,10 +411,11 @@ impl WinitApp {
     /// Snap the input-pane history's scroll offset back to the tail.
     ///
     /// Called on every accepted composer keystroke: unlike ordinary content
-    /// growth (which deliberately leaves a `ScrolledBack` viewport alone, spec
-    /// ), a viewer who is actively typing into their own composer should
-    /// not be stranded scrolled away from their own live draft. No-op (and no
-    /// scene write) once the tile is already at the tail.
+    /// growth (which deliberately leaves a `ScrolledBack` viewport alone), a
+    /// viewer actively typing into their own composer should not be stranded
+    /// away from their live draft. Busy locks retain the reset in the keyboard
+    /// FIFO without replaying the accepted edit. No-op (and no scene write)
+    /// once the tile is already at the tail.
     pub(super) fn reset_input_history_scroll_to_tail(&mut self, tile_id: tze_hud_scene::SceneId) {
         if let Ok(state) = self.state.shared_state.try_lock()
             && let Ok(mut scene) = state.scene.try_lock()
@@ -396,6 +423,10 @@ impl WinitApp {
             self.state
                 .input_processor
                 .reset_portal_input_scroll_to_tail(tile_id, &mut scene);
+        } else {
+            self.state
+                .pending_keyboard_events
+                .push_back(PendingKeyboardEvent::ResetInputHistory(tile_id));
         }
     }
 
@@ -793,7 +824,7 @@ impl WinitApp {
         //     following Character event (dispatch_character_event_inner).
         // Gated on `!is_composer_active()` so normal composer editing (where the
         // composer is the focus sink) is untouched — Enter submits, Space types,
-        // Escape cancels there, all handled by the intercept below.
+        // Escape leaves (keeping the draft), all handled by the intercept below.
         if !self.state.input_processor.is_composer_active() {
             match self.portal_key_focus(tab_id) {
                 PortalKeyFocus::Busy => {
@@ -863,41 +894,40 @@ impl WinitApp {
 
         // ── Composer draft intercept ──────────────────────────────
         if self.state.input_processor.is_composer_active() {
-            if is_escape_key(&raw.key, &raw.key_code)
-                && !raw.modifiers.ctrl
-                && !raw.modifiers.alt
-                && !raw.modifiers.meta
-                && let Some((text, cursor, anchor, ..)) =
-                    self.state.input_processor.composer_draft_snapshot()
-            {
-                if cursor != anchor {
-                    self.state
-                        .input_processor
-                        .route_pointer_selection_to_composer(cursor, cursor);
-                    self.push_local_composer_echo(Instant::now());
+            // Every Escape stops here and never changes draft text: a bare one
+            // collapses a selection, else leaves, keeping the draft for refocus.
+            if is_escape_key(&raw.key, &raw.key_code) {
+                let modified = raw.modifiers.ctrl || raw.modifiers.alt || raw.modifiers.meta;
+                let selection_caret = self
+                    .state
+                    .input_processor
+                    .composer_draft_snapshot()
+                    .and_then(|(_, cursor, anchor, ..)| (cursor != anchor).then_some(cursor));
+                if modified || selection_caret.is_some() {
+                    if let Some(cursor) = selection_caret.filter(|_| !modified) {
+                        self.state
+                            .input_processor
+                            .route_pointer_selection_to_composer(cursor, cursor);
+                        self.push_local_composer_echo(Instant::now());
+                    }
                     self.state
                         .notification_keydowns
                         .insert(keyboard_key_identity(&raw.key_code, &raw.key));
                     return;
                 }
-                if text.is_empty() {
-                    let command =
-                        keyboard_command(raw, self.state.focus_manager.current_owner(tab_id))
-                            .expect("bare Escape is a cancel binding");
-                    match self.try_escape_clear_focus(tab_id, &command) {
-                        EscapeClearOutcome::Busy => self
-                            .state
-                            .pending_keyboard_events
-                            .push_back(PendingKeyboardEvent::KeyDown(raw.clone())),
-                        _ => {
-                            self.clear_local_composer_echo();
-                            self.return_focus_after_key(raw);
-                        }
+                let command = keyboard_command(raw, self.state.focus_manager.current_owner(tab_id))
+                    .expect("bare Escape is a cancel binding");
+                match self.try_escape_clear_focus(tab_id, &command) {
+                    EscapeClearOutcome::Busy => self
+                        .state
+                        .pending_keyboard_events
+                        .push_back(PendingKeyboardEvent::KeyDown(raw.clone())),
+                    _ => {
+                        self.clear_local_composer_echo();
+                        self.return_focus_after_key(raw);
                     }
-                    return;
                 }
-                // A nonempty draft is an inner cancellation. The next Esc,
-                // on the empty editor, performs the outer native focus return.
+                return;
             }
             let history_tile_id = match self.composer_target_for_tab(tab_id) {
                 ComposerTargetLookup::Ready(tile_id) => Some(tile_id),
@@ -950,11 +980,8 @@ impl WinitApp {
                 raw.modifiers.ctrl,
                 raw.modifiers.alt,
             );
-            let key_down_is_terminal = matches!(
-                outcome,
-                tze_hud_input::ComposerOutcome::Submitted(_)
-                    | tze_hud_input::ComposerOutcome::Cancelled
-            );
+            let key_down_is_terminal =
+                matches!(outcome, tze_hud_input::ComposerOutcome::Submitted(_));
             if let tze_hud_input::ComposerOutcome::Submitted(text) = outcome
                 && let Some(tile_id) = history_tile_id
             {
@@ -964,11 +991,6 @@ impl WinitApp {
                 self.clear_local_composer_echo();
             }
             if consumed {
-                if is_escape_key(&raw.key, &raw.key_code) {
-                    self.state
-                        .notification_keydowns
-                        .insert(keyboard_key_identity(&raw.key_code, &raw.key));
-                }
                 tracing::debug!(
                     key_code = %str_preview(&raw.key_code),
                     "composer: KeyDown consumed by draft manager"
@@ -1465,10 +1487,30 @@ impl WinitApp {
             }
             _ => None,
         };
+        // OUTPUT reading focus: a selection (it takes it from the caret), a
+        // focused link or Copy stop, or the focused portal tile.
+        let held = reader.selection.map(|s| s.tile).or(focused);
+        let reading_tile = held.or(match self.state.focus_manager.current_owner(tab_id) {
+            tze_hud_input::FocusOwner::Tile(tile)
+                if self
+                    .state
+                    .input_processor
+                    .portal_output_layout(*tile)
+                    .is_some() =>
+            {
+                Some(*tile)
+            }
+            _ => None,
+        });
+        // At tile focus PageUp/PageDown keep their command path, same step.
+        let scroll = reading_scroll_key(raw)
+            .zip(reading_tile)
+            .filter(|_| held.is_some() || keyboard_page_scroll_delta(raw).is_none());
         let relevant = (copy && reader.selection.is_some())
             || (escape && (reader.selection.is_some() || focused.is_some()))
             || (tab && (focused.is_some() || (entry.is_some() && !m.shift)))
-            || focused.is_some();
+            || focused.is_some()
+            || scroll.is_some();
         if !relevant {
             return Ok(false);
         }
@@ -1494,6 +1536,16 @@ impl WinitApp {
             } else if let (true, Some(tile)) = (activate, focused) {
                 effect = ip.output_activate(tile, &mut scene, Instant::now());
                 true
+            } else if let Some((scroll, tile)) = scroll {
+                // Unmoved OUTPUT changes nothing, so no frame is drawn.
+                match scroll {
+                    ReadingScroll::Top => ip.scroll_tile_to_top(tile, &mut scene),
+                    ReadingScroll::Tail => ip.reset_tile_scroll_to_tail(tile, &mut scene),
+                    ReadingScroll::Page(dy) => {
+                        ip.process_keyboard_scroll(tile, dy, &mut scene).is_some()
+                    }
+                };
+                true
             } else {
                 // Any other key leaves the reading stop; typing reaches the composer.
                 ip.output_reading.focus = None;
@@ -1518,9 +1570,21 @@ impl WinitApp {
         let modified = raw.modifiers.ctrl || raw.modifiers.alt || raw.modifiers.meta;
         let traversal = is_bare_tab_chord(&raw.key, &raw.modifiers);
         let activation = !modified && is_activation_key(&raw.key, &raw.key_code);
+        let mut go_to_origin = super::window_go_to::GoToOrigin::Keyboard(None);
+        let window_go_to = &self.state.window_go_to;
+        let mut authorize_go_to = || {
+            let foreground = window_go_to.foreground();
+            if !window_go_to.keyboard_owns_foreground(foreground) {
+                return false;
+            }
+            go_to_origin = super::window_go_to::GoToOrigin::Keyboard(foreground);
+            true
+        };
         let mut wake = None;
         let mut answer_exit = false;
         let mut return_focus = false;
+        // Tab onto a control: its bounds, to move keys to its display's window.
+        let mut tabbed_to = None;
         let consumed = {
             let state = spin_acquire(&self.state.shared_state, INTERACTION_LOCK_BUDGET).ok_or(())?;
             let mut scene = spin_acquire(&state.scene, INTERACTION_LOCK_BUDGET).ok_or(())?;
@@ -1530,6 +1594,10 @@ impl WinitApp {
                 self.state.input_processor.clear_chrome_feedback(&mut scene);
             }
             scene.prune_notification_feedback();
+            // Another key (Esc included) ends a key hold; a repeat does not.
+            if !raw.repeat && self.state.answer_keyboard.hold_key.take().is_some() {
+                super::notification_hold::cancel_hold(&mut scene, &self.state.global_tokens);
+            }
             if let Some(focus) = self.state.answer_keyboard.focus {
                 if !self
                     .state
@@ -1541,10 +1609,12 @@ impl WinitApp {
                         focus,
                         raw,
                         &self.state.global_tokens,
+                        authorize_go_to,
                     );
                     wake = outcome.activation;
                     answer_exit = outcome.exit;
                     return_focus = outcome.return_focus;
+                    self.state.answer_keyboard.hold_key = outcome.hold_key;
                 }
                 true
             } else {
@@ -1556,6 +1626,7 @@ impl WinitApp {
                         matches!(
                             region.kind,
                             tze_hud_scene::types::ZoneInteractionKind::Dismiss
+                                | tze_hud_scene::types::ZoneInteractionKind::GoTo
                                 | tze_hud_scene::types::ZoneInteractionKind::Action { .. }
                         )
                     })
@@ -1587,6 +1658,7 @@ impl WinitApp {
                                 scene.focus_notification(Some(
                                     controls[next].interaction_id.clone(),
                                 ));
+                                tabbed_to = Some(controls[next].bounds);
                             }
                             true
                         }
@@ -1605,6 +1677,7 @@ impl WinitApp {
                             };
                             scene.overlay.notification_focus_entered_reverse = raw.modifiers.shift;
                             scene.focus_notification(Some(controls[next].interaction_id.clone()));
+                            tabbed_to = Some(controls[next].bounds);
                         }
                         true
                     } else {
@@ -1622,15 +1695,24 @@ impl WinitApp {
                             .state
                             .safe_mode_atomic
                             .load(std::sync::atomic::Ordering::Acquire)
+                        && (control.kind != tze_hud_scene::ZoneInteractionKind::GoTo
+                            || authorize_go_to())
                     {
                         // The pending-keyboard drain bypasses the outer FIFO guard;
                         // a key queued before pause must not activate a card afterward.
-                        let duration = super::lifecycle::notification_exit_ms(
-                            &scene,
-                            &control.zone_name,
-                            &self.state.global_tokens,
-                        );
-                        wake = scene.activate_notification(control, duration);
+                        let tokens = &self.state.global_tokens;
+                        if super::notification_hold::needs_hold(&scene, control, tokens) {
+                            let key = keyboard_key_identity(&raw.key_code, &raw.key);
+                            scene.begin_notification_hold(control.clone(), Some(key.clone()));
+                            self.state.answer_keyboard.hold_key = Some(key);
+                        } else {
+                            let duration = super::lifecycle::notification_exit_ms(
+                                &scene,
+                                &control.zone_name,
+                                tokens,
+                            );
+                            wake = scene.activate_notification(control, duration);
+                        }
                         return_focus = matches!(
                             wake,
                             Some(tze_hud_scene::graph::NotificationActivation::Callback(_))
@@ -1644,9 +1726,19 @@ impl WinitApp {
         };
         if answer_exit {
             self.state.answer_keyboard.focus = None;
+            self.state.answer_keyboard.invalidate_visit();
         }
         if return_focus {
             self.return_focus_after_key(raw);
+        }
+        if let Some(bounds) = tabbed_to {
+            let (x, y) = (
+                bounds.x + bounds.width * 0.5,
+                bounds.y + bounds.height * 0.5,
+            );
+            if self.display_window_at(x, y) != self.state.keyboard_window {
+                self.focus_native_window_at(x, y);
+            }
         }
         if consumed {
             self.state
@@ -1654,7 +1746,7 @@ impl WinitApp {
                 .insert(keyboard_key_identity(&raw.key_code, &raw.key));
         }
         if let Some(wake) = wake {
-            self.deliver_notification_activation(wake);
+            self.deliver_notification_activation(wake, go_to_origin);
         }
         Ok(consumed)
     }
@@ -1684,6 +1776,7 @@ impl WinitApp {
             self.state
                 .notification_keydowns
                 .remove(&keyboard_key_identity(&raw.key_code, &raw.key));
+            self.state.answer_keyboard.hold_key = None;
             tracing::debug!(
                 key = %str_preview(&raw.key),
                 "safe-mode capture: KeyUp dropped (safe mode active — chrome layer owns input)"
@@ -1720,6 +1813,10 @@ impl WinitApp {
         active_tab: Option<tze_hud_scene::SceneId>,
     ) {
         let key_identity = keyboard_key_identity(&raw.key_code, &raw.key);
+        // Releasing a held key ends its hold this turn (settle cancels it).
+        if self.state.answer_keyboard.hold_key.as_ref() == Some(&key_identity) {
+            self.state.answer_keyboard.hold_key = None;
+        }
         if self.state.answer_keyboard.return_key.as_ref() == Some(&key_identity) {
             self.state.answer_keyboard.return_key = None;
             self.state.notification_keydowns.remove(&key_identity);
@@ -2188,6 +2285,9 @@ impl WinitApp {
                 PendingKeyboardEvent::Character(raw) => {
                     self.dispatch_character_event_inner(&raw, active_tab)
                 }
+                PendingKeyboardEvent::ResetInputHistory(tile_id) => {
+                    self.reset_input_history_scroll_to_tail(tile_id)
+                }
             }
             // Inner dispatch can still defer the popped event if a required
             // namespace/composer delivery-context lookup is busy. Those paths
@@ -2307,9 +2407,61 @@ mod tests {
     use tze_hud_scene::{MonoUs, SceneId};
 
     use super::{
-        PendingKeyboardEvent, drain_keyboard_queue_bounded, is_bare_tab_chord, keyboard_command,
-        restore_front_requeued_event,
+        PendingKeyboardEvent, ReadingScroll, drain_keyboard_queue_bounded, is_bare_tab_chord,
+        keyboard_command, reading_scroll_key, restore_front_requeued_event,
     };
+
+    /// R4.2: the OUTPUT reading keys and their page step; any
+    /// Ctrl/Alt/Meta chord, and every other key, stays out of the map.
+    #[test]
+    fn reading_scroll_keys_map_home_end_and_page_keys() {
+        let page = tze_hud_input::KEYBOARD_PAGE_SCROLL_PX;
+        let none = KeyboardModifiers::NONE;
+        let shift = KeyboardModifiers {
+            shift: true,
+            ..none
+        };
+        let ctrl = KeyboardModifiers { ctrl: true, ..none };
+        let alt = KeyboardModifiers { alt: true, ..none };
+        let meta = KeyboardModifiers { meta: true, ..none };
+        for (key_code, key, modifiers, expected) in [
+            ("Home", "Home", none, Some(ReadingScroll::Top)),
+            ("End", "End", none, Some(ReadingScroll::Tail)),
+            ("Space", " ", none, Some(ReadingScroll::Page(page))),
+            ("Space", " ", shift, Some(ReadingScroll::Page(-page))),
+            (
+                "Unidentified",
+                "Space",
+                none,
+                Some(ReadingScroll::Page(page)),
+            ),
+            ("Home", "Home", ctrl, None),
+            ("End", "End", alt, None),
+            ("Space", " ", meta, None),
+            (
+                "PageDown",
+                "PageDown",
+                none,
+                Some(ReadingScroll::Page(page)),
+            ),
+            ("PageUp", "PageUp", shift, Some(ReadingScroll::Page(-page))),
+            ("PageDown", "PageDown", ctrl, None),
+            ("KeyA", "a", none, None),
+        ] {
+            let raw = RawKeyDownEvent {
+                key_code: key_code.to_string(),
+                key: key.to_string(),
+                modifiers,
+                repeat: false,
+                timestamp_mono_us: MonoUs(1),
+            };
+            assert_eq!(
+                reading_scroll_key(&raw),
+                expected,
+                "{key_code} {modifiers:?}"
+            );
+        }
+    }
 
     fn command_binding(
         key_code: &str,
@@ -3710,7 +3862,7 @@ mod tests {
         let ready = handle.input_notify("test-agent").unwrap();
         let mut notified = std::pin::pin!(ready.notified());
         assert!(!notified.as_mut().enable());
-        for key in ["Enter", "Space", "Enter", "Escape"] {
+        for key in ["Enter", "Space", "Enter", "Backspace"] {
             app.dispatch_key_down_event_inner(
                 &RawKeyDownEvent {
                     key_code: key.into(),
@@ -3739,14 +3891,10 @@ mod tests {
                 .0,
             ""
         );
-        assert!(matches!(
-            *app.state.local_composer_state.lock().unwrap(),
-            Some(None)
-        ));
         app.submit_composer_reply(SceneId::new(), "not a portal".into());
         assert!(
             !notified.as_mut().enable(),
-            "repeat/whitespace/cancel/nonportal signal no accepted input"
+            "repeat/whitespace/nonportal signal no accepted input"
         );
         let shared = app.state.shared_state.try_lock().unwrap();
         let scene = shared.scene.try_lock().unwrap();
@@ -3877,7 +4025,7 @@ mod tests {
         );
         let mut notified = std::pin::pin!(ready.notified());
         assert!(!notified.as_mut().enable());
-        for key in ["Enter", "Space", "Enter", "Escape"] {
+        for key in ["Enter", "Space", "Enter", "Backspace"] {
             app.dispatch_key_down_event_inner(
                 &RawKeyDownEvent {
                     key_code: key.into(),
@@ -3978,6 +4126,247 @@ mod tests {
             "the second reply also leaves no perpetual local dirty frame"
         );
 
+        // Model either lock becoming busy after the composer target lookup,
+        // at the post-edit reset boundary. Accepted text is already local;
+        // retrying the raw character would duplicate it or submit it twice.
+        let shared_handle = Arc::clone(&app.state.shared_state);
+        let scene_handle = {
+            let shared = shared_handle.try_lock().unwrap();
+            Arc::clone(&shared.scene)
+        };
+        let mut recovered_input_offsets = Vec::new();
+        for busy_scene in [false, true] {
+            let output_offset = {
+                let mut scene = scene_handle.try_lock().unwrap();
+                crate::portal::tests::measured_panes(&mut scene, tile_id, 900.0, 900.0);
+                app.state
+                    .input_processor
+                    .reconcile_portal_document_layouts(&mut scene);
+                app.state
+                    .input_processor
+                    .reset_portal_input_scroll_to_tail(tile_id, &mut scene);
+                assert_eq!(scene.portal_input_scroll_offset(tile_id).1, 800.0);
+                app.state.input_processor.process_scroll_event(
+                    &tze_hud_input::ScrollEvent {
+                        x: tile_bounds.x + tile_bounds.width * 0.25,
+                        y: tile_bounds.y + 200.0,
+                        delta_x: 0.0,
+                        delta_y: -50.0,
+                    },
+                    &mut scene,
+                );
+                assert_eq!(scene.portal_input_scroll_offset(tile_id).1, 750.0);
+                assert!(!scene.tile_follow_tail_at_tail(tile_id));
+                scene.tile_scroll_offset_local(tile_id)
+            };
+            app.state.input_processor.route_character_to_composer("z");
+            app.push_local_composer_echo(std::time::Instant::now());
+            let accepted_draft = app
+                .state
+                .input_processor
+                .composer_draft_snapshot()
+                .unwrap()
+                .0;
+            let shared_guard = (!busy_scene).then(|| shared_handle.try_lock().unwrap());
+            let scene_guard = busy_scene.then(|| scene_handle.try_lock().unwrap());
+            app.reset_input_history_scroll_to_tail(tile_id);
+            // A maintenance turn while still busy must retain the reset intent.
+            app.drain_pending_keyboard_events();
+            drop(scene_guard);
+            drop(shared_guard);
+            app.settle_scene_work();
+            let scene = scene_handle.try_lock().unwrap();
+            recovered_input_offsets.push(scene.portal_input_scroll_offset(tile_id).1);
+            assert_eq!(scene.tile_scroll_offset_local(tile_id), output_offset);
+            assert!(!scene.tile_follow_tail_at_tail(tile_id));
+            assert_eq!(
+                app.state
+                    .input_processor
+                    .composer_draft_snapshot()
+                    .unwrap()
+                    .0,
+                accepted_draft
+            );
+            drop(scene);
+            let hub = handle.hub.lock().unwrap();
+            let portal = hub
+                .get(&tze_hud_portal::hub::PortalKey::new(
+                    "test-agent",
+                    "proj-npcdf",
+                ))
+                .unwrap();
+            assert_eq!(portal.inputs.len(), 2, "tail recovery sends no reply");
+            assert_eq!(portal.replies.len(), 2, "tail recovery authors no echo");
+            assert!(!notified.as_mut().enable());
+        }
+
+        assert_eq!(
+            recovered_input_offsets,
+            [800.0, 800.0],
+            "accepted draft reset must survive both shared-state and scene contention"
+        );
+
+        // Later raw text waits behind the retained reset and is accepted once,
+        // after the busy turn. The drain must stop rather than spin on the reset.
+        let draft_before_retry = app
+            .state
+            .input_processor
+            .composer_draft_snapshot()
+            .unwrap()
+            .0;
+        let scene_guard = scene_handle.try_lock().unwrap();
+        app.reset_input_history_scroll_to_tail(tile_id);
+        app.dispatch_character_event(&RawCharacterEvent {
+            character: "!".into(),
+            timestamp_mono_us: tze_hud_scene::MonoUs(8),
+        });
+        app.drain_pending_keyboard_events();
+        assert_eq!(
+            app.state
+                .input_processor
+                .composer_draft_snapshot()
+                .unwrap()
+                .0,
+            draft_before_retry
+        );
+        drop(scene_guard);
+        app.settle_scene_work();
+        assert!(app.state.pending_keyboard_events.is_empty());
+        assert_eq!(
+            app.state
+                .input_processor
+                .composer_draft_snapshot()
+                .unwrap()
+                .0,
+            format!("{draft_before_retry}!")
+        );
+
+        // A newer wheel must win over a retained reset; conversely an older
+        // retained wheel must settle before a later character resets INPUT.
+        app.state.cursor_x = tile_bounds.x + tile_bounds.width * 0.25;
+        app.state.cursor_y = tile_bounds.y + 200.0;
+        let mut ordered_offsets = Vec::new();
+        let mut observed_tail = Vec::new();
+        for wheel_after_edit in [true, false] {
+            app.reset_input_history_scroll_to_tail(tile_id);
+            let output_before = scene_handle
+                .try_lock()
+                .unwrap()
+                .tile_scroll_offset_local(tile_id);
+            let scene_guard = scene_handle.try_lock().unwrap();
+            let mut generation = app.state.wake.main_work_generation();
+            if wheel_after_edit {
+                app.reset_input_history_scroll_to_tail(tile_id);
+                drop(scene_guard);
+                app.enqueue_scroll_event(0.0, -50.0, tze_hud_input::WheelStep::Pixels);
+            } else {
+                app.enqueue_scroll_event(0.0, -50.0, tze_hud_input::WheelStep::Pixels);
+                app.dispatch_character_event(&RawCharacterEvent {
+                    character: "?".into(),
+                    timestamp_mono_us: tze_hud_scene::MonoUs(9),
+                });
+                drop(scene_guard);
+            }
+            // Retaining a wheel already schedules availability. A reset alone
+            // uses about_to_wait's deferred-work wake. Observe the scheduled
+            // completion without creating a competing fixture waiter.
+            if app.state.pending_pointer_buttons.is_empty() && app.state.pending_scroll.is_empty() {
+                app.schedule_shared_scene_availability_wake();
+            }
+            for _ in 0..2 {
+                let deadline = std::time::Instant::now()
+                    + std::time::Duration::from_micros(tze_hud_scene::perf_budget::test_budget(
+                        1_000_000,
+                    ));
+                while app.state.wake.main_work_generation() == generation {
+                    assert!(
+                        std::time::Instant::now() < deadline,
+                        "scene availability must wake deferred input"
+                    );
+                    std::thread::yield_now();
+                }
+                app.settle_scene_work();
+                if app.state.pending_keyboard_events.is_empty()
+                    && app.state.pending_pointer_buttons.is_empty()
+                {
+                    break;
+                }
+                // The earlier pointer used this turn; about_to_wait schedules
+                // the remaining keyboard work through the same availability seam.
+                generation = app.state.wake.main_work_generation();
+                app.schedule_shared_scene_availability_wake();
+            }
+            assert!(app.state.pending_keyboard_events.is_empty());
+            assert!(app.state.pending_pointer_buttons.is_empty());
+            assert!(app.state.pending_scroll.is_empty());
+            app.push_focus_ring_owner();
+            let scene = scene_handle.try_lock().unwrap();
+            ordered_offsets.push(scene.portal_input_scroll_offset(tile_id).1);
+            let status = crate::operator::surface_status::portals_json(
+                &scene,
+                &app.state.surface_ui.lock().unwrap(),
+                &[],
+            );
+            assert_eq!(status.as_array().unwrap().len(), 1);
+            observed_tail.push(
+                status[0]["input"]["at_tail"]
+                    .as_bool()
+                    .expect("current shaped INPUT"),
+            );
+            assert_eq!(
+                status[0]["input"]["draft_chars"],
+                app.state
+                    .input_processor
+                    .composer_draft_snapshot()
+                    .unwrap()
+                    .0
+                    .chars()
+                    .count()
+            );
+            assert_eq!(status[0]["output"]["at_tail"], false);
+            assert_eq!(scene.tile_scroll_offset_local(tile_id), output_before);
+            assert!(!scene.tile_follow_tail_at_tail(tile_id));
+        }
+        assert_eq!(
+            (ordered_offsets, observed_tail),
+            (vec![750.0, 800.0], vec![false, true]),
+            "wheel and accepted edits must retain their arrival order and actual observer tail"
+        );
+        assert_eq!(
+            app.state
+                .input_processor
+                .composer_draft_snapshot()
+                .unwrap()
+                .0,
+            format!("{draft_before_retry}!?")
+        );
+
+        // A stale target has no editor or scene work to recover. It must leave
+        // no perpetually deferred reset and must not retarget the live portal.
+        let stale_tile = SceneId::new();
+        let pane_offsets = {
+            let scene = scene_handle.try_lock().unwrap();
+            (
+                scene.portal_input_scroll_offset(tile_id),
+                scene.tile_scroll_offset_local(tile_id),
+            )
+        };
+        let scene_guard = scene_handle.try_lock().unwrap();
+        app.reset_input_history_scroll_to_tail(stale_tile);
+        app.drain_pending_keyboard_events();
+        drop(scene_guard);
+        app.settle_scene_work();
+        assert!(app.state.pending_keyboard_events.is_empty());
+        let scene = scene_handle.try_lock().unwrap();
+        assert_eq!(
+            (
+                scene.portal_input_scroll_offset(tile_id),
+                scene.tile_scroll_offset_local(tile_id)
+            ),
+            pane_offsets
+        );
+        drop(scene);
+
         // A known portal whose hub is unavailable must not fall back to a raw
         // success echo. Register readiness before the refusal, as a real poll does.
         let limit = handle.hub.lock().unwrap().limits().input_item_bytes;
@@ -4019,6 +4408,24 @@ mod tests {
             !notified.as_mut().enable(),
             "refusal does not notify accepted input"
         );
+
+        // A tile may disappear before its retained reset reaches the scene.
+        // Recovery must finish without recreating the target or sending input.
+        let mut scene = scene_handle.try_lock().unwrap();
+        app.reset_input_history_scroll_to_tail(tile_id);
+        let namespace = scene.tiles[&tile_id].namespace.clone();
+        scene.delete_tile(tile_id, &namespace).unwrap();
+        drop(scene);
+        app.settle_scene_work();
+        assert!(app.state.pending_keyboard_events.is_empty());
+        assert!(
+            !scene_handle
+                .try_lock()
+                .unwrap()
+                .tiles
+                .contains_key(&tile_id)
+        );
+        assert!(!notified.as_mut().enable());
     }
 
     #[test]

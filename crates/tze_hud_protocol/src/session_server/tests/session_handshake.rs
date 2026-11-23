@@ -197,16 +197,22 @@ async fn test_handshake_init_established_and_current_degradation() {
                     1,
                 )
                 .unwrap();
-            let node = crate::convert::proto_node_to_scene(&crate::proto::NodeProto {
-                data: Some(crate::proto::node_proto::Data::TextMarkdown(
-                    crate::proto::TextMarkdownNodeProto {
-                        content: secret.to_string(),
-                        ..Default::default()
-                    },
-                )),
-                ..Default::default()
-            })
-            .unwrap();
+            let node = Node {
+                id: SceneId::new(),
+                children: vec![],
+                layout: Default::default(),
+                data: NodeData::TextMarkdown(tze_hud_scene::TextMarkdownNode {
+                    content: secret.to_string(),
+                    bounds: Rect::new(0.0, 0.0, 100.0, 100.0),
+                    font_size_px: 16.0,
+                    font_family: tze_hud_scene::FontFamily::SystemSansSerif,
+                    color: tze_hud_scene::Rgba::WHITE,
+                    background: None,
+                    alignment: tze_hud_scene::TextAlign::Start,
+                    overflow: tze_hud_scene::TextOverflow::Ellipsis,
+                    color_runs: Box::default(),
+                }),
+            };
             scene.set_tile_root(tile, node).unwrap();
             scene
                 .set_portal_surface(tile, PortalSurface::default(), "foreign-portal")
@@ -1150,10 +1156,9 @@ async fn removed_client_request_numbers_decode_to_empty_payload() {
         removed.push(msg);
     }
 
-    // Retired internal portal operations must also disappear when nested in the
-    // removed public MutationBatch envelope (ClientMessage tag 20). Build the old
-    // wire bytes explicitly: the retired generated types intentionally no longer exist.
-    let mut retired_fields = Vec::new();
+    // Retired portal operations must also disappear when nested in the removed
+    // MutationBatch envelope (ClientMessage tag 20). Build the old wire bytes
+    // explicitly: the generated mutation types no longer exist.
     for field in 13u64..=17 {
         let mut body = vec![0x0a, 0x10]; // former tile_id, 16 bytes
         body.extend_from_slice(&[1; 16]);
@@ -1167,8 +1172,6 @@ async fn removed_client_request_numbers_decode_to_empty_payload() {
         prost::encoding::encode_varint(field << 3 | 2, &mut mutation_wire);
         prost::encoding::encode_varint(body.len() as u64, &mut mutation_wire);
         mutation_wire.extend_from_slice(&body);
-        let decoded = crate::proto::MutationProto::decode(mutation_wire.as_slice()).unwrap();
-        assert!(decoded.mutation.is_none(), "retired tag {field} is unknown");
 
         let mut batch_wire = vec![0x1a]; // MutationBatch.mutations = 3
         prost::encoding::encode_varint(mutation_wire.len() as u64, &mut batch_wire);
@@ -1180,37 +1183,6 @@ async fn removed_client_request_numbers_decode_to_empty_payload() {
         let request = ClientMessage::decode(request_wire.as_slice()).unwrap();
         assert!(request.payload.is_none());
         removed.push(request);
-        retired_fields.extend_from_slice(&mutation_wire);
-    }
-
-    // Unrelated internal fields retain their typed values, including alongside
-    // unknown retired operations. This is decoder coverage, not a public route.
-    use crate::proto::mutation_proto::Mutation;
-    for mutation in [
-        Mutation::CreateTile(crate::proto::CreateTileMutation {
-            tab_id: vec![2; 16],
-            z_order: 7,
-            ..Default::default()
-        }),
-        Mutation::PublishToTile(crate::proto::PublishToTileMutation {
-            element_id: vec![3; 16],
-            ..Default::default()
-        }),
-    ] {
-        let retained = crate::proto::MutationProto {
-            mutation: Some(mutation),
-        };
-        let wire = retained.encode_to_vec();
-        assert_eq!(
-            crate::proto::MutationProto::decode(wire.as_slice()).unwrap(),
-            retained
-        );
-        let mut mixed = wire;
-        mixed.extend_from_slice(&retired_fields);
-        assert_eq!(
-            crate::proto::MutationProto::decode(mixed.as_slice()).unwrap(),
-            retained
-        );
     }
 
     let (mut client, _server, state) = setup_test_with_state().await;
@@ -1221,7 +1193,7 @@ async fn removed_client_request_numbers_decode_to_empty_payload() {
         let scene = state.scene.lock().await;
         (
             serde_json::to_value(&*scene).unwrap(),
-            scene.scheduled_batches.len(),
+            scene.scheduled_publications.len(),
         )
     };
 
@@ -1312,7 +1284,7 @@ async fn removed_client_request_numbers_decode_to_empty_payload() {
         let state = state.lock().await;
         let scene = state.scene.lock().await;
         assert_eq!(serde_json::to_value(&*scene).unwrap(), scene_before);
-        assert_eq!(scene.scheduled_batches.len(), scheduled_before);
+        assert_eq!(scene.scheduled_publications.len(), scheduled_before);
     }
 }
 

@@ -3,7 +3,7 @@ use std::time::Instant;
 use tze_hud_compositor::LocalComposerState;
 use tze_hud_scene::types::{DragHandleContextMenuState, WidgetParameterValue};
 
-use super::hittest::combined_overlay_hit_regions;
+use super::hittest::{combined_overlay_hit_regions, pressable_control_regions};
 use super::input_dispatch::nanoseconds_since_start;
 use super::lifecycle::record_pending_input_latency;
 use super::{HitRegion, WinitApp};
@@ -372,6 +372,12 @@ impl WinitApp {
                     &self.state.static_hit_regions,
                     &scene,
                 ));
+                self.state.pressable_regions = pressable_control_regions(
+                    &scene,
+                    self.state
+                        .safe_mode_atomic
+                        .load(std::sync::atomic::Ordering::Acquire),
+                );
                 next_trackers = Some(next);
             }
         }
@@ -468,7 +474,7 @@ impl WinitApp {
                 .zip(self.state.primary_monitor.as_ref())
                 .map(|(monitor, primary)| monitor.scene_rect(primary));
             let px_scale = monitor.map(|m| {
-                m.scale as f32 * tze_hud_config::tokens::ui_scale(&self.state.global_tokens)
+                m.scale as f32 * tze_hud_config::tokens::effective_scale(&self.state.global_tokens)
             });
             scene.overlay.drag_handle_context_menu = Some(DragHandleContextMenuState {
                 element_id,
@@ -637,7 +643,7 @@ impl WinitApp {
     /// No-op if the element has no user override.
     fn perform_reset_element_geometry(&mut self, element_id: tze_hud_scene::SceneId) {
         // Collect previous override, fallback geometry, and optional persist path.
-        let (previous_override, fallback_geometry, store_snapshot, persist_path) = {
+        let (previous_override, fallback_geometry, store_snapshot, persist_file) = {
             let Ok(mut state) = self.state.shared_state.try_lock() else {
                 tracing::warn!("perform_reset_element_geometry: could not acquire shared state");
                 return;
@@ -701,17 +707,15 @@ impl WinitApp {
                     .unwrap_or(tze_hud_scene::ZERO_GEOMETRY_POLICY)
             };
             let store_snapshot = state.element_store.clone();
-            let persist_path = state.element_store_path.clone();
-            (previous, fallback, store_snapshot, persist_path)
+            let persist_file = state.element_store_file.clone();
+            (previous, fallback, store_snapshot, persist_file)
         };
 
         // Persist the updated store on a background thread to avoid blocking the
         // Winit event loop with sync disk I/O (atomic write + fsync).
-        if let Some(path) = persist_path {
+        if let Some(file) = persist_file {
             std::thread::spawn(move || {
-                if let Err(e) =
-                    crate::element_store::persist_element_store_to_path(&store_snapshot, &path)
-                {
+                if let Err(e) = file.save(&store_snapshot) {
                     tracing::warn!(error = %e, "perform_reset_element_geometry: persist failed");
                 }
             });

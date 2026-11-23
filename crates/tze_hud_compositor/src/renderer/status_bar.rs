@@ -101,6 +101,9 @@ pub(super) struct StatusEntry {
     pub icon: Option<String>,
     pub x: f32,
     pub width: f32,
+    /// Room left for this entry, and its key's unconstrained width.
+    room: f32,
+    key_natural: f32,
     key_width: f32,
     value_width: f32,
 }
@@ -175,6 +178,42 @@ impl StatusBarCard {
         })
     }
 }
+/// `text` on one line within the byte budget; an omitted suffix is marked.
+fn bounded(text: &str, max_bytes: usize) -> String {
+    let mut end = text.len().min(max_bytes);
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    let mut shown = text[..end].replace(['\n', '\r'], " ");
+    if end < text.len() {
+        shown.push_str(crate::overflow::ELLIPSIS);
+    }
+    shown
+}
+fn measure(s: &StatusStyle, fonts: &mut glyphon::FontSystem, text: &str) -> f32 {
+    crate::text::single_line_width(fonts, text, s.size, s.font, s.weight).ceil()
+}
+/// An entry's (width, key width, value width) in `available` room. Keep both
+/// parts readable when an entry is constrained. Every text item has its own
+/// one-line ellipsis and exact measured box.
+fn entry_widths(
+    s: &StatusStyle,
+    inset: f32,
+    key_natural: f32,
+    value_natural: f32,
+    available: f32,
+) -> (f32, f32, f32) {
+    let natural = inset + key_natural + s.gap + value_natural;
+    let entry_width = natural.min(s.entry_max).min(available);
+    let text_space = (entry_width - inset - s.gap).max(0.0);
+    let key_width = key_natural.min(if natural > entry_width {
+        text_space * 0.5
+    } else {
+        text_space
+    });
+    let value_width = value_natural.min((text_space - key_width).max(0.0));
+    (entry_width, key_width, value_width)
+}
 fn entries(publishes: &[ZonePublishRecord], contention: ContentionPolicy) -> Vec<(String, String)> {
     let mut merged = HashMap::new();
     match contention {
@@ -197,6 +236,75 @@ fn entries(publishes: &[ZonePublishRecord], contention: ContentionPolicy) -> Vec
         entries.truncate(max_keys as usize);
     }
     entries
+}
+/// Drawn character counts for the values in `set` that the bar laid out from
+/// `records` would cut, sorted by key: a cut value reports the longest prefix
+/// its entry draws whole; an entry the bar does not draw reports 0. Empty
+/// values remove entries and report nothing.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn clipped_values(
+    records: &[ZonePublishRecord],
+    contention: ContentionPolicy,
+    set: &HashMap<String, String>,
+    icons: &HashMap<String, String>,
+    style: StatusStyle,
+    zone: Rect,
+    display: Rect,
+    fonts: &mut glyphon::FontSystem,
+    max_input_bytes: usize,
+) -> Vec<(String, usize)> {
+    let merged = entries(records, contention);
+    if merged.is_empty() || zone.width <= 0.0 || zone.height <= 0.0 {
+        return Vec::new();
+    }
+    let mut cache = StatusBarLayoutCache {
+        max_input_bytes,
+        ..Default::default()
+    };
+    let input = Inputs {
+        entries: merged.clone(),
+        icons: icons.clone(),
+        style,
+        zone,
+        display,
+    };
+    let card = cache.resolve("", input, fonts, true);
+    let s = &card.style;
+    let mut set: Vec<_> = set.iter().filter(|(_, value)| !value.is_empty()).collect();
+    set.sort();
+    let mut clipped = Vec::new();
+    for (key, value) in set {
+        // Drawn entries are the leading run of the merged, sorted entries.
+        let Some(entry) = merged
+            .iter()
+            .position(|(k, v)| k == key && v == value)
+            .and_then(|index| card.entries.get(index))
+        else {
+            clipped.push((key.clone(), 0));
+            continue;
+        };
+        if measure(s, fonts, &entry.value) <= entry.value_width {
+            continue;
+        }
+        let inset = if entry.icon.is_some() {
+            s.icon + s.gap
+        } else {
+            0.0
+        };
+        let mut end = value.len().min(max_input_bytes);
+        while !value.is_char_boundary(end) {
+            end -= 1;
+        }
+        // A value within the budget is known not to fit whole.
+        let upper = value[..end].chars().count() - usize::from(end == value.len());
+        let count = crate::overflow::longest_fitting_prefix(upper, |n| {
+            let prefix = crate::overflow::char_prefix(value, n).replace(['\n', '\r'], " ");
+            let natural = measure(s, fonts, &prefix);
+            natural <= entry_widths(s, inset, entry.key_natural, natural, entry.room).2
+        });
+        clipped.push((key.clone(), count));
+    }
+    clipped
 }
 #[derive(Clone, PartialEq)]
 struct Inputs {
@@ -271,42 +379,22 @@ impl StatusBarLayoutCache {
             if available <= inset + s.gap {
                 break;
             }
-            let bounded = |text: &str| {
-                let mut end = text.len().min(self.max_input_bytes);
-                while !text.is_char_boundary(end) {
-                    end -= 1;
-                }
-                let mut shown = text[..end].replace(['\n', '\r'], " ");
-                if end < text.len() {
-                    shown.push_str(crate::overflow::ELLIPSIS);
-                }
-                shown
-            };
-            let shown_key = bounded(key);
-            let shown_value = bounded(value);
-            let measure = |fonts: &mut glyphon::FontSystem, text: &str| {
-                crate::text::single_line_width(fonts, text, s.size, s.font, s.weight).ceil()
-            };
-            let key_natural = measure(fonts, &shown_key);
-            let value_natural = measure(fonts, &shown_value);
+            let shown_key = bounded(key, self.max_input_bytes);
+            let shown_value = bounded(value, self.max_input_bytes);
+            let key_natural = measure(s, fonts, &shown_key);
+            let value_natural = measure(s, fonts, &shown_value);
             self.shapes += 2;
             let natural = inset + key_natural + s.gap + value_natural;
-            let entry_width = natural.min(s.entry_max).min(available);
-            // Keep both parts readable when an entry is constrained. Every
-            // text item has its own one-line ellipsis and exact measured box.
-            let text_space = (entry_width - inset - s.gap).max(0.0);
-            let key_width = key_natural.min(if natural > entry_width {
-                text_space * 0.5
-            } else {
-                text_space
-            });
-            let value_width = value_natural.min((text_space - key_width).max(0.0));
+            let (entry_width, key_width, value_width) =
+                entry_widths(s, inset, key_natural, value_natural, available);
             shown.push(StatusEntry {
                 key: shown_key,
                 value: shown_value,
                 icon,
                 x: padding + used + gap,
                 width: entry_width,
+                room: available,
+                key_natural,
                 key_width,
                 value_width,
             });

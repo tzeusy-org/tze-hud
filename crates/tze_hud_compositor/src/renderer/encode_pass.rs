@@ -1,11 +1,5 @@
 //! GPU encode-pass methods and rounded-rect helpers for the compositor.
 //!
-//! Moved from `renderer/mod.rs` (the "Color helpers + encode passes" and
-//! "Rounded rect" clusters, formerly ~L5850–6380 at plan date) by Step R-6 of
-//! the renderer module split. No logic was changed; only
-//! visibility modifiers were added where Rust's module-privacy rules require
-//! them (listed in the PR body).
-//!
 //! ## Methods in this file
 //!
 //! **Color helpers** (used by many encode methods):
@@ -410,7 +404,9 @@ impl super::Compositor {
         if !scene.zones_shown() {
             return result;
         }
-        for (zone_name, publishes) in &scene.zone_registry.active_publishes {
+        for stack in self.zone_stacks(scene) {
+            let _tokens = self.tokens_for_stack(&stack);
+            let (zone_name, publishes) = (stack.name, &*stack.publishes);
             if publishes.is_empty() {
                 continue;
             }
@@ -438,7 +434,7 @@ impl super::Compositor {
             }
 
             let (x, y, w, h) =
-                self.zone_geometry(zone_name, &scene.effective_zone_geometry(zone_def), sw, sh);
+                self.stack_geometry(&stack, &scene.effective_zone_geometry(zone_def), sw, sh);
             let out = match zone_def.layer_attachment {
                 LayerAttachment::Background => &mut result.background,
                 LayerAttachment::Content => &mut result.content,
@@ -492,7 +488,12 @@ impl super::Compositor {
                             .is_some_and(|id| self.image_texture_cache.contains_key(&id));
                         if let Some(mut mark) = style.mark(payload.urgency, agent_icon) {
                             mark.a *= opacity;
-                            let icon = style.icon_bounds(slot.x, slot.y, !payload.title.is_empty());
+                            let icon = style.icon_bounds(
+                                slot.x,
+                                slot.y,
+                                !payload.title.is_empty(),
+                                record.caption.as_deref(),
+                            );
                             out.push(self.border_only_cmd(
                                 icon,
                                 icon.width * 0.5,
@@ -502,7 +503,13 @@ impl super::Compositor {
                         }
                         // Dismiss: a borderless × that takes a state layer.
                         if pushed {
-                            let b = dismiss_bounds(zone_name, zone_tokens, policy, slot);
+                            let b = dismiss_bounds(
+                                zone_name,
+                                zone_tokens,
+                                policy,
+                                slot,
+                                record.caption.as_deref(),
+                            );
                             let state = chrome_state(notification_dismiss_interaction_id(
                                 zone_name, record,
                             ));
@@ -514,25 +521,69 @@ impl super::Compositor {
                                 opacity,
                             ));
                         }
+                        if let Some((bounds, _)) =
+                            super::notification_style::go_to_control(scene, record, &style, slot)
+                        {
+                            let state = chrome_state(
+                                super::hit_regions::notification_go_to_interaction_id(
+                                    zone_name, record,
+                                ),
+                            );
+                            out.extend(self.card_control_cmd(
+                                bounds,
+                                state,
+                                style.control_fill(state, None),
+                                &style,
+                                opacity,
+                            ));
+                        }
                         // Action buttons: at exactly the bounds
                         // `populate_notification_hit_regions` registers; labels
-                        // are drawn by `collect_text_items`.
-                        for (index, (_action, b)) in payload
+                        // are drawn by `collect_text_items`. A destructive one
+                        // adds a `color.error` hairline, and while held a
+                        // hold fill sweeping in from the left.
+                        for (index, (action, b)) in payload
                             .actions
                             .iter()
                             .zip(action_layout.bounds(slot.x, slot.y, slot.width, slot.height))
                             .enumerate()
                         {
-                            let state = chrome_state(notification_action_interaction_id(
-                                zone_name, record, index,
-                            ));
+                            let id = notification_action_interaction_id(zone_name, record, index);
+                            let state = chrome_state(id.clone());
+                            if action.is_destructive() {
+                                let mut outline = style.destructive_outline();
+                                outline.a *= opacity;
+                                let radius = style
+                                    .control_radius
+                                    .min(b.width * 0.5)
+                                    .min(b.height * 0.5)
+                                    .max(0.0);
+                                out.push(self.border_only_cmd(b, radius, style.hairline, outline));
+                            }
                             out.extend(self.card_control_cmd(
                                 b,
                                 state,
-                                style.control_fill(state, style.action_fill(index)),
+                                style.control_fill(state, style.action_fill(payload, index)),
                                 &style,
                                 opacity,
                             ));
+                            if let Some(fill) = self.notification_hold_fill(scene, &id)
+                                && let Some(mut sweep) = self.card_control_cmd(
+                                    b,
+                                    state,
+                                    Some(style.hold_fill(payload.urgency)),
+                                    &style,
+                                    opacity,
+                                )
+                            {
+                                sweep.clip = Some(RoundedRectClip {
+                                    x: b.x,
+                                    y: b.y,
+                                    width: b.width * fill,
+                                    height: b.height,
+                                });
+                                out.push(sweep);
+                            }
                         }
                     }
                 }
@@ -807,7 +858,11 @@ impl super::Compositor {
                 if let Some(clipped) = Self::clip_rect_to_tile(tile, rect) {
                     let max_r = (rect.width * 0.5).min(rect.height * 0.5).max(0.0);
                     let color = super::tile_render::composer_backdrop_color(
-                        scene, tile.id, sc.bounds, sc.color,
+                        scene,
+                        tile.id,
+                        sc.bounds,
+                        sc.color,
+                        &self.token_map,
                     )
                     .unwrap_or(sc.color);
                     cmds.push(crate::pipeline::RoundedRectDrawCmd {

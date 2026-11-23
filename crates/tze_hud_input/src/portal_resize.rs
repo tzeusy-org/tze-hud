@@ -146,14 +146,12 @@ pub struct PortalWindowTokens {
 
 impl Default for PortalWindowTokens {
     fn default() -> Self {
-        // These defaults must match `portal_tokens::defaults::WINDOW_*` in
-        // tze_hud_config. There is no compile-time link (the crates are
-        // intentionally independent); update both when changing a default.
+        use tze_hud_scene::portal_defaults::{self as d, number};
         Self {
-            min_width_px: 240.0,
-            min_height_px: 160.0,
-            resize_step_px: 32.0,
-            affordance_px: 8.0,
+            min_width_px: number(d::WINDOW_MIN_WIDTH_PX),
+            min_height_px: number(d::WINDOW_MIN_HEIGHT_PX),
+            resize_step_px: number(d::WINDOW_RESIZE_STEP_PX),
+            affordance_px: number(d::WINDOW_RESIZE_AFFORDANCE_PX),
         }
     }
 }
@@ -637,7 +635,7 @@ impl PortalResizeState {
     /// Returns true while any pointer device has an active resize gesture.
     ///
     /// Advisory flag.  For the **enforcement point** that actually rejects
-    /// adapter publishes, use [`accept_adapter_publish`].
+    /// adapter publishes, use [`Self::accept_adapter_publish`].
     ///
     /// When this is true, the caller MUST reject adapter geometry publishes
     /// (gesture is authoritative — ).
@@ -663,7 +661,7 @@ impl PortalResizeState {
     /// Sample the current gesture epoch.
     ///
     /// Adapters MUST call this **before** dispatching an adapter geometry
-    /// publish and then pass the sampled value to [`accept_adapter_publish`]
+    /// publish and then pass the sampled value to [`Self::accept_adapter_publish`]
     /// on arrival.  A publish that does not present a matching epoch will be
     /// rejected, guarding against races around gesture start/end.
     ///
@@ -734,8 +732,8 @@ impl PortalResizeState {
     /// On idle→active transition (first pointer down on this portal), increments
     /// the gesture epoch to an odd value (odd → active) so that any in-flight
     /// adapter publish sampled before this call is rejected by
-    /// [`accept_adapter_publish`].  Subsequent pointer-downs while already active
-    /// (multi-device) do not change the epoch so the even/odd invariant holds.
+    /// [`Self::accept_adapter_publish`].  Subsequent pointer-downs while already
+    /// active (multi-device) do not change the epoch so the even/odd invariant holds.
     pub fn on_pointer_down(
         &mut self,
         device_id: u32,
@@ -870,7 +868,7 @@ impl HotkeyResizeDir {
     /// Parse from a **physical** `KeyCode` string (e.g. `"Equal"`, `"Minus"`,
     /// `"NumpadAdd"`, `"NumpadSubtract"`) with Ctrl modifier check.
     ///
-    /// This is the layout- and modifier-independent fallback for [`from_key`].
+    /// This is the layout- and modifier-independent fallback for [`Self::from_key`].
     /// Matching the logical key string alone (`from_key`) is fragile under
     /// modified chords: with Ctrl held, winit on Windows does not reliably
     /// resolve the logical key to bare `"="`/`"-"`/`"+"`, and `"+"` requires

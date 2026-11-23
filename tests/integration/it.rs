@@ -8,14 +8,6 @@ mod gpu_init;
 #[path = "multi_agent.rs"]
 mod multi_agent;
 
-// HitRegionNode input capture, local feedback, and focus cycling.
-// Tests: PointerDown/Up events on Refresh/Dismiss buttons, hover enter/leave,
-// auto_capture + release_on_up semantics, focus cycling Tab/Shift+Tab,
-// focus ring bounds, FocusGainedEvent/FocusLostEvent dispatch, cross-tile Tab,
-// and keyboard-only activation via NAVIGATE_NEXT + ACTIVATE.
-#[path = "dashboard_tile_input.rs"]
-mod dashboard_tile_input;
-
 // Subtitle streaming breakpoint reveal — MCP and gRPC publish path verification.
 // Tests: gRPC ZonePublish with stream_text + breakpoints forwarded to compositor,
 // empty breakpoints = immediate reveal, replacement cancels streaming, gRPC/MCP parity,

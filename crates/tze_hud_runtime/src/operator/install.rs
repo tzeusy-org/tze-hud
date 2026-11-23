@@ -17,24 +17,12 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-pub const APP_DIR_NAME: &str = "tze_hud";
-pub const EXE_NAME: &str = "tze_hud.exe";
+const APP_DIR_NAME: &str = "tze_hud";
+const EXE_NAME: &str = "tze_hud.exe";
 /// The previous exe, parked here while a running instance holds the lock on it.
-pub const OLD_EXE_NAME: &str = "tze_hud.old.exe";
+const OLD_EXE_NAME: &str = "tze_hud.old.exe";
 /// A new exe that failed its handoff and was renamed aside by a rollback.
-pub const FAILED_EXE_NAME: &str = "tze_hud.failed.exe";
-/// `HKCU` Run value name.
-pub const RUN_VALUE_NAME: &str = "tze_hud";
-pub const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
-pub const APP_PATHS_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\App Paths\tze_hud.exe";
-/// Per-user single-instance mutex.
-pub const MUTEX_NAME: &str = "Local\\tze_hud";
-/// Named event the uninstaller (and an upgrading installer) signals to ask the
-/// running instance to shut down cleanly.
-pub const QUIT_EVENT_NAME: &str = "Local\\tze_hud.quit";
-/// Named event `tze_hud --pair` signals to ask the running instance to open
-/// pairing and show a code.
-pub const PAIR_EVENT_NAME: &str = "Local\\tze_hud.pair";
+const FAILED_EXE_NAME: &str = "tze_hud.failed.exe";
 /// How long `--handoff` waits for the previous instance to release the mutex.
 pub const HANDOFF_WAIT: Duration = Duration::from_secs(35);
 
@@ -58,6 +46,7 @@ pub enum InstallError {
     },
 }
 
+#[cfg(any(windows, test))]
 fn io_err(context: &'static str) -> impl FnOnce(io::Error) -> InstallError {
     move |source| InstallError::Io { context, source }
 }
@@ -107,13 +96,14 @@ impl InstallPaths {
         }
     }
 
-    /// The command line autostart and the post-install relaunch both use.
     /// `<install_dir>\tze_hud.failed.exe`
-    pub fn failed_exe(&self) -> PathBuf {
+    pub(super) fn failed_exe(&self) -> PathBuf {
         self.install_dir.join(FAILED_EXE_NAME)
     }
 
-    pub fn run_command(&self) -> String {
+    /// The command line autostart and the post-install relaunch both use.
+    #[cfg(any(windows, test))]
+    fn run_command(&self) -> String {
         format!(
             "\"{}\" --config \"{}\" --window-mode overlay",
             self.exe.display(),
@@ -208,7 +198,8 @@ pub fn decide(
 
 /// Create `path` with `contents` unless it already exists. Returns whether it
 /// was written; an existing file (the user's config) is never touched.
-pub fn write_default_config(path: &Path, contents: &str) -> io::Result<bool> {
+#[cfg(any(windows, test))]
+fn write_default_config(path: &Path, contents: &str) -> io::Result<bool> {
     use std::io::Write;
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir)?;
@@ -233,7 +224,8 @@ pub struct Staged {
 /// Copy the exe into the install dir and write the default config if absent.
 /// An existing (possibly running, so locked) installed exe is renamed to
 /// `tze_hud.old.exe` first, and restored if the copy fails. Idempotent.
-pub fn stage_files(
+#[cfg(any(windows, test))]
+fn stage_files(
     current_exe: &Path,
     paths: &InstallPaths,
     default_config: &str,
@@ -278,7 +270,8 @@ pub fn cleanup_old_exe(paths: &InstallPaths) {
 /// The `cmd /c` script that waits for this process to exit, then removes the
 /// install dir (and, when purging, the config and data dirs). Only paths named
 /// `tze_hud` are ever included.
-pub fn cleanup_script(paths: &InstallPaths, purge: bool) -> Result<String, InstallError> {
+#[cfg(any(windows, test))]
+fn cleanup_script(paths: &InstallPaths, purge: bool) -> Result<String, InstallError> {
     validate_owned(paths)?;
     let mut dirs = vec![&paths.install_dir];
     if purge {
@@ -306,7 +299,8 @@ pub fn cleanup_script(paths: &InstallPaths, purge: bool) -> Result<String, Insta
 /// Every directory install/uninstall may delete is `tze_hud`-named, and no
 /// path holds a character the cleanup script cannot quote. Checked at install
 /// too, so an install is never created that uninstall would refuse.
-pub fn validate_owned(paths: &InstallPaths) -> Result<(), InstallError> {
+#[cfg(any(windows, test))]
+fn validate_owned(paths: &InstallPaths) -> Result<(), InstallError> {
     for dir in [&paths.install_dir, &paths.config_dir, &paths.data_dir] {
         if dir.file_name().is_none_or(|n| n != APP_DIR_NAME) || dir.components().count() < 3 {
             return Err(InstallError::NotOwned(dir.clone()));
@@ -521,10 +515,7 @@ pub fn signal_pair() -> bool {
 
 #[cfg(windows)]
 mod win {
-    use super::{
-        APP_PATHS_KEY, Acquire, InstallPaths, InstanceGuard, MUTEX_NAME, PAIR_EVENT_NAME,
-        QUIT_EVENT_NAME, RUN_KEY, RUN_VALUE_NAME,
-    };
+    use super::{Acquire, InstallPaths, InstanceGuard};
     use std::ffi::{OsStr, OsString, c_void};
     use std::io;
     use std::os::windows::ffi::OsStrExt;
@@ -545,6 +536,19 @@ mod win {
         INFINITE, OpenEventW, SetEvent, WaitForSingleObject,
     };
     use windows::core::PCWSTR;
+
+    /// `HKCU` Run value name.
+    const RUN_VALUE_NAME: &str = "tze_hud";
+    const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
+    const APP_PATHS_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\App Paths\tze_hud.exe";
+    /// Per-user single-instance mutex.
+    const MUTEX_NAME: &str = "Local\\tze_hud";
+    /// Named event the uninstaller (and an upgrading installer) signals to ask the
+    /// running instance to shut down cleanly.
+    const QUIT_EVENT_NAME: &str = "Local\\tze_hud.quit";
+    /// Named event `tze_hud --pair` signals to ask the running instance to open
+    /// pairing and show a code.
+    const PAIR_EVENT_NAME: &str = "Local\\tze_hud.pair";
 
     fn wide(s: &str) -> Vec<u16> {
         OsStr::new(s).encode_wide().chain(Some(0)).collect()

@@ -2,6 +2,3 @@
 
 #[path = "../idle_efficiency.rs"]
 mod idle_efficiency;
-
-#[path = "../publish_load_artifact.rs"]
-mod publish_load_artifact;

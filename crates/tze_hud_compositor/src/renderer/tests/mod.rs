@@ -61,8 +61,8 @@ fn should_skip_gpu_tests() -> bool {
 /// `cargo test` output — indistinguishable from a test that actually
 /// exercised the render path. PR #1148's RefCell double-borrow panic escaped
 /// exactly this way: the render-path regression tests that would have caught
-/// it (`markdown_primer_landing_converges_on_render_path_hud_u4lq2`,
-/// `reused_compositor_across_scenes_lands_markdown_primer_hud_u4lq2`) silently
+/// it (`markdown_primer_landing_converges_on_render_path`,
+/// `reused_compositor_across_scenes_lands_markdown_primer`) silently
 /// no-op'd in a no-GPU sandbox; only CI's GPU/llvmpipe lane actually ran them.
 /// `require_gpu!` now `eprintln!`s a loud, greppable
 /// `"SKIPPED (no GPU)"` marker — carrying the exact call-site location and
@@ -162,6 +162,122 @@ async fn make_compositor_and_surface(w: u32, h: u32) -> Option<(Compositor, Head
     }
 }
 
+fn token_overrides<const N: usize>(pairs: [(&str, &str); N]) -> HashMap<String, String> {
+    pairs
+        .into_iter()
+        .map(|(key, value)| (key.into(), value.into()))
+        .collect()
+}
+
+fn leaf(data: NodeData) -> Node {
+    Node {
+        id: SceneId::new(),
+        children: Vec::new(),
+        layout: Default::default(),
+        data,
+    }
+}
+
+fn solid_node(bounds: Rect, color: Rgba, radius: Option<f32>) -> Node {
+    leaf(NodeData::SolidColor(SolidColorNode {
+        bounds,
+        color,
+        radius,
+    }))
+}
+
+fn markdown_text(content: impl Into<String>, bounds: Rect, font_size_px: f32) -> TextMarkdownNode {
+    TextMarkdownNode {
+        content: content.into(),
+        bounds,
+        font_size_px,
+        font_family: FontFamily::SystemSansSerif,
+        color: Rgba::WHITE,
+        background: None,
+        alignment: TextAlign::Start,
+        overflow: TextOverflow::Clip,
+        color_runs: Box::default(),
+    }
+}
+
+async fn make_text_compositor(width: u32, height: u32) -> Option<(Compositor, HeadlessSurface)> {
+    let (mut compositor, surface) = make_compositor_and_surface(width, height).await?;
+    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+    Some((compositor, surface))
+}
+
+fn prime_text(compositor: &mut Compositor, scene: &SceneGraph) {
+    compositor.prime_markdown_cache(scene);
+    compositor.prime_truncation_cache(scene);
+}
+
+fn render_pixels(
+    compositor: &mut Compositor,
+    scene: &mut SceneGraph,
+    surface: &HeadlessSurface,
+) -> Vec<u8> {
+    compositor.render_frame_headless(scene, surface);
+    surface.read_pixels(&compositor.device)
+}
+
+fn scrollable_tile(
+    scene: &mut SceneGraph,
+    name: &str,
+    viewport: Rect,
+    content_height: Option<f32>,
+) -> SceneId {
+    let tab_id = scene.create_tab("test", 0).unwrap();
+    let lease = scene.grant_lease(name, 120_000);
+    let tile = scene.create_tile(tab_id, name, lease, viewport, 1).unwrap();
+    scene
+        .register_tile_scroll_config(
+            tile,
+            TileScrollConfig {
+                content_height,
+                ..TileScrollConfig::vertical()
+            },
+        )
+        .unwrap();
+    tile
+}
+
+fn publish_zone(scene: &mut SceneGraph, zone: &str, publisher: &str, content: ZoneContent) {
+    scene
+        .publish_to_zone(zone, content, publisher, None, None, None)
+        .unwrap();
+}
+
+fn relative(x_pct: f32, y_pct: f32, width_pct: f32, height_pct: f32) -> GeometryPolicy {
+    GeometryPolicy::Relative {
+        x_pct,
+        y_pct,
+        width_pct,
+        height_pct,
+    }
+}
+
+fn zone_fixture(
+    name: &str,
+    geometry_policy: GeometryPolicy,
+    media: ZoneMediaType,
+    layer_attachment: LayerAttachment,
+) -> ZoneDefinition {
+    ZoneDefinition {
+        id: SceneId::new(),
+        name: name.into(),
+        description: name.into(),
+        geometry_policy,
+        accepted_media_types: vec![media],
+        rendering_policy: RenderingPolicy::default(),
+        contention_policy: ContentionPolicy::LatestWins,
+        max_publishers: 1,
+        auto_clear_ms: None,
+        layer_attachment,
+        ephemeral: false,
+    }
+}
+
+mod action_roles;
 mod alert_banner;
 mod composer;
 mod control_panel;

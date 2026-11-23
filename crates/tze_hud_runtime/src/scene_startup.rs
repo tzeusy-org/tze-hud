@@ -17,7 +17,7 @@ use std::path::Path;
 
 use tze_hud_config::raw::RawConfig;
 use tze_hud_config::themes::resolve_config_tokens;
-use tze_hud_config::tokens::DesignTokenMap;
+use tze_hud_config::tokens::{DesignTokenMap, OsPreferences};
 use tze_hud_scene::types::ZoneRegistry;
 
 use crate::widget_startup::init_widget_registry;
@@ -40,15 +40,16 @@ pub struct SceneStartupResult {
 /// relative `[widget_bundles].paths`; `None` resolves against the working
 /// directory.
 ///
-/// `animations_enabled` is the Windows "Show animations" preference
-/// (hud-ljhku.13): the windowed HUD passes
-/// `os_prefs::animations_enabled()`; headless runs, harnesses and tests pin
-/// it so the resolved tokens never depend on the build host.
+/// `os` holds the Windows preferences the tokens follow ("Show animations",
+/// hud-ljhku.13; text size and caret blink): the windowed HUD
+/// passes `os_prefs::read()`; headless runs, harnesses and tests pin
+/// [`OsPreferences::default`] so the resolved tokens never depend on the
+/// build host.
 pub fn run_scene_startup(
     raw: &RawConfig,
     config_parent: Option<&Path>,
     scene: &mut tze_hud_scene::graph::SceneGraph,
-    animations_enabled: bool,
+    os: OsPreferences,
 ) -> SceneStartupResult {
     let config_tokens: DesignTokenMap = raw
         .design_tokens
@@ -56,14 +57,12 @@ pub fn run_scene_startup(
         .map(|dt| dt.0.clone())
         .unwrap_or_default();
     let mut global_tokens = resolve_config_tokens(&config_tokens);
-    // Theme -> Windows animation preference -> config overrides (hud-ljhku.13).
-    tze_hud_config::tokens::apply_os_motion_layer(
-        &mut global_tokens,
-        &config_tokens,
-        animations_enabled,
-    );
+    // Theme -> Windows animation preference -> config overrides
+    // (hud-ljhku.13), plus the Windows text size and caret blink, which
+    // config cannot override.
+    tze_hud_config::tokens::apply_os_preferences(&mut global_tokens, &config_tokens, &os);
     resolve_font_dir(&mut global_tokens, config_parent);
-    // Monitor scale is not known yet: `ui.scale` alone until the windows
+    // Monitor scale is not known yet: the effective zoom alone until the windows
     // report theirs (`Appearance::set_display_scales`).
     tze_hud_config::tokens::set_px_scale(&mut global_tokens, 1.0);
     tracing::info!(
@@ -81,7 +80,7 @@ pub fn run_scene_startup(
     let mut zone_registry = ZoneRegistry::with_defaults();
     crate::appearance::restyle_zones(&mut zone_registry, &global_tokens);
     scene.zone_registry = zone_registry;
-    scene.widget_registry.zoom = tze_hud_config::tokens::ui_scale(&global_tokens);
+    scene.widget_registry.zoom = tze_hud_config::tokens::effective_scale(&global_tokens);
     scene.widget_registry.reduce_motion = tze_hud_config::tokens::os_reduce_motion(&global_tokens);
     tracing::info!(
         zone_count = scene.zone_registry.zones.len(),
@@ -203,6 +202,12 @@ mod tests {
     use tze_hud_config::raw::{RawConfig, RawDesignTokens};
     use tze_hud_scene::graph::SceneGraph;
 
+    const ANIMATIONS_OFF: OsPreferences = OsPreferences {
+        animations_enabled: false,
+        text_scale: 1.0,
+        caret_blink_ms: tze_hud_config::tokens::DEFAULT_CARET_BLINK_MS,
+    };
+
     #[test]
     fn fonts_dir_is_config_dir_fonts_when_present_and_never_user_set() {
         use tze_hud_compositor::fonts::RUNTIME_FONTS_DIR_KEY as KEY;
@@ -254,7 +259,7 @@ mod tests {
     fn absent_design_tokens_uses_default_theme() {
         let raw = RawConfig::default();
         let mut scene = make_scene();
-        let result = run_scene_startup(&raw, None, &mut scene, true);
+        let result = run_scene_startup(&raw, None, &mut scene, OsPreferences::default());
 
         let mut expected = tze_hud_config::themes::resolve_config_tokens(&DesignTokenMap::new());
         tze_hud_config::tokens::set_px_scale(&mut expected, 1.0);
@@ -281,7 +286,7 @@ mod tests {
         raw.design_tokens = Some(RawDesignTokens(dt_map));
 
         let mut scene = make_scene();
-        let result = run_scene_startup(&raw, None, &mut scene, true);
+        let result = run_scene_startup(&raw, None, &mut scene, OsPreferences::default());
 
         assert_eq!(
             result
@@ -304,7 +309,7 @@ mod tests {
         raw.design_tokens = Some(RawDesignTokens(dt_map));
 
         let mut scene = make_scene();
-        run_scene_startup(&raw, None, &mut scene, true);
+        run_scene_startup(&raw, None, &mut scene, OsPreferences::default());
 
         let subtitle_zone = scene
             .zone_registry
@@ -340,7 +345,7 @@ mod tests {
     fn zone_registry_applied_to_scene() {
         let raw = RawConfig::default();
         let mut scene = make_scene();
-        run_scene_startup(&raw, None, &mut scene, true);
+        run_scene_startup(&raw, None, &mut scene, OsPreferences::default());
 
         // All 6 default zones must be present
         for zone_name in &[
@@ -370,7 +375,7 @@ mod tests {
         raw.design_tokens = Some(RawDesignTokens(dt_map));
 
         let mut scene = make_scene();
-        run_scene_startup(&raw, None, &mut scene, true);
+        run_scene_startup(&raw, None, &mut scene, OsPreferences::default());
 
         // subtitle should get text_color from tokens
         let subtitle = scene.zone_registry.zones.get("subtitle").unwrap();
@@ -434,7 +439,7 @@ default_tab = true
 
         let raw: RawConfig = toml::from_str(toml_str).expect("TOML parse should succeed");
         let mut scene = SceneGraph::new(1920.0, 1080.0);
-        let result = run_scene_startup(&raw, None, &mut scene, true);
+        let result = run_scene_startup(&raw, None, &mut scene, OsPreferences::default());
 
         // Global token map should include the overrides
         assert_eq!(
@@ -484,7 +489,12 @@ default_tab = true
         tokens.insert("motion.enter.ms".into(), "275".into());
         tokens.insert("motion.state.ms".into(), "240".into());
         let mut changed_scene = SceneGraph::new(1920.0, 1080.0);
-        let changed = run_scene_startup(&overridden, None, &mut changed_scene, true);
+        let changed = run_scene_startup(
+            &overridden,
+            None,
+            &mut changed_scene,
+            OsPreferences::default(),
+        );
         let policy = &changed_scene.zone_registry.zones["subtitle"].rendering_policy;
         assert_eq!(policy.transition_in_ms, Some(275));
         assert_eq!(policy.transition_out_ms, Some(100));
@@ -504,7 +514,7 @@ default_tab = true
     #[test]
     fn startup_with_animations_off_zeroes_motion_below_config() {
         let mut scene = make_scene();
-        let off = run_scene_startup(&RawConfig::default(), None, &mut scene, false);
+        let off = run_scene_startup(&RawConfig::default(), None, &mut scene, ANIMATIONS_OFF);
         let subtitle = &scene.zone_registry.zones["subtitle"].rendering_policy;
         assert_eq!(subtitle.transition_in_ms, Some(0));
         assert_eq!(subtitle.transition_out_ms, Some(0));
@@ -522,14 +532,67 @@ default_tab = true
         dt_map.insert("motion.enter.ms".into(), "275".into());
         raw.design_tokens = Some(RawDesignTokens(dt_map));
         let mut scene = make_scene();
-        run_scene_startup(&raw, None, &mut scene, false);
+        run_scene_startup(&raw, None, &mut scene, ANIMATIONS_OFF);
         let subtitle = &scene.zone_registry.zones["subtitle"].rendering_policy;
         assert_eq!(subtitle.transition_in_ms, Some(275), "config wins");
         assert_eq!(subtitle.transition_out_ms, Some(0));
 
         let mut scene = make_scene();
-        run_scene_startup(&RawConfig::default(), None, &mut scene, true);
+        run_scene_startup(
+            &RawConfig::default(),
+            None,
+            &mut scene,
+            OsPreferences::default(),
+        );
         assert!(!scene.widget_registry.reduce_motion);
+    }
+
+    /// Pinned rather than read from the host:
+    /// Windows text size 125% with Zoom 100% zooms widget boxes and every dp
+    /// by 1.25, and the caret key records blinking off; at the defaults
+    /// neither key is present (R12.3 S1).
+    #[test]
+    fn startup_follows_windows_text_size_and_caret_blink() {
+        let mut scene = make_scene();
+        let os = OsPreferences {
+            text_scale: 1.25,
+            caret_blink_ms: 0,
+            ..OsPreferences::default()
+        };
+        let at_125 = run_scene_startup(&RawConfig::default(), None, &mut scene, os);
+        assert_eq!(scene.widget_registry.zoom, 1.25);
+        assert_eq!(
+            tze_hud_config::tokens::px_scale(&at_125.global_tokens),
+            1.25
+        );
+        assert_eq!(
+            tze_hud_config::tokens::caret_blink_ms(&at_125.global_tokens),
+            0
+        );
+        let notes_125 = scene.zone_registry.zones["notification-area"]
+            .rendering_policy
+            .font_size_px
+            .unwrap();
+
+        let mut scene = make_scene();
+        let defaults = run_scene_startup(
+            &RawConfig::default(),
+            None,
+            &mut scene,
+            OsPreferences::default(),
+        );
+        assert_eq!(scene.widget_registry.zoom, 1.0);
+        for key in [
+            tze_hud_config::tokens::TEXT_SCALE_KEY,
+            tze_hud_config::tokens::CARET_BLINK_MS_KEY,
+        ] {
+            assert!(!defaults.global_tokens.contains_key(key), "{key}");
+        }
+        let notes = scene.zone_registry.zones["notification-area"]
+            .rendering_policy
+            .font_size_px
+            .unwrap();
+        assert_eq!(notes_125, notes * 1.25);
     }
 
     // ── Step 2.5: Config-declared tab bootstrap ───────────────────
@@ -550,7 +613,7 @@ default_tab = true
 "##;
         let raw: RawConfig = toml::from_str(toml_str).expect("TOML parse should succeed");
         let mut scene = make_scene();
-        run_scene_startup(&raw, None, &mut scene, true);
+        run_scene_startup(&raw, None, &mut scene, OsPreferences::default());
 
         // The declared tab must exist even though it hosts no widgets.
         assert_eq!(
@@ -593,7 +656,7 @@ name = "Third"
 "##;
         let raw: RawConfig = toml::from_str(toml_str).expect("TOML parse should succeed");
         let mut scene = make_scene();
-        run_scene_startup(&raw, None, &mut scene, true);
+        run_scene_startup(&raw, None, &mut scene, OsPreferences::default());
 
         assert_eq!(scene.tabs.len(), 3, "all declared tabs must materialize");
         let second_id = scene
@@ -625,7 +688,7 @@ name = "Beta"
 "##;
         let raw: RawConfig = toml::from_str(toml_str).expect("TOML parse should succeed");
         let mut scene = make_scene();
-        run_scene_startup(&raw, None, &mut scene, true);
+        run_scene_startup(&raw, None, &mut scene, OsPreferences::default());
 
         assert_eq!(scene.tabs.len(), 2, "all declared tabs must materialize");
         let alpha_id = scene

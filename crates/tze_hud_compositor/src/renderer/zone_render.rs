@@ -1,11 +1,5 @@
 //! Zone rendering and zone layout methods for the compositor.
 //!
-//! Moved from `renderer/mod.rs` (the "Zone rendering" and "Zone layout"
-//! clusters, formerly ~L6381–7083 at plan date) by Step R-7 of the renderer
-//! module split. No logic was changed; only visibility modifiers
-//! were added where Rust's module-privacy rules require them (listed in the
-//! PR body).
-//!
 //! ## Methods in this file
 //!
 //! **Zone rendering**:
@@ -98,7 +92,9 @@ impl Compositor {
         if !scene.zones_shown() {
             return;
         }
-        for (zone_name, publishes) in &scene.zone_registry.active_publishes {
+        for stack in self.zone_stacks(scene) {
+            let _tokens = self.tokens_for_stack(&stack);
+            let (zone_name, publishes) = (stack.name, &*stack.publishes);
             if publishes.is_empty() {
                 continue;
             }
@@ -114,7 +110,7 @@ impl Compositor {
                 }
             }
             let (x, y, w, h) =
-                self.zone_geometry(zone_name, &scene.effective_zone_geometry(zone_def), sw, sh);
+                self.stack_geometry(&stack, &scene.effective_zone_geometry(zone_def), sw, sh);
 
             let policy = &zone_def.rendering_policy;
 
@@ -263,7 +259,12 @@ impl Compositor {
                                     // (cards and banners alike).
                                     let icon =
                                         NotificationStyle::for_zone(zone_name, zone_tokens, policy)
-                                            .icon_bounds(x, slot_y, !payload.title.is_empty());
+                                            .icon_bounds(
+                                                x,
+                                                slot_y,
+                                                !payload.title.is_empty(),
+                                                record.caption.as_deref(),
+                                            );
                                     let (icon_x, icon_y, size) = (icon.x, icon.y, icon.width);
                                     textured_cmds.push(TexturedDrawCmd {
                                         resource_id: icon_id,
@@ -554,14 +555,15 @@ impl Compositor {
         };
         let mut cache = self.notification_layouts.borrow_mut();
         cache.retain(scene);
-        for (name, records) in scene.shown_zone_publishes() {
+        for stack in super::zone_stacks_in(&self.display_layout, scene) {
+            let (name, records) = (stack.name, &*stack.publishes);
             let Some(zone) = scene.zone_registry.zones.get(name) else {
                 continue;
             };
-            let tokens = tze_hud_config::tokens::for_zone(&self.token_map, name);
-            let (_, _, width, _) = super::zone_geometry_in(
+            let tokens = tze_hud_config::tokens::for_zone(&self.token_map, &stack.token_key());
+            let (_, _, width, _) = super::stack_geometry_in(
                 &self.display_layout,
-                name,
+                &stack,
                 &scene.effective_zone_geometry(zone),
                 sw,
                 sh,
@@ -638,6 +640,25 @@ impl Compositor {
         )
     }
 
+    /// The order a stack draws (and tabs through) its publications.
+    pub(super) fn stack_order(
+        scene: &SceneGraph,
+        zone_name: &str,
+        publishes: &[ZonePublishRecord],
+    ) -> Vec<usize> {
+        if is_alert_banner_zone(zone_name) {
+            sort_alert_banner_indices(publishes)
+        } else {
+            // A spared question must stay reachable when the bounded zone
+            // cannot draw every retained card. Keep newest-first within each
+            // group and use the same answered/expiry predicate as admission.
+            let mut indices: Vec<_> = (0..publishes.len()).rev().collect();
+            // Evaluate expiry once per card so its key cannot change mid-sort.
+            indices.sort_by_cached_key(|&index| !scene.is_unanswered_question(&publishes[index]));
+            indices
+        }
+    }
+
     /// [`Self::zone_slot_layout`] without a compositor, so GPU-free hit-region
     /// population lays slots out with the exact same function as drawing.
     pub(super) fn zone_slot_layout_with_tokens(
@@ -650,17 +671,7 @@ impl Compositor {
         layouts: &std::cell::RefCell<super::notification_layout::NotificationLayoutCache>,
     ) -> super::ZoneSlotLayout {
         let (zw, zh) = size;
-        let ordered_indices: Vec<usize> = if is_alert_banner_zone(zone_name) {
-            sort_alert_banner_indices(publishes)
-        } else {
-            // A spared question must stay reachable when the bounded zone
-            // cannot draw every retained card. Keep newest-first within each
-            // group and use the same answered/expiry predicate as admission.
-            let mut indices: Vec<_> = (0..publishes.len()).rev().collect();
-            // Evaluate expiry once per card so its key cannot change mid-sort.
-            indices.sort_by_cached_key(|&index| !scene.is_unanswered_question(&publishes[index]));
-            indices
-        };
+        let ordered_indices = Self::stack_order(scene, zone_name, publishes);
 
         let ordered_refs: Vec<&ZonePublishRecord> =
             ordered_indices.iter().map(|&i| &publishes[i]).collect();
@@ -674,6 +685,7 @@ impl Compositor {
             .map(|record| match &record.content {
                 ZoneContent::Notification(n) => {
                     style.text_block_height(!n.title.is_empty())
+                        + style.caption_height(record.caption.as_deref())
                         + layouts
                             .borrow_mut()
                             .resolve(token_map, zone_name, record, policy, card_w)

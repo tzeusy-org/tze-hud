@@ -158,6 +158,123 @@ async fn panel_draws_over_the_frame_and_capture_leaves_it_out() {
     );
 }
 
+#[tokio::test]
+async fn secondary_panel_draws_at_its_scale_and_leaves_pairing_on_primary() {
+    let (w, h) = (640, 400);
+    let (mut compositor, primary_surface) = require_gpu!(make_compositor_and_surface(w, h).await);
+    let format = wgpu::TextureFormat::Rgba8UnormSrgb;
+    compositor.init_text_renderer(format);
+    let side = crate::FrameTarget {
+        x: -760.0,
+        y: 80.0,
+        width: 760,
+        height: 480,
+        primary: false,
+    };
+    let primary = crate::FrameTarget::primary(w, h);
+    let side_surface = HeadlessSurface::new(&compositor.device, side.width, side.height);
+    compositor.set_display_layout(crate::DisplayLayout::new(
+        vec![
+            crate::DisplayRect {
+                name: "DISPLAY1".into(),
+                primary: true,
+                rect: Rect::new(0.0, 0.0, w as f32, h as f32),
+            },
+            crate::DisplayRect {
+                name: "DISPLAY3".into(),
+                primary: false,
+                rect: Rect::new(side.x, side.y, side.width as f32, side.height as f32),
+            },
+        ],
+        &Default::default(),
+    ));
+    let mut tokens = HashMap::from([("control_panel.inset".into(), "32".into())]);
+    tze_hud_config::tokens::set_zone_px_scale(&mut tokens, "control-panel@DISPLAY3", 1.5);
+    compositor.set_token_map(tokens);
+    let mut scene = red_scene(w as f32, h as f32);
+    compositor.prime_markdown_cache(&scene);
+    compositor.prime_truncation_cache(&scene);
+    compositor.render_frame_headless(&mut scene, &primary_surface);
+    compositor.portal_tile_anim_states.clear();
+    compositor.set_system_card(Some(crate::SystemCardModel {
+        kind: crate::SystemCardKind::Pairing,
+        title: "Pair an agent".into(),
+        lines: vec!["482913".into()],
+    }));
+
+    let render = |compositor: &mut Compositor,
+                  build: &super::super::frame::WindowedFrameBuild,
+                  target,
+                  surface: &HeadlessSurface| {
+        assert!(
+            compositor
+                .present_windowed_frame_to(build, target, surface)
+                .gpu_submitted
+        );
+        let mut encoder = compositor
+            .device
+            .create_command_encoder(&Default::default());
+        surface.copy_to_buffer(&mut encoder);
+        compositor.queue.submit([encoder.finish()]);
+        surface.read_pixels(&compositor.device)
+    };
+    let closed = compositor.build_windowed_frame(&mut scene, w, h);
+    let primary_pairing = render(&mut compositor, &closed, &primary, &primary_surface);
+    let side_clear = render(&mut compositor, &closed, &side, &side_surface);
+    let closed_signature = compositor.frame_signature(&closed, &side);
+    compositor.set_control_panel_on_display(Some(panel()), Some("DISPLAY3".into()));
+    let open = compositor.build_windowed_frame(&mut scene, w, h);
+    let (_, geometry) = compositor
+        .control_panel_geometry(w as f32, h as f32)
+        .unwrap();
+    assert_eq!(
+        (geometry.panel.x, geometry.panel.w),
+        (48.0, side.width as f32 - 96.0)
+    );
+    assert_ne!(compositor.frame_signature(&open, &side), closed_signature);
+    assert_eq!(
+        render(&mut compositor, &open, &primary, &primary_surface),
+        primary_pairing
+    );
+    assert_ne!(
+        render(&mut compositor, &open, &side, &side_surface),
+        side_clear
+    );
+    assert_eq!(
+        compositor
+            .capture_windowed_frame(&open, &side, format)
+            .unwrap()
+            .rgba,
+        side_clear
+    );
+
+    // A changed text layout reaches the secondary present ledger too.
+    let mut typed = panel();
+    typed.query = "pause".into();
+    compositor.set_control_panel_on_display(Some(typed), Some("DISPLAY3".into()));
+    let typed = compositor.build_windowed_frame(&mut scene, w, h);
+    assert_ne!(
+        compositor.frame_signature(&open, &side),
+        compositor.frame_signature(&typed, &side)
+    );
+
+    compositor.set_control_panel(None);
+    compositor.set_closed_notice(Some(crate::PanelNotice {
+        text: "Everything hidden".into(),
+        key: "Ctrl+Shift+F11".into(),
+    }));
+    let notice = compositor.build_windowed_frame(&mut scene, w, h);
+    assert_ne!(
+        render(&mut compositor, &notice, &primary, &primary_surface),
+        primary_pairing
+    );
+    assert_eq!(
+        render(&mut compositor, &notice, &side, &side_surface),
+        side_clear
+    );
+    assert_eq!(compositor.frame_signature(&notice, &side), closed_signature);
+}
+
 /// The panel's layout (and so the geometry the runtime hit-tests against) is
 /// cached: an unchanged model and size reuse it, and only a model change or
 /// a resize recomputes it (CP-11: idle costs nothing).
@@ -449,9 +566,12 @@ async fn connect_card_draws_the_prompt_well_and_its_rows() {
         item(
             "connect.name",
             "Agent name",
-            PanelControl::Value {
+            PanelControl::Field {
                 text: "claude-laptop".into(),
-                mono: true,
+                caret: Some(crate::PanelCaret {
+                    cursor: 13,
+                    anchor: 0,
+                }),
             },
         ),
         item("connect.code", "One-time code", ro("564 016", true)),

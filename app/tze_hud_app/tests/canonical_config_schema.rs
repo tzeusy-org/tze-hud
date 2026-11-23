@@ -1,5 +1,4 @@
 use tze_hud_config::loader::TzeHudConfig;
-use tze_hud_scene::config::ConfigLoader;
 
 /// Canonical app production config remains valid against current loader schema.
 #[test]

@@ -20,7 +20,7 @@ use crate::themes::{THEME_KEY, validate_theme};
 /// Whether the control panel may write `[design_tokens] key`: the theme,
 /// the font roles (`font.serif` is a role without a canonical default) and
 /// every canonical token.
-pub fn is_writable_token(key: &str) -> bool {
+fn is_writable_token(key: &str) -> bool {
     key == THEME_KEY || key == FONT_SERIF || crate::tokens::canonical_token(key).is_some()
 }
 
@@ -93,7 +93,7 @@ fn validate(updates: &[(&str, TokenUpdate)]) -> Result<(), ConfigWriteError> {
 
 /// Check one update without touching the file. Any key may be removed (so
 /// "Reset all" also clears hand-written overrides such as `portal.*`
-/// colors); only [`is_writable_token`] keys may be set, and only to a value
+/// colors); only writable keys may be set, and only to a value
 /// of their kind.
 pub fn check_token_update(key: &str, update: &TokenUpdate) -> Result<(), ConfigWriteError> {
     let TokenUpdate::Set(value) = update else {
@@ -338,6 +338,7 @@ pub enum RuntimeUpdate {
     Fps(Option<u32>),
     AnswerWindowMs(Option<u32>),
     LogLevel(Option<String>),
+    QuestionPlacement(Option<String>),
     DebugZones(Option<bool>),
     ExcludeFromCapture(Option<bool>),
     Hotkey(ChordRole, Option<String>),
@@ -345,13 +346,14 @@ pub enum RuntimeUpdate {
 
 impl RuntimeUpdate {
     /// The `[runtime]` key this writes.
-    pub fn key(&self) -> &'static str {
+    fn key(&self) -> &'static str {
         match self {
             Self::McpPort(_) => "mcp_port",
             Self::GrpcPort(_) => "grpc_port",
             Self::Fps(_) => "fps",
             Self::AnswerWindowMs(_) => "answer_window_ms",
             Self::LogLevel(_) => "log_level",
+            Self::QuestionPlacement(_) => "question_placement",
             Self::DebugZones(_) => "debug_zones",
             Self::ExcludeFromCapture(_) => "exclude_from_capture",
             Self::Hotkey(role, _) => role.config_key(),
@@ -362,7 +364,9 @@ impl RuntimeUpdate {
         match self {
             Self::McpPort(v) | Self::GrpcPort(v) => v.map(|p| Value::from(i64::from(p))),
             Self::Fps(v) | Self::AnswerWindowMs(v) => v.map(|f| Value::from(i64::from(f))),
-            Self::LogLevel(v) | Self::Hotkey(_, v) => v.as_deref().map(Value::from),
+            Self::LogLevel(v) | Self::QuestionPlacement(v) | Self::Hotkey(_, v) => {
+                v.as_deref().map(Value::from)
+            }
             Self::DebugZones(v) | Self::ExcludeFromCapture(v) => v.map(Value::from),
         }
     }
@@ -971,6 +975,7 @@ mod tests {
                 RuntimeUpdate::Fps(Some(30)),
                 RuntimeUpdate::AnswerWindowMs(Some(120_000)),
                 RuntimeUpdate::LogLevel(Some("debug".into())),
+                RuntimeUpdate::QuestionPlacement(Some("pointer".into())),
                 RuntimeUpdate::DebugZones(Some(true)),
                 RuntimeUpdate::Hotkey(ChordRole::Panel, Some("Ctrl+Alt+F9".into())),
                 RuntimeUpdate::Hotkey(ChordRole::Answer, Some("Alt+F8".into())),
@@ -993,6 +998,7 @@ mod tests {
         assert_eq!(runtime.fps, Some(30));
         assert_eq!(runtime.answer_window_ms, Some(120_000));
         assert_eq!(runtime.log_level.as_deref(), Some("debug"));
+        assert_eq!(runtime.question_placement.as_deref(), Some("pointer"));
         assert_eq!(runtime.debug_zones, Some(true));
         assert_eq!(runtime.panel_hotkey.as_deref(), Some("Ctrl+Alt+F9"));
         assert_eq!(runtime.answer_hotkey.as_deref(), Some("Alt+F8"));
@@ -1007,6 +1013,7 @@ mod tests {
                 RuntimeUpdate::Fps(None),
                 RuntimeUpdate::AnswerWindowMs(None),
                 RuntimeUpdate::LogLevel(None),
+                RuntimeUpdate::QuestionPlacement(None),
                 RuntimeUpdate::DebugZones(None),
                 RuntimeUpdate::Hotkey(ChordRole::Panel, None),
                 RuntimeUpdate::Hotkey(ChordRole::Answer, None),
@@ -1044,6 +1051,10 @@ mod tests {
             (
                 RuntimeUpdate::LogLevel(Some("loud".into())),
                 "runtime.log_level",
+            ),
+            (
+                RuntimeUpdate::QuestionPlacement(Some("everywhere".into())),
+                "runtime.question_placement",
             ),
             (
                 RuntimeUpdate::Hotkey(ChordRole::Pause, Some("F12".into())),

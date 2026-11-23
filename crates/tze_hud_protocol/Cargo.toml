@@ -20,12 +20,6 @@ tonic = { workspace = true }
 prost = { workspace = true }
 blake3 = { workspace = true }
 serde_json = { workspace = true }
-# toml is used by the element-store persistence helper in session_server.
-# Serialization for ElementStore data was moved out of tze_hud_scene (which is
-# now I/O-free); the write path lives in tze_hud_runtime, but a lightweight
-# serialize-and-write helper is duplicated here to avoid a circular dep
-# (tze_hud_runtime already depends on tze_hud_protocol).
-toml = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
 tokio-stream = { workspace = true }
@@ -34,9 +28,8 @@ tokio-stream = { workspace = true }
 # Self-dependency with dev-mode enabled so that integration tests under tests/
 # can call HudSessionImpl::new without going through the production config path.
 tze_hud_protocol = { path = ".", version = "0.1.0", features = ["dev-mode"] }
-# fuzz_protocol_boundary.rs asserts Layer 0 invariants from the scene test fixtures.
+# Behavior tests build scenes with the scene test-support helpers.
 tze_hud_scene = { path = "../tze_hud_scene", version = "0.1.0", features = ["test-support"] }
-proptest = { workspace = true }
 tempfile = { workspace = true }
 
 [build-dependencies]

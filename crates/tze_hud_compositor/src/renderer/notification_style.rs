@@ -25,8 +25,9 @@
 use std::collections::HashMap;
 
 use tze_hud_config::tokens::{CANONICAL_TOKENS, px_scale};
-use tze_hud_scene::types::{ChromeLocalState, RenderingPolicy, Rgba};
+use tze_hud_scene::types::{ChromeLocalState, NotificationPayload, Rect, RenderingPolicy, Rgba};
 
+use super::control_panel::{MIN_TEXT_CONTRAST, contrast};
 use super::token_colors::parse_hex_color;
 
 /// The × glyph, drawn as text so its diagonals are antialiased.
@@ -93,7 +94,19 @@ pub(super) struct NotificationTone {
     pub(super) body: Rgba,
     /// The severity mark's tint (alert banners); `None` draws no mark.
     pub(super) mark: Option<Rgba>,
+    /// A destructive action's label: `color.error` on a neutral tone where
+    /// it holds text contrast on the fill, else the tone's own text role.
+    destructive: Rgba,
+    /// The hold sweep: `color.error.container`, or on a tone whose fill it
+    /// would vanish into (the error card) the inverted pair's
+    /// `color.on_error.container`.
+    hold_fill: Rgba,
+    /// The held label over [`Self::hold_fill`]: the other role of that pair.
+    held_label: Rgba,
 }
+
+/// Non-text contrast (WCAG 1.4.11) a hold sweep keeps against its card.
+pub(super) const MIN_SWEEP_CONTRAST: f32 = 3.0;
 
 /// One text line role (title, body or action label).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -173,6 +186,8 @@ struct Roles {
     icon: &'static str,
     /// A lone message line takes the title role (else the body role).
     lone_title: bool,
+    /// Draws a labeled session's caption (cards; never alert banners).
+    captioned: bool,
 }
 
 const CARD: Roles = Roles {
@@ -209,6 +224,7 @@ const CARD: Roles = Roles {
     body: BODY,
     icon: "space.xxl",
     lone_title: false,
+    captioned: true,
 };
 
 const ALERT: Roles = Roles {
@@ -245,6 +261,7 @@ const ALERT: Roles = Roles {
     body: ALERT_BODY,
     icon: "space.xl",
     lone_title: true,
+    captioned: false,
 };
 
 /// Resolved notification-card style, all sizes in physical px.
@@ -264,6 +281,7 @@ pub(super) struct NotificationStyle {
     /// A lone message line (no title): the body role on a card, the title
     /// role on a banner.
     pub(super) lone: TextRole,
+    captioned: bool,
     /// The dismiss button: a square as tall as the title line.
     pub(super) dismiss_size: f32,
     pub(super) dismiss_gap: f32,
@@ -283,6 +301,7 @@ pub(super) struct NotificationStyle {
     primary: Rgba,
     primary_container: Rgba,
     on_primary_container: Rgba,
+    error: Rgba,
     focus: Rgba,
     tones: [NotificationTone; 4],
 }
@@ -334,13 +353,33 @@ impl NotificationStyle {
             .backdrop_opacity
             .unwrap_or_else(|| number(tokens, roles.opacity))
             .clamp(0.0, 1.0);
+        let error = color(tokens, "color.error");
+        let error_container = color(tokens, "color.error.container");
+        let on_error_container = color(tokens, "color.on_error.container");
         let tones = std::array::from_fn(|i| {
             let mut fill = color(tokens, roles.fills[i]);
+            let title = color(tokens, roles.titles[i]);
+            let opaque = Rgba { a: 1.0, ..fill };
             fill.a *= opacity;
             NotificationTone {
                 fill,
                 outline: color(tokens, roles.outlines[i]),
-                title: color(tokens, roles.titles[i]),
+                title,
+                destructive: Some(error)
+                    .filter(|e| i <= 1 && contrast(*e, opaque) >= MIN_TEXT_CONTRAST)
+                    .unwrap_or(title),
+                // The same role pair either way round, so the held label
+                // keeps the pair's text contrast.
+                hold_fill: if contrast(error_container, opaque) >= MIN_SWEEP_CONTRAST {
+                    error_container
+                } else {
+                    on_error_container
+                },
+                held_label: if contrast(error_container, opaque) >= MIN_SWEEP_CONTRAST {
+                    on_error_container
+                } else {
+                    error_container
+                },
                 body: color(tokens, roles.bodies[i]),
                 mark: roles
                     .marks
@@ -376,6 +415,7 @@ impl NotificationStyle {
                 ..title
             },
             lone: if roles.lone_title { title } else { body },
+            captioned: roles.captioned,
             title,
             body,
             action_height: dp(tokens, "space.xxl"),
@@ -391,6 +431,7 @@ impl NotificationStyle {
             primary: color(tokens, "color.primary"),
             primary_container: color(tokens, "color.primary.container"),
             on_primary_container: color(tokens, "color.on_primary.container"),
+            error,
             focus: color(tokens, "color.primary"),
             tones,
         }
@@ -422,6 +463,17 @@ impl NotificationStyle {
             }
     }
 
+    /// The session caption line above the title: the body role, so it never
+    /// competes with the title; nothing for an unlabeled publication.
+    pub(super) fn caption_height(&self, caption: Option<&str>) -> f32 {
+        self.caption(caption).map_or(0.0, |_| self.body.line_height)
+    }
+
+    /// The caption this style draws: a card's, never a banner's.
+    pub(super) fn caption<'a>(&self, caption: Option<&'a str>) -> Option<&'a str> {
+        caption.filter(|_| self.captioned)
+    }
+
     /// The severity mark of a publication at `urgency` (alert banners), when
     /// no agent icon takes the icon column.
     pub(super) fn mark(&self, urgency: u32, agent_icon: bool) -> Option<Rgba> {
@@ -429,17 +481,19 @@ impl NotificationStyle {
     }
 
     /// Bounds of the icon column's square (agent icon or severity mark) in a
-    /// card at (`x`, `slot_y`): at the padding, centred on the text block.
+    /// card at (`x`, `slot_y`): at the padding, centred on the text block
+    /// below any caption.
     pub(super) fn icon_bounds(
         &self,
         x: f32,
         slot_y: f32,
         has_title: bool,
+        caption: Option<&str>,
     ) -> tze_hud_scene::types::Rect {
         let text_h = self.text_block_height(has_title);
         tze_hud_scene::types::Rect::new(
             x + self.padding_h,
-            slot_y + (text_h - self.icon_size).max(0.0) * 0.5,
+            slot_y + self.caption_height(caption) + (text_h - self.icon_size).max(0.0) * 0.5,
             self.icon_size,
             self.icon_size,
         )
@@ -457,29 +511,95 @@ impl NotificationStyle {
         }
     }
 
-    /// Idle fill of action `index`: the first is the filled primary action.
-    pub(super) fn action_fill(&self, index: usize) -> Option<Rgba> {
-        (index == 0).then_some(self.primary_container)
+    /// Idle fill of action `index`: only the primary action (the first that
+    /// is not destructive) is filled.
+    pub(super) fn action_fill(&self, payload: &NotificationPayload, index: usize) -> Option<Rgba> {
+        (payload.primary_action() == Some(index)).then_some(self.primary_container)
     }
 
-    /// Label colour of action `index` on a card of `urgency`: the filled
-    /// primary action's on-container role; the transparent ones
-    /// `color.primary` on a neutral card, else the tone's own text role
-    /// (primary blue does not hold contrast on caution/error containers).
-    pub(super) fn action_label_color(&self, index: usize, urgency: u32) -> Rgba {
-        if index == 0 {
+    /// Label colour of action `index`: the filled primary action's
+    /// on-container role; a destructive one its tone's destructive label;
+    /// the other transparent ones `color.primary` on a neutral card, else the
+    /// tone's own text role (primary blue does not hold contrast on
+    /// caution/error containers). Over a hold fill, the tone's held label.
+    pub(super) fn action_label_color(
+        &self,
+        payload: &NotificationPayload,
+        index: usize,
+        held: bool,
+    ) -> Rgba {
+        let tone = self.tone(payload.urgency);
+        if held {
+            tone.held_label
+        } else if payload.primary_action() == Some(index) {
             self.on_primary_container
-        } else if urgency <= 1 {
+        } else if payload
+            .actions
+            .get(index)
+            .is_some_and(|a| a.is_destructive())
+        {
+            tone.destructive
+        } else if payload.urgency <= 1 {
             self.primary
         } else {
-            self.tone(urgency).title
+            tone.title
         }
+    }
+
+    /// A destructive action's hairline outline: `color.error` on every tone.
+    pub(super) fn destructive_outline(&self) -> Rgba {
+        self.error
+    }
+
+    /// The fill that sweeps across a held destructive action on a card of
+    /// `urgency`.
+    pub(super) fn hold_fill(&self, urgency: u32) -> Rgba {
+        self.tone(urgency).hold_fill
     }
 
     /// Focus ring colour of a control.
     pub(super) fn focus_color(&self) -> Rgba {
         self.focus
     }
+}
+
+/// The fixed caption-row affordance and its current owner-only feedback.
+pub(super) fn go_to_control(
+    scene: &tze_hud_scene::graph::SceneGraph,
+    record: &tze_hud_scene::ZonePublishRecord,
+    style: &NotificationStyle,
+    card: Rect,
+) -> Option<(Rect, Option<tze_hud_scene::graph::overlay::GoToCue>)> {
+    style.caption(record.caption.as_deref())?;
+    if scene
+        .overlay
+        .notification_choices
+        .contains_key(&record.publication_id)
+    {
+        return None;
+    }
+    let state = scene
+        .overlay
+        .notification_go_to
+        .get(&record.publication_id)?;
+    if !state.available {
+        return None;
+    }
+    // Keep the label at the same right edge. A result can borrow room from
+    // the caption for longer text without changing the row or card size.
+    let row_width = (card.width - 2.0 * style.padding_h).max(1.0);
+    let width = if state.cue.is_some() {
+        (style.body.size * 15.0).min(row_width)
+    } else {
+        (style.body.size * 5.0).min(row_width * 0.5)
+    };
+    let bounds = Rect::new(
+        card.x + card.width - style.padding_h - width,
+        card.y + style.padding_v,
+        width,
+        style.body.line_height,
+    );
+    Some((bounds, state.cue))
 }
 
 /// Bounds of a notification's dismiss ×: the single geometry source for
@@ -489,10 +609,12 @@ pub(super) fn dismiss_bounds(
     tokens: &HashMap<String, String>,
     policy: &RenderingPolicy,
     card: tze_hud_scene::types::Rect,
+    caption: Option<&str>,
 ) -> tze_hud_scene::types::Rect {
     let style = NotificationStyle::for_zone(zone_name, tokens, policy);
     let size = style.dismiss_size;
-    let top = style.padding_v.min((card.height - 1.0).max(0.0));
+    // In the title row, below any caption.
+    let top = (style.padding_v + style.caption_height(caption)).min((card.height - 1.0).max(0.0));
     tze_hud_scene::types::Rect::new(
         card.x + card.width - style.padding_h - size,
         card.y + top,

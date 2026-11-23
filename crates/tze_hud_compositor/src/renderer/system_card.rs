@@ -7,28 +7,17 @@
 //! layer), never in the main passes. The model is pushed
 //! by the runtime through [`Compositor::set_system_card`]; it never enters the
 //! scene graph, so no agent API (SceneSnapshot, `hud_surfaces`, zone publish
-//! results) can observe it. Fallbacks below MUST stay in sync with
-//! `tze_hud_config`'s `CANONICAL_TOKENS` (the crates are intentionally
-//! unlinked).
+//! results) can observe it. Absent tokens fall back to their canonical
+//! defaults in `tze_hud_config`.
 
 use std::collections::HashMap;
 
 use tze_hud_scene::types::{RenderingPolicy, TextAlign};
 
 use super::safe_mode_overlay::OverlayRect;
-use super::token_colors::{parse_hex_color, resolve_token_color};
+use super::token_colors::{canonical_color, canonical_number, resolve_token_color};
 use super::*;
 
-const BACKGROUND_DEFAULT_HEX: &str = "#0C1426F2";
-const ACCENT_DEFAULT_HEX: &str = "#4A9EFF";
-const TEXT_DEFAULT_HEX: &str = "#FFFFFF";
-const WIDTH_DEFAULT_PX: f32 = 420.0;
-const PADDING_DEFAULT_PX: f32 = 20.0;
-const ACCENT_WIDTH_DEFAULT_PX: f32 = 4.0;
-const TOAST_MARGIN_DEFAULT_PX: f32 = 32.0;
-const TITLE_FONT_DEFAULT_PX: f32 = 18.0;
-const BODY_FONT_DEFAULT_PX: f32 = 14.0;
-const CODE_FONT_DEFAULT_PX: f32 = 40.0;
 /// Line box height as a multiple of font size, matching the text pipeline.
 const LINE_HEIGHT: f32 = 1.4;
 
@@ -55,12 +44,12 @@ pub(super) struct SystemCardLayout {
     pub(super) texts: Vec<TextItem>,
 }
 
-fn px_token(tokens: &HashMap<String, String>, key: &str, default: f32) -> f32 {
+fn px_token(tokens: &HashMap<String, String>, key: &str) -> f32 {
     tokens
         .get(key)
         .and_then(|v| v.trim_end_matches("px").parse::<f32>().ok())
         .filter(|v| v.is_finite() && *v >= 0.0)
-        .unwrap_or(default)
+        .unwrap_or_else(|| canonical_number(key))
         * tze_hud_config::tokens::px_scale(tokens)
 }
 
@@ -70,38 +59,17 @@ pub(super) fn system_card_layout(
     w: f32,
     h: f32,
 ) -> SystemCardLayout {
-    let color = |key: &str, fallback: &str| {
+    let color = |key: &str| {
         resolve_token_color(tokens, key)
-            .or_else(|| parse_hex_color(fallback))
+            .or_else(|| canonical_color(key))
             .unwrap_or(Rgba::WHITE)
     };
-    let padding = px_token(tokens, "system_card.padding_px", PADDING_DEFAULT_PX);
-    let accent_w = px_token(
-        tokens,
-        "system_card.accent.width_px",
-        ACCENT_WIDTH_DEFAULT_PX,
-    );
-    let title_px = px_token(
-        tokens,
-        "system_card.title.font_size_px",
-        TITLE_FONT_DEFAULT_PX,
-    )
-    .clamp(6.0, 200.0);
-    let body_px = px_token(
-        tokens,
-        "system_card.body.font_size_px",
-        BODY_FONT_DEFAULT_PX,
-    )
-    .clamp(6.0, 200.0);
-    let code_px = px_token(
-        tokens,
-        "system_card.code.font_size_px",
-        CODE_FONT_DEFAULT_PX,
-    )
-    .clamp(6.0, 200.0);
-    let card_w = px_token(tokens, "system_card.width_px", WIDTH_DEFAULT_PX)
-        .max(1.0)
-        .min(w);
+    let padding = px_token(tokens, "system_card.padding_px");
+    let accent_w = px_token(tokens, "system_card.accent.width_px");
+    let title_px = px_token(tokens, "system_card.title.font_size_px").clamp(6.0, 200.0);
+    let body_px = px_token(tokens, "system_card.body.font_size_px").clamp(6.0, 200.0);
+    let code_px = px_token(tokens, "system_card.code.font_size_px").clamp(6.0, 200.0);
+    let card_w = px_token(tokens, "system_card.width_px").max(1.0).min(w);
 
     let line_px = |i: usize| {
         if card.kind == SystemCardKind::Pairing && i == 0 {
@@ -119,11 +87,7 @@ pub(super) fn system_card_layout(
     let y = match card.kind {
         SystemCardKind::Pairing => (h - card_h) / 2.0,
         SystemCardKind::Toast => {
-            let margin = px_token(
-                tokens,
-                "system_card.toast.margin_px",
-                TOAST_MARGIN_DEFAULT_PX,
-            );
+            let margin = px_token(tokens, "system_card.toast.margin_px");
             (h - card_h - margin).max(0.0)
         }
     };
@@ -134,18 +98,18 @@ pub(super) fn system_card_layout(
             y,
             w: card_w,
             h: card_h,
-            color: color("system_card.background", BACKGROUND_DEFAULT_HEX).to_array(),
+            color: color("system_card.background").to_array(),
         },
         OverlayRect {
             x,
             y,
             w: accent_w.min(card_w),
             h: card_h,
-            color: color("system_card.accent.color", ACCENT_DEFAULT_HEX).to_array(),
+            color: color("system_card.accent.color").to_array(),
         },
     ];
 
-    let text_color = color("color.text.primary", TEXT_DEFAULT_HEX);
+    let text_color = color("color.text.primary");
     let text_x = x + accent_w + padding;
     let text_w = (card_w - accent_w - padding * 2.0).max(1.0);
     let mut texts = Vec::with_capacity(1 + card.lines.len());
@@ -230,8 +194,14 @@ mod tests {
         assert_eq!(bg.x + bg.w / 2.0, 960.0);
         assert!((bg.y + bg.h / 2.0 - 540.0).abs() < 0.01);
         assert_eq!(layout.texts.len(), 3, "title + two lines");
-        assert_eq!(layout.texts[1].font_size_px, CODE_FONT_DEFAULT_PX);
-        assert_eq!(layout.texts[2].font_size_px, BODY_FONT_DEFAULT_PX);
+        assert_eq!(
+            layout.texts[1].font_size_px,
+            canonical_number("system_card.code.font_size_px")
+        );
+        assert_eq!(
+            layout.texts[2].font_size_px,
+            canonical_number("system_card.body.font_size_px")
+        );
         for t in &layout.texts {
             assert!(t.pixel_x >= bg.x && t.pixel_x + t.bounds_width <= bg.x + bg.w);
             assert!(t.pixel_y >= bg.y && t.pixel_y + t.bounds_height <= bg.y + bg.h);
@@ -248,7 +218,10 @@ mod tests {
         };
         let bg = system_card_layout(&HashMap::new(), &toast, 1920.0, 1080.0).rects[0];
         assert_eq!(bg.x + bg.w / 2.0, 960.0);
-        assert_eq!(bg.y + bg.h, 1080.0 - TOAST_MARGIN_DEFAULT_PX);
+        assert_eq!(
+            bg.y + bg.h,
+            1080.0 - canonical_number("system_card.toast.margin_px")
+        );
     }
 
     /// Size, width and colors come from `system_card.*` tokens, not literals.

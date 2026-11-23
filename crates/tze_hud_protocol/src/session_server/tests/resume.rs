@@ -35,16 +35,22 @@ async fn test_resume_with_token() {
                     1,
                 )
                 .unwrap();
-            let node = crate::convert::proto_node_to_scene(&crate::proto::NodeProto {
-                data: Some(crate::proto::node_proto::Data::TextMarkdown(
-                    crate::proto::TextMarkdownNodeProto {
-                        content: secret.to_string(),
-                        ..Default::default()
-                    },
-                )),
-                ..Default::default()
-            })
-            .unwrap();
+            let node = Node {
+                id: SceneId::new(),
+                children: vec![],
+                layout: Default::default(),
+                data: NodeData::TextMarkdown(tze_hud_scene::TextMarkdownNode {
+                    content: secret.to_string(),
+                    bounds: Rect::new(0.0, 0.0, 100.0, 100.0),
+                    font_size_px: 16.0,
+                    font_family: tze_hud_scene::FontFamily::SystemSansSerif,
+                    color: tze_hud_scene::Rgba::WHITE,
+                    background: None,
+                    alignment: tze_hud_scene::TextAlign::Start,
+                    overflow: tze_hud_scene::TextOverflow::Ellipsis,
+                    color_runs: Box::default(),
+                }),
+            };
             scene.set_tile_root(tile, node).unwrap();
             scene
                 .set_portal_surface(tile, PortalSurface::default(), "foreign-portal")

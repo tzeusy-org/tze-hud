@@ -1,6 +1,6 @@
 //! CPU scene-graph calibration for the benchmark's hardware-factor vector.
 //!
-//! Runs a fixed scene-mutation workload plus a synthetic hash loop and reports
+//! Runs a fixed publish workload plus a synthetic hash loop and reports
 //! how much slower this machine is than the reference. The Windows and
 //! constrained-envelope budget gates divide raw observations by this factor.
 
@@ -8,12 +8,13 @@
 #![cfg_attr(not(feature = "headless"), allow(dead_code))]
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::time::Instant;
 use tze_hud_scene::graph::SceneGraph;
-use tze_hud_scene::mutation::{MutationBatch, SceneMutation};
 use tze_hud_scene::types::{
-    FontFamily, Node, NodeData, Rect, Rgba, SceneId, SolidColorNode, TextAlign, TextMarkdownNode,
-    TextOverflow,
+    ContentionPolicy, GeometryPolicy, NotificationPayload, RenderingPolicy, SceneId,
+    StatusBarPayload, WidgetDefinition, WidgetInstance, WidgetParamConstraints, WidgetParamType,
+    WidgetParameterDeclaration, WidgetParameterValue, ZoneContent, ZoneRegistry,
 };
 
 /// Result of the CPU calibration workload.
@@ -33,28 +34,27 @@ pub struct CpuCalibrationResult {
 
 // ─── Reference baselines ─────────────────────────────────────────────────────
 
-/// Reference baseline: scene-graph ops/sec on target hardware.
+/// Reference baseline: publish-workload scene operations per second.
 ///
-/// This was measured on a reference machine (modern x86-64, ~4 GHz, no
-/// software rendering overhead). The calibration workload produces this
-/// many operations per second on that machine.
-///
-/// The workload: create a 50-tile scene, then apply 100 mutation batches
-/// (each with 5 mutations: 2 UpdateTileBounds + 2 SetTileRoot + 1 DeleteTile/CreateTile).
-/// Total: ~550 scene-graph operations.
-const REFERENCE_SCENE_OPS_PER_SEC: f64 = 550_000.0;
+/// The workload: 1,000 rounds of five publishes (a notification, a status-bar
+/// entry, a subtitle line, two widget parameter updates) plus 100 hit tests,
+/// about 5,100 operations. The constant is the earlier tile-mutation
+/// workload's reference (550,000 ops/s) scaled by the ratio of the two
+/// workloads' throughput on one host (336k / 110k ops/s, debug build), so a
+/// host keeps the factor it had and factor-scaled budgets stay comparable.
+const REFERENCE_SCENE_OPS_PER_SEC: f64 = 1_680_000.0;
 
 /// Reference baseline: synthetic hash throughput in MB/s.
 const REFERENCE_HASH_THROUGHPUT_MBPS: f64 = 800.0;
 
-/// Number of tiles to create in the reference scene.
-const CALIBRATION_TILES: usize = 50;
+/// Publisher namespace of the calibration workload.
+const AGENT: &str = "calibration";
 
-/// Number of mutation batches to apply.
-const CALIBRATION_BATCHES: usize = 100;
+/// Widget instances the workload publishes to.
+const CALIBRATION_WIDGETS: usize = 8;
 
-/// Mutations per batch in the calibration workload.
-const MUTATIONS_PER_BATCH: usize = 5;
+/// Publish rounds (five publishes each).
+const CALIBRATION_ROUNDS: usize = 1_000;
 
 /// Minimum speed factor (prevents unreasonably tight budgets).
 const MIN_SPEED_FACTOR: f64 = 0.5;
@@ -63,7 +63,7 @@ const MIN_SPEED_FACTOR: f64 = 0.5;
 const MAX_SPEED_FACTOR: f64 = 50.0;
 
 /// Run the CPU calibration workload and compute the speed factor.
-pub fn calibrate() -> CpuCalibrationResult {
+pub(crate) fn calibrate() -> CpuCalibrationResult {
     let overall_start = Instant::now();
     let scene_ops = run_scene_workload();
     let hash_mbps = run_hash_workload();
@@ -89,161 +89,152 @@ pub fn calibrate() -> CpuCalibrationResult {
     }
 }
 
-/// Run the scene-graph mutation workload and return ops/sec.
+/// A parameterized widget type with no SVG layers: the scene-side half of a
+/// widget publish (validation, contention, parameter storage) without the
+/// renderer's raster work, which the upload calibration measures.
+pub(crate) fn level_widget(id: &str) -> WidgetDefinition {
+    WidgetDefinition {
+        id: id.to_string(),
+        name: id.to_string(),
+        description: "Benchmark level widget".to_string(),
+        parameter_schema: vec![WidgetParameterDeclaration {
+            audience: Default::default(),
+            name: "level".to_string(),
+            param_type: WidgetParamType::F32,
+            default_value: WidgetParameterValue::F32(0.0),
+            constraints: Some(WidgetParamConstraints {
+                f32_min: Some(0.0),
+                f32_max: Some(1.0),
+                ..Default::default()
+            }),
+        }],
+        layers: vec![],
+        default_geometry_policy: GeometryPolicy::Relative {
+            x_pct: 0.0,
+            y_pct: 0.0,
+            width_pct: 0.2,
+            height_pct: 0.1,
+        },
+        default_rendering_policy: RenderingPolicy::default(),
+        default_contention_policy: ContentionPolicy::LatestWins,
+        max_publishers: WidgetDefinition::default_max_publishers(),
+        ephemeral: false,
+        hover_behavior: None,
+    }
+}
+
+/// Register `count` instances `{prefix}-{i}` of widget type `type_name`.
+pub(crate) fn register_instances(
+    scene: &mut SceneGraph,
+    tab_id: SceneId,
+    type_name: &str,
+    prefix: &str,
+    count: usize,
+    geometry: impl Fn(usize) -> Option<GeometryPolicy>,
+) {
+    for i in 0..count {
+        scene.widget_registry.register_instance(WidgetInstance {
+            id: SceneId::new(),
+            widget_type_name: type_name.to_string(),
+            tab_id,
+            geometry_override: geometry(i),
+            contention_override: None,
+            instance_name: format!("{prefix}-{i}"),
+            current_params: HashMap::new(),
+            auto_clear_ms: None,
+        });
+    }
+}
+
+/// One `level` parameter value.
+pub(crate) fn level(value: f32) -> HashMap<String, WidgetParameterValue> {
+    HashMap::from([("level".to_string(), WidgetParameterValue::F32(value))])
+}
+
+/// Run the publish workload and return scene operations per second.
+///
+/// The scene commits of what agents send, through the same scene calls
+/// `hud_publish` makes: per round a notification, a status-bar entry, a
+/// subtitle line and two widget parameter updates, then hit tests over the
+/// resulting zones and widgets.
 fn run_scene_workload() -> f64 {
     let start = Instant::now();
     let mut total_ops: u64 = 0;
 
-    // Create a scene with CALIBRATION_TILES tiles
     let mut scene = SceneGraph::new(1920.0, 1080.0);
+    scene.zone_registry = ZoneRegistry::with_defaults();
     let tab_id = scene.create_tab("calibration", 0).expect("create_tab");
+    scene
+        .widget_registry
+        .register_definition(level_widget("level"));
+    register_instances(
+        &mut scene,
+        tab_id,
+        "level",
+        "level",
+        CALIBRATION_WIDGETS,
+        |_| None,
+    );
     total_ops += 1;
 
-    // Grant a lease with a high budget for the calibration workload
-    let lease_id = scene.grant_lease("calibration", 300_000);
-    // Override the budget to allow many tiles
-    if let Some(lease) = scene.leases.get_mut(&lease_id) {
-        lease.resource_budget.max_tiles = (CALIBRATION_TILES + 10) as u32;
-    }
-    total_ops += 1;
-
-    // Create tiles
-    let mut tile_ids = Vec::with_capacity(CALIBRATION_TILES);
-    let cols = 10u32;
-    for i in 0..CALIBRATION_TILES {
-        let col = (i as u32) % cols;
-        let row = (i as u32) / cols;
-        let bounds = Rect::new(col as f32 * 190.0, row as f32 * 180.0, 180.0, 170.0);
-        let tile_id = scene
-            .create_tile(tab_id, "calibration", lease_id, bounds, (i + 1) as u32)
-            .expect("create_tile during calibration");
-
-        // Set a root node
-        let node = if i % 2 == 0 {
-            Node {
-                layout: Default::default(),
-                id: SceneId::new(),
-                children: vec![],
-                data: NodeData::SolidColor(SolidColorNode {
-                    color: Rgba::new(0.5, 0.5, 0.5, 1.0),
-                    bounds: Rect::new(0.0, 0.0, 180.0, 170.0),
-                    radius: None,
-                }),
-            }
-        } else {
-            Node {
-                layout: Default::default(),
-                id: SceneId::new(),
-                children: vec![],
-                data: NodeData::TextMarkdown(TextMarkdownNode {
-                    content: format!("calibration tile {i}"),
-                    bounds: Rect::new(0.0, 0.0, 180.0, 170.0),
-                    font_size_px: 14.0,
-                    font_family: FontFamily::SystemMonospace,
-                    color: Rgba::WHITE,
-                    background: None,
-                    alignment: TextAlign::Start,
-                    overflow: TextOverflow::Clip,
-                    color_runs: Box::default(),
-                }),
-            }
-        };
-        scene
-            .set_tile_root(tile_id, node)
-            .expect("set_tile_root during calibration");
-        tile_ids.push(tile_id);
-        total_ops += 2; // create_tile + set_tile_root
-    }
-
-    // Apply CALIBRATION_BATCHES mutation batches
-    for batch_idx in 0..CALIBRATION_BATCHES {
-        let mut mutations = Vec::with_capacity(MUTATIONS_PER_BATCH);
-
-        // Pick tiles to mutate (cycling through available tiles)
-        let base = batch_idx % tile_ids.len();
-
-        // Mutation 1-2: UpdateTileBounds on two tiles
-        for offset in 0..2 {
-            let idx = (base + offset) % tile_ids.len();
-            let jitter = (batch_idx as f32) * 0.1;
-            mutations.push(SceneMutation::UpdateTileBounds {
-                tile_id: tile_ids[idx],
-                bounds: Rect::new(
-                    (idx as u32 % cols) as f32 * 190.0 + jitter,
-                    (idx as u32 / cols) as f32 * 180.0,
-                    180.0,
-                    170.0,
-                ),
-            });
-        }
-
-        // Mutation 3-4: SetTileRoot on two tiles (replace node tree)
-        for offset in 2..4 {
-            let idx = (base + offset) % tile_ids.len();
-            let node = Node {
-                layout: Default::default(),
-                id: SceneId::new(),
-                children: vec![],
-                data: NodeData::SolidColor(SolidColorNode {
-                    color: Rgba::new(batch_idx as f32 / CALIBRATION_BATCHES as f32, 0.5, 0.5, 1.0),
-                    bounds: Rect::new(0.0, 0.0, 180.0, 170.0),
-                    radius: None,
-                }),
-            };
-            mutations.push(SceneMutation::SetTileRoot {
-                tile_id: tile_ids[idx],
-                node,
-                descendants: vec![],
-            });
-        }
-
-        // Mutation 5: Delete a tile and recreate it (exercises full lifecycle)
-        let recycle_idx = (base + 4) % tile_ids.len();
-        mutations.push(SceneMutation::DeleteTile {
-            tile_id: tile_ids[recycle_idx],
+    let mut count = |ok: bool| {
+        assert!(ok, "a calibration publish was refused");
+        total_ops += 1;
+    };
+    for round in 0..CALIBRATION_ROUNDS {
+        let notification = ZoneContent::Notification(NotificationPayload {
+            title: "Build".to_string(),
+            text: format!("Step {round} passed."),
+            ..Default::default()
         });
-
-        let batch = MutationBatch {
-            batch_id: SceneId::new(),
-            agent_namespace: "calibration".to_string(),
-            mutations,
-            timing_hints: None,
-            lease_id: None,
-        };
-
-        let result = scene.apply_batch(&batch);
-        total_ops += MUTATIONS_PER_BATCH as u64;
-
-        // Recreate the deleted tile
-        if result.applied {
-            let col = (recycle_idx as u32) % cols;
-            let row = (recycle_idx as u32) / cols;
-            let bounds = Rect::new(col as f32 * 190.0, row as f32 * 180.0, 180.0, 170.0);
-            if let Ok(new_tile_id) = scene.create_tile(
-                tab_id,
-                "calibration",
-                lease_id,
-                bounds,
-                (recycle_idx + 1) as u32,
-            ) {
-                let node = Node {
-                    layout: Default::default(),
-                    id: SceneId::new(),
-                    children: vec![],
-                    data: NodeData::SolidColor(SolidColorNode {
-                        color: Rgba::new(0.3, 0.3, 0.3, 1.0),
-                        bounds: Rect::new(0.0, 0.0, 180.0, 170.0),
-                        radius: None,
-                    }),
-                };
-                let _ = scene.set_tile_root(new_tile_id, node);
-                tile_ids[recycle_idx] = new_tile_id;
-                total_ops += 2;
-            }
+        count(
+            scene
+                .publish_to_zone("notification-area", notification, AGENT, None, None, None)
+                .is_ok(),
+        );
+        let status = ZoneContent::StatusBar(StatusBarPayload {
+            entries: HashMap::from([(format!("k{}", round % 4), format!("{round}"))]),
+        });
+        count(
+            scene
+                .publish_to_zone(
+                    "status-bar",
+                    status,
+                    AGENT,
+                    Some(format!("k{}", round % 4)),
+                    None,
+                    None,
+                )
+                .is_ok(),
+        );
+        let line = ZoneContent::StreamText(format!("line {round} of the calibration transcript"));
+        count(
+            scene
+                .publish_to_zone("subtitle", line, AGENT, None, None, None)
+                .is_ok(),
+        );
+        for w in [
+            round % CALIBRATION_WIDGETS,
+            (round + 3) % CALIBRATION_WIDGETS,
+        ] {
+            let value = (round % 101) as f32 / 100.0;
+            count(
+                scene
+                    .publish_to_widget_for_lease(
+                        &format!("level-{w}"),
+                        level(value),
+                        AGENT,
+                        None,
+                        0,
+                        None,
+                        None,
+                    )
+                    .is_ok(),
+            );
         }
     }
 
-    // Also exercise hit_test — it's on the hot path
+    // Hit testing over the published zones and widgets is on the input path.
     for i in 0..100 {
         let x = (i as f32 * 19.2) % 1920.0;
         let y = (i as f32 * 10.8) % 1080.0;

@@ -138,13 +138,13 @@ message ServerMessage {
 
   }
 
-  // Field 22 (lease_denial) was removed in the v1 vocabulary rename.
+  // Field 22 (lease_denial) was removed.
   // Reserved to prevent accidental reuse and wire-format incompatibilities.
   reserved 22;
   reserved "lease_denial";
 
-  // Field 32 (subscription_ack) was renamed to subscription_change_result (field 39)
-  // to align with the spec. Reserved to prevent accidental reuse.
+  // Field 32 (subscription_ack) was renamed to subscription_change_result (field 39).
+  // Reserved to prevent accidental reuse.
   reserved 32;
   reserved "subscription_ack";
 
@@ -175,7 +175,7 @@ message ServerMessage {
 
 // ─── Authentication credentials ──────────────────────────────
 
-// Pre-shared key credential (v1 primary auth mechanism).
+// Pre-shared key credential (the auth mechanism).
 message PreSharedKeyCredential {
   string key = 1;  // The pre-shared key value
 }
@@ -324,32 +324,6 @@ message SessionSuspended {
 // After delivery, publication is permitted again. Transactional — never dropped.
 message SessionResumed {
   uint64 timestamp_wall_us = 1; // Wall-clock time of resumption (UTC us since epoch)
-}
-
-// ─── Mutation messages ────────────────────────────────────────────────────────
-
-// Optional timing semantics for a MutationBatch.
-// Clock domain: wall-clock (UTC µs since Unix epoch).
-// 0 in either field means "no constraint" (present immediately / no expiry).
-message TimingHints {
-  // Wall-clock time at which mutations should be presented (UTC µs since epoch).
-  // 0 = present immediately.
-  // Rejected if < session_open_at_wall_us - 60_000_000 µs (TIMESTAMP_TOO_OLD).
-  // Rejected if > current_wall_us + max_future_schedule_us (TIMESTAMP_TOO_FUTURE).
-  uint64 present_at_wall_us = 1;
-
-  // Wall-clock expiry for the mutations (UTC µs since epoch).
-  // 0 = no expiry.
-  // Rejected if > 0 and <= present_at_wall_us (TIMESTAMP_EXPIRY_BEFORE_PRESENT).
-  uint64 expires_at_wall_us = 2;
-}
-
-// Internal-only container for scene mutation conversion. No public session route.
-message MutationBatch {
-  bytes  batch_id  = 1;  // UUIDv7; deduplication key
-  bytes  lease_id  = 2;  // Lease under which mutations execute
-  repeated tze_hud.protocol.v1.MutationProto mutations = 3;  // Ordered; applied atomically
-  TimingHints timing = 4;  // Optional timing semantics
 }
 
 // ─── Lifecycle verbs (docs/api.md) ───────────────────────────────────────────

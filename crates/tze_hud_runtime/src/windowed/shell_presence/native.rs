@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 use std::sync::{Arc, OnceLock, RwLock};
 
 use serde_json::{Value, json};
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
     BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CreateBitmap, CreateDIBSection, DIB_RGB_COLORS,
     DeleteObject,
@@ -32,10 +32,13 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::{PCWSTR, PWSTR, w};
 
 use super::{
-    GlyphColors, GlyphState, Inputs, Presentation, Registration, SessionState, ShellIcon,
-    ShellOperation,
+    GlyphColors, Inputs, Presentation, Registration, SessionState, ShellIcon, ShellOperation,
+    TrayClick, WindowFacts,
 };
-use crate::shell::control_panel::{ControlPanelHandle, PanelEvent, TrayCommand};
+use crate::question_placement::Win32Probe;
+use crate::shell::control_panel::{
+    ControlPanelHandle, PanelEvent, TrayCommand, TrayFocusOrigin, TrayVisit,
+};
 
 const ICON_ID: u32 = 1;
 const NIN_KEYSELECT: u32 = NIN_SELECT | 1;
@@ -71,13 +74,14 @@ pub(in crate::windowed) fn bridge() -> Option<Arc<Bridge>> {
 
 pub(crate) fn status() -> Value {
     let Some(bridge) = BRIDGE.get() else {
-        return json!({"registered": false, "glyph": "normal", "tooltip": "No questions\nNo agents"});
+        return json!({"registered": false, "glyph": "normal", "tooltip": "No questions\nNo agents", "click": "panel"});
     };
     let latest = bridge.latest.read().unwrap_or_else(|e| e.into_inner());
     json!({
         "registered": bridge.registered.load(Ordering::Acquire),
         "glyph": latest.view.glyph,
         "tooltip": latest.view.tooltip,
+        "click": latest.view.click,
         "all_hidden": latest.view.all_hidden,
         // The hidden pill's text, for the tier-W harness (null: no pill).
         "hidden_notice": bridge
@@ -158,9 +162,9 @@ impl Bridge {
         }
     }
 
-    fn command(&self, command: TrayCommand) {
+    fn command(&self, command: TrayCommand, visit: TrayVisit) {
         if let Some(panel) = &self.panel {
-            panel.send(PanelEvent::Tray(command));
+            panel.send(PanelEvent::Tray(command, visit));
         } else if command == TrayCommand::Quit {
             (self.quit)();
         }
@@ -448,8 +452,8 @@ impl Host {
                     return Some(LRESULT(0));
                 }
                 match event {
-                    NIN_SELECT | NIN_KEYSELECT => self.bridge.command(TrayCommand::TogglePanel), // NIN_KEYSELECT
-                    WM_CONTEXTMENU => self.menu(wparam),
+                    NIN_SELECT | NIN_KEYSELECT => self.click(wparam),
+                    WM_CONTEXTMENU => self.menu(),
                     _ => {}
                 }
             }
@@ -462,14 +466,52 @@ impl Host {
         Some(LRESULT(0))
     }
 
-    fn menu(&self, position: WPARAM) {
-        let view = self
-            .bridge
+    fn view(&self) -> Presentation {
+        self.bridge
             .latest
             .read()
             .unwrap_or_else(|e| e.into_inner())
             .view
-            .clone();
+            .clone()
+    }
+
+    /// Left click or Win+B Enter: answer while a click would, else the panel.
+    fn click(&self, position: WPARAM) {
+        let origin = sample_tray_origin();
+        // VERSION_4 supplies the activation point, including the icon's
+        // anchor when activated by keyboard.
+        let point = POINT {
+            x: position.0 as u16 as i16 as i32,
+            y: (position.0 >> 16) as u16 as i16 as i32,
+        };
+        let command = if self.view().click == TrayClick::Answer {
+            TrayCommand::AnswerNext
+        } else {
+            TrayCommand::TogglePanel
+        };
+        self.bridge.command(
+            command,
+            TrayVisit {
+                display: Win32Probe::display_at(point),
+                origin,
+            },
+        );
+    }
+
+    fn menu(&self) {
+        let origin = sample_tray_origin();
+        let view = self.view();
+        // VERSION_4 does not specify a WM_CONTEXTMENU anchor in wParam.
+        // Capture the pointer at invocation, before the native menu takes
+        // focus or the pointer moves to one of its items.
+        let mut point = POINT::default();
+        let visit = TrayVisit {
+            // SAFETY: point is a valid out-parameter.
+            display: unsafe { GetCursorPos(&mut point) }
+                .ok()
+                .and_then(|()| Win32Probe::display_at(point)),
+            origin,
+        };
         let menu = match unsafe { CreatePopupMenu() } {
             Ok(menu) => Menu(menu),
             Err(error) => {
@@ -477,42 +519,25 @@ impl Host {
                 return;
             }
         };
-        let labels = [
-            "&Open panel",
-            if view.glyph == GlyphState::Paused {
-                "&Resume agents"
-            } else {
-                "&Pause agents"
-            },
-            if view.all_hidden {
-                "&Show all"
-            } else {
-                "&Hide all"
-            },
-            "&Quit",
-        ];
-        for (index, label) in labels.into_iter().enumerate() {
+        let items = super::menu_items(&view, crate::operator::status::hotkey);
+        for (command, label) in &items {
             let wide: Vec<u16> = label.encode_utf16().chain(Some(0)).collect();
             if let Err(error) =
-                unsafe { AppendMenuW(menu.0, MF_STRING, index + 1, PCWSTR(wide.as_ptr())) }
+                unsafe { AppendMenuW(menu.0, MF_STRING, command.menu_id(), PCWSTR(wide.as_ptr())) }
             {
                 tracing::warn!(%error, "tray menu item unavailable");
                 return;
             }
         }
-        let mut point = windows::Win32::Foundation::POINT {
-            x: position.0 as u16 as i16 as i32,
-            y: (position.0 >> 16) as u16 as i16 as i32,
-        };
-        if point.x == -1 && point.y == -1 {
-            let _ = unsafe { GetCursorPos(&mut point) };
-        }
+        let default = items
+            .first()
+            .map_or(0, |(command, _)| command.menu_id() as u32);
         // Notification menus require foreground ownership and the trailing
         // WM_NULL for reliable dismiss/reopen. TrackPopupMenu dispatches this
         // same thread's display/session messages while it is open.
         self.bridge.menu_open.store(true, Ordering::Release);
         let id = unsafe {
-            let _ = SetMenuDefaultItem(menu.0, 1, 0);
+            let _ = SetMenuDefaultItem(menu.0, default, 0);
             let _ = SetForegroundWindow(self.hwnd);
             let id = TrackPopupMenu(
                 menu.0,
@@ -528,8 +553,8 @@ impl Host {
             id
         };
         self.bridge.menu_open.store(false, Ordering::Release);
-        if let Some(command) = TrayCommand::from_menu_id(id, &view) {
-            self.bridge.command(command);
+        if let Some(command) = TrayCommand::from_menu_id(id) {
+            self.bridge.command(command, visit);
         }
     }
 
@@ -661,4 +686,83 @@ fn icon(svg: &str, size: i32) -> Result<Icon, String> {
         let _ = DeleteObject(color);
         result
     }
+}
+
+/// Capture real focus before a menu or an overlay gets a chance to take it.
+fn sample_tray_origin() -> TrayFocusOrigin {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetClassNameW, GetForegroundWindow, GetWindowThreadProcessId,
+    };
+
+    // SAFETY: the HWND is only queried, and the out-parameters are local.
+    let foreground = unsafe {
+        let window = GetForegroundWindow();
+        (!window.is_invalid()).then(|| {
+            let mut pid = 0;
+            GetWindowThreadProcessId(window, Some(&mut pid));
+            let mut class = [0u16; 64];
+            let len = GetClassNameW(window, &mut class).max(0) as usize;
+            WindowFacts {
+                hwnd: window.0 as isize,
+                hud: pid == std::process::id(),
+                class: String::from_utf16_lossy(&class[..len]),
+                ..Default::default()
+            }
+        })
+    };
+    super::tray_focus_origin(foreground, app_window_in_front)
+}
+
+/// One look, top to bottom in z-order, for the app window behind the tray.
+fn app_window_in_front() -> Option<isize> {
+    use windows::Win32::Foundation::BOOL;
+    use windows::Win32::Graphics::Dwm::{DWMWA_CLOAKED, DwmGetWindowAttribute};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        EnumWindows, GW_OWNER, GWL_EXSTYLE, GetClassNameW, GetWindow, GetWindowLongW,
+        GetWindowThreadProcessId, IsIconic, IsWindowVisible, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
+    };
+
+    unsafe extern "system" fn collect(hwnd: HWND, list: LPARAM) -> BOOL {
+        // SAFETY: `list` is the Vec below, alive for the synchronous enumeration.
+        unsafe { (*(list.0 as *mut Vec<HWND>)).push(hwnd) };
+        BOOL(1)
+    }
+    let mut list: Vec<HWND> = Vec::new();
+    // SAFETY: the callback only appends to `list` during this call.
+    if unsafe { EnumWindows(Some(collect), LPARAM(&mut list as *mut Vec<HWND> as isize)) }.is_err()
+    {
+        return None;
+    }
+    let hud = std::process::id();
+    let facts = list.into_iter().map(|hwnd| {
+        // SAFETY: read-only queries; a window closed meanwhile reads as absent.
+        unsafe {
+            let mut cloaked = 0u32;
+            let cloaked = DwmGetWindowAttribute(
+                hwnd,
+                DWMWA_CLOAKED,
+                (&mut cloaked as *mut u32).cast(),
+                std::mem::size_of::<u32>() as u32,
+            )
+            .is_ok()
+                && cloaked != 0;
+            let style = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
+            let mut pid = 0u32;
+            GetWindowThreadProcessId(hwnd, Some(&mut pid));
+            let mut class = [0u16; 64];
+            let len = GetClassNameW(hwnd, &mut class).max(0) as usize;
+            WindowFacts {
+                hwnd: hwnd.0 as isize,
+                visible: IsWindowVisible(hwnd).as_bool(),
+                minimized: IsIconic(hwnd).as_bool(),
+                cloaked,
+                topmost: style & WS_EX_TOPMOST.0 != 0,
+                tool: style & WS_EX_TOOLWINDOW.0 != 0,
+                owned: GetWindow(hwnd, GW_OWNER).is_ok_and(|owner| !owner.is_invalid()),
+                hud: pid == hud,
+                class: String::from_utf16_lossy(&class[..len]),
+            }
+        }
+    });
+    super::return_window(facts)
 }

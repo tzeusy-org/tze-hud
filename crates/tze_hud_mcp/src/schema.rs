@@ -39,7 +39,7 @@ pub fn tools_list_result() -> Value {
         {
             "name": "hud_publish",
             "description": "Zone: publish text or a structured object; notification is \
-                {title?,body,urgency?:0-3,actions?:[{label,callback_id|url}]}. Widget: typed params from hud_surfaces. \
+                {title?,body,urgency?:0-3,actions?:[{label,callback_id?|url,role?:destructive}]}. Widget: typed params from hud_surfaces. \
                 Portal: choose portal:<id>; first publish attaches, even without content. \
                 Send only new output text: content appends; same key replaces the newest matching output. \
                 Returns reattached and pending_input; poll hud_input for replies.",
@@ -51,7 +51,7 @@ pub fn tools_list_result() -> Value {
                     "params": {"type": "object"},
                     "ttl_ms": {"type": "integer", "minimum": 0, "description": "zone default 60000; widget durable; portal hold; 0 = until cleared"},
                     "delay_ms": {"type": "integer", "minimum": 0, "maximum": 300000, "description": "show later"},
-                    "wait_ms": {"type": "integer", "minimum": 0, "maximum": 30000, "description": "notification actions: wait for a consumed answer; otherwise hud_input"},
+                    "wait_ms": {"type": "integer", "minimum": 0, "maximum": 55000, "description": "notification actions: wait for a consumed answer; otherwise hud_input"},
                     "key": {"type": "string", "description": "notification: own exact key replaces; at most 256 UTF-8 bytes; empty appends. Other surfaces: merge key"},
                     "status": {"type": "string", "enum": ["active", "degraded"], "description": "portal agent status; content optional"},
                     "expects_reply": {"type": "boolean", "description": "portal: arm reply composer"},
@@ -88,7 +88,7 @@ pub fn tools_list_result() -> Value {
                 "type": "object",
                 "properties": {
                     "ack": {"type": "array", "items": {"type": "string"}},
-                    "wait_ms": {"type": "integer", "minimum": 0, "maximum": 30000},
+                    "wait_ms": {"type": "integer", "minimum": 0, "maximum": 55000},
                     "max_items": {"type": "integer", "minimum": 1},
                 },
             },

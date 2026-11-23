@@ -1,5 +1,19 @@
 use super::notification_wait::is_unanswered_question;
 use super::*;
+use std::collections::hash_map::Entry;
+
+type AdmissionMeasure<'a> = dyn FnMut(&SceneGraph, &ZoneContent, Option<&str>, Option<&str>) + 'a;
+
+enum AdmissionTiming<'a> {
+    Absolute {
+        expiry: Option<u64>,
+        urgency_default: bool,
+    },
+    AfterMeasurement {
+        ttl_us: Option<u64>,
+        measure: &'a mut AdmissionMeasure<'a>,
+    },
+}
 
 impl SceneGraph {
     /// Agent writes cannot change owner configuration or runtime-local widget state.
@@ -23,7 +37,7 @@ impl SceneGraph {
         })
     }
     /// Notification routing keys are exact UTF-8 bytes, with empty meaning absent.
-    pub const MAX_NOTIFICATION_KEY_BYTES: usize = 256;
+    const MAX_NOTIFICATION_KEY_BYTES: usize = 256;
 
     pub fn validate_notification_key(key: Option<&str>) -> Result<(), ValidationError> {
         if key.is_some_and(|key| key.len() > Self::MAX_NOTIFICATION_KEY_BYTES) {
@@ -45,11 +59,23 @@ impl SceneGraph {
     ) -> Result<f32, ValidationError> {
         let min = decl.constraints.as_ref().and_then(|c| c.f32_min);
         let max = decl.constraints.as_ref().and_then(|c| c.f32_max);
-        if !value.is_finite()
+        let invalid = !value.is_finite()
             || value.abs() > f64::from(f32::MAX)
             || min.is_some_and(|min| value < f64::from(min))
-            || max.is_some_and(|max| value > f64::from(max))
+            || max.is_some_and(|max| value > f64::from(max));
+        // A whole-number count is refused (checked before narrowing, so a
+        // fraction too small for f32 still fails), and every refusal of one
+        // names the integer bound.
+        if decl.constraints.as_ref().is_some_and(|c| c.f32_integer)
+            && (invalid || value.fract() != 0.0)
         {
+            return Err(ValidationError::WidgetParameterTypeMismatch {
+                widget: widget.to_string(),
+                param: param.to_string(),
+                expected: decl.value_hint(),
+            });
+        }
+        if invalid {
             let range = match (min, max) {
                 (Some(min), Some(max)) => format!("{min}..{max} inclusive"),
                 (Some(min), None) => format!("at least {min}"),
@@ -78,10 +104,12 @@ impl SceneGraph {
 
         match (&decl.param_type, submitted_value) {
             (WidgetParamType::Deadline, WidgetParameterValue::Deadline(d)) if d.valid() => {
-                // A supplied runtime snapshot is never an agent-set absolute time.
-                Ok(WidgetParameterValue::Deadline(
-                    crate::WidgetDeadline::relative(d.ends_in_ms),
-                ))
+                // A supplied runtime snapshot is never an agent-set absolute
+                // time; the direction comes from the declaration.
+                Ok(WidgetParameterValue::Deadline(crate::WidgetDeadline {
+                    counts_up: decl.deadline_counts_up(),
+                    ..crate::WidgetDeadline::relative(d.ends_in_ms)
+                }))
             }
             (WidgetParamType::Deadline, _) => Err(ValidationError::WidgetParameterTypeMismatch {
                 widget: widget_name.to_string(),
@@ -221,7 +249,7 @@ impl SceneGraph {
     ///
     /// # Arguments
     /// - `zone_name` — zone type name, resolved in the global `zone_registry` (v1: publishes
-    ///   are global, not tab-scoped; tab-scoped zone instances are a post-v1 feature)
+    ///   are global, not tab-scoped; tab-scoped zone instances are not supported)
     /// - `content` — content payload; must match one of the zone's accepted_media_types
     /// - `publisher_namespace` — the publishing agent's namespace
     /// - `merge_key` — key for MergeByKey contention (ignored for other policies)
@@ -297,6 +325,38 @@ impl SceneGraph {
         urgency_default: bool,
         publication_id: Option<SceneId>,
     ) -> Result<(), ValidationError> {
+        self.publish_to_zone_with_timing(
+            zone_name,
+            content,
+            publisher_namespace,
+            merge_key,
+            content_classification,
+            breakpoints,
+            lease_id,
+            publication_origin,
+            publication_id,
+            AdmissionTiming::Absolute {
+                expiry: expires_at_wall_us,
+                urgency_default,
+            },
+        )
+        .map(|_| ())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn publish_to_zone_with_timing(
+        &mut self,
+        zone_name: &str,
+        content: ZoneContent,
+        publisher_namespace: &str,
+        merge_key: Option<String>,
+        content_classification: Option<String>,
+        breakpoints: Vec<u64>,
+        lease_id: Option<SceneId>,
+        publication_origin: Option<SceneId>,
+        publication_id: Option<SceneId>,
+        timing: AdmissionTiming<'_>,
+    ) -> Result<(u64, Option<u64>), ValidationError> {
         // Check zone exists and content type is accepted
         let (contention_policy, max_publishers, accepted) = {
             let zone = self.zone_registry.get_by_name(zone_name).ok_or_else(|| {
@@ -335,21 +395,23 @@ impl SceneGraph {
         //   3+ (critical)   → 30 s
         //
         // A publisher-supplied expires_at always takes precedence.
-        let effective_expires_at = expires_at_wall_us.or_else(|| {
-            if !urgency_default {
-                return None;
-            }
-            if let ZoneContent::Notification(ref payload) = content {
-                let ttl_us: u64 = match payload.urgency {
-                    0 | 1 => Self::NOTIFICATION_TTL_INFO_US,
-                    2 => Self::NOTIFICATION_TTL_WARNING_US,
-                    _ => Self::NOTIFICATION_TTL_CRITICAL_US,
-                };
-                Some(now_us.saturating_add(ttl_us))
-            } else {
-                None
-            }
-        });
+        let effective_expires_at = match &timing {
+            AdmissionTiming::Absolute {
+                expiry,
+                urgency_default,
+            } => expiry.or_else(|| match &content {
+                ZoneContent::Notification(payload) if *urgency_default => {
+                    let ttl_us = match payload.urgency {
+                        0 | 1 => Self::NOTIFICATION_TTL_INFO_US,
+                        2 => Self::NOTIFICATION_TTL_WARNING_US,
+                        _ => Self::NOTIFICATION_TTL_CRITICAL_US,
+                    };
+                    Some(now_us.saturating_add(ttl_us))
+                }
+                _ => None,
+            }),
+            AdmissionTiming::AfterMeasurement { .. } => None,
+        };
 
         let publication_id = publication_id.unwrap_or_default();
         let waiting_before: Vec<_> = self
@@ -363,6 +425,7 @@ impl SceneGraph {
                     .then_some(*id)
             })
             .collect();
+        let label = self.session_labels.get(publisher_namespace);
         let record = ZonePublishRecord {
             publication_id,
             zone_name: zone_name.to_string(),
@@ -375,14 +438,13 @@ impl SceneGraph {
             breakpoints,
             lease_id,
             publication_origin: publication_origin.filter(|_| lease_id.is_none()),
+            caption: label.map(|label| label.caption.clone()),
+            window_token: label.and_then(|label| label.window_token.clone()),
+            display: None,
         };
+        let mut record = record;
 
-        let publishes = self
-            .zone_registry
-            .active_publishes
-            .entry(zone_name.to_string())
-            .or_default();
-
+        let publishes = self.zone_registry.active_for_zone(zone_name);
         let replacement = notification.then_some(()).and_then(|()| {
             merge_key.as_ref().and_then(|key| {
                 publishes.iter().position(|old| {
@@ -393,6 +455,44 @@ impl SceneGraph {
             })
         });
         let replaced_id = replacement.map(|index| publishes[index].publication_id);
+        // A question is placed once, when presented; a same-key replacement
+        // keeps the display its card already has.
+        record.display = match replacement {
+            Some(index) => publishes[index].display.clone(),
+            None if zone_name == "notification-area"
+                && is_unanswered_question(&record, &self.overlay.notification_choices, now_us) =>
+            {
+                self.overlay
+                    .question_placer
+                    .as_ref()
+                    .and_then(|placer| placer.place())
+            }
+            None => None,
+        };
+        if let AdmissionTiming::AfterMeasurement { ttl_us, measure } = timing {
+            measure(
+                self,
+                &record.content,
+                record.merge_key.as_deref(),
+                record.display.as_deref(),
+            );
+            // Measurement holds the scene lock. Start the presentation
+            // lifetime only after shaping so it can reach a renderer.
+            record.published_at_wall_us = self.clock.now_us();
+            record.expires_at_wall_us =
+                ttl_us.map(|ttl| record.published_at_wall_us.saturating_add(ttl));
+        }
+        let now_us = record.published_at_wall_us;
+        let expires_at = record.expires_at_wall_us;
+        let mut new_records = Vec::new();
+        let mut slot = self
+            .zone_registry
+            .active_publishes
+            .entry(zone_name.to_string());
+        let publishes = match &mut slot {
+            Entry::Occupied(entry) => entry.get_mut(),
+            Entry::Vacant(_) => &mut new_records,
+        };
         let mut trimmed = Vec::new();
         if let Some(index) = replacement {
             // Keep the visual slot, but never transfer the old activation or
@@ -424,6 +524,10 @@ impl SceneGraph {
             )?;
         }
 
+        if let Entry::Vacant(entry) = slot {
+            entry.insert(new_records);
+        }
+
         if let Some(wait) = self.notification_waits.get_mut(&publication_id) {
             wait.materialized = true;
         }
@@ -450,7 +554,7 @@ impl SceneGraph {
         }
         self.prune_publication_orphans();
         self.version += 1;
-        Ok(())
+        Ok((now_us, expires_at))
     }
 
     /// Resolve the "best" lease state for a given namespace.
@@ -583,24 +687,32 @@ impl SceneGraph {
         )
     }
 
-    /// [`Self::publish_to_zone_with_lease`] with no expiry at all: the
-    /// publication stays until cleared, even a notification (whose urgency
-    /// default would otherwise apply). `hud_publish` with `ttl_ms: 0`.
-    pub fn publish_held_to_zone_with_lease(
+    /// Place an immediate MCP publication and measure it before presentation.
+    /// Returns the presentation time and optional absolute expiry in wall µs.
+    #[allow(clippy::too_many_arguments)]
+    pub fn publish_to_zone_with_measurement<'measure>(
         &mut self,
-        zone_name: &str,
+        zone: &str,
         content: ZoneContent,
-        publisher_namespace: &str,
-        lease_id: SceneId,
-        merge_key: Option<String>,
-    ) -> Result<(), ValidationError> {
-        self.publish_to_zone_until_with_lease(
-            zone_name,
+        namespace: &str,
+        lease: SceneId,
+        key: Option<String>,
+        ttl_us: Option<u64>,
+        publication_id: Option<SceneId>,
+        measure: &'measure mut AdmissionMeasure<'measure>,
+    ) -> Result<(u64, Option<u64>), ValidationError> {
+        self.check_zone_publish_lease(namespace, lease)?;
+        self.publish_to_zone_with_timing(
+            zone,
             content,
-            publisher_namespace,
-            lease_id,
-            merge_key,
+            namespace,
+            key,
             None,
+            Vec::new(),
+            Some(lease),
+            None,
+            publication_id,
+            AdmissionTiming::AfterMeasurement { ttl_us, measure },
         )
     }
 
@@ -804,6 +916,25 @@ impl SceneGraph {
                         && r.publication_origin == publication_origin.filter(|_| lease_id.is_none())
                 })
             });
+        // Partial updates belong to this publication, not the shared instance.
+        // Keep ordinary model fields in the record so occupancy and cleanup can
+        // restore them. Deadlines retain their separate snapshot rules below.
+        if contention_policy != ContentionPolicy::Replace
+            && let Some(previous) = previous
+        {
+            for decl in &definition.parameter_schema {
+                if decl.audience != crate::WidgetParamAudience::Model
+                    || decl.param_type == WidgetParamType::Deadline
+                {
+                    continue;
+                }
+                if let Some(value) = previous.params.get(&decl.name) {
+                    validated_params
+                        .entry(decl.name.clone())
+                        .or_insert_with(|| value.clone());
+                }
+            }
+        }
         for decl in &definition.parameter_schema {
             if decl.param_type != WidgetParamType::Deadline
                 || decl.audience != crate::WidgetParamAudience::Model
@@ -818,6 +949,7 @@ impl SceneGraph {
                 validated_params
                     .insert(decl.name.clone(), WidgetParameterValue::Deadline(d.clone()));
             } else if let WidgetParameterValue::Deadline(mut d) = decl.default_value.clone() {
+                d.counts_up = decl.deadline_counts_up();
                 d.snapshot(now_us);
                 validated_params.insert(decl.name.clone(), WidgetParameterValue::Deadline(d));
             }
@@ -836,11 +968,15 @@ impl SceneGraph {
             publication_origin: publication_origin.filter(|_| lease_id.is_none()),
         };
 
-        let publishes = self
+        let mut new_records = Vec::new();
+        let mut slot = self
             .widget_registry
             .active_publishes
-            .entry(widget_name.to_string())
-            .or_default();
+            .entry(widget_name.to_string());
+        let publishes = match &mut slot {
+            Entry::Occupied(entry) => entry.get_mut(),
+            Entry::Vacant(_) => &mut new_records,
+        };
 
         apply_contention(
             publishes,
@@ -853,6 +989,10 @@ impl SceneGraph {
             },
             |_| false,
         )?;
+
+        if let Entry::Vacant(entry) = slot {
+            entry.insert(new_records);
+        }
 
         // ── Step 4: Update current_params on the instance ─────────────────────
         // Merge new validated params over existing current_params.
@@ -1201,6 +1341,70 @@ impl SceneGraph {
             })
     }
 
+    /// Whether `region` is a destructive action, taken only by a completed
+    /// hold.
+    pub fn notification_needs_hold(&self, region: &ZoneHitRegion) -> bool {
+        self.notification_action(region)
+            .is_some_and(NotificationAction::is_destructive)
+    }
+
+    /// Start holding `region` (a destructive action) with the pointer
+    /// (`key` = `None`) or a key. A new press replaces any hold or drain.
+    pub fn begin_notification_hold(&mut self, region: ZoneHitRegion, key: Option<String>) {
+        self.overlay.notification_hold_drain = None;
+        self.overlay.notification_hold = Some(super::NotificationHold {
+            region,
+            key,
+            started_mono_us: self.now_monotonic_us(),
+        });
+        self.bump_geometry_epoch();
+    }
+
+    /// End the hold, if any, without activating it: its fill drains from
+    /// where it reached over `drain_ms` (0: at once). Returns whether a hold
+    /// ended.
+    pub fn cancel_notification_hold(&mut self, hold_ms: u32, drain_ms: u32) -> bool {
+        let Some(hold) = self.overlay.notification_hold.take() else {
+            return false;
+        };
+        let now = self.now_monotonic_us();
+        let progress = hold_progress(hold.started_mono_us, now, hold_ms);
+        self.overlay.notification_hold_drain =
+            (drain_ms > 0 && progress > 0.0).then_some(super::NotificationHoldDrain {
+                interaction_id: hold.region.interaction_id,
+                progress,
+                released_mono_us: now,
+            });
+        self.bump_geometry_epoch();
+        true
+    }
+
+    /// The hold that has lasted `hold_ms`, removed so it completes once.
+    /// The caller activates its region ([`Self::activate_notification`]),
+    /// which refuses a control that was replaced, cleared or expired.
+    pub fn take_completed_notification_hold(
+        &mut self,
+        hold_ms: u32,
+    ) -> Option<super::NotificationHold> {
+        let hold = self.overlay.notification_hold.as_ref()?;
+        let due = hold
+            .started_mono_us
+            .saturating_add(u64::from(hold_ms) * 1_000);
+        if self.now_monotonic_us() < due {
+            return None;
+        }
+        self.bump_geometry_epoch();
+        self.overlay.notification_hold.take()
+    }
+
+    /// Scene monotonic time at which the current hold completes.
+    pub fn notification_hold_due_mono_us(&self, hold_ms: u32) -> Option<u64> {
+        self.overlay.notification_hold.as_ref().map(|hold| {
+            hold.started_mono_us
+                .saturating_add(u64::from(hold_ms) * 1_000)
+        })
+    }
+
     /// Activate one exact, visible and unexpired notification control. Pointer
     /// releases and keyboard activation both enter here. The FIFO remains the
     /// authoritative answer; its readiness callback must run after unlocking.
@@ -1236,6 +1440,27 @@ impl SceneGraph {
             return None;
         };
         let kind = match &region.kind {
+            ZoneInteractionKind::GoTo => {
+                let token = record.window_token.clone()?;
+                let mono = self.now_monotonic_us();
+                let state = self.overlay.notification_go_to.get_mut(&key)?;
+                if !state.available
+                    || state
+                        .attempted_at_mono_us
+                        .is_some_and(|last| mono.saturating_sub(last) < 2_000_000)
+                {
+                    return None;
+                }
+                state.attempted_at_mono_us = Some(mono);
+                state.cue = Some(super::overlay::GoToCue::Switching);
+                self.bump_geometry_epoch();
+                return Some(super::NotificationActivation::GoTo {
+                    publication_id: key,
+                    token,
+                    attempted_at_mono_us: mono,
+                    bounds: region.bounds,
+                });
+            }
             ZoneInteractionKind::Dismiss => super::PendingActionKind::Dismiss,
             ZoneInteractionKind::Action { index } => {
                 let action = payload.actions.get(*index)?;
@@ -1253,7 +1478,11 @@ impl SceneGraph {
                         return None;
                     }
                     self.overlay.notification_link_attempts.insert(stamp, mono);
-                    return Some(super::NotificationActivation::OpenUrl(url));
+                    return Some(super::NotificationActivation::OpenUrl {
+                        url,
+                        publication_id: key,
+                        index: *index,
+                    });
                 }
                 super::PendingActionKind::Callback(action.callback_id.clone()?)
             }
@@ -1306,6 +1535,7 @@ impl SceneGraph {
             self.prune_notification_feedback();
             self.version += 1;
         }
+        self.overlay.notification_owner_activated = Some(region.publication_id);
         Some(super::NotificationActivation::Callback(
             self.push_pending_action(super::PendingAction {
                 publication_id: Some(region.publication_id),
@@ -1353,7 +1583,9 @@ impl SceneGraph {
                 // Native chrome shares this list but has no notification publication.
                 !matches!(
                     r.kind,
-                    ZoneInteractionKind::Dismiss | ZoneInteractionKind::Action { .. }
+                    ZoneInteractionKind::Dismiss
+                        | ZoneInteractionKind::GoTo
+                        | ZoneInteractionKind::Action { .. }
                 ) || (!hidden && live(&r.zone_name, r.publication_id, &r.publisher_namespace))
             })
             .map(|r| r.interaction_id.clone())
@@ -1371,6 +1603,18 @@ impl SceneGraph {
                     })
                     && !keys.contains(id)
             });
+        self.overlay.notification_go_to.retain(|id, _| {
+            !keys.contains(id)
+                && self
+                    .zone_registry
+                    .active_publishes
+                    .values()
+                    .flatten()
+                    .any(|record| {
+                        record.publication_id == *id
+                            && record.expires_at_wall_us.is_none_or(|expiry| expiry > now)
+                    })
+        });
         self.overlay
             .notification_choices
             .retain(|key, _| keys.contains(key));
@@ -1394,6 +1638,17 @@ impl SceneGraph {
         {
             self.focus_notification(None);
         }
+        // A held control that was replaced, cleared, expired or hidden ends
+        // its hold with no callback.
+        if self
+            .overlay
+            .notification_hold
+            .as_ref()
+            .is_some_and(|hold| !valid.contains(&hold.region.interaction_id))
+        {
+            self.overlay.notification_hold = None;
+            self.bump_geometry_epoch();
+        }
     }
 
     /// Whether current content or a pending unleased batch still owns this origin.
@@ -1410,9 +1665,9 @@ impl SceneGraph {
                 .flatten()
                 .any(|r| r.lease_id.is_none() && r.publication_origin == Some(origin))
             || self
-                .scheduled_batches
+                .scheduled_publications
                 .iter()
-                .any(|s| s.batch.lease_id.is_none() && s.publication_origin == Some(origin))
+                .any(|s| s.has_origin(origin))
     }
 
     /// Keep orphan state bounded by the current publications, never request history.
@@ -1434,30 +1689,6 @@ impl SceneGraph {
         for origin in empty {
             self.publication_orphans.remove(&origin);
         }
-    }
-
-    /// Adopt only this session's still-unleased content after a complete claim.
-    /// Existing independently leased publications (including later claims) are untouched.
-    pub fn adopt_publications(&mut self, origin: SceneId, lease_id: SceneId) {
-        for r in self.zone_registry.active_publishes.values_mut().flatten() {
-            if r.lease_id.is_none() && r.publication_origin == Some(origin) {
-                r.lease_id = Some(lease_id);
-                r.publication_origin = None;
-            }
-        }
-        for r in self.widget_registry.active_publishes.values_mut().flatten() {
-            if r.lease_id.is_none() && r.publication_origin == Some(origin) {
-                r.lease_id = Some(lease_id);
-                r.publication_origin = None;
-            }
-        }
-        for s in &mut self.scheduled_batches {
-            if s.batch.lease_id.is_none() && s.publication_origin == Some(origin) {
-                s.batch.lease_id = Some(lease_id);
-                s.publication_origin = None;
-            }
-        }
-        self.publication_orphans.remove(&origin);
     }
 
     /// Scoped counterpart of lease cleanup for a publication-only session.
@@ -1483,15 +1714,15 @@ impl SceneGraph {
             self.refresh_widget_current_params(&name);
         }
         let pending_waits: Vec<_> = self
-            .scheduled_batches
+            .scheduled_publications
             .iter()
             .filter_map(|s| s.notification_publication)
             .collect();
-        self.scheduled_batches
-            .retain(|s| s.publication_origin != Some(origin) || s.batch.lease_id.is_some());
+        self.scheduled_publications
+            .retain(|s| !s.has_origin(origin));
         for id in pending_waits {
             if !self
-                .scheduled_batches
+                .scheduled_publications
                 .iter()
                 .any(|s| s.notification_publication == Some(id))
             {
@@ -1505,28 +1736,28 @@ impl SceneGraph {
         self.version += 1;
     }
 
-    /// Clear active publications and whole scheduled batches owned by `lease_id`.
+    /// Clear active and scheduled publications owned by `lease_id`.
     ///
     /// Called when a lease reaches a terminal state (expired after grace,
     /// revoked). Publications by the same namespace under another lease
     /// (e.g. an operator session's MCP notifications) are untouched.
     pub fn clear_publications_for_lease(&mut self, lease_id: SceneId) {
-        let pending_before = self.scheduled_batches.len();
+        let pending_before = self.scheduled_publications.len();
         let pending_waits: Vec<_> = self
-            .scheduled_batches
+            .scheduled_publications
             .iter()
-            .filter(|batch| batch.batch.lease_id == Some(lease_id))
-            .filter_map(|batch| batch.notification_publication)
+            .filter(|s| s.publisher.lease_id == Some(lease_id))
+            .filter_map(|s| s.notification_publication)
             .collect();
-        self.scheduled_batches
-            .retain(|scheduled| scheduled.batch.lease_id != Some(lease_id));
+        self.scheduled_publications
+            .retain(|s| s.publisher.lease_id != Some(lease_id));
         for id in pending_waits {
             self.finish_notification_wait(
                 id,
                 super::NotificationOutcome::Gone(super::NotificationGone::Cleared),
             );
         }
-        let pending_changed = self.scheduled_batches.len() != pending_before;
+        let pending_changed = self.scheduled_publications.len() != pending_before;
         let mut zone_changed = false;
         for publishes in self.zone_registry.active_publishes.values_mut() {
             let before = publishes.len();
@@ -1801,4 +2032,12 @@ pub(super) fn effective_expiry(
         (Some(a), Some(b)) => Some(a.min(b)),
         (a, b) => a.or(b),
     }
+}
+
+/// Fill fraction of a hold started at `started` after `hold_ms`, at `now`.
+pub fn hold_progress(started: u64, now: u64, hold_ms: u32) -> f32 {
+    if hold_ms == 0 {
+        return 1.0;
+    }
+    (now.saturating_sub(started) as f32 / (hold_ms as f32 * 1_000.0)).clamp(0.0, 1.0)
 }

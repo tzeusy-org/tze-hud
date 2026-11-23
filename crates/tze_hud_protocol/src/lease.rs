@@ -18,7 +18,7 @@ use std::collections::HashMap;
 /// sending more than 256 lease requests without receiving ACKs is operating
 /// far outside normal patterns; oldest entries are evicted when the cap is
 /// hit.
-pub const DEFAULT_LEASE_CORRELATION_CACHE_CAPACITY: usize = 256;
+pub(crate) const DEFAULT_LEASE_CORRELATION_CACHE_CAPACITY: usize = 256;
 
 // ─── Retransmit correlation ──────────────────────────────────
 
@@ -27,7 +27,7 @@ pub const DEFAULT_LEASE_CORRELATION_CACHE_CAPACITY: usize = 256;
 /// Keyed by the **client sequence number** that carried the original request.
 /// On retransmit the server replays the cached reply without re-applying the
 /// operation.
-pub type CachedLeaseResponse = crate::proto::session::RequestResult;
+pub(crate) type CachedLeaseResponse = crate::proto::session::RequestResult;
 
 /// Per-session cache of recent lease-operation responses, keyed by the
 /// client-side sequence number that originated the request.
@@ -35,7 +35,7 @@ pub type CachedLeaseResponse = crate::proto::session::RequestResult;
 /// Cache capacity is capped at `capacity` entries; oldest entries are evicted
 /// when the cap is exceeded (LRU-approximated via insertion-order VecDeque).
 #[derive(Debug)]
-pub struct LeaseCorrelationCache {
+pub(crate) struct LeaseCorrelationCache {
     /// Maps client_sequence → cached response.
     entries: HashMap<u64, CachedLeaseResponse>,
     /// Insertion-order list of sequence numbers, for LRU eviction.
@@ -46,7 +46,7 @@ pub struct LeaseCorrelationCache {
 
 impl LeaseCorrelationCache {
     /// Create a new cache with the given capacity.
-    pub fn new(capacity: usize) -> Self {
+    pub(crate) fn new(capacity: usize) -> Self {
         Self {
             entries: HashMap::new(),
             order: std::collections::VecDeque::new(),
@@ -57,7 +57,7 @@ impl LeaseCorrelationCache {
     /// Look up the cached response for `client_sequence`.  Returns `None` if
     /// this sequence has not been seen before (i.e. it is a fresh request, not
     /// a retransmit).
-    pub fn get(&self, client_sequence: u64) -> Option<&CachedLeaseResponse> {
+    pub(crate) fn get(&self, client_sequence: u64) -> Option<&CachedLeaseResponse> {
         self.entries.get(&client_sequence)
     }
 
@@ -65,7 +65,7 @@ impl LeaseCorrelationCache {
     /// evicts the oldest entry (in insertion order).
     ///
     /// A capacity of 0 is a no-op (nothing is ever cached).
-    pub fn insert(&mut self, client_sequence: u64, response: CachedLeaseResponse) {
+    pub(crate) fn insert(&mut self, client_sequence: u64, response: CachedLeaseResponse) {
         if self.capacity == 0 {
             return;
         }

@@ -11,11 +11,12 @@ pub mod clock;
 pub mod element_store;
 pub mod error_codes;
 pub mod graph;
-pub mod mutation;
 pub mod perf_budget;
+pub mod portal_defaults;
 pub mod portal_reading;
 pub mod publication_defaults;
 pub mod render_wake;
+pub mod scope;
 pub mod startup_diagnostics;
 pub mod svg_tokens;
 #[cfg(any(test, feature = "test-support"))]
@@ -40,11 +41,9 @@ pub use element_store::{
 pub use graph::{
     MAX_MARKDOWN_BYTES,
     MAX_NODES_PER_TILE,
-    MAX_TAB_NAME_BYTES,
-    // scene-level capacity constants
-    MAX_TABS,
-    MAX_TILES_PER_TAB,
     PendingAction,
+    Publication,
+    Publisher,
     RuntimeOverlayState,
     SceneGraph,
     // zone band reservation
@@ -52,15 +51,12 @@ pub use graph::{
     // Node data validation
     validate_text_markdown_node_data,
 };
-pub use mutation::{
-    BatchTimingHints, MAX_BATCH_SIZE, MutationBatch, MutationResult, SceneMutation,
-};
 pub use portal_reading::{
-    PortalCopyButton, PortalGlyph, PortalLink, PortalReadingDecor, PortalReadingLayout,
-    https_link_target,
+    LinkFeedbackState, LinkFeedbackTarget, PortalCopyButton, PortalGlyph, PortalLink,
+    PortalReadingDecor, PortalReadingLayout, https_link_target,
 };
 pub use publication_defaults::{
-    DEFAULT_ANSWER_WINDOW_MS, MAX_ANSWER_WINDOW_MS, PublicationDefaults,
+    DEFAULT_ANSWER_WINDOW_MS, MAX_ANSWER_WINDOW_MS, PublicationDefaults, QuestionPlacement,
 };
 pub use svg_tokens::{is_valid_token_key, resolve_token_placeholders};
 #[cfg(any(test, feature = "test-support"))]
@@ -70,8 +66,15 @@ pub use test_scenes::{
 pub use text_fit::TextFit;
 pub use timing::{MonoUs, WallUs};
 pub use types::*;
-pub use validation::{BatchRejected, BatchValidationError, ValidationError, ValidationErrorCode};
+pub use validation::ValidationError;
 pub use widget_deadline::WidgetDeadline;
 
 // ── Lease governance public API ───────────────────────────────────────────────
 pub use lease::degradation::DegradationLevel;
+
+/// Picks the display a new question card appears on, once, when the card is
+/// presented. Runs under the scene lock, so it must be quick.
+pub trait QuestionPlacer: Send + Sync + std::fmt::Debug {
+    /// The normalized OS display name, or `None` for the notification display.
+    fn place(&self) -> Option<String>;
+}

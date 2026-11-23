@@ -6,8 +6,8 @@ input and rendering. Agents send intent; they do not run the frame loop.
 The three surfaces and their contracts are in [api.md](api.md); current
 implementation gaps are in [scope.md](scope.md).
 
-[Observed] This map was checked against `855f8397` on 2026-10-13. Links point
-to interface owners rather than a full call graph. Update affected rows and
+[Observed] Links point to interface owners rather than a full call graph;
+`just ci` fails when one no longer resolves. Update affected rows and
 flows when ownership or observable behavior changes. Planned behavior belongs
 in scope; historical designs at `pre-reset-2026-10-02` are not requirements.
 
@@ -68,7 +68,7 @@ crates, the canonical app, five examples and a separate integration package.
 | `app/tze_hud_app` | Canonical binary, CLI, config selection and operator startup actions: [main.rs](../app/tze_hud_app/src/main.rs) |
 | `tze_hud_runtime` | Window/event-loop lifecycle, protocol wiring, portal driver, shell (including the [control panel](../crates/tze_hud_runtime/src/shell/control_panel/mod.rs) model and its sections), deadlines and operator services: [lib.rs](../crates/tze_hud_runtime/src/lib.rs), [windowed](../crates/tze_hud_runtime/src/windowed/mod.rs) |
 | `tze_hud_scene` | Shared scene graph, tiles/nodes/zones, leases, agent identity, the owner's visibility set and per-agent holdings and Clear: [SceneGraph](../crates/tze_hud_scene/src/graph/mod.rs), [visibility](../crates/tze_hud_scene/src/graph/visibility.rs), [agents](../crates/tze_hud_scene/src/graph/agents.rs), [lease](../crates/tze_hud_scene/src/lease/), [config](../crates/tze_hud_scene/src/config/) |
-| `tze_hud_mcp` | Discover, publish, clear, hold and input tools, with caller-scoped authorization and shared errors: [tools.rs](../crates/tze_hud_mcp/src/tools.rs) |
+| `tze_hud_mcp` | Discover, publish, clear, hold and input tools, with caller-scoped authorization and shared errors: [tools.rs](../crates/tze_hud_mcp/src/tools.rs); per-session ownership: [scopes.rs](../crates/tze_hud_mcp/src/scopes.rs) |
 | `tze_hud_protocol` | Protobuf schemas, resident session lifecycle, zone/widget publication, resource uploads, resume and event delivery: [proto](../crates/tze_hud_protocol/proto/), [session_server](../crates/tze_hud_protocol/src/session_server/mod.rs) |
 | `tze_hud_portal` | `PortalHub` state, pure scene-node renderer and resolved visual tokens: [hub.rs](../crates/tze_hud_portal/src/hub.rs), [render.rs](../crates/tze_hud_portal/src/render.rs), [tokens.rs](../crates/tze_hud_portal/src/tokens.rs) |
 | `tze_hud_input` | Hit testing, focus, pointer/keyboard processing, scrolling and composer editing: [lib.rs](../crates/tze_hud_input/src/lib.rs) |
@@ -120,10 +120,11 @@ through `Appearance::apply`: it restyles zones and re-resolves widget SVGs
 in the scene and publishes the new token map in `LiveTokens`, which the
 compositor and main thread take on their next turn. The windows report each
 monitor's scale factor to `Appearance::set_display_scales`; the token map
-carries `runtime.px_scale` (monitor scale × `ui.scale`), and every size read
-multiplies by it (`tze_hud_config::tokens::token_px`, the policy builder,
-the compositor's token resolvers). MCP and
-gRPC share [`SharedAgents`](../crates/tze_hud_scene/src/config/agents.rs).
+carries `runtime.px_scale` (monitor scale × Windows text size × `ui.scale`,
+the last two held to 0.5–3.0 by `tokens::effective_scale`). The policy builder
+and compositor token resolvers use that factor to convert logical sizes to
+physical pixels. MCP and gRPC share
+[`SharedAgents`](../crates/tze_hud_scene/src/config/agents.rs).
 Network listeners bind loopback and local Tailscale-interface addresses
 ([`net_addrs`](../crates/tze_hud_runtime/src/net_addrs.rs)).
 [`http::route`](../crates/tze_hud_runtime/src/http.rs) keeps `/pair` and
@@ -133,9 +134,9 @@ restart and signed-update semantics belong in the
 
 **Operator diagnostics.** [`graph/holdings`](../crates/tze_hud_scene/src/graph/holdings.rs)
 visits borrowed ownership metadata beside the scene's real publication, lease,
-scheduled-batch and orphan owners. `PortalHub::visit_holdings` exposes only live
-authenticated keys and reclaim metadata. Neither reader copies payloads or runs
-cleanup. Runtime [`operator/diagnostics`](../crates/tze_hud_runtime/src/operator/diagnostics.rs)
+scheduled publication and orphan owners. `PortalHub::visit_holdings` exposes
+only live authenticated keys and reclaim metadata. Both readers work from
+metadata they borrow and leave cleanup to the runtime. Runtime [`operator/diagnostics`](../crates/tze_hud_runtime/src/operator/diagnostics.rs)
 collects them through separate nonblocking locks into the bounded admin-only
 projection; ordinary agent discovery stays unchanged.
 
@@ -232,9 +233,8 @@ reposition events. The human grip menu clears live Zone placement directly;
 the agent service reset and saved element-store contracts remain unchanged.
 
 Scene `graph/zone_ops.rs` owns notification-key validation, publisher-scoped
-replacement and selective clear; `graph/timed.rs` cancels matching delayed
-notifications while retaining mixed-batch remainder. Central
-`SceneGraph::activate_notification` validates the exact publication and snapshots
+replacement and selective clear. `graph/timed.rs` cancels matching delayed
+notifications. `SceneGraph::activate_notification` validates the exact publication and snapshots
 its existing `merge_key` into `PendingAction` for callback activation before
 removal or finite exit. URL activation resolves the same indexed live action
 and returns its parsed serialization without changing publication lifetime.
@@ -253,9 +253,10 @@ The driver applies them through checked scene calls; it no longer builds or
 decodes protobuf render batches. The hub owns cue-expiry repaints and retained
 unread counts. Composer drafts, selections and carets remain in the runtime
 input manager; only submissions enter the hub. The manager keeps an active draft
-and one keyed retained draft. Nonempty blur replaces the retained slot; an empty
-peer leaves it intact. Matching refocus restores text/caret/selection under the
-current suspension and placeholder configuration. Removed nodes lose their saved
+and one kept draft per unfocused composer node; Esc and blur keep a nonempty
+draft, and `drafts()` is the one reading behind admin `draft_chars` and the
+compositor's caretless kept-draft text. Matching refocus restores
+text/caret/selection under the current suspension and placeholder configuration. Removed nodes lose their saved
 state. The input layer returns direct `ComposerOutcome` results, with consumed-key
 status separate and local capacity/suspension detail retained in `EditOutcome`.
 Native `PortalView.input_history` is rendered through projection markdown and
@@ -288,6 +289,45 @@ keys come from EDID identity in
 [`monitor_identity`](../crates/tze_hud_runtime/src/windowed/monitor_identity.rs). Do not infer
 live theme switching or full logical-DPI scaling from
 the presence of helper modules; their status is recorded in [scope.md](scope.md).
+
+## Constraints that make the code larger
+
+[Observed] A from-scratch build that knew only the API would be smaller in
+these eight places. Each is deliberate; remove one only with its constraint.
+
+- **Hand-drawn control panel.** The panel is drawn with the HUD's own
+  primitives and theme tokens, not a UI toolkit: the vision's non-goals
+  exclude a UI framework ([vision](vision.md), T11 in [scope](scope.md)).
+  Code: [renderer/control_panel.rs](../crates/tze_hud_compositor/src/renderer/control_panel.rs),
+  [shell/control_panel](../crates/tze_hud_runtime/src/shell/control_panel/mod.rs).
+- **Hand-rolled HTTP server.** One request per connection, no keep-alive or
+  TLS, on loopback and tailnet addresses; that is smaller than adopting a
+  framework such as axum. Code: [http.rs](../crates/tze_hud_runtime/src/http.rs),
+  listeners in [mcp.rs](../crates/tze_hud_runtime/src/mcp.rs).
+- **Widget raster fast path.** SVG layers within a small primitive subset are
+  compiled once and redrawn straight through `tiny-skia` (`ab_glyph` text),
+  skipping the per-update XML parse; other layers keep the `resvg` path. Work
+  must be proportional to change ([vision](vision.md)).
+  Code: [widget.rs](../crates/tze_hud_compositor/src/widget.rs).
+- **Durable widget assets, one resident ledger.** Operator widget SVG assets are
+  re-indexed and budgeted at startup so they survive restart. Resources, widget
+  sources, widget rasters and fonts share one resident-memory ledger with an
+  aggregate cap and a cap per class.
+  Code: [runtime_widget_store.rs](../crates/tze_hud_resource/src/runtime_widget_store.rs),
+  [resident_ledger.rs](../crates/tze_hud_resource/src/resident_ledger.rs).
+- **Dragged zone placement survives clear.** A zone moved by its grip keeps
+  that slot through clear, expiry and republish for the session
+  ([invariants §3](invariants.md#3-the-runtime-owns-the-screen-the-human-override-always-wins)).
+  Code: [zone_ops.rs](../crates/tze_hud_scene/src/graph/zone_ops.rs).
+- **Skill examples parse in a test.** The `hud-projection` and `th-hud-publish`
+  skills are installed outside this repository, so their documented calls go
+  through the production argument parser in CI (CLAUDE.md, user-scope install).
+  Code: [skill_examples.rs](../crates/tze_hud_mcp/tests/skill_examples.rs).
+- **Gesture harness, tiers L and W.** Owner-directed (T13 in
+  [scope](scope.md)): agents drive the real binary with real OS input.
+  Code: [hud_gestures.py](../scripts/ci/hud_gestures.py).
+- **glyphon pinned to 0.8.** glyphon 0.9+ needs wgpu 28+ and Rust 1.92+, so it
+  moves only with a wgpu and toolchain upgrade. Code: [Cargo.toml](../Cargo.toml).
 
 ## Verification and navigation
 

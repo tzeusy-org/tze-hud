@@ -48,13 +48,10 @@ use serde::{Deserialize, Serialize};
 
 /// sRGB transfer: straight-sRGB component → linear, for one channel in [0.0, 1.0].
 ///
-/// Kept byte-for-byte identical to `tze_hud_compositor`'s `srgb_to_linear` so the
-/// `color_*` DEFAULT below lands in the same LINEAR space the token-set path
-/// produces (that path parses `#RRGGBB` via the compositor's `parse_hex_color`,
-/// which applies this same transfer). No compile-time link between the two copies;
-/// update both if the transfer function ever changes.
+/// The compositor's `parse_hex_color` applies this same function, so the
+/// `color_*` DEFAULT below lands in the LINEAR space the token-set path produces.
 #[inline]
-fn srgb_to_linear(c: f32) -> f32 {
+pub fn srgb_to_linear(c: f32) -> f32 {
     if c <= 0.04045 {
         c / 12.92
     } else {
@@ -96,9 +93,8 @@ pub struct JumpToLatestTokens {
 
 impl Default for JumpToLatestTokens {
     fn default() -> Self {
-        // Must match `token_colors::resolve_jump_to_latest_tokens` fallback
-        // defaults in tze_hud_compositor. No compile-time link; update both
-        // sides when changing defaults.
+        // The one definition: the compositor's token resolution falls back
+        // to these.
         Self {
             // #4A5568 — the same neutral chrome tone as the scroll indicator
             // thumb, ambient rather than alarming. Stored LINEAR (via

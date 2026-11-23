@@ -24,7 +24,7 @@ VERSION = "26.2.6"
 ASSET_ID = 704037727
 SHA256 = "b2e00615feaba45942343c265cc8c5f576142ca682c1ac6661922d4b72492877"
 REGISTRY_KEY = r"SOFTWARE\Khronos\Vulkan\Drivers"
-OVERLAY_SCENARIOS = {"overlay-pointer", "tray"}
+OVERLAY_SCENARIOS = hud_gestures.OVERLAY_SCENARIOS
 
 
 def extract_driver(work: Path, *, expected_sha256: str = SHA256) -> Path:

@@ -88,7 +88,7 @@ impl FrameTurnState {
     /// Adapters own scene acquisition. `commit` preserves the headless Stage 2/3
     /// input boundary, and `build` implements only the surface-specific tail.
     /// Windowed builds leave submission deferred until after releasing the lock.
-    pub fn run_frame_turn<C, T>(
+    pub(crate) fn run_frame_turn<C, T>(
         &mut self,
         scene: &mut SceneGraph,
         mut compositor: Option<&mut tze_hud_compositor::Compositor>,
@@ -189,7 +189,7 @@ impl FrameTurnState {
         }
     }
 
-    pub fn record_submission(&mut self, submitted: bool, versions: (u64, u64)) {
+    pub(crate) fn record_submission(&mut self, submitted: bool, versions: (u64, u64)) {
         if submitted {
             self.last_rendered = versions;
             self.widget_repaint_pending = false;
@@ -199,7 +199,7 @@ impl FrameTurnState {
     }
 
     #[cfg(test)]
-    pub fn last_rendered(&self) -> (u64, u64) {
+    pub(crate) fn last_rendered(&self) -> (u64, u64) {
         self.last_rendered
     }
 }
@@ -450,45 +450,42 @@ impl Default for FramePipeline {
 /// (windowed compositor, headless runtime, GPU-free harness) so none of them
 /// can skip a step.
 ///
-/// Applies batches whose `present_at` has arrived (invariant 1), removes
-/// expired tiles and zone and widget publications, and expires leases whose
-/// TTL or orphan grace has elapsed (invariant 4). Returns the terminal lease
-/// expiries; the caller forwards them to sessions after releasing the scene
-/// lock.
-pub fn sweep_timed_scene_state(scene: &mut SceneGraph) -> Vec<tze_hud_scene::types::LeaseExpiry> {
+/// Applies publications whose `present_at` has arrived (invariant 1), removes
+/// expired zone and widget content, and expires leases whose TTL or orphan
+/// grace has elapsed (invariant 4). The caller forwards the returned terminal
+/// lease expiries to sessions after releasing the scene lock.
+pub(crate) fn sweep_timed_scene_state(
+    scene: &mut SceneGraph,
+) -> Vec<tze_hud_scene::types::LeaseExpiry> {
     // Diagnostic work is opt-in; normal sweeps allocate no extra metadata.
     let scheduled = tracing::enabled!(target: "tze_hud_delay_diagnostic", tracing::Level::DEBUG)
         .then(|| {
             scene
-                .scheduled_batches
+                .scheduled_publications
                 .iter()
                 .map(|s| {
-                    let publication = match s.batch.mutations.as_slice() {
-                        [
-                            tze_hud_scene::mutation::SceneMutation::PublishToZone {
-                                zone_name,
-                                expires_at_wall_us,
-                                ..
-                            },
-                        ] if zone_name == "subtitle" => {
-                            Some((s.batch.agent_namespace.clone(), *expires_at_wall_us))
+                    let publication = match &s.publication {
+                        tze_hud_scene::Publication::Zone {
+                            zone_name,
+                            expires_at_wall_us,
+                            ..
+                        } if zone_name == "subtitle" => {
+                            Some((s.publisher.namespace.clone(), *expires_at_wall_us))
                         }
                         _ => None,
                     };
-                    (s.batch.batch_id, (s.present_at_wall_us, publication))
+                    (s.id, (s.present_at_wall_us, publication))
                 })
                 .collect::<std::collections::HashMap<_, _>>()
         });
-    let applied = scene.apply_due_batches();
+    let applied = scene.apply_due_publications();
     for late in &applied {
-        if let Some((present_at, publication)) =
-            scheduled.as_ref().and_then(|s| s.get(&late.batch_id))
-        {
+        if let Some((present_at, publication)) = scheduled.as_ref().and_then(|s| s.get(&late.id)) {
             let records = scene.zone_registry.active_publishes.get("subtitle");
             let record = records.and_then(|records| match records.as_slice() {
                 [record]
                     if applied.len() == 1
-                        && late.error.is_none()
+                        && late.result.is_ok()
                         && publication.as_ref().is_some_and(|(namespace, expiry)| {
                             record.publisher_namespace == *namespace
                                 && record.expires_at_wall_us == *expiry
@@ -499,29 +496,28 @@ pub fn sweep_timed_scene_state(scene: &mut SceneGraph) -> Vec<tze_hud_scene::typ
                 }
                 _ => None,
             });
-            let (batch_hi, batch_lo) = late.batch_id.as_uuid().as_u64_pair();
+            let (batch_hi, batch_lo) = late.id.as_uuid().as_u64_pair();
             tracing::debug!(
                 target: "tze_hud_delay_diagnostic",
                 event = "scheduled_activation", batch_hi, batch_lo,
                 present_at_wall_us = present_at,
                 applied_at_wall_us = scene.now_wall_us(),
                 scene_version = scene.version,
-                accepted = late.error.is_none(),
+                accepted = late.result.is_ok(),
                 identity_valid = record.is_some(),
                 active_publications = records.map_or(0, Vec::len),
                 published_at_wall_us = record.map(|r| r.published_at_wall_us),
                 expires_at_wall_us = record.and_then(|r| r.expires_at_wall_us),
             );
         }
-        if let Some(err) = &late.error {
+        if let Err(err) = &late.result {
             tracing::warn!(
-                batch_id = %late.batch_id,
+                publication_id = %late.id,
                 error = %err,
-                "scheduled batch rejected at present_at"
+                "scheduled publication rejected at present_at"
             );
         }
     }
-    scene.drain_expired_tiles();
     scene.drain_expired_zone_publications();
     scene.drain_expired_widget_publications();
     scene.expire_leases()

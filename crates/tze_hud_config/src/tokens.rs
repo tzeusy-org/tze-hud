@@ -841,6 +841,26 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         description: "Trailing mark on a notification HTTPS link button",
         default_value: "↗",
     },
+    CanonicalToken {
+        key: "link.feedback.ms",
+        description: "How long a pressed link shows Opened or Couldn't open (ms)",
+        default_value: "1500",
+    },
+    CanonicalToken {
+        key: "notification.goto.feedback.ms",
+        description: "How long the result of Go to session stays visible (ms)",
+        default_value: "1200",
+    },
+    CanonicalToken {
+        key: NOTIFICATION_ACTION_HOLD_MS_KEY,
+        description: "How long a destructive notification action must be held (ms, 0-3000; 0 = no hold)",
+        default_value: "600",
+    },
+    CanonicalToken {
+        key: NOTIFICATION_PRESS_GUARD_MS_KEY,
+        description: "How long a card that arrives under a resting pointer ignores pointer presses (ms, 0-3000; 0 = no guard)",
+        default_value: "400",
+    },
     // Runtime system card / toast (pairing code, update notices); never agent-visible.
     CanonicalToken {
         key: "system_card.background",
@@ -1005,6 +1025,26 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         default_value: "#FFDAD6",
     },
     // State layers and focus
+    CanonicalToken {
+        key: "tile.hit_region.hover.color",
+        description: "Hover tint for a tile hit region without a local override",
+        default_value: "#FFFFFF",
+    },
+    CanonicalToken {
+        key: "tile.hit_region.hover.opacity",
+        description: "Opacity of the tile hit-region hover tint (0.0-1.0)",
+        default_value: "0.1",
+    },
+    CanonicalToken {
+        key: "tile.hit_region.pressed.color",
+        description: "Pressed tint for a tile hit region without a local override",
+        default_value: "#000000",
+    },
+    CanonicalToken {
+        key: "tile.hit_region.pressed.opacity",
+        description: "Opacity of the tile hit-region pressed tint (0.0-1.0)",
+        default_value: "0.15",
+    },
     CanonicalToken {
         key: "state.hover.opacity",
         description: "Opacity of the on-surface state layer while hovered (0.0-1.0)",
@@ -1566,6 +1606,49 @@ pub fn resolve_motion_duration_ms(tokens: &DesignTokenMap, key: &str) -> u32 {
     duration(canonical.default_value).expect("canonical motion duration must be valid")
 }
 
+/// How long a destructive notification action must be held before it fires
+/// (ms). `0` turns the hold off.
+const NOTIFICATION_ACTION_HOLD_MS_KEY: &str = "notification.action.hold.ms";
+
+/// The longest hold [`NOTIFICATION_ACTION_HOLD_MS_KEY`] may ask for.
+const MAX_NOTIFICATION_ACTION_HOLD_MS: u32 = 3_000;
+
+fn parse_hold_ms(value: &str) -> Option<u32> {
+    value
+        .trim()
+        .parse::<u32>()
+        .ok()
+        .filter(|ms| *ms <= MAX_NOTIFICATION_ACTION_HOLD_MS)
+}
+
+/// The destructive-action hold in ms from `notification.action.hold.ms`.
+/// Uses the canonical default when unset or invalid.
+pub fn notification_action_hold_ms(tokens: &DesignTokenMap) -> u32 {
+    safety_interval_ms(tokens, NOTIFICATION_ACTION_HOLD_MS_KEY)
+}
+
+/// A card that an agent puts under a resting pointer ignores pointer presses
+/// on its controls for this long (ms). `0` turns the guard off. A safety
+/// interval, not motion: the OS animation preference leaves it alone.
+const NOTIFICATION_PRESS_GUARD_MS_KEY: &str = "notification.press_guard.ms";
+
+/// The fresh-card press guard in ms from `notification.press_guard.ms`.
+/// Uses the canonical default when unset or invalid.
+pub fn notification_press_guard_ms(tokens: &DesignTokenMap) -> u32 {
+    safety_interval_ms(tokens, NOTIFICATION_PRESS_GUARD_MS_KEY)
+}
+
+fn safety_interval_ms(tokens: &DesignTokenMap, key: &str) -> u32 {
+    tokens
+        .get(key)
+        .and_then(|v| parse_hold_ms(v))
+        .unwrap_or_else(|| {
+            canonical_token(key)
+                .and_then(|token| parse_hold_ms(token.default_value))
+                .expect("canonical safety interval must be valid")
+        })
+}
+
 /// Easing curve names accepted by `motion.*.easing` tokens.
 ///
 /// The compositor's curves (`renderer/easing.rs`) map as: `linear` ->
@@ -1573,9 +1656,21 @@ pub fn resolve_motion_duration_ms(tokens: &DesignTokenMap, key: &str) -> u32 {
 /// `accelerate` -> `EaseInQuad`. Whole-zone transitions capture these curves.
 const MOTION_EASINGS: &[&str] = &["linear", "standard", "decelerate", "accelerate"];
 
+/// The canonical default of `key`: the one definition every fallback reads.
+pub fn canonical_default(key: &str) -> Option<&'static str> {
+    canonical_token(key).map(|token| token.default_value)
+}
+
 /// Look up a canonical token definition by key.
 pub(crate) fn canonical_token(key: &str) -> Option<&'static CanonicalToken> {
     CANONICAL_TOKENS.iter().find(|t| t.key == key)
+}
+
+fn is_hit_region_opacity(key: &str) -> bool {
+    matches!(
+        key,
+        "tile.hit_region.hover.opacity" | "tile.hit_region.pressed.opacity"
+    )
 }
 
 /// Check `value` against the kind of the canonical token `key`.
@@ -1607,11 +1702,21 @@ pub(crate) fn validate_canonical_value(key: &str, value: &str) -> Result<(), Str
             parse_color_hex(value).is_some(),
             "a color #RRGGBB or #RRGGBBAA".into(),
         )
+    } else if key == NOTIFICATION_ACTION_HOLD_MS_KEY || key == NOTIFICATION_PRESS_GUARD_MS_KEY {
+        (
+            parse_hold_ms(value).is_some(),
+            format!("a whole number of ms from 0 to {MAX_NOTIFICATION_ACTION_HOLD_MS}"),
+        )
     } else if key == UI_SCALE_KEY {
         let (lo, hi) = UI_SCALE_RANGE;
         (
             parse_numeric(value).is_some_and(|n| (lo..=hi).contains(&n)),
             format!("a number from {lo} to {hi}"),
+        )
+    } else if is_hit_region_opacity(key) {
+        (
+            parse_numeric(value).is_some_and(|n| (0.0..=1.0).contains(&n)),
+            "a number from 0 to 1".into(),
         )
     } else if parse_numeric(token.default_value).is_some() {
         (parse_numeric(value).is_some(), "a finite number".into())
@@ -1631,14 +1736,22 @@ pub(crate) fn validate_canonical_value(key: &str, value: &str) -> Result<(), Str
 /// - `runtime.px_scale` ([`PX_SCALE_KEY`]): physical px per logical dp.
 /// - `runtime.reduce_motion` ([`OS_REDUCE_MOTION_KEY`]): the Windows
 ///   animation preference is off ([`apply_os_motion_layer`]).
+/// - `runtime.text_scale` ([`TEXT_SCALE_KEY`]) and `runtime.caret_blink_ms`
+///   ([`CARET_BLINK_MS_KEY`]): the Windows text size and caret blink time
+///   ([`apply_os_text_and_caret`]). Unlike the motion layer, nothing in the
+///   config overrides them.
 ///
-/// Every `runtime.px_scale@<zone>` key ([`ZONE_PX_SCALE_PREFIX`]) is
-/// reserved too ([`is_reserved_runtime_key`]).
-pub const RESERVED_RUNTIME_TOKEN_KEYS: &[&str] =
-    &["runtime.fonts_dir", PX_SCALE_KEY, OS_REDUCE_MOTION_KEY];
+/// Every `runtime.px_scale@<zone>` key is reserved too.
+pub const RESERVED_RUNTIME_TOKEN_KEYS: &[&str] = &[
+    "runtime.fonts_dir",
+    PX_SCALE_KEY,
+    OS_REDUCE_MOTION_KEY,
+    TEXT_SCALE_KEY,
+    CARET_BLINK_MS_KEY,
+];
 
 /// Whether the runtime, not config, sets `key`.
-pub fn is_reserved_runtime_key(key: &str) -> bool {
+fn is_reserved_runtime_key(key: &str) -> bool {
     RESERVED_RUNTIME_TOKEN_KEYS.contains(&key) || key.starts_with(ZONE_PX_SCALE_PREFIX)
 }
 
@@ -1685,6 +1798,116 @@ pub fn apply_os_motion_layer(
     resolved.insert(OS_REDUCE_MOTION_KEY.to_owned(), "true".to_owned());
 }
 
+// ─── OS text size and caret blink ─────────────────────────────────────────────
+
+/// Runtime-set key: the Windows text size (Settings › Accessibility › Text
+/// size) as a factor, 1–2.25; absent means 1. It multiplies `ui.scale`
+/// ([`effective_scale`]).
+pub const TEXT_SCALE_KEY: &str = "runtime.text_scale";
+
+/// The values [`TEXT_SCALE_KEY`] may take: Windows' 100–225%.
+pub const TEXT_SCALE_RANGE: (f32, f32) = (1.0, 2.25);
+
+/// Runtime-set key: the Windows caret blink half-period in ms, 200–1200, or
+/// `0` when Windows caret blinking is off (a steady caret); absent means
+/// [`DEFAULT_CARET_BLINK_MS`].
+pub const CARET_BLINK_MS_KEY: &str = "runtime.caret_blink_ms";
+
+/// The caret blink half-period off Windows or when the setting cannot be
+/// read: the conventional editor rate.
+pub const DEFAULT_CARET_BLINK_MS: u32 = 530;
+
+/// The blinking half-periods [`CARET_BLINK_MS_KEY`] may take; `0` (steady)
+/// is outside it.
+pub const CARET_BLINK_MS_RANGE: (u32, u32) = (200, 1200);
+
+/// Record the Windows text size and caret blink time in `tokens`. At the
+/// Windows defaults (text size 1, blink [`DEFAULT_CARET_BLINK_MS`]) both
+/// keys are removed, so the map is the same as without this layer. The
+/// runtime reads both at startup and on each config reload; there is no
+/// live OS watch.
+pub fn apply_os_text_and_caret(tokens: &mut DesignTokenMap, text_scale: f32, caret_blink_ms: u32) {
+    if (text_scale - 1.0).abs() > f32::EPSILON {
+        tokens.insert(TEXT_SCALE_KEY.to_owned(), text_scale.to_string());
+    } else {
+        tokens.remove(TEXT_SCALE_KEY);
+    }
+    if caret_blink_ms != DEFAULT_CARET_BLINK_MS {
+        tokens.insert(CARET_BLINK_MS_KEY.to_owned(), caret_blink_ms.to_string());
+    } else {
+        tokens.remove(CARET_BLINK_MS_KEY);
+    }
+}
+
+/// The Windows preferences the HUD follows as token layers, read by the
+/// runtime at startup and on each config reload. The default is what the
+/// HUD uses off Windows or when a setting cannot be read.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct OsPreferences {
+    /// "Show animations" ([`apply_os_motion_layer`]).
+    pub animations_enabled: bool,
+    /// Text size as a factor, 1–2.25 ([`TEXT_SCALE_KEY`]).
+    pub text_scale: f32,
+    /// Caret blink half-period in ms, `0` for steady ([`CARET_BLINK_MS_KEY`]).
+    pub caret_blink_ms: u32,
+}
+
+impl Default for OsPreferences {
+    fn default() -> Self {
+        Self {
+            animations_enabled: true,
+            text_scale: 1.0,
+            caret_blink_ms: DEFAULT_CARET_BLINK_MS,
+        }
+    }
+}
+
+/// Apply every Windows preference layer to `resolved`, a map from
+/// [`crate::themes::resolve_config_tokens`] of `config_tokens`: the motion
+/// layer ([`apply_os_motion_layer`]) and the text size and caret blink
+/// ([`apply_os_text_and_caret`]).
+pub fn apply_os_preferences(
+    resolved: &mut DesignTokenMap,
+    config_tokens: &DesignTokenMap,
+    os: &OsPreferences,
+) {
+    apply_os_motion_layer(resolved, config_tokens, os.animations_enabled);
+    apply_os_text_and_caret(resolved, os.text_scale, os.caret_blink_ms);
+}
+
+/// The map's Windows text size ([`TEXT_SCALE_KEY`]), clamped to
+/// [`TEXT_SCALE_RANGE`]; 1 when unset.
+pub fn text_scale(tokens: &DesignTokenMap) -> f32 {
+    let (lo, hi) = TEXT_SCALE_RANGE;
+    tokens
+        .get(TEXT_SCALE_KEY)
+        .and_then(|v| parse_numeric(v))
+        .map_or(1.0, |n| n.clamp(lo, hi))
+}
+
+/// The map's caret blink half-period in ms ([`CARET_BLINK_MS_KEY`]): `0`
+/// for a steady caret, else clamped to [`CARET_BLINK_MS_RANGE`];
+/// [`DEFAULT_CARET_BLINK_MS`] when unset.
+pub fn caret_blink_ms(tokens: &DesignTokenMap) -> u32 {
+    let (lo, hi) = CARET_BLINK_MS_RANGE;
+    match tokens
+        .get(CARET_BLINK_MS_KEY)
+        .and_then(|v| v.parse::<u32>().ok())
+    {
+        Some(0) => 0,
+        Some(ms) => ms.clamp(lo, hi),
+        None => DEFAULT_CARET_BLINK_MS,
+    }
+}
+
+/// The whole-HUD zoom: Windows text size × `ui.scale`, held to
+/// [`UI_SCALE_RANGE`]. Every logical size and widget box uses it; the
+/// panel's Zoom row edits `ui.scale` alone.
+pub fn effective_scale(tokens: &DesignTokenMap) -> f32 {
+    let (lo, hi) = UI_SCALE_RANGE;
+    (text_scale(tokens) * ui_scale(tokens)).clamp(lo, hi)
+}
+
 /// Whether the OS motion layer is active in `tokens` ([`apply_os_motion_layer`]).
 pub fn os_reduce_motion(tokens: &DesignTokenMap) -> bool {
     tokens
@@ -1703,14 +1926,14 @@ pub const UI_SCALE_KEY: &str = "ui.scale";
 pub const UI_SCALE_RANGE: (f32, f32) = (0.5, 3.0);
 
 /// Physical px per logical dp for the display a token map draws on: the
-/// monitor's scale factor × `ui.scale`. Set by the runtime
+/// monitor's scale factor × [`effective_scale`]. Set by the runtime
 /// ([`set_px_scale`]); absent means 1.
 pub const PX_SCALE_KEY: &str = "runtime.px_scale";
 
 /// Prefix of the px per dp of a zone placed on a secondary monitor:
 /// `runtime.px_scale@<zone>` overrides [`PX_SCALE_KEY`] for that zone
 /// ([`set_zone_px_scale`], [`for_zone`]).
-pub const ZONE_PX_SCALE_PREFIX: &str = "runtime.px_scale@";
+const ZONE_PX_SCALE_PREFIX: &str = "runtime.px_scale@";
 
 /// The map's `ui.scale`, clamped to [`UI_SCALE_RANGE`]; 1 when unset.
 pub fn ui_scale(tokens: &DesignTokenMap) -> f32 {
@@ -1731,7 +1954,8 @@ pub fn px_scale(tokens: &DesignTokenMap) -> f32 {
 }
 
 /// Record that `tokens` draw on a monitor with Windows scale factor
-/// `monitor_scale`: [`PX_SCALE_KEY`] becomes `monitor_scale × ui.scale`.
+/// `monitor_scale`: [`PX_SCALE_KEY`] becomes `monitor_scale ×`
+/// [`effective_scale`].
 pub fn set_px_scale(tokens: &mut DesignTokenMap, monitor_scale: f64) {
     let px = monitor_px_scale(tokens, monitor_scale);
     tokens.insert(PX_SCALE_KEY.to_owned(), px);
@@ -1744,7 +1968,7 @@ pub fn set_zone_px_scale(tokens: &mut DesignTokenMap, zone: &str, monitor_scale:
     tokens.insert(format!("{ZONE_PX_SCALE_PREFIX}{zone}"), px);
 }
 
-/// `monitor_scale × ui.scale`, spelled for the token map; a bogus monitor
+/// `monitor_scale ×` [`effective_scale`], spelled for the token map; a bogus monitor
 /// scale counts as 1.
 fn monitor_px_scale(tokens: &DesignTokenMap, monitor_scale: f64) -> String {
     let monitor = if monitor_scale.is_finite() && monitor_scale > 0.0 {
@@ -1752,7 +1976,7 @@ fn monitor_px_scale(tokens: &DesignTokenMap, monitor_scale: f64) -> String {
     } else {
         1.0
     };
-    (monitor * ui_scale(tokens)).to_string()
+    (monitor * effective_scale(tokens)).to_string()
 }
 
 /// [`for_zone`] for every zone placed on a secondary monitor at a scale
@@ -1784,16 +2008,6 @@ pub fn for_zone<'a>(tokens: &'a DesignTokenMap, zone: &str) -> Cow<'a, DesignTok
     }
 }
 
-/// The logical size token `key` (or `default` dp when absent or not a
-/// number) in physical px: the one place a dp size becomes pixels.
-pub fn token_px(tokens: &DesignTokenMap, key: &str, default: f32) -> f32 {
-    tokens
-        .get(key)
-        .and_then(|v| parse_numeric(v))
-        .unwrap_or(default)
-        * px_scale(tokens)
-}
-
 /// Validate the `[design_tokens]` section of a `RawConfig`.
 ///
 /// Produces `CONFIG_INVALID_TOKEN_KEY` for any key that does not match the
@@ -1810,8 +2024,10 @@ pub(crate) fn validate_design_tokens(raw: &RawConfig, errors: &mut Vec<ConfigErr
                 field_path: format!("design_tokens.{key}"),
                 expected: "a design token, not a runtime-reserved key".into(),
                 got: key.clone(),
-                hint: if key.starts_with(PX_SCALE_KEY) {
+                hint: if key.starts_with(PX_SCALE_KEY) || key == TEXT_SCALE_KEY {
                     format!("{key:?} is set by the runtime; set \"ui.scale\" to resize the HUD")
+                } else if key == OS_REDUCE_MOTION_KEY || key == CARET_BLINK_MS_KEY {
+                    format!("{key:?} is set by the runtime from the Windows setting")
                 } else {
                     format!(
                         "{key:?} is set by the runtime; put font files in a `fonts` \
@@ -1821,7 +2037,10 @@ pub(crate) fn validate_design_tokens(raw: &RawConfig, errors: &mut Vec<ConfigErr
             });
             continue;
         }
-        if key == UI_SCALE_KEY
+        if (key == UI_SCALE_KEY
+            || key == NOTIFICATION_ACTION_HOLD_MS_KEY
+            || key == NOTIFICATION_PRESS_GUARD_MS_KEY
+            || is_hit_region_opacity(key))
             && let Err(expected) = validate_canonical_value(key, &tokens.0[key])
         {
             errors.push(ConfigError {
@@ -1829,7 +2048,13 @@ pub(crate) fn validate_design_tokens(raw: &RawConfig, errors: &mut Vec<ConfigErr
                 field_path: format!("design_tokens.{key}"),
                 expected,
                 got: tokens.0[key].clone(),
-                hint: "e.g. \"ui.scale\" = \"1.25\" makes everything a quarter bigger".into(),
+                hint: if key == UI_SCALE_KEY {
+                    "e.g. \"ui.scale\" = \"1.25\" makes everything a quarter bigger".into()
+                } else if is_hit_region_opacity(key) {
+                    format!("e.g. \"{key}\" = \"0.2\"")
+                } else {
+                    format!("e.g. \"{key}\" = \"800\"")
+                },
             });
             continue;
         }
@@ -2114,6 +2339,39 @@ mod tests {
     // ── validate_design_tokens ────────────────────────────────────────────────
 
     #[test]
+    fn hit_region_opacity_accepts_only_unit_interval_values() {
+        use crate::raw::RawDesignTokens;
+
+        for key in [
+            "tile.hit_region.hover.opacity",
+            "tile.hit_region.pressed.opacity",
+        ] {
+            for (value, allowed) in [
+                ("0", true),
+                ("0.2", true),
+                ("1", true),
+                ("-0.1", false),
+                ("1.1", false),
+                ("NaN", false),
+            ] {
+                assert_eq!(validate_canonical_value(key, value).is_ok(), allowed);
+                let raw = RawConfig {
+                    design_tokens: Some(RawDesignTokens(
+                        [(key.to_owned(), value.to_owned())].into(),
+                    )),
+                    ..Default::default()
+                };
+                let mut errors = Vec::new();
+                validate_design_tokens(&raw, &mut errors);
+                assert_eq!(errors.is_empty(), allowed, "{key} = {value}");
+                if !allowed {
+                    assert_eq!(errors[0].code, ConfigErrorCode::TokenValueParseError);
+                }
+            }
+        }
+    }
+
+    #[test]
     fn ui_scale_is_config_only_and_ranged() {
         use crate::raw::RawDesignTokens;
         let check = |pairs: &[(&str, &str)]| {
@@ -2136,6 +2394,36 @@ mod tests {
             assert_eq!(errors.len(), 1, "{bad}");
             assert_eq!(errors[0].code, ConfigErrorCode::TokenValueParseError);
         }
+        for good in ["0", "600", "3000"] {
+            assert!(check(&[(NOTIFICATION_ACTION_HOLD_MS_KEY, good)]).is_empty());
+            let tokens = DesignTokenMap::from([(
+                NOTIFICATION_ACTION_HOLD_MS_KEY.to_owned(),
+                good.to_owned(),
+            )]);
+            assert_eq!(
+                notification_action_hold_ms(&tokens).to_string(),
+                good,
+                "hold {good}"
+            );
+        }
+        for bad in ["-1", "3001", "0.5", "long"] {
+            let errors = check(&[(NOTIFICATION_ACTION_HOLD_MS_KEY, bad)]);
+            assert_eq!(errors.len(), 1, "{bad}");
+            assert_eq!(errors[0].code, ConfigErrorCode::TokenValueParseError);
+        }
+        assert_eq!(notification_action_hold_ms(&DesignTokenMap::new()), 600);
+        assert_eq!(notification_press_guard_ms(&DesignTokenMap::new()), 400);
+        for (value, ms) in [("0", 0), ("250", 250), ("3000", 3000), ("3001", 400)] {
+            let tokens = DesignTokenMap::from([(
+                NOTIFICATION_PRESS_GUARD_MS_KEY.to_owned(),
+                value.to_owned(),
+            )]);
+            assert_eq!(notification_press_guard_ms(&tokens), ms, "guard {value}");
+            assert_eq!(
+                check(&[(NOTIFICATION_PRESS_GUARD_MS_KEY, value)]).is_empty(),
+                value != "3001"
+            );
+        }
         for key in [PX_SCALE_KEY, "runtime.px_scale@subtitle"] {
             let errors = check(&[(key, "2")]);
             assert_eq!(errors[0].code, ConfigErrorCode::InvalidTokenKey);
@@ -2144,19 +2432,23 @@ mod tests {
         assert!(crate::themes::parse_theme("\"ui.scale\" = \"1.25\"").is_err());
     }
 
+    /// The press guard is a safety interval: turning Windows animations off
+    /// zeroes motion durations but leaves it unchanged.
+    #[test]
+    fn press_guard_is_not_zeroed_by_os_motion() {
+        assert!(!OS_MOTION_ZEROED_KEYS.contains(&NOTIFICATION_PRESS_GUARD_MS_KEY));
+        let mut resolved = crate::themes::resolve_config_tokens(&DesignTokenMap::new());
+        apply_os_motion_layer(&mut resolved, &DesignTokenMap::new(), false);
+        assert_eq!(resolved["motion.enter.ms"], "0");
+        assert_eq!(notification_press_guard_ms(&resolved), 400);
+    }
+
     #[test]
     fn px_scale_is_monitor_times_ui_scale() {
         let mut tokens = DesignTokenMap::from([(UI_SCALE_KEY.to_owned(), "1.25".to_owned())]);
         assert_eq!(px_scale(&tokens), 1.0, "unset means 1");
         set_px_scale(&mut tokens, 1.5);
         assert_eq!(px_scale(&tokens), 1.875);
-        assert_eq!(
-            token_px(&tokens, "space.m", 12.0),
-            22.5,
-            "absent: the default dp"
-        );
-        tokens.insert("space.m".into(), "8".into());
-        assert_eq!(token_px(&tokens, "space.m", 12.0), 15.0);
         set_px_scale(&mut tokens, f64::NAN);
         assert_eq!(px_scale(&tokens), 1.25, "a bogus monitor scale counts as 1");
     }
@@ -2171,7 +2463,6 @@ mod tests {
         let subtitle = for_zone(&tokens, "subtitle");
         assert!(matches!(subtitle, Cow::Owned(_)));
         assert_eq!(px_scale(&subtitle), 1.25);
-        assert_eq!(token_px(&subtitle, "space.m", 8.0), 10.0);
         assert!(matches!(for_zone(&tokens, "status-bar"), Cow::Borrowed(_)));
         let cached = secondary_zone_tokens(&tokens);
         assert_eq!(cached.keys().collect::<Vec<_>>(), ["subtitle"]);
@@ -2249,6 +2540,74 @@ mod tests {
     #[test]
     fn os_reduce_motion_key_is_runtime_reserved() {
         assert!(is_reserved_runtime_key(OS_REDUCE_MOTION_KEY));
+    }
+
+    /// `[design_tokens]` may set neither Windows key.
+    #[test]
+    fn os_text_and_caret_keys_are_runtime_reserved() {
+        use crate::raw::RawDesignTokens;
+        for key in [TEXT_SCALE_KEY, CARET_BLINK_MS_KEY] {
+            assert!(is_reserved_runtime_key(key));
+            let raw = RawConfig {
+                design_tokens: Some(RawDesignTokens(HashMap::from([(
+                    key.to_owned(),
+                    "1".to_owned(),
+                )]))),
+                ..Default::default()
+            };
+            let mut errors = Vec::new();
+            validate_design_tokens(&raw, &mut errors);
+            assert_eq!(errors.len(), 1, "{key}");
+            assert_eq!(errors[0].code, ConfigErrorCode::InvalidTokenKey);
+            assert!(!errors[0].hint.contains("fonts"), "{}", errors[0].hint);
+        }
+    }
+
+    /// At the Windows defaults the layer leaves the
+    /// map as it was, and every reader is today's.
+    #[test]
+    fn os_text_and_caret_at_defaults_are_identity() {
+        let themed = crate::themes::resolve_config_tokens(&DesignTokenMap::new());
+        let mut tokens = themed.clone();
+        tokens.insert(TEXT_SCALE_KEY.into(), "1.25".into());
+        tokens.insert(CARET_BLINK_MS_KEY.into(), "0".into());
+        apply_os_text_and_caret(&mut tokens, 1.0, DEFAULT_CARET_BLINK_MS);
+        assert_eq!(tokens, themed, "a reload back to defaults clears both");
+        assert_eq!(text_scale(&tokens), 1.0);
+        assert_eq!(caret_blink_ms(&tokens), 530);
+        assert_eq!(effective_scale(&tokens), ui_scale(&tokens));
+    }
+
+    /// Text size × `ui.scale`, held to 0.5–3.0;
+    /// px per dp is the monitor's scale times that.
+    #[test]
+    fn effective_scale_is_text_size_times_ui_scale_held_to_range() {
+        let at = |text: f32, ui: &str| {
+            let mut tokens = DesignTokenMap::from([(UI_SCALE_KEY.to_owned(), ui.to_owned())]);
+            apply_os_text_and_caret(&mut tokens, text, DEFAULT_CARET_BLINK_MS);
+            tokens
+        };
+        assert_eq!(effective_scale(&at(1.25, "1")), 1.25);
+        assert_eq!(effective_scale(&at(1.25, "0.8")), 1.0);
+        assert_eq!(effective_scale(&at(2.25, "2")), 3.0, "held at 300%");
+        assert_eq!(effective_scale(&at(2.25, "0.5")), 1.125, "floor 112.5%");
+        let mut s1 = at(1.25, "1");
+        set_px_scale(&mut s1, 1.5);
+        assert_eq!(px_scale(&s1), 1.875);
+        assert_eq!(ui_scale(&s1), 1.0, "the owner's Zoom is never rewritten");
+    }
+
+    /// Off-range values clamp; a steady caret stays 0.
+    #[test]
+    fn os_text_and_caret_readers_clamp() {
+        let with = |key: &str, v: &str| DesignTokenMap::from([(key.to_owned(), v.to_owned())]);
+        assert_eq!(text_scale(&with(TEXT_SCALE_KEY, "3")), 2.25);
+        assert_eq!(text_scale(&with(TEXT_SCALE_KEY, "0.5")), 1.0);
+        assert_eq!(caret_blink_ms(&with(CARET_BLINK_MS_KEY, "0")), 0);
+        assert_eq!(caret_blink_ms(&with(CARET_BLINK_MS_KEY, "50")), 200);
+        assert_eq!(caret_blink_ms(&with(CARET_BLINK_MS_KEY, "5000")), 1200);
+        assert_eq!(caret_blink_ms(&with(CARET_BLINK_MS_KEY, "250")), 250);
+        assert_eq!(caret_blink_ms(&with(CARET_BLINK_MS_KEY, "x")), 530);
     }
 
     #[test]

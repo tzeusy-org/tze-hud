@@ -550,6 +550,7 @@ async fn test_stack_slot_clips_at_zone_boundary() {
         label: "Answer".into(),
         callback_id: Some("answer".into()),
         url: None,
+        role: None,
     };
     let records = scene
         .zone_registry
@@ -610,6 +611,7 @@ async fn test_stack_slot_clips_at_zone_boundary() {
         label: "Open".into(),
         callback_id: None,
         url: Some("https://example.com/".into()),
+        role: None,
     }];
     assert_eq!(
         order(&scene),

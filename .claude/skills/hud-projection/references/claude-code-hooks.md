@@ -1,37 +1,31 @@
-# Claude Code portal hooks (owner opt-in)
+# Claude Code session state and optional portal mirror
 
-Mirror a main interactive Claude Code session onto the existing HUD portal
-without asking the model to call `hud_publish`. Explicit model/client verbs
-remain available. This is cooperative event delivery, not terminal capture.
-Nothing in this feature installs settings, pairs a host or changes permissions.
-The independent optional [five-hour usage gauge](claude-code-usage.md) uses the
-status line and typed widget parameters, with no model calls.
+Report the state of an interactive Claude Code session through its paired
+stdio MCP adapter. To show safe main-session tool progress and final replies
+in a portal, set `TZE_HUD_MIRROR=1` in that workspace's Claude settings
+`env`. Explicit portal publication and input collection remain available.
+The [five-hour usage gauge](claude-code-usage.md) has separate settings.
+This transport supersedes the independent hooks from `hud-o4ixb.1`.
 
-Compatibility is qualified against the observed Claude Code **2.1.290** CLI and
-its [official hooks reference](https://code.claude.com/docs/en/hooks), checked
-2026-10-07 local time. The [hooks guide](https://code.claude.com/docs/en/hooks-guide)
-explains owner configuration. Older event shapes without `prompt_id` cannot be
-assumed compatible. Use an interactive POSIX Linux/macOS Claude host with
-Python3, not native Windows Python; the HUD itself can run on Windows. Native
-Windows hook-host execution silently does nothing until separately supported.
-Immediate `claude -p` teardown may cancel async final delivery. No live owner
-session or recorded owner payload has been verified by the synthetic fixtures.
+Use an interactive Claude Code host on Linux or WSL2 with Python 3.10+.
+The HUD may run on Windows. Claude Code 2.1.330 was verified against the
+[official hooks reference](https://code.claude.com/docs/en/hooks) and in an
+isolated scripted session using the project and user-scope stdio launchers.
+Prompt-bound events require the documented `prompt_id`.
 
-## Enable only this block
+## Enable this block
 
-Pair normally first and set `HUD_HOST`. The existing `hud_env` resolver reads
-only that host's paired PSK at network execution. The hook never prints it,
-puts it in state, pairs automatically, reads transcripts, or inspects another
-credential. The paired agent needs the existing `portal` capability.
+Start the paired stdio MCP adapter from the same Claude session. Merge these
+entries into your chosen Claude settings file and preserve unrelated settings.
+Use absolute interpreter and repository paths. The separate `command` and
+`args` make Claude exec the hook directly. Trust the workspace explicitly.
+Keep the SessionStart matcher restricted to startup, resume and clear. Use an
+ordinary hook configuration without `asyncRewake`, decision output or new
+model calls.
 
-In your selected Claude settings file, merge the following entries while
-preserving unrelated hooks/settings. Substitute stable absolute interpreter
-and repository paths; `command` plus `args` uses exec form, without shell
-interpolation of hook payload. Trust the selected workspace explicitly. Do
-not add `asyncRewake`, prompt/agent hooks, decision outputs, permission overrides,
-additional context or new model calls. Local markers and SessionEnd deliberately
-omit `async`; only marker writes (and a background status child on prompt) run
-on the synchronous prompt side. SessionStart's matcher excludes compact/fork.
+For an existing hand-pasted hook block, copy the Notification entry to pick
+up permission, input and idle signals. Set `TZE_HUD_MIRROR=1` in the
+workspace's `env` to keep the earlier visible portal mirror.
 
 <!-- example: partial -->
 ```json
@@ -114,6 +108,22 @@ on the synchronous prompt side. SessionStart's matcher excludes compact/fork.
         "matcher": "*"
       }
     ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/absolute/path/to/python3",
+            "args": [
+              "/absolute/path/to/tze-hud/.claude/skills/hud-projection/scripts/portal_hook.py"
+            ],
+            "timeout": 2,
+            "async": true
+          }
+        ],
+        "matcher": "^(permission_prompt|idle_prompt|elicitation_dialog)$"
+      }
+    ],
     "Stop": [
       {
         "hooks": [
@@ -147,133 +157,92 @@ on the synchronous prompt side. SessionStart's matcher excludes compact/fork.
 }
 ```
 
-## What is mirrored
+## Events and privacy
 
-`portal_hook.py` accepts one bounded JSON object on stdin (at most 64 KiB).
-It validates the configured event and a 1–96-byte ASCII session identifier,
-UUID prompt identifier for prompt-bound events, and bounded tool-use identifier.
-Subagent events carrying `agent_id` are ignored; `agent_type` alone is not a
-subagent identity. There is no invented version field in the documented input.
-
-| Event | Behavior |
+| Event | Adapter behavior |
 |---|---|
-| SessionStart startup/resume/clear | Start an explicit metadata generation; no network |
-| UserPromptSubmit | Record current prompt immediately; schedule bounded content-free active status |
-| PreToolUse | Fixed tool label plus `running`, keyed by a hash of prompt/tool-use IDs |
-| PostToolUse / PostToolUseFailure | Same key plus `completed` / `failed`; late start cannot replace terminal stage |
-| Stop | Close current prompt; mirror `last_assistant_message`; omit status; no continuation/control output |
-| SessionEnd | Mark generation ended first, then attempt bounded owner-surface clear |
+| UserPromptSubmit, or a tool event in an open prompt | Report working |
+| Main PreToolUse AskUserQuestion | Report blocked with reason question |
+| Notification permission_prompt or elicitation_dialog | Report blocked with reason permission or input and remember the asker |
+| Main completion of AskUserQuestion, or a later tool call from the remembered permission/input asker | Resume working |
+| Main Stop or Notification idle_prompt | Report done |
+| SessionEnd and SessionStart during /clear | Clear the old mirrored portal and keep the MCP scope |
+| SessionEnd on exit, EOF, or a clean shutdown signal | Release the MCP scope and its owned content |
 
-Unknown/MCP tool names become fixed `Tool`/`MCP tool` labels. Inputs, results,
-errors, command descriptions, cwd, transcript/scratchpad paths and unknown
-payload fields are discarded. Stop's documented final-text field is used
-instead of a potentially lagging transcript. Missing/nonstring final text can
-send a content-free publish, but does not prove final-reply acceptance. Final text
-has escape/control sequences removed and is truncated at a valid UTF-8 boundary
-to 8 KiB, including a visible truncation marker. Recognizable private-key/token/
-credential forms discard the entire final string. This is not a universal
-secret classifier: the owner must never authorize mirroring a secret final
-reply. There is no generic redaction promise or raw-payload diagnostic log.
-Every invocation emits empty stdout/stderr and exits0, including HUD-down,
-unpaired, malformed input, unsupported shape and state failures. That exit
-status is deliberately not an assertion that mirroring succeeded.
+The hook accepts up to 64 KiB of JSON on stdin and emits one normalized
+packet of at most 16 KiB. It drops raw tool inputs and results, command
+descriptions, cwd, transcript names, and notification message text. Known
+tool names become fixed labels. The optional mirror displays main-session
+tool events and the final reply. It removes escape and control characters from
+final replies, rejects recognized credential forms and truncates at an
+8 KiB UTF-8 boundary. Keep secret final replies out of sessions with the
+mirror enabled.
 
-## Ordering, bounds and privacy
+## Transport and ordering
 
-Only small metadata lives under `~/.cache/tze-hud/claude-hooks` outside the
-repository (own directories 0700, files 0600). The path is a hash of endpoint
-hostname, session and profile, never a PSK or raw unchecked path. Metadata
-contains generation/prompt identifiers, bounded closed prompts and delivered
-stage/content hashes; no final text, tool payload or credential is persisted.
-State is capped at 32 KiB, 256 current-prompt tools and 16 closed/final prompts.
-New tool identities beyond that cap are dropped rather than evicting terminal
-stages and allowing a late start to overwrite them. Closed tombstones survive
-24 hours; ordinary invocation examines at most 16 profile-owned directories for
-bounded expiry cleanup. Lock files remain to preserve their inode domain.
+The hook and adapter find the socket by their immediate Claude parent PID.
+The path is `$XDG_RUNTIME_DIR/tze-hud/claude-<pid>.sock` when the runtime
+directory belongs to the user, with `~/.cache/tze-hud/run` as the fallback.
+The adapter checks ownership and private modes. Both ends verify that the
+peer has the same Unix UID. The hook uses one nonblocking connect and send,
+then exits silently. The hook has no credential or HTTP path. Only the existing
+adapter worker uses the paired credential for a HUD request. The design uses
+one adapter per session and no daemon, heartbeat or polling.
 
-Marker admission is at most 5 ms and never covers network I/O. The independent
-atomic marker records the prompt before Claude's next work. A separate delivery
-lock serializes publishers. Off-prompt publishers (async tool/Stop hooks and the
-prompt's background status child) wait for it for up to 750 ms, in no fixed
-order, so a short backlog of parallel tool updates is delivered instead of
-dropped. An update still drops when the delivery ahead of it holds the lock
-longer than that (a slow or unreachable HUD can hold it for 1.0 s). Once
-admitted, one supervised HTTP child gets 350 ms per request and a 1.0 s
-watchdog, keeping the whole job under the 2 s hook timeout. SessionEnd waits
-and delivers within one 1.2 s total. The
-living supervisor kills/reaps its known child on timeout, errors or catchable
-SIGTERM before releasing its delivery lock. The child also arms a default-action
-real-time timer for the remaining absolute budget before network I/O and inherits
-the delivery-lock descriptor. If the supervisor dies abruptly, that descriptor
-keeps ownership until the child terminates; OS adoption/reaping is distinct from
-the dead parent reaping it. Incomplete job input exits silently, and a late child
-does not start HTTP after its deadline. Interpreter startup, filesystem, OS
-scheduling and stopped-process delays are separate from these network deadlines;
-real owner-host tool AND prompt-side overhead must be measured below 50 ms. An
-async flag or successful local fixture does not establish that live limit.
+The adapter keeps prompt boundaries, activity and mirror ordering in memory.
+It drops late tool events for closed prompts and replaces a running tool
+stage only with a terminal stage. It coalesces queued updates and uses one
+bounded internal HTTP lane beside the four model-call slots. The mirror renews
+a finite `hud_hold(ttl_ms=600000)` after a successful publish when the last
+acknowledged hold is at least 60 seconds old. A failed delivery can leave an
+already accepted request visible until its hold expires or the scope ends.
 
-Publish and then the separate `hud_hold(ttl_ms=600000)` refresh a finite 10 min
-quiet hold. No publish TTL field, indefinite hold, daemon, heartbeat or polling
-is introduced. Longer quiet periods can degrade/reclaim through existing HUD
-behavior. SessionEnd clear is best effort when a previous admitted request
-exhausts its remaining budget; NOT_HELD is harmless. Finite hold/reclaim is the
-fallback. Explicit client publication/input remain independent.
+## Verification and remaining acceptance
 
-Observable stale generations/prompts and tool events after Stop are rejected
-before send. Stop delivery deduplicates only acknowledged equal final hashes;
-a failed final delivery can retry via a duplicate Stop for the same still-current
-closed prompt, never reopening tool activity. A newer prompt/ended generation
-rejects that retry. Compact/fork/unknown SessionStart sources do not reopen.
+Production-path tests cover silent delivery, runtime path and peer checks,
+ordering, isolated scopes, model capacity, cleanup and re-initialization.
+The live Claude Code PID check compares the adapter with SessionStart, main
+PreToolUse, subagent PreToolUse and a permission Notification in both launcher
+forms. The overhead gate times 200 invocations per event on the hook host,
+with p95 below 50 ms and a recorded maximum. Paired owner visualization still
+requires the separate mirrored portal acceptance.
 
-After each acknowledgment the child revalidates the atomic marker before
-committing delivery hashes or sending a hold. An already-SENT old final may
-briefly append its own prompt-keyed text or publish without a status after a new prompt.
-Within the same watchdog, at most one content-free active catch-up restores
-the latest open prompt after acknowledgment. An ended marker permits a
-compensating clear only for that same generation; no old cleanup is admitted
-after a newer generation is observable. If the marker changes again, acknowledgment
-fails, or the deadline is exhausted, the next genuine event reconciles.
+## Disable
 
-A timed-out request can still reach the server: killing a client is not rollback.
-The existing server has no conditional prompt epoch/status compare-and-set;
-an already-sent clear can also arrive after a new generation opens.
-Therefore universal ordering/detach is not promised, including reattachment by
-an unacknowledged request after clear. Late processes first starting after an
-explicit resume also lack a documented event-generation identifier. Tests of
-observable rejection/catch-up cannot erase these in-flight and generation
-ambiguities; fixing them would require an excluded runtime/API change.
+Remove these hook entries to stop session state updates, or remove
+`TZE_HUD_MIRROR` from the workspace settings to keep state updates with the
+portal mirror disabled. The adapter tears down its private socket and
+ends its scope on exit.
 
-Metadata admission/write failure best-effort writes an independent disabled
-sentinel, preventing later jobs from using old metadata. Explicit successful
-SessionStart can reopen. If even sentinel/storage fails, no lifecycle proof
-survives: mirroring is unavailable, not successfully idle/active. Symlink,
-ownership/permission and malformed-state failures publish no new activity.
+## Held pull requests
 
-## Verification and remaining owner acceptance
+`hud_pr.py` runs on the Linux or WSL agent host with Python 3.10+, an authenticated
+`gh`, and a paired HUD. From this checkout:
 
-The existing `test_portal_client.py` uses real subprocess/stdin and a loopback
-fake MCP endpoint with **docs-derived synthetic** payloads. It checks keyed
-lifecycle/privacy, separate finite holds, before-send replay rejection,
-acknowledged rollover catch-up while the fast marker proceeds independently,
-failed Stop retry, metadata disable/reopen, malformed/unavailable input and
-actual watchdog child termination. Existing client/default timeout tests stay
-positive. Synthetic events are not recorded owner payloads or a screenshot.
+```sh
+python3 .claude/skills/hud-projection/scripts/hud_pr.py hold 123
+python3 .claude/skills/hud-projection/scripts/hud_pr.py list
+python3 .claude/skills/hud-projection/scripts/hud_pr.py release 123
+```
 
-The original acceptance still requires a separately authorized paired owner
-host: copy only this block, run an interactive turn with parallel success and
-failure tools, observe progress and final reply/status on the HUD, capture
-screenshots and a filtered model transcript proving **zero mirroring model
-calls**, and verify explicit intentional publication still works. Record CLI,
-script/source, HUD build/config/theme, safe payload field names and actual
-max/p95 scheduling/tool AND prompt-side overhead over repeated invocations;
-every observed addition must be below 50 ms. Demonstrate HUD-down silence and
-prompt rollover/late Post/Stop/SessionEnd. No claim of zero total session tokens,
-hard performance, universal secret detection or complete owner acceptance
-follows from code merge or these local fixtures.
+`hold` adds `owner-merge` and starts one detached watcher. Pass
+`--review-url https://example.com/review/123` to use a specific HTTPS review
+page. Run `hold` again to change the next card's Review link or re-arm an
+exited watcher. When multiple HUDs are paired, set `HUD_HOST` to select one.
+Without a selected pairing, `hold` still labels the PR and reports
+`no HUD pairing: no card`. The fleet and agent sessions skip labelled PRs.
 
-## Disable and roll back
+When a held PR targeting `main` passes its required checks, the watcher can
+show a ten-minute card captioned `PR #123`. Review opens the page and keeps
+the card. Merge re-checks the label and asks GitHub to enqueue the exact
+commit shown by the card. A push can make that request fail, and the watcher
+reports the failure before watching the current head. Later, ×, and expiry
+bring the card back after an hour if the same head is still green and held.
 
-Remove only the copied entries; preserve unrelated hooks and do not set global
-`disableAllHooks`. After owned children terminate, remove only this hook's
-metadata cache if desired. Use your ordinary paired client to clear this portal.
-No pairing, auth, runtime state/schema or global settings change is needed.
+`list` shows open held PRs and their local status, including the UTC return
+time after Later. A watcher stops on merge, closure, release, successful
+queueing, or after 24 hours. A queue outcome stays up for up to 15 seconds
+within that window. `release` removes the label and stops the local watcher,
+which releases its card's HUD session. A hard-killed watcher's card
+expires by its TTL. State and logs are private files under
+`${XDG_STATE_HOME:-~/.local/state}/tze-hud/hud_pr/`.

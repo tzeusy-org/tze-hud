@@ -20,7 +20,11 @@ use tze_hud_protocol::proto::session as session_proto;
 use tze_hud_protocol::proto::session::client_message::Payload as ClientPayload;
 use tze_hud_protocol::proto::session::hud_session_client::HudSessionClient;
 use tze_hud_protocol::proto::session::server_message::Payload as ServerPayload;
-use tze_hud_telemetry::{
+mod publish_load;
+#[cfg(test)]
+mod publish_load_artifact_tests;
+
+use publish_load::{
     ByteAccountingMode, PublishLoadArtifact, PublishLoadCalibrationStatus, PublishLoadIdentity,
     PublishLoadMetrics, PublishLoadMode, PublishLoadThresholds, PublishLoadTraceability,
     PublishLoadTransport, PublishLoadVerdict,
@@ -565,7 +569,6 @@ async fn main() -> Result<(), DynError> {
         },
         traceability: PublishLoadTraceability {
             spec_id: Some("publish-load-harness".to_string()),
-            rfc_id: Some("RFC-0005".to_string()),
             budget_id: cli
                 .target_p99_rtt_us
                 .map(|_| "publish_load_widget_p99".to_string()),

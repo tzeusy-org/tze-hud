@@ -1,11 +1,5 @@
 //! Image texture cache, local composer state, and font/image loading methods
 //! for the compositor.
-//!
-//! Moved from `renderer/mod.rs` banner 6 (`// ─── Image texture cache ──`)
-//! and the font/image loading method cluster (formerly ~L1338–1735 pre-split),
-//! by Step R-2 of the renderer module split. No logic was changed;
-//! only visibility modifiers were added where Rust's module-privacy rules
-//! require them (listed in the PR body).
 
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex as StdMutex};
@@ -170,6 +164,14 @@ impl LocalComposerState {
 /// frame at the top of the render loop.
 pub type LocalComposerStateHandle = Arc<StdMutex<Option<Option<LocalComposerState>>>>;
 
+/// Unsent drafts of unfocused composers, `(composer node, text)`, drawn as
+/// text without a caret in their own composer boxes.
+///
+/// Same take-on-drain semantics as [`LocalComposerStateHandle`]: `None` keeps
+/// the current set, `Some(list)` replaces it. The runtime writes only when the
+/// kept set changes, so an idle HUD writes nothing.
+pub type KeptComposerDraftsHandle = Arc<StdMutex<Option<Vec<(SceneId, String)>>>>;
+
 /// Reverse channel for soft-wrap vertical caret movement: the
 /// compositor thread publishes the active composer's wrapped-line layout here
 /// each frame; the input thread reads it before dispatching ArrowUp/ArrowDown.
@@ -179,14 +181,27 @@ pub type LocalComposerStateHandle = Arc<StdMutex<Option<Option<LocalComposerStat
 /// Mirrors [`LocalComposerStateHandle`] in the opposite direction.
 pub type ComposerVisualLayoutHandle = Arc<StdMutex<Option<tze_hud_input::ComposerVisualLayout>>>;
 
-/// Caret blink half-period: the caret stays solid for this long, then hidden
-/// for this long, repeating.  ~530 ms is the conventional editor blink rate.
+/// Default caret blink half-period: the caret stays solid for this long, then
+/// hidden for this long, repeating.  ~530 ms is the conventional editor blink
+/// rate, used off Windows; on Windows the runtime records the Windows caret
+/// blink time as `runtime.caret_blink_ms` ([`caret_blink_from_tokens`]).
 pub(crate) const CARET_BLINK_HALF_PERIOD: std::time::Duration =
-    std::time::Duration::from_millis(530);
+    std::time::Duration::from_millis(tze_hud_config::tokens::DEFAULT_CARET_BLINK_MS as u64);
+
+/// The caret blink half-period a token map asks for: `None` when Windows
+/// caret blinking is off (a steady caret that never wakes the frame loop).
+pub(crate) fn caret_blink_from_tokens(
+    tokens: &std::collections::HashMap<String, String>,
+) -> Option<std::time::Duration> {
+    match tze_hud_config::tokens::caret_blink_ms(tokens) {
+        0 => None,
+        ms => Some(std::time::Duration::from_millis(u64::from(ms))),
+    }
+}
 
 /// Pure blink-phase logic: given the time elapsed since the caret was last reset
-/// to "solid" (a keystroke / caret move), return whether the caret should be
-/// drawn on the current frame.
+/// to "solid" (a keystroke / caret move) and the blink half-period (`None`:
+/// steady), return whether the caret should be drawn on the current frame.
 ///
 /// Phase 0 (`[0, half)`) is solid → `true`; phase 1 (`[half, 2*half)`) is
 /// hidden → `false`; and so on.  Resetting `elapsed` to zero on edit therefore
@@ -194,8 +209,13 @@ pub(crate) const CARET_BLINK_HALF_PERIOD: std::time::Duration =
 ///
 /// This is frame-level state computed by the runtime from its own clock — the
 /// model never participates in the blink loop.
-pub(crate) fn caret_visible_at(elapsed: std::time::Duration) -> bool {
-    let half = CARET_BLINK_HALF_PERIOD.as_nanos();
+pub(crate) fn caret_visible_at(
+    elapsed: std::time::Duration,
+    half: Option<std::time::Duration>,
+) -> bool {
+    let Some(half) = half.map(|h| h.as_nanos()) else {
+        return true;
+    };
     if half == 0 {
         return true;
     }
@@ -521,6 +541,9 @@ impl super::Compositor {
     /// historical behaviour for configs that omit the override.
     pub fn set_max_truncation_input_bytes(&mut self, bytes: usize) {
         self.configured_max_truncation_input_bytes = Some(bytes);
+        if let Some(fit) = &self.text_fit {
+            fit.set_max_truncation_input_bytes(bytes);
+        }
         self.status_bar_layouts
             .borrow_mut()
             .set_max_input_bytes(bytes);
@@ -631,7 +654,7 @@ impl super::Compositor {
                 self.status_bar_layouts.borrow_mut().invalidate();
                 tracing::debug!(
                     resource_id = %crate::text::format_resource_id(&resource_id),
-                    "load_font_bytes: new font loaded — truncation cache invalidated [hud-v2z6u]"
+                    "load_font_bytes: new font loaded — truncation cache invalidated"
                 );
             }
             true

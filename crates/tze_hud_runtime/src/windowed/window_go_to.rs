@@ -1,0 +1,720 @@
+//! Go to session is a local card control. Discover titles off-thread; only an
+//! explicit press can carry a result back to the winit thread for activation.
+
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, mpsc};
+use std::time::{Duration, Instant};
+
+use tze_hud_scene::graph::overlay::GoToCue;
+use tze_hud_scene::render_wake::RenderWakeNotifier;
+use tze_hud_scene::{Rect, SceneGraph, SceneId};
+
+use super::window_match::{self, Match, Target, Window};
+use super::{WinitApp, lifecycle};
+
+type Candidates = Vec<(SceneId, String)>;
+
+struct Inspector {
+    apps: Vec<String>,
+    windows: Box<dyn Fn() -> Vec<Window> + Send + Sync>,
+}
+
+impl Inspector {
+    fn matches(&self, windows: &[Window], token: &str) -> Match {
+        window_match::find(windows, std::process::id(), &self.apps, token)
+    }
+}
+
+fn inspect<T: Send + 'static>(
+    work: impl FnOnce() -> T + Send + 'static,
+    wake: RenderWakeNotifier,
+) -> std::io::Result<mpsc::Receiver<T>> {
+    let (tx, rx) = mpsc::sync_channel(1);
+    std::thread::Builder::new()
+        .name("HUD window lookup".into())
+        .spawn(move || {
+            let _ = tx.send(work());
+            wake.notify();
+        })?;
+    Ok(rx)
+}
+
+fn take_result<T>(worker: &mut Option<mpsc::Receiver<T>>) -> Option<T> {
+    match worker.as_ref()?.try_recv() {
+        Ok(value) => {
+            *worker = None;
+            Some(value)
+        }
+        Err(mpsc::TryRecvError::Disconnected) => {
+            *worker = None;
+            None
+        }
+        Err(mpsc::TryRecvError::Empty) => None,
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum GoToOrigin {
+    Keyboard(Option<isize>),
+    Pointer(Option<isize>),
+}
+
+#[derive(Clone, Copy)]
+struct Press {
+    id: SceneId,
+    stamp: u64,
+    bounds: Rect,
+    foreground: Option<isize>,
+    origin: GoToOrigin,
+    answer_visit: u64,
+    until: Instant,
+}
+
+struct PendingPress {
+    press: Press,
+    worker: mpsc::Receiver<Match>,
+    token: Arc<str>,
+    timed_out: bool,
+}
+
+enum Feedback {
+    Cancelled,
+    Switched,
+    Cue(GoToCue),
+}
+
+/// An accepted Win32 request can complete on the target's thread later.
+#[derive(Clone, Copy)]
+struct Handoff {
+    target: Target,
+    temporary_overlay: Option<isize>,
+}
+
+struct PendingHandoff {
+    press: Press,
+    handoff: Handoff,
+    until: Instant,
+    next_check: Instant,
+}
+
+const FOREGROUND_CONFIRM_INTERVAL: Duration = Duration::from_millis(12);
+const FOREGROUND_CONFIRM_TIMEOUT: Duration = Duration::from_millis(180);
+
+#[derive(Default)]
+pub(super) struct WindowGoTo {
+    inspector: Option<Arc<Inspector>>,
+    presented: HashSet<SceneId>,
+    scan: Option<mpsc::Receiver<Vec<SceneId>>>,
+    presses: Vec<PendingPress>,
+    handoffs: Vec<PendingHandoff>,
+    feedback: Vec<(Press, Feedback)>,
+    pub(super) pointer_foreground: Option<Option<isize>>,
+    cue_deadlines: HashMap<SceneId, (u64, Instant)>,
+    #[cfg(test)]
+    test_activate: Option<Box<dyn FnMut(Target) -> bool>>,
+    #[cfg(test)]
+    pub(super) test_foreground: Option<Box<dyn Fn() -> Option<isize>>>,
+    #[cfg(test)]
+    pub(super) test_hud_foreground: Option<isize>,
+    pub(super) activations: u64,
+}
+
+impl WindowGoTo {
+    #[cfg(target_os = "windows")]
+    pub(super) fn new(apps: Option<Vec<String>>) -> Self {
+        let apps = apps.unwrap_or_else(|| {
+            window_match::DEFAULT_APPS
+                .iter()
+                .map(|app| (*app).into())
+                .collect()
+        });
+        if apps.is_empty() {
+            return Self::default();
+        }
+        Self {
+            inspector: Some(Arc::new(Inspector {
+                apps,
+                windows: Box::new(window_match::native::enumerate),
+            })),
+            ..Self::default()
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    pub(super) fn new(_apps: Option<Vec<String>>) -> Self {
+        Self::default()
+    }
+
+    pub(super) fn enabled(&self) -> bool {
+        self.inspector.is_some()
+    }
+
+    pub(super) fn foreground(&self) -> Option<isize> {
+        #[cfg(test)]
+        if let Some(sample) = self.test_foreground.as_ref() {
+            return sample();
+        }
+        #[cfg(target_os = "windows")]
+        if self.inspector.is_some() {
+            return lifecycle::foreground_window();
+        }
+        None
+    }
+
+    pub(super) fn keyboard_owns_foreground(&self, observed: Option<isize>) -> bool {
+        #[cfg(test)]
+        if self.test_activate.is_some() {
+            return self.test_foreground.is_none()
+                || observed.is_some() && observed == self.test_hud_foreground;
+        }
+        #[cfg(target_os = "windows")]
+        {
+            lifecycle::hud_owned_foreground(observed)
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = observed;
+            false
+        }
+    }
+
+    pub(super) fn next_deadline(&self) -> Option<Instant> {
+        self.cue_deadlines
+            .values()
+            .map(|(_, due)| *due)
+            .chain(
+                self.presses
+                    .iter()
+                    .filter(|pending| !pending.timed_out)
+                    .map(|pending| pending.press.until),
+            )
+            .chain(self.handoffs.iter().map(|pending| pending.next_check))
+            .min()
+    }
+
+    #[cfg(test)]
+    pub(super) fn press_pending_for_test(&self) -> bool {
+        !self.presses.is_empty() || !self.handoffs.is_empty()
+    }
+
+    #[cfg(test)]
+    pub(super) fn inject(
+        &mut self,
+        windows: impl Fn() -> Vec<Window> + Send + Sync + 'static,
+        activate: impl FnMut(Target) -> bool + 'static,
+    ) {
+        self.inspector = Some(Arc::new(Inspector {
+            apps: vec!["Code.exe".into()],
+            windows: Box::new(windows),
+        }));
+        self.test_activate = Some(Box::new(activate));
+    }
+}
+
+fn presented_candidates(scene: &SceneGraph, presented: &HashSet<SceneId>) -> Candidates {
+    let now = scene.now_wall_us();
+    scene
+        .zone_registry
+        .active_publishes
+        .values()
+        .flatten()
+        .filter(|record| {
+            presented.contains(&record.publication_id)
+                && record.expires_at_wall_us.is_none_or(|expiry| expiry > now)
+                && !scene
+                    .overlay
+                    .notification_go_to
+                    .contains_key(&record.publication_id)
+                && !scene
+                    .overlay
+                    .notification_choices
+                    .contains_key(&record.publication_id)
+        })
+        .filter_map(|record| {
+            record
+                .window_token
+                .as_ref()
+                .map(|token| (record.publication_id, token.clone()))
+        })
+        .collect()
+}
+
+impl WinitApp {
+    pub(super) fn go_to_presented(&mut self, ids: Vec<SceneId>) {
+        if self.state.window_go_to.enabled() {
+            self.state.window_go_to.presented.extend(ids);
+            if self.settle_go_to(Instant::now()) {
+                self.state
+                    .wake
+                    .notify_compositor(crate::idle_efficiency::RuntimeWakeupSource::SceneChange);
+            }
+        }
+    }
+
+    pub(super) fn press_go_to(
+        &mut self,
+        id: SceneId,
+        token: String,
+        stamp: u64,
+        bounds: Rect,
+        origin: GoToOrigin,
+    ) {
+        let state = &mut self.state.window_go_to;
+        let Some(inspector) = state.inspector.clone() else {
+            return;
+        };
+        let now = Instant::now();
+        let press = Press {
+            id,
+            stamp,
+            bounds,
+            foreground: match origin {
+                GoToOrigin::Keyboard(foreground) | GoToOrigin::Pointer(foreground) => foreground,
+            },
+            origin,
+            answer_visit: self.state.answer_keyboard.visit,
+            until: now + Duration::from_secs(2),
+        };
+        if !state.presses.iter().any(|pending| pending.press.id == id) {
+            let wake = self.state.wake.main_work_notifier();
+            let token: Arc<str> = token.into();
+            let lookup_token = Arc::clone(&token);
+            match inspect(
+                move || inspector.matches(&(inspector.windows)(), &lookup_token),
+                wake,
+            ) {
+                Ok(worker) => state.presses.push(PendingPress {
+                    press,
+                    worker,
+                    token,
+                    timed_out: false,
+                }),
+                Err(_) => state
+                    .feedback
+                    .push((press, Feedback::Cue(GoToCue::Blocked))),
+            }
+        } else {
+            state
+                .feedback
+                .push((press, Feedback::Cue(GoToCue::Blocked)));
+        }
+        self.state.wake.main_work_notifier().notify();
+    }
+
+    pub(super) fn settle_go_to(&mut self, now: Instant) -> bool {
+        let state = &mut self.state.window_go_to;
+        if state.presented.is_empty()
+            && state.scan.is_none()
+            && state.presses.is_empty()
+            && state
+                .handoffs
+                .iter()
+                .all(|pending| pending.next_check > now)
+            && state.feedback.is_empty()
+            && !state.cue_deadlines.values().any(|(_, at)| now >= *at)
+        {
+            return false;
+        }
+        let shared = Arc::clone(&self.state.shared_state);
+        let Ok(shared) = shared.try_lock() else {
+            self.schedule_shared_scene_availability_wake();
+            return false;
+        };
+        let Ok(mut scene) = shared.scene.try_lock() else {
+            self.schedule_shared_scene_availability_wake();
+            return false;
+        };
+        let mut changed = false;
+        if let Some(found) = take_result(&mut state.scan) {
+            scene.prune_notification_feedback();
+            for id in found {
+                if let Some(availability) = scene.overlay.notification_go_to.get_mut(&id) {
+                    availability.available = true;
+                    changed = true;
+                }
+            }
+        }
+        if !state.presented.is_empty() {
+            let candidates = presented_candidates(&scene, &state.presented);
+            state.presented.clear();
+            if state.scan.is_some() {
+                // Keep only active publications while the previous one-shot
+                // query finishes, even if newer frames keep replacing cards.
+                state
+                    .presented
+                    .extend(candidates.into_iter().map(|(id, _)| id));
+            } else if !candidates.is_empty()
+                && let Some(probe) = state.inspector.clone()
+            {
+                for (id, _) in &candidates {
+                    scene.overlay.notification_go_to.entry(*id).or_default();
+                }
+                state.scan = inspect(
+                    move || {
+                        let windows = (probe.windows)();
+                        candidates
+                            .into_iter()
+                            .filter(|(_, token)| {
+                                matches!(probe.matches(&windows, token), Match::One(_))
+                            })
+                            .map(|(id, _)| id)
+                            .collect()
+                    },
+                    self.state.wake.main_work_notifier(),
+                )
+                .ok();
+            }
+        }
+        state.cue_deadlines.retain(|id, (stamp, due)| {
+            let Some(control) = scene.overlay.notification_go_to.get_mut(id) else {
+                return false;
+            };
+            if control.attempted_at_mono_us != Some(*stamp) {
+                return false;
+            }
+            if now < *due {
+                return true;
+            }
+            control.cue = None;
+            changed = true;
+            false
+        });
+        let hold = self
+            .state
+            .global_tokens
+            .get("notification.goto.feedback.ms")
+            .and_then(|value| value.trim().parse::<u32>().ok())
+            .unwrap_or(1200);
+        for (press, feedback) in state.feedback.drain(..) {
+            let Some(control) = scene.overlay.notification_go_to.get_mut(&press.id) else {
+                continue;
+            };
+            if control.attempted_at_mono_us == Some(press.stamp) {
+                control.cue = match feedback {
+                    Feedback::Cue(cue) => {
+                        state.cue_deadlines.insert(
+                            press.id,
+                            (press.stamp, now + Duration::from_millis(hold.into())),
+                        );
+                        Some(cue)
+                    }
+                    Feedback::Switched | Feedback::Cancelled => None,
+                };
+                if matches!(feedback, Feedback::Switched)
+                    && self.state.answer_keyboard.visit == press.answer_visit
+                {
+                    scene.focus_notification(None);
+                }
+                changed = true;
+            }
+        }
+        let mut completed = Vec::new();
+        state.presses.retain_mut(|pending| {
+            let result = pending.worker.try_recv();
+            if !pending.timed_out {
+                if now >= pending.press.until {
+                    completed.push((
+                        pending.press,
+                        Arc::clone(&pending.token),
+                        Err(mpsc::TryRecvError::Disconnected),
+                    ));
+                    // Keep this card's worker slot until its exit so repeated
+                    // timeouts cannot spawn more workers for one publication.
+                    pending.timed_out = true;
+                } else if !matches!(result, Err(mpsc::TryRecvError::Empty)) {
+                    completed.push((pending.press, Arc::clone(&pending.token), result));
+                }
+            }
+            matches!(result, Err(mpsc::TryRecvError::Empty))
+        });
+        if !completed.is_empty() {
+            scene.prune_notification_feedback();
+            completed.retain(|(press, _, _)| {
+                let active = scene.overlay.zone_hit_regions.iter().any(|region| {
+                    region.publication_id == press.id
+                        && region.kind == tze_hud_scene::ZoneInteractionKind::GoTo
+                        && (matches!(press.origin, GoToOrigin::Pointer(_))
+                            || scene.overlay.notification_focus.as_deref()
+                                == Some(region.interaction_id.as_str()))
+                });
+                let Some(control) = scene.overlay.notification_go_to.get_mut(&press.id) else {
+                    return false;
+                };
+                if control.attempted_at_mono_us != Some(press.stamp) {
+                    return false;
+                }
+                if !active || self.state.answer_keyboard.visit != press.answer_visit {
+                    control.cue = None;
+                    changed = true;
+                    return false;
+                }
+                true
+            });
+        }
+        if changed {
+            scene.bump_geometry_epoch();
+        }
+        drop(scene);
+        drop(shared);
+
+        let mut handoffs = std::mem::take(&mut self.state.window_go_to.handoffs);
+        for (press, token, result) in completed {
+            let foreground = self.state.window_go_to.foreground();
+            if press.foreground != foreground
+                || self
+                    .state
+                    .safe_mode_atomic
+                    .load(std::sync::atomic::Ordering::Acquire)
+            {
+                self.finish_go_to(press, Feedback::Cancelled);
+                continue;
+            }
+            let feedback = match result {
+                Ok(Match::None) => Feedback::Cue(GoToCue::NotFound),
+                Ok(Match::Multiple(count)) => Feedback::Cue(GoToCue::Ambiguous(count)),
+                Ok(Match::One(target)) => {
+                    match self.activate_go_to(target, &token, press.bounds, press.foreground) {
+                        Ok(handoff) => {
+                            handoffs.push(PendingHandoff {
+                                press,
+                                handoff,
+                                until: now + FOREGROUND_CONFIRM_TIMEOUT,
+                                next_check: now,
+                            });
+                            continue;
+                        }
+                        Err(feedback) => feedback,
+                    }
+                }
+                Err(_) => Feedback::Cue(GoToCue::Blocked),
+            };
+            self.finish_go_to(press, feedback);
+        }
+        for mut pending in handoffs {
+            if pending.next_check <= now {
+                let current = self.state.window_go_to.foreground();
+                if self.confirm_go_to_foreground(pending.handoff.target, current) {
+                    self.finish_go_to(pending.press, Feedback::Switched);
+                    continue;
+                }
+                let user_switched = current.is_some()
+                    && current != pending.press.foreground
+                    && current != pending.handoff.temporary_overlay;
+                let other_visit = self.state.answer_keyboard.visit != pending.press.answer_visit;
+                if user_switched || other_visit || now >= pending.until {
+                    if !user_switched && !other_visit {
+                        release_temporary_foreground(
+                            pending.handoff.temporary_overlay,
+                            pending.press.foreground,
+                        );
+                    }
+                    self.finish_go_to(
+                        pending.press,
+                        if user_switched || other_visit {
+                            Feedback::Cancelled
+                        } else {
+                            Feedback::Cue(GoToCue::Blocked)
+                        },
+                    );
+                    continue;
+                }
+                pending.next_check = (now + FOREGROUND_CONFIRM_INTERVAL).min(pending.until);
+            }
+            self.state.window_go_to.handoffs.push(pending);
+        }
+        changed
+    }
+
+    fn finish_go_to(&mut self, press: Press, feedback: Feedback) {
+        if matches!(feedback, Feedback::Switched) {
+            if self.state.answer_keyboard.visit == press.answer_visit {
+                lifecycle::discard_foreground_origin();
+                self.state.answer_keyboard.focus = None;
+                self.state.answer_keyboard.return_key = None;
+            }
+            self.state.window_go_to.activations += 1;
+            self.state
+                .surface_ui
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .window_activations = self.state.window_go_to.activations;
+        }
+        self.state.window_go_to.feedback.push((press, feedback));
+        self.state.wake.main_work_notifier().notify();
+    }
+
+    fn confirm_go_to_foreground(&self, target: Target, current: Option<isize>) -> bool {
+        #[cfg(test)]
+        if self.state.window_go_to.test_activate.is_some() {
+            return self.state.window_go_to.test_foreground.is_none()
+                || current == Some(target.hwnd);
+        }
+        #[cfg(target_os = "windows")]
+        {
+            current == Some(target.hwnd) && window_match::native::hwnd(target).is_some()
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = (target, current);
+            false
+        }
+    }
+
+    fn activate_go_to(
+        &mut self,
+        target: Target,
+        token: &str,
+        bounds: Rect,
+        previous: Option<isize>,
+    ) -> Result<Handoff, Feedback> {
+        #[cfg(test)]
+        if let Some(injected) = self.state.window_go_to.test_activate.as_mut() {
+            return if injected(target) {
+                Ok(Handoff {
+                    target,
+                    temporary_overlay: None,
+                })
+            } else {
+                Err(Feedback::Cue(GoToCue::Blocked))
+            };
+        }
+        #[cfg(target_os = "windows")]
+        {
+            let display = self.display_window_at(
+                bounds.x + bounds.width * 0.5,
+                bounds.y + bounds.height * 0.5,
+            );
+            let overlay = display
+                .and_then(|index| self.state.secondaries.get(index))
+                .map(|display| &display.window)
+                .or(self.state.window.as_ref())
+                .and_then(|window| lifecycle::hwnd_for_window(window));
+            let Some(inspector) = self.state.window_go_to.inspector.as_ref() else {
+                return Err(Feedback::Cue(GoToCue::Blocked));
+            };
+            windows_activate(target, &inspector.apps, token, overlay, previous)
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = (target, token, bounds, previous);
+            Err(Feedback::Cue(GoToCue::Blocked))
+        }
+    }
+}
+
+fn release_temporary_foreground(overlay: Option<isize>, previous: Option<isize>) {
+    #[cfg(target_os = "windows")]
+    if let Some(previous) = previous
+        && let Some(overlay) = overlay
+        && previous != overlay
+    {
+        use windows::Win32::Foundation::HWND;
+        use windows::Win32::UI::WindowsAndMessaging::{IsWindow, SetForegroundWindow};
+        let previous = HWND(previous as _);
+        // SAFETY: Release only our temporary foreground, using a verified HWND.
+        unsafe {
+            if IsWindow(previous).as_bool() && lifecycle::foreground_window() == Some(overlay) {
+                let _ = SetForegroundWindow(previous);
+            }
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    let _ = (overlay, previous);
+}
+
+#[cfg(target_os = "windows")]
+fn windows_activate(
+    target: Target,
+    apps: &[String],
+    token: &str,
+    overlay: Option<windows::Win32::Foundation::HWND>,
+    previous: Option<isize>,
+) -> Result<Handoff, Feedback> {
+    use std::cell::Cell;
+    use window_match::{ActivationFailure, Foreground, native};
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SW_RESTORE, SetForegroundWindow, ShowWindowAsync,
+    };
+
+    struct Win32<'a> {
+        overlay: Option<HWND>,
+        apps: &'a [String],
+        token: &'a str,
+    }
+
+    impl Foreground for Win32<'_> {
+        fn revalidate(&mut self, target: Target) -> Option<Target> {
+            window_match::revalidate(target, self.apps, self.token, native::observe)
+                .filter(|checked| native::hwnd(*checked).is_some())
+        }
+
+        fn current(&self) -> Option<isize> {
+            lifecycle::foreground_window()
+        }
+
+        fn restore_minimized(&mut self, target: Target) -> bool {
+            // SAFETY: activate validates the destination and samples the
+            // original foreground immediately before this call.
+            unsafe { ShowWindowAsync(HWND(target.hwnd as _), SW_RESTORE).as_bool() }
+        }
+
+        fn raise(&mut self, target: Target) -> bool {
+            // SAFETY: activate validates the destination and samples an
+            // authorized foreground immediately before this call.
+            unsafe { SetForegroundWindow(HWND(target.hwnd as _)).as_bool() }
+        }
+
+        fn acquire_overlay(
+            &mut self,
+            previous: Option<isize>,
+        ) -> Result<Option<isize>, ActivationFailure> {
+            let Some(overlay) = self.overlay else {
+                return Ok(None);
+            };
+            let handle = Some(overlay.0 as isize);
+            let interrupted = Cell::new(false);
+            let may_continue = |after_raise, current| {
+                let allowed = current == previous || after_raise && current == handle;
+                interrupted.set(interrupted.get() || !allowed);
+                !interrupted.get()
+            };
+            let acquired = lifecycle::acquire_window_foreground(
+                overlay,
+                |after_raise, current| {
+                    let current = (!current.0.is_null()).then_some(current.0 as isize);
+                    may_continue(after_raise, current)
+                },
+                || {},
+            );
+            let current = self.current();
+            if !may_continue(true, current) {
+                Err(ActivationFailure::Cancelled)
+            } else if acquired || current == handle {
+                Ok(handle)
+            } else {
+                Ok(None)
+            }
+        }
+
+        fn release_overlay(&mut self, overlay: isize, previous: Option<isize>) {
+            release_temporary_foreground(Some(overlay), previous);
+        }
+    }
+
+    let mut api = Win32 {
+        overlay,
+        apps,
+        token,
+    };
+    window_match::activate(&mut api, target, previous)
+        .map(|temporary_overlay| Handoff {
+            target,
+            temporary_overlay,
+        })
+        .map_err(|failure| match failure {
+            ActivationFailure::Cancelled => Feedback::Cancelled,
+            ActivationFailure::Unavailable => Feedback::Cue(GoToCue::NotFound),
+            ActivationFailure::Blocked => Feedback::Cue(GoToCue::Blocked),
+        })
+}

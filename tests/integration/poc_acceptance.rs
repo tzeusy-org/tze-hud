@@ -818,10 +818,15 @@ async fn poc_portal_attach_stream_reply_detach() {
                 json!({"surface": PORTAL, "content": line, "expects_reply": true}),
             )
             .await;
-        assert_eq!(
-            reply.body,
-            json!({"ok": true, "reattached": false, "pending_input": 0})
-        );
+        // This POC draws no frames, so the viewer never reaches the OUTPUT
+        // tail: the first publish appends the only unit (nothing unread
+        // before it), and the second reports that first line as unread.
+        let unread = u64::from(line != "Running the test suite.");
+        let mut expected = json!({"ok": true, "reattached": false, "pending_input": 0});
+        if unread > 0 {
+            expected["unread"] = json!(unread);
+        }
+        assert_eq!(reply.body, expected);
         flow_tokens += reply.model_tokens;
     }
     assert_eq!(poc.hud.tile_count(), 1, "the portal is on screen");
@@ -1050,31 +1055,60 @@ async fn poc_zone_delay_ms_appears_on_schedule() {
     assert_eq!(poc.shown(SUBTITLE), 0);
 }
 
-/// hud-ljhku.5 R5.1: publish replies name text the production renderer
-/// would cut, measured with the real shaper at production tokens, and keep
-/// today's bytes when everything fits.
+/// hud-ljhku.5 R5.1: publish replies count the characters
+/// the production renderer draws of each cut field, measured with the real
+/// shaper at production tokens; that many characters, republished, are drawn
+/// whole, and a reply where everything fits keeps today's bytes.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn poc_publish_reports_clipped_text_only_when_cut() {
+    /// The single count in `clipped`, under `name`, below `len`.
+    fn count(reply: &Value, name: &str, len: usize) -> usize {
+        let clipped = reply["clipped"].as_object().expect("clipped object");
+        assert_eq!(clipped.len(), 1, "{reply}");
+        let n = clipped[name].as_u64().expect("count") as usize;
+        assert!(n > 0 && n < len, "{reply}");
+        n
+    }
+    fn prefix(text: &str, n: usize) -> String {
+        text.chars().take(n).collect()
+    }
     let mut poc = Poc::boot().await;
     let long = "The nightly migration finished but three shards reported \
         checksum drift that needs a manual look before tomorrow's deploy window";
     let body = poc
         .call(
             "hud_publish",
-            json!({"surface":NOTIFICATION,"content":{"title":"Migration","body":long}}),
+            json!({"surface":NOTIFICATION,"key":"migration","content":{"title":"Migration","body":long}}),
         )
         .await;
-    assert_eq!(body.body["clipped"], json!(["body"]), "{}", body.body);
+    let n = count(&body.body, "body", long.chars().count());
+    let again = poc
+        .call(
+            "hud_publish",
+            json!({"surface":NOTIFICATION,"key":"migration","content":{"title":"Migration","body":prefix(long, n)}}),
+        )
+        .await;
+    assert!(again.body.get("clipped").is_none(), "{n}: {}", again.body);
 
+    let go = "Deploy the release to every production region and every staging region right now, then page on-call";
     let label = poc
         .call(
             "hud_publish",
             json!({"surface":NOTIFICATION,"content":{"body":"Deploy?","actions":[
-                {"label":"Deploy the release to every production region and every staging region right now, then page on-call","callback_id":"go"},
+                {"label":go,"callback_id":"go"},
                 {"label":"Hold","callback_id":"hold"}]}}),
         )
         .await;
-    assert_eq!(label.body["clipped"], json!(["actions"]), "{}", label.body);
+    let n = count(&label.body, "actions", go.chars().count());
+    let again = poc
+        .call(
+            "hud_publish",
+            json!({"surface":NOTIFICATION,"content":{"body":"Deploy?","actions":[
+                {"label":prefix(go, n),"callback_id":"go"},
+                {"label":"Hold","callback_id":"hold"}]}}),
+        )
+        .await;
+    assert!(again.body.get("clipped").is_none(), "{n}: {}", again.body);
 
     let fits = poc
         .call(
@@ -1096,7 +1130,14 @@ async fn poc_publish_reports_clipped_text_only_when_cut() {
             json!({"surface":"widget:main-status","params":{"status":"online","label":"API","reason":reason}}),
         )
         .await;
-    assert_eq!(widget.body["clipped"], json!(["reason"]), "{}", widget.body);
+    let n = count(&widget.body, "reason", 150);
+    let again = poc
+        .call(
+            "hud_publish",
+            json!({"surface":"widget:main-status","params":{"reason":prefix(&reason, n)}}),
+        )
+        .await;
+    assert!(again.body.get("clipped").is_none(), "{n}: {}", again.body);
     let short = poc
         .call(
             "hud_publish",
@@ -1197,6 +1238,9 @@ async fn poc_notification_action_reaches_hud_input() {
             )
             .await;
         assert!(publish.model_tokens <= ZONE_PUBLISH_BUDGET);
+        // The card can arrive where the last click rested; a person waits out
+        // the fresh-card press guard before pressing again.
+        poc.advance(400).await;
         assert_eq!(
             poc.shown(NOTIFICATION),
             2,
@@ -1740,9 +1784,12 @@ async fn poc_panel_connect_prompt_pairs_an_agent() {
     poc.wait_for("the name is typed", |hud| {
         hud.control_panel_row("connect.name").is_some_and(|item| {
             item.control
-                == tze_hud_compositor::PanelControl::Value {
+                == tze_hud_compositor::PanelControl::Field {
                     text: "laptop-2".into(),
-                    mono: true,
+                    caret: Some(tze_hud_compositor::PanelCaret {
+                        cursor: 8,
+                        anchor: 8,
+                    }),
                 }
         })
     })
@@ -1821,6 +1868,22 @@ async fn poc_panel_connect_prompt_pairs_an_agent() {
     .await;
     assert!(poc.hud.pairing_open());
     assert!(!poc.hud.safe_mode_active());
+
+    // A fresh Connect card discards the previous local name draft, even
+    // though the new card focuses the same row again.
+    poc.hud.panel_type("discard-me");
+    poc.wait_for("a local name draft exists", |hud| {
+        hud.control_panel_row("connect.name").is_some_and(|item| {
+            matches!(item.control, tze_hud_compositor::PanelControl::Field { ref text, .. } if text == "discard-me")
+        })
+    }).await;
+    poc.hud
+        .press_chord(tze_hud_scene::config::ChordRole::Pairing);
+    poc.wait_for("fresh Connect drops its previous draft", |hud| {
+        hud.control_panel_row("connect.name").is_some_and(|item| {
+            matches!(item.control, tze_hud_compositor::PanelControl::Field { ref text, caret: Some(_) } if text == "agent")
+        })
+    }).await;
 }
 
 /// Layout (T11): a widget is moved by typing its box and its
@@ -1865,7 +1928,7 @@ async fn poc_panel_layout_moves_widgets_and_saves_their_entry() {
 
     poc.wait_for("the gauge's box shows", |hud| {
         hud.control_panel_row(row).is_some_and(|item| {
-            matches!(item.control, PanelControl::Value { ref text, .. } if text == "1.25%, 45.42% · 5×9.17%")
+            matches!(item.control, PanelControl::Field { ref text, .. } if text == "1.25%, 45.42% · 5×9.17%")
         })
     })
     .await;
@@ -2347,7 +2410,7 @@ async fn poc_panel_chords_rebind_live_and_save() {
     poc.hud.panel_press("Enter");
     poc.wait_for("the new chord is in and saved", |hud| {
         hud.control_panel_row(row).is_some_and(|item| {
-            matches!(item.control, PanelControl::Value { ref text, .. } if text == "Ctrl+Alt+F9")
+            matches!(item.control, PanelControl::Field { ref text, .. } if text == "Ctrl+Alt+F9")
         }) && saved().contains("panel_hotkey = \"Ctrl+Alt+F9\"")
     })
     .await;
@@ -2604,7 +2667,7 @@ async fn poc_panel_runtime_rows_apply_save_and_stage_a_restart() {
     poc.wait_for("the port is staged", |hud| {
         hud.control_panel_row("network.grpc_port").is_some_and(|item| {
             item.badge.as_ref().is_some_and(|b| b.text == "Restart to apply")
-                && matches!(item.control, PanelControl::Value { ref text, .. } if text == "50061")
+                && matches!(item.control, PanelControl::Field { ref text, .. } if text == "50061")
         })
     })
     .await;
@@ -2704,7 +2767,10 @@ async fn poc_override_notifies_the_agent() {
 /// agent-visible answer (discovery, zone, widget and portal publishes, a
 /// resident tile claim's reply, and no unsolicited stream message before
 /// it) reads the same with the panel closed, open, with each surface class
-/// hidden, and with Hide all.
+/// hidden, and with Hide all. The one owner-approved exception is the
+/// portal's native `unread` count (owner decision 2026-11-22, see
+/// docs/invariants.md §3): output the viewer frame never reached stays
+/// unread, so the comparison leaves that one field out.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn poc_agents_see_the_same_with_the_panel_open_or_content_hidden() {
     use tze_hud_compositor::PanelControl;
@@ -2725,6 +2791,15 @@ async fn poc_agents_see_the_same_with_the_panel_open_or_content_hidden() {
         // Fresh each claim: the echoed sequence, the new ids and lease.
         // Everything else (granted, code, hint, TTL) must not move.
         published.seq = 0;
+        // The approved exception: the native unread count may differ.
+        for body in &mut bodies {
+            if let Some(o) = body.as_object_mut() {
+                o.remove("unread");
+            }
+            for entry in body["surfaces"].as_array_mut().into_iter().flatten() {
+                entry.as_object_mut().map(|o| o.remove("unread"));
+            }
+        }
         (bodies, published)
     };
     // The first publishes attach and create; compare from the second round.
@@ -2764,4 +2839,127 @@ async fn poc_agents_see_the_same_with_the_panel_open_or_content_hidden() {
     poc.wait_for("everything hides", toggle("visibility.hide_all", true))
         .await;
     assert_eq!(answers(&mut poc, &mut agent).await, baseline, "Hide all");
+}
+
+/// One raw MCP HTTP exchange as a session-keeping client makes it: returns
+/// the status code, the `Mcp-Session-Id` response header and the body.
+async fn exchange(
+    addr: std::net::SocketAddr,
+    method: &'static str,
+    session: Option<String>,
+    body: String,
+) -> (u16, Option<String>, String) {
+    let mut stream = TcpStream::connect(addr).await.expect("connect to MCP");
+    let header = session.map_or(String::new(), |id| format!("Mcp-Session-Id: {id}\r\n"));
+    let request = format!(
+        "{method} /mcp HTTP/1.0\r\nAuthorization: Bearer {CLAUDE_PSK}\r\n{header}\
+         Content-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+        body.len()
+    );
+    stream.write_all(request.as_bytes()).await.expect("write");
+    let mut raw = String::new();
+    stream.read_to_string(&mut raw).await.expect("read");
+    let (head, body) = raw.split_once("\r\n\r\n").expect("HTTP response");
+    let status = head
+        .split(' ')
+        .nth(1)
+        .and_then(|s| s.parse().ok())
+        .expect("status");
+    let session = head.lines().find_map(|line| {
+        let (name, value) = line.split_once(':')?;
+        name.eq_ignore_ascii_case("mcp-session-id")
+            .then(|| value.trim().to_owned())
+    });
+    (status, session, body.to_owned())
+}
+
+impl Poc {
+    /// [`exchange`] while the event loop keeps turning.
+    async fn exchange(
+        &mut self,
+        method: &'static str,
+        session: Option<&str>,
+        body: Value,
+    ) -> (u16, Option<String>, String) {
+        let body = if body.is_null() {
+            String::new()
+        } else {
+            body.to_string()
+        };
+        let mut call = tokio::spawn(exchange(
+            self.hud.mcp_addr(),
+            method,
+            session.map(str::to_owned),
+            body,
+        ));
+        let deadline = Instant::now() + WAIT;
+        let reply = loop {
+            self.hud.tick();
+            tokio::select! {
+                biased;
+                done = &mut call => break done.expect("MCP call task"),
+                () = tokio::task::yield_now() => {}
+            }
+            assert!(Instant::now() < deadline, "{method} /mcp did not complete");
+        };
+        self.settle().await;
+        reply
+    }
+
+    /// Open a labeled MCP session as the stdio adapter does.
+    async fn open_session(&mut self, label: &str) -> String {
+        let (status, session, _) = self
+            .exchange(
+                "POST",
+                None,
+                json!({"jsonrpc": "2.0", "id": 0, "method": "initialize", "params": {
+                    "protocolVersion": "2025-06-18", "_meta": {"tze-hud/label": label}}}),
+            )
+            .await;
+        assert_eq!(status, 200);
+        session.expect("initialize issues Mcp-Session-Id")
+    }
+}
+
+/// Two Claude sessions share one pairing: a clean exit (DELETE) takes only
+/// that session's card down at once; a killed one sends nothing, so its card
+/// follows the ordinary TTL like any other.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn poc_sessions_on_one_pairing_end_independently() {
+    let mut poc = Poc::boot().await;
+    let mut sessions = Vec::new();
+    for label in ["repo-a", "repo-b", "repo-c"] {
+        let session = poc.open_session(label).await;
+        let publish = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {
+            "name": "hud_publish", "arguments": {
+                "surface": NOTIFICATION, "ttl_ms": 8_000,
+                "content": {"title": label, "body": "working"}}}});
+        let (status, _, body) = poc.exchange("POST", Some(&session), publish).await;
+        assert_eq!(status, 200);
+        assert!(!body.contains("\"isError\":true"), "{body}");
+        sessions.push(session);
+    }
+    assert_eq!(poc.shown(NOTIFICATION), 3);
+
+    // repo-a exits cleanly: its card is gone before the next frame; the
+    // others stay, and its id is now unknown.
+    let started = Instant::now();
+    let (status, _, _) = poc
+        .exchange("DELETE", Some(&sessions[0]), Value::Null)
+        .await;
+    assert_eq!(status, 202);
+    assert_eq!(poc.shown(NOTIFICATION), 2);
+    assert!(started.elapsed() < Duration::from_secs(1));
+    let ping = json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"});
+    let (status, _, _) = poc.exchange("POST", Some(&sessions[0]), ping.clone()).await;
+    assert_eq!(status, 404);
+    let (status, _, _) = poc.exchange("POST", Some(&sessions[1]), ping).await;
+    assert_eq!(status, 200);
+
+    // repo-c is killed: nothing arrives, so its card (and repo-b's) leaves
+    // only at its TTL.
+    poc.advance(7_999).await;
+    assert_eq!(poc.shown(NOTIFICATION), 2);
+    poc.advance(1).await;
+    assert_eq!(poc.shown(NOTIFICATION), 0);
 }

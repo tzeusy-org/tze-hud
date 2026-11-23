@@ -1,17 +1,5 @@
 //! Textured draw commands, drag handle entries, UV fit-mode calculations,
 //! and animation-state types used by the compositor render passes.
-//!
-//! Moved from `renderer.rs` banner 5 (`// ─── Image fit mode UV calculations ───`)
-//! and the animation-state block that immediately follows it, by Step R-1 of
-//! the renderer module split. No logic was changed; only visibility
-//! modifiers were added where Rust's module-privacy rules require them.
-//!
-//! Animation-state types (`ZoneAnimationState`, `PublicationAnimationState`,
-//! `StreamRevealState`) are placed here rather than a separate `anim_types.rs`
-//! because they follow immediately in the original file with no banner seam
-//! between them, and the whole block (banner 5 + anim types) has no
-//! `impl Compositor` dependencies — keeping the one-banner-per-PR invariant
-//! while avoiding a file that would be <50 lines.
 
 use tze_hud_scene::types::*;
 

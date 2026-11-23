@@ -16,54 +16,15 @@ import http.client
 import json
 import sys
 import urllib.error
-import urllib.request
 from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "user-test" / "scripts"))
 import hud_env  # noqa: E402
+from hud_mcp import call_tool  # noqa: E402
 
-
-class PublishInterrupted(Exception):
-    """Preserve completed receipts when a later request has an unknown outcome."""
-
-    def __init__(self, results: list, surface: str, cause: Exception):
-        super().__init__("publish interrupted")
-        self.results = results
-        self.surface = surface
-        self.cause = cause
-
-
-def call_tool(
-    url: str, token: str, tool: str, arguments: dict[str, Any], request_id: int
-) -> dict[str, Any]:
-    """Call once; a transport failure does not establish whether mutation occurred."""
-    body = json.dumps(
-        {
-            "jsonrpc": "2.0",
-            "id": request_id,
-            "method": "tools/call",
-            "params": {"name": tool, "arguments": arguments},
-        },
-        allow_nan=False,
-    ).encode("utf-8")
-    req = urllib.request.Request(
-        url=url,
-        data=body,
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {token}",
-        },
-        method="POST",
-    )
-    # hud_input and question publishes can wait 30 s; leave a response allowance beyond that wait.
-    with urllib.request.urlopen(req, timeout=40) as resp:
-        envelope = json.loads(resp.read().decode("utf-8"))
-    if "error" in envelope:
-        return {"error": envelope["error"]}
-    result = envelope["result"]
-    decoded = json.loads(result["content"][0]["text"])
-    return {"error": decoded} if result.get("isError") else {"result": decoded}
+RESPONSE_ERRORS = (OSError, http.client.HTTPException, ValueError, KeyError, TypeError, IndexError)
+PUBLISH_ERRORS = RESPONSE_ERRORS + (KeyboardInterrupt,)
 
 
 def json_object(raw: str) -> dict[str, Any]:
@@ -79,23 +40,23 @@ def parse_content(raw: str) -> Any:
 
 
 def publish_arguments(message: dict[str, Any]) -> dict[str, Any]:
-    """Normalize legacy zone batches and reject misplaced fields before any POST."""
-    allowed = {"zone", "surface", "content", "params", "ttl_ms", "delay_ms", "key", "wait_ms"}
+    """Accept wire arguments and the zone/widget names used by capture fixtures."""
+    targets = {"zone", "widget", "surface"}
+    allowed = targets | {"content", "params", "ttl_ms", "delay_ms", "key", "wait_ms"}
     if set(message) - allowed:
         raise ValueError(
             "unknown publish fields: " + ", ".join(sorted(set(message) - allowed))
         )
-    if ("zone" in message) == ("surface" in message):
-        raise ValueError("supply exactly one of zone or surface")
-    if "zone" in message:
-        if not isinstance(message["zone"], str) or not message["zone"].strip():
-            raise ValueError("zone must be a non-empty string")
-        surface = f"zone:{message['zone']}"
-    else:
-        surface = message["surface"]
+    supplied = targets & message.keys()
+    if len(supplied) != 1:
+        raise ValueError("supply exactly one of zone, widget or surface")
+    target = supplied.pop()
+    name = message[target]
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError(f"{target} must be a non-empty string")
+    surface = name if target == "surface" else f"{target}:{name}"
     if (
-        not isinstance(surface, str)
-        or not surface.startswith(("zone:", "widget:"))
+        not surface.startswith(("zone:", "widget:"))
         or not surface.split(":", 1)[1].strip()
     ):
         raise ValueError(
@@ -126,7 +87,7 @@ def publish_arguments(message: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("key must be a string")
     arguments = {
         "surface": surface,
-        **{k: v for k, v in message.items() if k not in {"zone", "surface"}},
+        **{k: v for k, v in message.items() if k not in targets},
     }
     json.dumps(arguments, allow_nan=False)
     return arguments
@@ -137,35 +98,57 @@ def load_messages(path: str) -> list[dict[str, Any]]:
     data = json.loads(Path(path).read_text(encoding="utf-8"))
     if not isinstance(data, list) or not data:
         raise ValueError("messages file must be a non-empty JSON array")
+    messages = []
     for idx, item in enumerate(data):
         if not isinstance(item, dict):
             raise ValueError(f"message[{idx}] must be an object")
-        publish_arguments(item)
-    return data
+        messages.append(publish_arguments(item))
+    return messages
 
 
 def publish_messages(
-    url: str, token: str, messages: list[dict[str, Any]]
-) -> tuple[list[dict[str, Any]], bool]:
-    arguments = [publish_arguments(msg) for msg in messages]
+    url: str, token: str, messages: list[dict[str, Any]], cleanup: dict[str, bool]
+) -> bool:
     results = []
-    failed = False
-    # Independent calls, not an atomic transaction; receipts name every result.
-    for req_id, args in enumerate(arguments, start=10):
+    interrupted = None
+    try:
+        for req_id, args in enumerate(messages, start=10):
+            surface = args["surface"]
+            touched = cleanup.get(surface)
+            if touched is not None:
+                # Keep the cleanup target if the POST has an unknown outcome.
+                cleanup[surface] = True
+            try:
+                response = call_tool(url, token, "hud_publish", args, req_id)
+            except PUBLISH_ERRORS:
+                interrupted = {"surface": surface, "outcome": "unknown"}
+                raise
+            if touched is not None and "error" in response:
+                cleanup[surface] = touched
+            results.append({"surface": surface, "response": response})
+    finally:
+        receipt = {"published": results}
+        if interrupted is not None:
+            receipt["interrupted"] = interrupted
+        print(json.dumps(receipt, indent=2))
+    return any("error" in item["response"] for item in results)
+
+
+def clear_test_widgets(url: str, token: str, cleanup: dict[str, bool]) -> bool:
+    results = []
+    for request_id, (surface, touched) in enumerate(cleanup.items(), start=1000):
+        if not touched:
+            continue
         try:
-            response = call_tool(url, token, "hud_publish", args, req_id)
-        except (
-            OSError,
-            http.client.HTTPException,
-            ValueError,
-            KeyError,
-            TypeError,
-            IndexError,
-        ) as error:
-            raise PublishInterrupted(results, args["surface"], error) from error
-        failed |= "error" in response
-        results.append({"surface": args["surface"], "response": response})
-    return results, failed
+            response = call_tool(
+                url, token, "hud_clear", {"surface": surface}, request_id, timeout=20
+            )
+        except RESPONSE_ERRORS as error:
+            response = {"error": {"kind": type(error).__name__}}
+        results.append({"surface": surface, "response": response})
+    if results:
+        print(json.dumps({"cleanup": results}, indent=2))
+    return any("error" in item["response"] for item in results)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -177,14 +160,14 @@ def main(argv: list[str] | None = None) -> int:
   --zone notification-area --clear --key session:tests
   --surface widget:main-progress --params '{"progress":0.5}' --ttl-ms 10000
   --surface widget:main-progress --hold --ttl-ms 10000
-  --input --wait-ms 30000
+  --input --wait-ms 55000
   --input --ack <handled-id>   (repeat --ack for more ids; never auto-ACK)
   --messages-file batch.json
 
 Batch: [{"zone":"notification-area","content":{"body":"Passed"},"key":"session:tests","ttl_ms":10000},
         {"surface":"widget:main-progress","params":{"progress":0.5},"ttl_ms":10000}]
-Legacy zone batches remain supported. Batches are sequential, not atomic; inspect
-all receipts before retrying. No uncertain POST is automatically replayed.
+Batch fixtures may use a zone or widget name in place of surface. Each batch
+entry is an independent call. Inspect the receipts before any manual retry.
 """,
     )
     endpoint = parser.add_mutually_exclusive_group()
@@ -204,6 +187,11 @@ all receipts before retrying. No uncertain POST is automatically replayed.
         action="store_true",
         help="Discover allowed surfaces; failure stops further work",
     )
+    parser.add_argument(
+        "--cleanup-on-exit",
+        action="store_true",
+        help="Clear widgets touched by this run. Use an idle dedicated pairing.",
+    )
     target = parser.add_mutually_exclusive_group()
     target.add_argument("--zone", help="Zone name (alias for --surface zone:<name>)")
     target.add_argument("--surface", help="zone:<name> or widget:<name>")
@@ -211,7 +199,7 @@ all receipts before retrying. No uncertain POST is automatically replayed.
     operation.add_argument("--content", help="Zone text or JSON object")
     operation.add_argument("--params", help="Widget JSON parameter object")
     operation.add_argument(
-        "--messages-file", help="JSON array of zone/surface publish objects"
+        "--messages-file", help="JSON array of zone or widget publishes"
     )
     operation.add_argument(
         "--clear",
@@ -243,7 +231,7 @@ all receipts before retrying. No uncertain POST is automatically replayed.
         help="Handled input id to ACK with --input; repeatable",
     )
     parser.add_argument(
-        "--wait-ms", type=int, help="Input or question-publish wait in milliseconds, 0..30000"
+        "--wait-ms", type=int, help="Input or question-publish wait in milliseconds, 0..55000"
     )
     parser.add_argument("--max-items", type=int, help="Input result limit (positive)")
     args = parser.parse_args(argv)
@@ -276,10 +264,12 @@ all receipts before retrying. No uncertain POST is automatically replayed.
         parser.error("--ack and --max-items require --input")
     if args.wait_ms is not None and not (args.input or inline):
         parser.error("--wait-ms requires --input or a question publish")
-    if args.wait_ms is not None and not 0 <= args.wait_ms <= 30000:
-        parser.error("--wait-ms must be 0..30000")
+    if args.wait_ms is not None and not 0 <= args.wait_ms <= 55000:
+        parser.error("--wait-ms must be 0..55000")
     if args.max_items is not None and args.max_items < 1:
         parser.error("--max-items must be positive")
+    if args.cleanup_on_exit and not (inline or args.messages_file is not None):
+        parser.error("--cleanup-on-exit requires a publish")
     if surface and (
         not surface.startswith(("zone:", "widget:"))
         or not surface.split(":", 1)[1].strip()
@@ -309,35 +299,35 @@ all receipts before retrying. No uncertain POST is automatically replayed.
                     if v is not None
                 }
             )
-            publish_arguments(message)
-            messages = [message]
+            messages = [publish_arguments(message)]
         elif args.messages_file is not None:
             messages = load_messages(args.messages_file)
+        cleanup = {}
+        if args.cleanup_on_exit:
+            cleanup = {
+                msg["surface"]: False for msg in messages
+                if msg["surface"].startswith("widget:")
+            }
+        if args.cleanup_on_exit and not cleanup:
+            raise ValueError("--cleanup-on-exit requires at least one widget publish")
         url, token = hud_env.resolve(args.host or args.url, args.psk_env)
-        if args.list_surfaces:
+        if args.list_surfaces or cleanup:
             response = call_tool(url, token, "hud_surfaces", {}, 1)
             print(json.dumps(response, indent=2))
             if "error" in response:
                 return 1
+            if cleanup:
+                entries = response["result"]["surfaces"]
+                for surface in cleanup:
+                    matches = [entry for entry in entries if entry["s"] == surface]
+                    if len(matches) != 1 or matches[0].get("held", False) is not False:
+                        raise ValueError(f"{surface} must be discovered and unheld for cleanup")
         if messages:
             try:
-                results, failed = publish_messages(url, token, messages)
-            except PublishInterrupted as error:
-                print(
-                    json.dumps(
-                        {
-                            "published": error.results,
-                            "interrupted": {
-                                "surface": error.surface,
-                                "outcome": "unknown",
-                            },
-                        },
-                        indent=2,
-                    )
-                )
-                raise error.cause
-            print(json.dumps({"published": results}, indent=2))
-            return int(failed)
+                failed = publish_messages(url, token, messages, cleanup)
+            finally:
+                cleanup_failed = clear_test_widgets(url, token, cleanup)
+            return int(failed or cleanup_failed)
         if args.clear or args.hold:
             arguments = {"surface": surface}
             if args.clear and args.key is not None:
@@ -385,6 +375,9 @@ all receipts before retrying. No uncertain POST is automatically replayed.
             file=sys.stderr,
         )
         return 5
+    except KeyboardInterrupt:
+        print('{"error":"interrupted"}', file=sys.stderr)
+        return 130
     except (KeyError, TypeError, IndexError):
         print('{"error":"invalid_mcp_response"}', file=sys.stderr)
         return 6

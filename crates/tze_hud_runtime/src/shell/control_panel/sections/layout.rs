@@ -1,19 +1,21 @@
 //! Layout: where each widget sits and how long its content stays up, both
 //! live and saved to its `[[tabs.widgets]]` entry, and which zones a
-//! `[displays."<key>"]` table sends to another monitor.
+//! `[displays."<key>"]` table sends to another monitor, and where new
+//! questions appear (`[runtime] question_placement`).
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex as StdMutex};
 
 use tokio::sync::Mutex;
-use tze_hud_config::WidgetUpdate;
+use tze_hud_config::{RuntimeUpdate, WidgetUpdate};
+use tze_hud_scene::QuestionPlacement;
 use tze_hud_scene::graph::SceneGraph;
 use tze_hud_scene::render_wake::RenderWakeNotifier;
 use tze_hud_scene::types::GeometryPolicy;
 
 use super::super::displays::DisplayControl;
 use super::super::row::{BoxFuture, Control, Edit, Row, Section};
-use super::super::runtime::{DisplayWriter, WidgetWriter};
+use super::super::runtime::{DisplayWriter, RuntimeControl, WidgetWriter};
 
 /// "Clears after" choices, in ms (`None`: never).
 const CLEAR_CHOICES: [Option<u64>; 8] = [
@@ -39,6 +41,8 @@ pub(crate) struct LayoutSection {
     /// Keys offered by the last rendered rows; hotplug may reorder the live
     /// list before an edit arrives, so an index must keep its original meaning.
     display_options: StdMutex<HashMap<String, Vec<Option<String>>>>,
+    /// Live and saved question placement (`None`: no runtime settings).
+    runtime: Option<RuntimeControl>,
 }
 
 /// One widget as the rows need it.
@@ -54,6 +58,7 @@ impl LayoutSection {
     const GEOMETRY: &'static str = ".geometry";
     const CLEAR: &'static str = ".clear";
     const ZONE: &'static str = "layout.zone.";
+    pub(crate) const QUESTIONS: &'static str = "layout.question_placement";
 
     pub(crate) fn new(
         scene: Arc<Mutex<SceneGraph>>,
@@ -71,7 +76,66 @@ impl LayoutSection {
             save_display,
             main_wake,
             display_options: StdMutex::default(),
+            runtime: None,
         }
+    }
+
+    pub(crate) fn with_runtime(mut self, runtime: Option<RuntimeControl>) -> Self {
+        self.runtime = runtime;
+        self
+    }
+
+    fn question_row(&self) -> Option<Row> {
+        let control = self.runtime.as_ref()?;
+        let current = control.live.publication_defaults.question_placement();
+        Some(
+            Row::new(
+                Self::QUESTIONS,
+                "New questions appear on",
+                Control::Choice {
+                    selected: QuestionPlacement::ALL
+                        .iter()
+                        .position(|p| *p == current)
+                        .unwrap_or(0),
+                    options: QuestionPlacement::ALL
+                        .map(|p| placement_label(p).to_owned())
+                        .to_vec(),
+                },
+            )
+            .detail(format!(
+                "Notification display: primary unless [displays] moves it · Applies to the next question · {}",
+                if control.config_path.is_some() {
+                    "Saved to config"
+                } else {
+                    "No config file; lasts until restart"
+                }
+            ))
+            .keywords(&["question", "monitor", "display", "placement", "where"])
+            .resettable(current != QuestionPlacement::Focused),
+        )
+    }
+
+    /// Save, then apply to the next presented question; no visible card moves.
+    fn apply_question(&self, edit: Edit) -> Result<(), String> {
+        let control = self.runtime.as_ref().ok_or("No runtime settings")?;
+        let placement = match edit {
+            Edit::Choose(index) => *QuestionPlacement::ALL
+                .get(index)
+                .ok_or("No such placement")?,
+            Edit::Reset => QuestionPlacement::Focused,
+            _ => return Err("Choose a placement or Reset".into()),
+        };
+        let saved = (placement != QuestionPlacement::Focused).then(|| placement.as_str().into());
+        (control.write)(&[RuntimeUpdate::QuestionPlacement(saved)])?;
+        control
+            .live
+            .publication_defaults
+            .set_question_placement(placement);
+        tracing::info!(
+            placement = placement.as_str(),
+            "control panel: question placement"
+        );
+        Ok(())
     }
 
     async fn widgets(&self) -> Vec<Widget> {
@@ -231,7 +295,7 @@ impl Section for LayoutSection {
 
     fn rows(&self) -> BoxFuture<'_, Vec<Row>> {
         Box::pin(async move {
-            let mut rows = Vec::new();
+            let mut rows: Vec<Row> = self.question_row().into_iter().collect();
             for widget in self.widgets().await {
                 let id = format!("{}{}", Self::PREFIX, widget.name);
                 rows.push(
@@ -345,6 +409,9 @@ impl Section for LayoutSection {
         Box::pin(async move {
             let described = format!("{edit:?}");
             let unsupported = || format!("{row} does not support {described}");
+            if row == Self::QUESTIONS {
+                return self.apply_question(edit);
+            }
             if let Some(zone_row) = row.strip_prefix(Self::ZONE) {
                 let Edit::Choose(index) = edit else {
                     return Err(unsupported());
@@ -426,9 +493,105 @@ impl Section for LayoutSection {
     }
 }
 
+fn placement_label(placement: QuestionPlacement) -> &'static str {
+    match placement {
+        QuestionPlacement::Focused => "Focused window's monitor",
+        QuestionPlacement::Pointer => "Under the pointer",
+        QuestionPlacement::Fixed => "Notification display",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// R12.1 S9: the row saves `[runtime] question_placement`, applies to
+    /// the next question, and Reset restores focused (removing the key).
+    #[tokio::test]
+    async fn question_placement_saves_applies_and_resets() {
+        use super::super::super::runtime::tests::fake;
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().join("c.toml");
+        let mut control = fake(&config, Arc::default(), None);
+        let scene = Arc::new(Mutex::new(SceneGraph::new(800.0, 600.0)));
+        let section = || {
+            LayoutSection::new(
+                Arc::clone(&scene),
+                Default::default(),
+                None,
+                None,
+                None,
+                Default::default(),
+            )
+        };
+        let layout = section().with_runtime(Some(control.clone()));
+        let row = layout.question_row().unwrap();
+        assert_eq!(row.label, "New questions appear on");
+        assert_eq!(
+            row.control,
+            Control::Choice {
+                options: [
+                    "Focused window's monitor",
+                    "Under the pointer",
+                    "Notification display"
+                ]
+                .map(str::to_owned)
+                .to_vec(),
+                selected: 0,
+            }
+        );
+        assert_eq!(
+            row.keywords,
+            ["question", "monitor", "display", "placement", "where"]
+        );
+        assert!(
+            row.detail
+                .unwrap()
+                .contains("primary unless [displays] moves it")
+        );
+        assert!(!row.reset);
+        let saved = || {
+            tze_hud_config::runtime_section(&std::fs::read_to_string(&config).unwrap())
+                .unwrap()
+                .question_placement
+        };
+        for (index, expected) in [(1, "pointer"), (2, "fixed")] {
+            layout
+                .apply(LayoutSection::QUESTIONS, Edit::Choose(index))
+                .await
+                .unwrap();
+            assert_eq!(saved().as_deref(), Some(expected));
+            assert_eq!(
+                control.live.publication_defaults.question_placement(),
+                QuestionPlacement::ALL[index]
+            );
+            assert!(layout.question_row().unwrap().reset);
+        }
+        layout
+            .apply(LayoutSection::QUESTIONS, Edit::Reset)
+            .await
+            .unwrap();
+        assert_eq!(saved(), None);
+        assert_eq!(
+            control.live.publication_defaults.question_placement(),
+            QuestionPlacement::Focused
+        );
+        // A failed save changes nothing live.
+        control.write = Arc::new(|_| Err("no config file to save to".into()));
+        let layout = section().with_runtime(Some(control.clone()));
+        assert!(
+            layout
+                .apply(LayoutSection::QUESTIONS, Edit::Choose(1))
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            control.live.publication_defaults.question_placement(),
+            QuestionPlacement::Focused
+        );
+        // Without runtime settings there is no row.
+        assert!(section().question_row().is_none());
+    }
 
     #[test]
     fn a_box_is_typed_as_four_percentages() {

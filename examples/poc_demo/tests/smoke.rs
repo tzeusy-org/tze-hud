@@ -75,6 +75,9 @@ async fn drive(
 async fn zones_and_widgets_run_against_the_shipped_config() {
     // Exercise the real client's typed-error boundary before the shipped-config flow.
     // This endpoint only controls responses; the runtime below still owns delivery.
+    // The first response initializes the tokenizer before any retry. The
+    // fixture watchdog bounds hangs with headroom for that cold CPU work.
+    const FIXTURE_WATCHDOG: Duration = Duration::from_secs(12);
     let tool_error = |code, hint| {
         json!({"jsonrpc":"2.0", "id":1, "result":{
             "isError":true, "content":[{"type":"text", "text":json!({"code":code,"hint":hint}).to_string()}]
@@ -200,11 +203,11 @@ async fn zones_and_widgets_run_against_the_shipped_config() {
             }
         });
         let result = tokio::time::timeout(
-            Duration::from_secs(2),
+            FIXTURE_WATCHDOG,
             poc_demo::Mcp(&endpoint).call(tool, arguments.clone()),
         )
         .await
-        .unwrap();
+        .unwrap_or_else(|_| panic!("simulated MCP {tool} exchange exceeded {FIXTURE_WATCHDOG:?}"));
         replies.abort();
         let _ = replies.await;
         let requests = seen.lock().unwrap();

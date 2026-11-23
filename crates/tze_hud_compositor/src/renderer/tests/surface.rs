@@ -496,7 +496,25 @@ async fn test_new_headless_with_force_software_env_var() {
     }
     let result = {
         let _gpu = GPU_INIT_MUTEX.lock().await;
-        Compositor::new_headless(64, 64).await
+        let result = Compositor::new_headless(64, 64).await;
+        if let Ok(compositor) = &result {
+            let mut limits = compositor.device.limits();
+            let max_dimension = limits.max_texture_dimension_2d;
+            // Raising only the texture bound must preserve every other
+            // downlevel compatibility limit on the actual requested device.
+            limits.max_texture_dimension_2d =
+                wgpu::Limits::downlevel_defaults().max_texture_dimension_2d;
+            assert_eq!(limits, wgpu::Limits::downlevel_defaults());
+            for (width, height) in [(max_dimension + 1, 1), (1, max_dimension + 1)] {
+                let rejected = Compositor::new_headless(width, height).await;
+                let Err(CompositorError::DeviceCreation(message)) = rejected else {
+                    panic!("dimensions beyond the actual texture limit must be rejected");
+                };
+                assert!(message.contains(&format!("{width}x{height}")));
+                assert!(message.contains(&format!("<= {max_dimension}")));
+            }
+        }
+        result
     };
     unsafe {
         std::env::remove_var("HEADLESS_FORCE_SOFTWARE");
@@ -840,6 +858,204 @@ async fn zone_assigned_to_secondary_display_renders_there() {
         "the primary does not show the zone"
     );
     assert_ne!(frames[0].1, frames[1].1, "the secondary shows the zone");
+}
+
+/// Places each question on the display it is handed.
+#[derive(Debug, Default)]
+struct QueuedPlacer(std::sync::Mutex<Option<String>>);
+
+impl tze_hud_scene::QuestionPlacer for QueuedPlacer {
+    fn place(&self) -> Option<String> {
+        self.0.lock().unwrap().clone()
+    }
+}
+
+/// R12.1: a question placed on another display draws in its own stack on
+/// that display's rect, with hit regions there; it stays put when another
+/// display is focused and on a same-key replacement (S4), and falls back to
+/// the notification display when its display disconnects (S7).
+#[tokio::test]
+async fn placed_questions_draw_in_a_stack_on_their_display() {
+    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);
+    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+    let display = |name: &str, x: f32, primary| crate::DisplayRect {
+        name: name.into(),
+        rect: Rect::new(x, 0.0, 256.0, 256.0),
+        primary,
+    };
+    let three = vec![
+        display("MAIN", 0.0, true),
+        display("SIDE", 256.0, false),
+        display("THIRD", 512.0, false),
+    ];
+    compositor.set_display_layout(crate::DisplayLayout::new(three.clone(), &HashMap::new()));
+    let side = crate::FrameTarget {
+        x: 256.0,
+        y: 0.0,
+        width: 256,
+        height: 256,
+        primary: false,
+    };
+    let mut scene = SceneGraph::new(256.0, 256.0);
+    let _tab = scene.create_tab("Main", 0).unwrap();
+    scene.register_zone(tze_hud_scene::types::ZoneDefinition {
+        id: SceneId::new(),
+        name: "notification-area".to_string(),
+        description: "Stack zone".to_string(),
+        geometry_policy: tze_hud_scene::types::GeometryPolicy::Relative {
+            x_pct: 0.5,
+            y_pct: 0.0,
+            width_pct: 0.5,
+            height_pct: 0.8,
+        },
+        accepted_media_types: vec![tze_hud_scene::types::ZoneMediaType::ShortTextWithIcon],
+        rendering_policy: tze_hud_scene::types::RenderingPolicy {
+            font_size_px: Some(16.0),
+            ..Default::default()
+        },
+        contention_policy: ContentionPolicy::Stack { max_depth: 5 },
+        max_publishers: 8,
+        auto_clear_ms: None,
+        layer_attachment: tze_hud_scene::types::LayerAttachment::Chrome,
+        ephemeral: false,
+    });
+    let placer = Arc::new(QueuedPlacer::default());
+    scene.overlay.question_placer = Some(placer.clone());
+    let card = |text: &str, question: bool| {
+        ZoneContent::Notification(NotificationPayload {
+            text: text.to_string(),
+            icon: String::new(),
+            urgency: 1,
+            ttl_ms: None,
+            title: String::new(),
+            actions: question
+                .then(|| tze_hud_scene::types::NotificationAction {
+                    label: "Yes".into(),
+                    callback_id: Some("yes".into()),
+                    url: None,
+                    role: None,
+                })
+                .into_iter()
+                .collect(),
+        })
+    };
+    let publish = |scene: &mut SceneGraph, text: &str, question: bool| {
+        scene
+            .publish_to_zone(
+                "notification-area",
+                card(text, question),
+                "agent-a",
+                Some("k".into()).filter(|_| question),
+                None,
+                None,
+            )
+            .unwrap();
+    };
+    *placer.0.lock().unwrap() = Some("SIDE".into());
+    publish(&mut scene, "Status", false);
+    publish(&mut scene, "Deploy?", true);
+
+    let draw = |compositor: &mut Compositor, scene: &mut SceneGraph| {
+        compositor.prime_markdown_cache(scene);
+        compositor.prime_truncation_cache(scene);
+        let build = compositor.build_windowed_frame(scene, 256, 256);
+        let format = wgpu::TextureFormat::Rgba8UnormSrgb;
+        let primary = compositor
+            .capture_windowed_frame(&build, &primary_of(&build), format)
+            .expect("capture primary")
+            .rgba;
+        let secondary = compositor
+            .capture_windowed_frame(&build, &side, format)
+            .expect("capture secondary")
+            .rgba;
+        compositor.populate_zone_hit_regions(scene, 256.0, 256.0);
+        let on = |rect: Rect| if rect.x >= 256.0 { "SIDE" } else { "MAIN" };
+        let cards: Vec<_> = scene
+            .overlay
+            .notification_geometry
+            .iter()
+            .map(|card| on(card.bounds))
+            .collect();
+        let regions: Vec<_> = scene
+            .overlay
+            .zone_hit_regions
+            .iter()
+            .map(|region| on(region.bounds))
+            .collect();
+        (primary, secondary, cards, regions)
+    };
+
+    let (primary, secondary, cards, regions) = draw(&mut compositor, &mut scene);
+    // Each display stacks from the zone's top: the question tops SIDE's
+    // stack, the status card MAIN's.
+    let mut sorted = cards.clone();
+    sorted.sort();
+    assert_eq!(sorted, ["MAIN", "SIDE"]);
+    assert!(regions.contains(&"SIDE") && regions.contains(&"MAIN"));
+    let side_card = scene
+        .overlay
+        .notification_geometry
+        .iter()
+        .find(|card| card.bounds.x >= 256.0)
+        .unwrap()
+        .bounds;
+    let main_card = scene
+        .overlay
+        .notification_geometry
+        .iter()
+        .find(|card| card.bounds.x < 256.0)
+        .unwrap()
+        .bounds;
+    assert_eq!(side_card.x - 256.0, main_card.x, "same zone position");
+    assert_eq!(
+        side_card.y, main_card.y,
+        "each display's stack starts at its top"
+    );
+    assert_eq!(side_card.width, main_card.width, "same rect and scale");
+
+    // SIDE at twice the scale: its card, and only its card, grows.
+    let mut tokens = compositor.token_map.clone();
+    tze_hud_config::tokens::set_zone_px_scale(
+        &mut tokens,
+        &crate::placed_zone_key("notification-area", "SIDE"),
+        2.0,
+    );
+    compositor.set_token_map(tokens);
+    draw(&mut compositor, &mut scene);
+    let height_on = |side: bool| {
+        scene
+            .overlay
+            .notification_geometry
+            .iter()
+            .find(|card| (card.bounds.x >= 256.0) == side)
+            .unwrap()
+            .bounds
+            .height
+    };
+    assert_eq!(height_on(false), main_card.height);
+    assert!(
+        height_on(true) > side_card.height,
+        "SIDE draws at its scale"
+    );
+
+    // S4: focusing THIRD moves nothing; a same-key replacement stays.
+    *placer.0.lock().unwrap() = Some("THIRD".into());
+    publish(&mut scene, "Deploy now?", true);
+    let (primary_after, secondary_after, cards_after, _) = draw(&mut compositor, &mut scene);
+    assert_eq!(cards_after, cards);
+    assert_eq!(primary_after, primary, "the primary is unchanged");
+    assert_ne!(
+        secondary_after, secondary,
+        "the replacement redraws on SIDE"
+    );
+
+    // S7: SIDE disconnects; its card shows on the notification display.
+    let mut two = three;
+    two.remove(1);
+    compositor.set_display_layout(crate::DisplayLayout::new(two, &HashMap::new()));
+    let (_, _, cards_gone, regions_gone) = draw(&mut compositor, &mut scene);
+    assert_eq!(cards_gone, ["MAIN", "MAIN"]);
+    assert!(regions_gone.iter().all(|display| *display == "MAIN"));
 }
 
 /// Invariant 3 on every display: flipping safe mode changes what a

@@ -1,7 +1,6 @@
 use tze_hud_config::loader::TzeHudConfig;
 use tze_hud_runtime::HeadlessRuntime;
 use tze_hud_runtime::headless::HeadlessConfig;
-use tze_hud_scene::config::ConfigLoader;
 
 const BENCHMARK_CONFIG: &str = include_str!("../config/benchmark.toml");
 const REPO_ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");

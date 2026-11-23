@@ -11,26 +11,25 @@ impl SceneGraph {
     /// Default 30,000 ms (30 seconds).
     pub const DEFAULT_GRACE_PERIOD_MS: u64 = crate::lease::ORPHAN_GRACE_PERIOD_MS;
 
-    /// Budget soft-limit threshold (80% of hard limit).
-    pub const BUDGET_SOFT_LIMIT_PCT: f64 = 0.80;
-
     /// Maximum leases across all agents in the entire runtime.
-    pub const MAX_RUNTIME_LEASES: usize = 64;
+    pub(super) const MAX_RUNTIME_LEASES: usize = 64;
 
     /// Maximum nodes per tile.
     pub const MAX_NODES_PER_TILE: u32 = 64;
 
     /// Grant a lease with a default (nil) session_id.
     ///
-    /// Panics if caps are exceeded (use `try_grant_lease_for_session` for graceful errors).
+    /// Panics if caps are exceeded. Use [`Self::try_grant_lease_for_session_with_budget`]
+    /// to handle cap errors without panicking.
     pub fn grant_lease(&mut self, namespace: &str, ttl_ms: u64) -> SceneId {
         self.grant_lease_for_session(namespace, SceneId::nil(), ttl_ms)
     }
 
     /// Grant a lease, enforcing the runtime-wide 64-lease cap (`MAX_RUNTIME_LEASES`).
     ///
-    /// Panics if caps are exceeded (use `try_grant_lease_for_session` for graceful errors).
-    pub fn grant_lease_for_session(
+    /// Panics if caps are exceeded. Use [`Self::try_grant_lease_for_session_with_budget`]
+    /// to handle cap errors without panicking.
+    pub(super) fn grant_lease_for_session(
         &mut self,
         namespace: &str,
         session_id: SceneId,
@@ -44,7 +43,7 @@ impl SceneGraph {
     ///
     /// Enforces the lease caps:
     /// - Max 64 leases per runtime across all agents (`MAX_RUNTIME_LEASES`).
-    pub fn try_grant_lease_for_session(
+    pub(super) fn try_grant_lease_for_session(
         &mut self,
         namespace: &str,
         session_id: SceneId,
@@ -341,7 +340,10 @@ impl SceneGraph {
     }
 
     /// Like `expire_leases` but with a configurable max suspension time.
-    pub fn expire_leases_with_max_suspend(&mut self, max_suspend_ms: u64) -> Vec<LeaseExpiry> {
+    pub(super) fn expire_leases_with_max_suspend(
+        &mut self,
+        max_suspend_ms: u64,
+    ) -> Vec<LeaseExpiry> {
         let now = self.clock.now_millis();
         self.reap_orphaned_publications(now);
 

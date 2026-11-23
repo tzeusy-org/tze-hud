@@ -66,7 +66,7 @@ unreachable or rejects the call, continue in chat and report the limitation once
 | Widget `params` declaration | `{"progress":0.5,"label":"Tests"}` as `params`, using discovered names/types |
 | Countdown `deadline<=24h` | `{"ends_in_ms":300000,"label":"Tests","severity":"info"}`; relative integer ms, starts at presentation |
 | KPI bundle | `{"value":"3 fail","label":"Tests","trend":"down","severity":"error"}` |
-| Stepper bundle | `{"step":2,"total":5,"state":"blocked","label":"Deploy"}`; step floors and clamps to total |
+| Stepper bundle | `{"step":2,"total":5,"state":"blocked","label":"Deploy"}`; whole counts only (`2.5` is refused); a step above total fills every dot |
 
 - Structured zone `type` is inferred from the zone; set it explicitly when
   selecting another accepted type in a mixed zone. Unknown fields are rejected.
@@ -125,16 +125,17 @@ is already consumed and needs no ACK; human × includes `kind:"dismiss"`.
 `gone:expired|replaced|displaced|cleared` ends an unanswered card and is not
 consent. An ordinary reply without action/gone means the wait ended: continue
 with the same safely routed `hud_input` consumer. Cancellation leaves accepted
-input queued. Do not use this with a shared pairing unless the question's
-callback identity and fallback input consumer are coordinated. Earlier builds
-retain the three-call path below; discover before using the new argument.
+input queued. Earlier builds retain the three-call path below; discover
+before using the new argument.
 
 Route by surface **and** the current callback identity, handle once, then send
 `hud_input {"ack":["<handled-id>"]}`. Unacked input repeats with stable ids;
-ACKs are idempotent. Input covers every surface of the authenticated agent.
-Sessions sharing a pairing need one coordinated consumer/demultiplexer or
-separate identities. Do not auto-ACK another session's records. `wait_ms` defaults
-to 0 and caps at 30000; a CLI/network timeout does not establish a user's answer.
+ACKs are idempotent. Input covers every surface this MCP session holds:
+another session on the pairing never receives or ACKs your answers, and a
+keyless clear removes only your cards. Through the stdio adapter your cards
+carry a caption with your folder name; `display_name` on a zone publish
+renames it. `wait_ms` defaults to 0 and caps at
+30000; a CLI/network timeout does not establish a user's answer.
 
 Unanswered questions appear before other cards in a regular notification stack;
 newest-first order is retained within each group. Answered cards lose that priority.

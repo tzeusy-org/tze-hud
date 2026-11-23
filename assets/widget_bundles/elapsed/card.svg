@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="360" height="124" viewBox="0 0 360 124">
+<rect id="card" data-role="backdrop" x="0.5" y="0.5" width="359" height="75" rx="{{token.shape.m}}" fill="{{token.color.surface.container.high}}" fill-opacity="{{token.opacity.surface}}" stroke="{{token.color.outline.variant}}" stroke-width="{{token.stroke.border.width}}"/>
+<text id="label" x="16" y="27" font-family="{{token.type.title.m.family}}, sans-serif" font-size="{{token.type.title.m.size}}" fill="{{token.color.on_surface}}"></text>
+<text id="value" x="16" y="58" font-family="{{token.type.readout.family}}, sans-serif" font-size="{{token.type.readout.size}}" fill="{{token.color.on_surface}}">0:00</text>
+<g id="tooltip" opacity="0"><rect x="0.5" y="82.5" width="359" height="41" rx="{{token.shape.s}}" fill="{{token.color.surface.container.highest}}" stroke="{{token.color.outline.variant}}" stroke-width="{{token.stroke.border.width}}"/>
+<text id="tooltip-label" x="16" y="109" font-family="{{token.type.body.m.family}}, sans-serif" font-size="{{token.type.body.m.size}}" fill="{{token.color.on_surface}}"></text>
+</g></svg>

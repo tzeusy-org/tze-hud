@@ -40,7 +40,9 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.error
 import urllib.parse
+import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -153,7 +155,7 @@ def widget_entry(status: dict, surface: str) -> dict | None:
 def resolve_target(status: dict, target: str) -> tuple[int, int]:
     """Centre of a reported portal pane, card control, or widget hover target.
 
-    Card targets are `zone:<name>/<key>/<index|close>`; widget targets are
+    Card targets are `zone:<name>/<key>/<index|close|goto>`; widget targets are
     `widget:<instance>/hover`. No geometry is inferred from pixels or layout.
     """
     surface, _, pane = target.partition("/")
@@ -164,8 +166,8 @@ def resolve_target(status: dict, target: str) -> tuple[int, int]:
         card = notification_entry(status, key, surface)
         if card is None:
             raise LookupError(f"{surface}/{key} is not on screen")
-        if control == "close":
-            rect = card.get("close")
+        if control in {"close", "goto"}:
+            rect = card.get(control)
         elif control:
             try:
                 index = int(control)
@@ -306,6 +308,7 @@ class Run:
     smoke: Smoke | None = None
     injector: str = "xtest"
     window_mode: str = "fullscreen"
+    go_to_probe: bool = False
     inj: object | None = None  # XTest or hud_sendinput.SendInput
     helper_pids: list[int] = field(default_factory=list)  # owned non-HUD apps (scenario 10's Notepad)
     timeline: list[dict] = field(default_factory=list)
@@ -342,6 +345,11 @@ class Run:
         env["TZE_HUD_LOG_JSON"] = "1"
         self.port = free_port()
         config = seed_config(CONFIG, self.psk)
+        if self.go_to_probe:
+            seeded = config.read_text(encoding="utf-8")
+            config.write_text(seeded.replace("[runtime]\n",
+                                             '[runtime]\ngo_to_apps = ["notepad.exe"]\n', 1),
+                              encoding="utf-8")
         # Seed the second agent beside the first: PSK hash only, no admin grant.
         digest = hashlib.sha256(self.foreign_psk.encode()).hexdigest()
         with open(config.parent / "agents.toml", "a", encoding="utf-8") as agents:
@@ -518,7 +526,7 @@ class Run:
         try:
             wait_until(probe, what=what, timeout_s=timeout_s, interval_s=interval_s)
         except AssertionError:
-            raise ScenarioFailed(what, {k: last.get(k) for k in ("portals", "notifications", "widgets", "link_launches", "idle_since_ms")}) from None
+            raise ScenarioFailed(what, {k: last.get(k) for k in ("portals", "notifications", "widgets", "link_launches", "window_activations", "idle_since_ms")}) from None
         self.step(f"ok {what}")
         return last
 
@@ -560,6 +568,12 @@ class Run:
         self.step(f"point {target} {x},{y}")
         return x, y
 
+    def expect_cursor(self, target: str, hand: bool) -> None:
+        """Rest the pointer on a target; /admin/status `cursor` is the hand exactly when a press acts."""
+        self.point(target)
+        self.expect(f"{'hand' if hand else 'no hand'} over {target}",
+                    lambda st: (st.get("cursor") == "hand") == hand)
+
     def click(self, target: str | None = None) -> None:
         if target:
             self.point(target)
@@ -567,6 +581,34 @@ class Run:
             self.mark()
         self.inj.click()
         self.step(f"click {target or ''}".rstrip())
+
+    def click_link(self, point: tuple[int, int], *, repeat: int = 1) -> None:
+        """At a link, check the physical click target after the normal Windows guard."""
+        if self.injector != "sendinput":
+            self.inj.click(repeat=repeat)
+            return
+
+        def check_target() -> None:
+            observed = WIN.click_target_snapshot()
+            self.timeline.append({
+                "t": round(time.monotonic(), 3),
+                "step": "link click target before SendInput",
+                "click_target_before_send": observed,
+                "intended_point": list(point),
+                "owned_hud_pid": self.pid,
+                "repeat": repeat,
+            })
+            cursor = observed["cursor"]
+            at_cursor = observed["at_cursor"]
+            foreground = observed["foreground"]
+            # Absolute SendInput normalization can round a physical pixel.
+            if (cursor is None or any(abs(actual - wanted) > 1 for actual, wanted in zip(cursor, point))
+                    or at_cursor is None or at_cursor["pid"] != self.pid
+                    or foreground is None or foreground["pid"] != self.pid):
+                raise ScenarioFailed("owned HUD at the link click target", {"intended_point": list(point),
+                                     "owned_hud_pid": self.pid, "click_target_before_send": observed})
+
+        self.inj.click(repeat=repeat, before_send=check_target)
 
     def wheel(self, target: str, notches: int) -> None:
         """Positive notches scroll toward the start (wheel up); returns once the HUD handled them."""
@@ -829,6 +871,7 @@ def scenario_unread(run: Run) -> None:
     run.publish(s, content="\n" + lines("u", LINES, 5))
     run.expect("unread counted and badged",
                on(s, lambda p: p["output"]["unread"] > 0 and p["panes"]["unread_badge"] is not None))
+    run.expect_cursor(f"{s}/unread_badge", hand=True)
     run.wheel(f"{s}/output", -60)
     run.expect("tail clears unread",
                on(s, lambda p: p["output"]["at_tail"] and p["output"]["unread"] == 0
@@ -882,7 +925,8 @@ def scenario_badge_opaque(run: Run) -> None:
 
 
 def scenario_composer(run: Run) -> None:
-    """6. Hover, click focus, local echo, exact submit, a second send, typing while output streams."""
+    """6. Hover, click focus, local echo, exact submit, a second send, typing while output streams,
+    and Escape keeping the draft for one exact send after refocus (hud-ohgc9.4)."""
     s = "portal:g-composer"
     open_portal(run, s, "c", count=10, expects_reply=True)
     run.point(f"{s}/composer")
@@ -910,6 +954,19 @@ def scenario_composer(run: Run) -> None:
     run.expect("draft survives streamed output",
                on(s, lambda p: p["focus"] == "composer" and p["input"]["draft_chars"] == 3
                   and (p["output"]["last_visible_line"] or "").startswith("streamed 2")))
+    run.key("Escape")
+    run.expect("one Escape leaves and keeps the draft",
+               on(s, lambda p: p["focus"] == "none" and p["input"]["draft_chars"] == 3))
+    if items := run.inputs():
+        raise ScenarioFailed("Escape sends nothing", {"items": items})
+    run.point(f"{s}/composer")
+    run.click()
+    run.expect("refocus restores the kept draft",
+               on(s, lambda p: p["focus"] == "composer" and p["input"]["draft_chars"] == 3))
+    run.key("Return")
+    items = run.take(1)
+    if [i.get("text") for i in items] != ["abc"]:
+        raise ScenarioFailed("Enter sends the kept text once", {"items": items})
 
 
 def scenario_keyboard(run: Run) -> None:
@@ -930,7 +987,12 @@ def scenario_keyboard(run: Run) -> None:
 
 
 def open_card(run: Run, key: str, *, actions: list[dict] | None = None) -> dict:
-    """Publish through MCP, then wait for the actual drawn card, never its estimate."""
+    """Publish through MCP, then wait for the actual drawn card, never its estimate.
+
+    The pointer is parked first: a card that arrives under a resting pointer
+    ignores presses for `notification.press_guard.ms` (scenario press-guard).
+    """
+    run.glide(1, 1)
     run.publish("zone:notification-area", key=key, ttl_ms=0,
                 content={"body": "Owned gesture check", "actions": actions or [
                     {"label": "First", "callback_id": f"{key}-first"},
@@ -961,7 +1023,13 @@ def scenario_card_click(run: Run) -> None:
     """R14.2 S1: a real action click returns one callback and the card exits."""
     key = "gesture-card-click"
     open_card(run, key)
-    run.click(f"zone:notification-area/{key}/0")
+    card = f"zone:notification-area/{key}"
+    run.expect_cursor(f"{card}/close", hand=True)
+    run.expect_cursor(f"{card}/0", hand=True)
+    rect = notification_entry(run.status(), key, "zone:notification-area")["rect"]
+    run.glide(int(rect["x"]) + 6, int(rect["y"]) + 6)  # the card's text corner presses nothing
+    run.expect("no hand over card text", lambda st: st.get("cursor") != "hand")
+    run.click(f"{card}/0")
     take_card_answer(run, key, f"{key}-first")
 
 
@@ -1016,6 +1084,87 @@ def scenario_foreign_publisher(run: Run) -> None:
         raise ScenarioFailed("A's answer reaches no other agent", {"items": items})
 
 
+class SessionSmoke(Smoke):
+    """A Smoke that keeps the `Mcp-Session-Id` its `initialize` was issued,
+    as the stdio adapter does: one Claude session on a shared pairing."""
+
+    def __init__(self, url: str, psk: str, label: str) -> None:
+        super().__init__(url, psk)
+        self.session: str | None = None
+        self.rpc("initialize", {"protocolVersion": "2025-06-18", "_meta": {"tze-hud/label": label}})
+        if not self.session:
+            raise ScenarioFailed("initialize issues Mcp-Session-Id", {"label": label})
+
+    def _open(self, request, timeout_s: float):
+        if self.session:
+            request.add_header("Mcp-Session-Id", self.session)
+        resp = super()._open(request, timeout_s)
+        self.session = self.session or resp.headers.get("Mcp-Session-Id")
+        return resp
+
+    def end(self) -> int:
+        """DELETE the session, as the adapter does on a clean exit."""
+        request = urllib.request.Request(self.url, method="DELETE", headers={
+            "Authorization": f"Bearer {self.psk}", "Mcp-Session-Id": self.session or ""})
+        try:
+            with urllib.request.urlopen(request, timeout=5) as resp:
+                return resp.status
+        except urllib.error.HTTPError as err:
+            return err.code
+
+
+def entry_held(surfaces: dict, surface: str) -> bool:
+    return any(e.get("s") == surface and e.get("held") for e in surfaces.get("surfaces") or [])
+
+
+def scenario_sessions(run: Run) -> None:
+    """Tier L: two labeled sessions on one pairing each publish a
+    card; pressing B's answers only B (not A, not the unscoped caller), both
+    are listed in /admin/status, and B's clean exit takes only its card."""
+    zone, url = "zone:notification-area", run.smoke.url
+    a, b = SessionSmoke(url, run.psk, "gesture-a"), SessionSmoke(url, run.psk, "gesture-b")
+    try:
+        run.glide(1, 1)  # a card arriving under a resting pointer is press-guarded
+        # Two captioned cards outgrow tier L's 180 px zone, so B's newer card
+        # covers A's slot; A's card is retained and draws again once B exits.
+        for who, name in ((a, "a"), (b, "b")):
+            run.mark()
+            key = f"gesture-session-{name}"
+            is_error, reply = who.call("hud_publish", {"surface": zone, "key": key, "ttl_ms": 0, "content": {
+                "body": "Session gesture check", "actions": [{"label": name.upper(), "callback_id": f"{key}-pick"}]}})
+            if is_error:
+                raise ScenarioFailed(f"session {name} publish refused", {"code": reply.get("code"), "hint": reply.get("hint")})
+            run.step(f"session {name} publish {zone} key={key}")
+            run.expect(f"session {name} card drawn", lambda st, key=key: bool(
+                (c := notification_entry(st, key)) and c["state"] != "exiting"))
+        # The harness's own initialize opened an unlabeled session it never uses.
+        labels = sorted(s["label"] for s in run.status().get("sessions") or [] if s.get("label"))
+        if labels != ["gesture-a", "gesture-b"]:
+            raise ScenarioFailed("/admin/status lists both sessions", {"labels": labels})
+        run.settle()
+        run.click(f"{zone}/gesture-session-b/0")
+        _, got = b.call("hud_input", {"wait_ms": int(SETTLE_S * 1000)})
+        items = got.get("items") or []
+        if [i.get("action") for i in items] != ["gesture-session-b-pick"]:
+            raise ScenarioFailed("B's press answers B", {"items": items})
+        b.call("hud_input", {"ack": [i["id"] for i in items]})
+        _, other = a.call("hud_input", {})
+        if other.get("items") or run.inputs():
+            raise ScenarioFailed("B's answer reaches neither A nor the unscoped caller",
+                                 {"a": other.get("items"), "unscoped": run.inputs()})
+        run.mark()
+        if (status := b.end()) != 202:
+            raise ScenarioFailed("B's DELETE releases it", {"status": status})
+        run.step("session b DELETE")
+        run.expect("B's exit takes only its card", lambda st: notification_entry(st, "gesture-session-b") is None
+                   and notification_entry(st, "gesture-session-a") is not None, timeout_s=1.0)
+        if not entry_held(a.ok("hud_surfaces"), zone):
+            raise ScenarioFailed("A still holds its card", {})
+    finally:
+        for who in (a, b):
+            who.end()
+
+
 def held_press_on_retired_card(run: Run, key: str, retire: Callable[[], None], what: str) -> None:
     """Press A's action, retire that card while the button is down, release:
     the retired publication's press must send nothing."""
@@ -1067,6 +1216,59 @@ def scenario_held_press(run: Run) -> None:
         run.expect("the keyed clear removes the card", lambda st: not keyed_cards(st, cleared))
 
     held_press_on_retired_card(run, cleared, clear, "a keyed clear")
+
+
+def scenario_card_hold(run: Run) -> None:
+    """A destructive action ignores a tap and fires once when held past
+    `notification.action.hold.ms` (default 600 ms)."""
+    key = "gesture-card-hold"
+    open_card(run, key, actions=[{"label": "Delete", "callback_id": f"{key}-delete", "role": "destructive"},
+                                 {"label": "Keep", "callback_id": f"{key}-keep"}])
+    target = f"zone:notification-area/{key}/0"
+    run.click(target)
+    run.observe_for("a tap on a destructive action chooses nothing",
+                    lambda st: (card := notification_entry(st, key)) is not None and card.get("chosen") is None, 1.0)
+    if items := run.inputs(wait_ms=500):
+        raise ScenarioFailed("a tap on a destructive action sends nothing", {"items": items, "status": run.status()})
+    run.point(target)
+    run.mark()
+    run.inj.button(True)
+    run.step("button down (held)")
+    try:
+        time.sleep(1.0)
+    finally:
+        run.mark()
+        run.inj.button(False)
+        run.step("button up")
+    take_card_answer(run, key, f"{key}-delete")
+
+
+def scenario_press_guard(run: Run) -> None:
+    """A keyed card that arrives under a resting pointer ignores a click for
+    `notification.press_guard.ms` (default 400 ms); once `guarded` clears, a
+    click at the same spot answers."""
+    key = "gesture-press-guard"
+    open_card(run, key)
+    target = f"zone:notification-area/{key}/0"
+    run.point(target)
+    run.smoke.ok("hud_clear", {"surface": "zone:notification-area", "key": key})
+    run.expect(f"card {key} gone", lambda st: notification_entry(st, key) is None)
+    run.settle()
+    # The pointer rests where the card will draw again.
+    run.publish("zone:notification-area", key=key, ttl_ms=0,
+                content={"body": "Owned gesture check", "actions": [
+                    {"label": "First", "callback_id": f"{key}-first"},
+                    {"label": "Second", "callback_id": f"{key}-second"}]})
+    run.expect(f"card {key} guarded", lambda st: bool((card := notification_entry(st, key)) and card.get("guarded")),
+               interval_s=0.01)
+    run.click()
+    if items := run.inputs(wait_ms=500):
+        raise ScenarioFailed("a click on an arriving card sends nothing", {"items": items, "status": run.status()})
+    run.expect(f"card {key} no longer guarded",
+               lambda st: (card := notification_entry(st, key)) is not None and not card.get("guarded"))
+    run.expect("the hand returns without motion", lambda st: st.get("cursor") == "hand")
+    run.click()
+    take_card_answer(run, key, f"{key}-first")
 
 
 def scenario_card_keyboard(run: Run) -> None:
@@ -1144,6 +1346,15 @@ def regain_owned_foreground(run: Run, what: str, timeout_s: float) -> None:
     wait_until(foreground, what=what, timeout_s=timeout_s, interval_s=0.02)
 
 
+def expect_link_feedback(run: Run) -> None:
+    """R3.2: a counted press says "Opening…" then "Opened". Off Windows the
+    handoff succeeds at once, so "opening" may already have passed."""
+    run.expect("the pressed link reports its handoff",
+               lambda s: s["link_feedback"] in ("opening", "opened"), timeout_s=1.0, interval_s=0.02)
+    run.expect("then says it opened", lambda s: s["link_feedback"] == "opened",
+               timeout_s=1.0, interval_s=0.02)
+
+
 def scenario_card_link(run: Run) -> None:
     """R14.2 S4/S5: one real link handoff; same action within 2s is refused, with no input."""
     key = "gesture-card-link"
@@ -1151,14 +1362,15 @@ def scenario_card_link(run: Run) -> None:
     # portal-reading's handoffs run just before this one.
     regain_owned_foreground(run, "owned HUD foreground before the first link press", 2.0)
     before = run.status()["link_launches"]
-    run.point(f"zone:notification-area/{key}/0")
+    point = run.point(f"zone:notification-area/{key}/0")
     first = time.monotonic()
-    run.inj.click()
+    run.click_link(point)
     run.expect("one accepted link launch", lambda s: s["link_launches"] == before + 1,
                timeout_s=1.0, interval_s=0.02)
+    expect_link_feedback(run)
     regain_owned_foreground(run, "owned HUD foreground before second link press",
                             max(0.01, first + 1.8 - time.monotonic()))
-    run.inj.click()
+    run.click_link(point)
     second = time.monotonic()
     if second - first >= 2.0:
         raise ScenarioFailed("second link press must occur within 2s", {"seconds": second - first, "status": run.status()})
@@ -1230,19 +1442,32 @@ def scenario_portal_reading(run: Run) -> None:
         text = (WIN.clipboard_text() or "").replace("\r\n", "\n")  # CF_UNICODETEXT is CRLF
         if not ("\nLine four words words words words\n" in text and len(text) == portal_entry(selected, s)["selection_chars"]):
             raise ScenarioFailed("the clipboard holds the three selected lines", {"chars": len(text)})
+    # hud-ohgc9.4 R4.2: the selection holds reading focus, so Home and End scroll
+    # OUTPUT (first and last lines visible) and keep the selection.
+    chars = portal_entry(selected, s)["selection_chars"]
+    run.key("Home")
+    run.expect("Home shows the first OUTPUT line",
+               on(s, lambda p: (p["output"]["first_visible_line"] or "").startswith("alpha")
+                  and p["selection_chars"] == chars))
+    run.key("End")
+    run.expect("End shows the last OUTPUT line",
+               on(s, lambda p: (p["output"]["last_visible_line"] or "").startswith("Line five")
+                  and p["selection_chars"] == chars))
     run.key("Escape")
     run.expect("selection cleared", on(s, lambda p: p["selection_chars"] == 0))
 
-    # Real link handoffs last: the browser can take the foreground late
-    # , so nothing but state reads follows a launch.
+    # Real link handoffs follow the other portal input. A browser can take
+    # the foreground after the handoff has returned.
     time.sleep(0.7)  # past the double-click interval
     run.glide(x, a)
-    run.click()
+    run.mark()
+    run.click_link((x, a))
     run.expect("a link click launches once (R2.1 S1)", lambda st: st["link_launches"] == launches + 1)
+    expect_link_feedback(run)
     time.sleep(0.7)
     regain_owned_foreground(run, "owned HUD foreground before the link double-click", 1.0)
     run.glide(x, b)
-    run.inj.click(repeat=2)
+    run.click_link((x, b), repeat=2)
     run.expect("a link double-click launches once and selects nothing (R2.1 S3)",
                lambda st: st["link_launches"] == launches + 2 and portal_entry(st, s)["selection_chars"] == 0)
     if items := run.inputs():
@@ -1277,8 +1502,11 @@ def shrink(run: Run, s: str, times: int = 4) -> dict:
     before = portal_entry(run.status(), s)["rect"]
     for _ in range(times):
         run.key("ctrl+minus")
-    return run.expect("Ctrl+- shrinks the portal",
-                      on(s, lambda p: p["rect"]["w"] < before["w"] or p["rect"]["h"] < before["h"]))
+    run.expect("Ctrl+- shrinks the portal",
+               on(s, lambda p: p["rect"]["w"] < before["w"] or p["rect"]["h"] < before["h"]))
+    # The first shrink can show before the later presses land; return only
+    # once they all have, so the caller's next resize starts from rest.
+    return run.settle()
 
 
 def scenario_drag_alignment(run: Run) -> None:
@@ -1432,6 +1660,7 @@ def scenario_dismiss(run: Run) -> None:
     open_portal(run, s, "old", count=5, expects_reply=True)
     run.point(f"{s}/header")
     run.expect("the actual close hit region is exposed", on(s, lambda p: p["panes"]["close"] is not None))
+    run.expect_cursor(f"{s}/close", hand=True)  # beats the header band's open hand
     run.click(f"{s}/close")
     run.expect("the pointer close removes the portal",
                lambda st: isinstance(st.get("portals"), list) and portal_entry(st, s) is None)
@@ -1600,6 +1829,85 @@ def scenario_no_focus_steal(run: Run) -> None:
         run.helper_pids.remove(notepad.pid)
 
 
+
+def scenario_go_to_session(run: Run) -> None:
+    """Go to switches to the exact owned window without moving it and stays absent for two matches."""
+    zone, key = "zone:notification-area", "gesture-go-to-session"
+    token = "tzgo-" + secrets.token_hex(4)
+    notepads = []
+    session = SessionSmoke(run.smoke.url, run.psk, token)
+
+    def open_editor(name):
+        # Keep the token bounded whether this Notepad includes the extension
+        # in its title. The acceptance check requires distinct top-level
+        # windows, each owned by the harness.
+        path = run.home / (name + ".txt")
+        path.write_text("Go to session gesture\n", encoding="utf-8")
+        editor = subprocess.Popen(["notepad.exe", str(path)])
+        notepads.append(editor)
+        run.helper_pids.append(editor.pid)
+
+        def opened():
+            info = WIN.window_snapshot(editor.pid)
+            return info is not None and name in info["title"], info
+
+        info, _ = wait_until(opened, what=f"owned Notepad window for {name}",
+                             timeout_s=15, interval_s=0.1)
+        return info
+
+    def question(body):
+        run.mark()
+        session.ok("hud_publish", {"surface": zone, "key": key, "ttl_ms": 0, "content": {
+            "body": body, "actions": [{"label": "Keep", "callback_id": "kept"}]}})
+        run.step(f"publish scoped Go to card {key}")
+
+    try:
+        target = open_editor(token + " target")
+        other = open_editor("Unmatched gesture editor")
+
+        def foreground_other():
+            foreground = WIN.foreground_pid()
+            if foreground != other["pid"]:
+                WIN.bring_to_front(other["pid"])  # Window request on an owned process only.
+            now = WIN.foreground_pid()
+            return now == other["pid"], now
+
+        wait_until(foreground_other, what="owned unmatched editor foreground",
+                   timeout_s=SETTLE_S, interval_s=0.05)
+        run.glide(1, 1)
+        before = run.status()["window_activations"]
+        question("Follow the session")
+        run.expect("the uniquely matched Go to is drawn and ready", lambda st: bool(
+            (card := notification_entry(st, key)) and card["goto"] and not card["guarded"]))
+        if WIN.foreground_pid() != other["pid"] or run.status()["window_activations"] != before:
+            raise ScenarioFailed("publication kept the current foreground", {"before": before,
+                                 "foreground": WIN.foreground_snapshot()})
+        run.expect_cursor(f"{zone}/{key}/goto", hand=True)
+        run.click()
+        run.expect("exact Go to window activation", lambda st: (
+            st["window_activations"] == before + 1 and WIN.foreground_snapshot() == target))
+        run.step(f"ok exact foreground HWND, title and unchanged rect {target['rect']}")
+        run.expect("the Go to card remains live", lambda st: bool(
+            (card := notification_entry(st, key)) and card["goto"] and card["chosen"] is None))
+        if session.ok("hud_input", {}).get("items"):
+            raise ScenarioFailed("Go to emits no scoped input", {})
+
+        duplicate = open_editor(token + " duplicate")
+        if duplicate["hwnd"] == target["hwnd"]:
+            raise ScenarioFailed("two distinct eligible Notepad windows", {"target": target, "duplicate": duplicate})
+        run.glide(1, 1)
+        question("Two Windows titles match")
+        run.settle()
+        run.observe_for("two eligible windows leave the replacement without Go to", lambda st: bool(
+            (card := notification_entry(st, key)) and card["goto"] is None
+            and st["window_activations"] == before + 1), 0.25)
+    finally:
+        session.end()
+        for editor in reversed(notepads):
+            kill_pid(editor.pid)
+            editor.wait(10)
+            run.helper_pids.remove(editor.pid)
+
 def expect_overlay_capture(run: Run, wanted: bool, what: str) -> None:
     def sample():
         state = WIN.pointer_capture_state(run.pid)
@@ -1674,8 +1982,23 @@ def overlay_focus_etiquette(run: Run, notepad_pid: int, surface: str) -> None:
     wait_until(lambda: (WIN.edit_text(notepad_pid) == expected, WIN.edit_text(notepad_pid)),
                what="next physical keystroke after answer reaches Notepad", timeout_s=SETTLE_S)
     run.expect("answer keys never edit the composer", on(surface, lambda p: p["input"]["draft_chars"] == 0))
+    # hud-ohgc9.5 R5.2: with no card, the chord reaches the portal whose latest
+    # output still asks for a reply; its outer Esc returns to Notepad.
     run.key("ctrl+shift+F9")
-    run.observe_for("no question means no foreground change",
+    run.expect("no card: the chord focuses the waiting portal's composer",
+               on(surface, lambda p: p["focus"] == "composer"))
+    foreground_is(run.pid, "the chord takes keyboard focus for the composer")
+    run.key("Escape")
+    foreground_is(notepad_pid, "composer Esc returns to the prior app")
+    run.type(" portal")
+    expected += " portal"
+    wait_until(lambda: (WIN.edit_text(notepad_pid) == expected, WIN.edit_text(notepad_pid)),
+               what="next key after the portal visit reaches Notepad", timeout_s=SETTLE_S)
+    run.publish(surface, content="\nno reply needed")
+    run.expect("the portal no longer waits for a reply", on(
+        surface, lambda p: (p["output"]["last_visible_line"] or "").startswith("no reply needed")))
+    run.key("ctrl+shift+F9")
+    run.observe_for("no card and no waiting portal means no foreground change",
                     lambda _: WIN.foreground_pid() == notepad_pid, 0.25)
 
     third = subprocess.Popen(["notepad.exe"])
@@ -1961,6 +2284,53 @@ def scenario_tray(run: Run) -> None:
     run.step("ok exposed tray: real right-click and keyboard Hide all / Show all")
 
 
+def scenario_tray_answer(run: Run) -> None:
+    """Tray left click with a question waiting focuses it; Esc returns keys to Notepad (informational)."""
+    run.expect("tray registered", lambda st: st.get("tray", {}).get("registered") is True)
+    notepad = subprocess.Popen(["notepad.exe"])
+    run.helper_pids.append(notepad.pid)
+    try:
+        def foreground():
+            if WIN.foreground_pid() != notepad.pid:
+                WIN.bring_to_front(notepad.pid)  # a window request, not injected input
+            return WIN.foreground_pid() == notepad.pid, WIN.foreground_pid()
+        wait_until(foreground, what="owned Notepad foreground", timeout_s=15, interval_s=0.2)
+        key = "gesture-tray-answer"
+        open_card(run, key)
+        status = run.expect("a left click would answer", lambda st: st["tray"].get("click") == "answer")
+        tray = status["tray"]
+        if not tray["tooltip"].splitlines()[0].endswith(" · click to answer"):
+            raise ScenarioFailed("the tooltip announces what a click does", tray)
+        probe = {}
+        try:
+            rect = WIN.tray_rect(tray["hwnd"], tray["icon_id"], run.pid,
+                                 expected_tooltip=tray["tooltip"], diagnostics=probe)
+        finally:
+            run.step(f"owned tray visibility probe {json.dumps(probe)}")
+        if rect is None:
+            run.step("limited tray-answer proof: click rule and tooltip passed; icon in overflow, no click injected")
+            return
+        wait_until(foreground, what="owned Notepad foreground before the tray click", timeout_s=15, interval_s=0.2)
+        run.inj.move_abs((rect[0] + rect[2]) // 2, (rect[1] + rect[3]) // 2)
+        run.inj.click()
+        run.expect("tray click focuses the question's first action", lambda st: bool(
+            (card := notification_entry(st, key)) and card["focus"] == 0
+            and WIN.foreground_pid() == run.pid))
+        run.key("Escape")
+        wait_until(lambda: (WIN.foreground_pid() == notepad.pid, WIN.foreground_pid()),
+                   what="Esc returns to the app that was in front", timeout_s=SETTLE_S)
+        run.expect("Esc leaves the card unanswered", lambda st: bool(
+            (card := notification_entry(st, key)) and card["focus"] is None and card["chosen"] is None))
+        run.type("after tray")
+        wait_until(lambda: (WIN.edit_text(notepad.pid) == "after tray", WIN.edit_text(notepad.pid)),
+                   what="the next keystroke reaches Notepad", timeout_s=SETTLE_S)
+        run.step("ok real tray click answers; Esc returns keys to Notepad")
+    finally:
+        kill_pid(notepad.pid)
+        notepad.wait(10)
+        run.helper_pids.remove(notepad.pid)
+
+
 CAPTURE_RGB = (255, 0, 255)  # magenta: nothing else on a CI desktop is this colour
 
 
@@ -2057,7 +2427,8 @@ def scenario_capture_exclusion(run: Run) -> None:
 
 
 # Windows only: they need Win32 foreground/edit-control access or global hotkeys.
-TIER_W_ONLY = {"no-focus-steal", "safe-mode", "overlay-pointer", "tray", "capture-exclusion"}
+OVERLAY_SCENARIOS = {"overlay-pointer", "tray", "tray-answer", "go-to-session"}
+TIER_W_ONLY = OVERLAY_SCENARIOS | {"no-focus-steal", "safe-mode", "capture-exclusion"}
 
 SCENARIOS: dict[str, Callable[[Run], None]] = {
     "output-anchor": scenario_output_anchor,          # 1
@@ -2069,8 +2440,11 @@ SCENARIOS: dict[str, Callable[[Run], None]] = {
     "keyboard": scenario_keyboard,                    # 7
     "card-click": scenario_card_click,
     "card-keyboard": scenario_card_keyboard,
+    "card-hold": scenario_card_hold,
+    "press-guard": scenario_press_guard,
     "card-dismiss": scenario_card_dismiss,
     "foreign-publisher": scenario_foreign_publisher,
+    "sessions": scenario_sessions,
     "held-press": scenario_held_press,
     "card-link": scenario_card_link,
     "stack-trim": scenario_stack_trim,
@@ -2083,8 +2457,10 @@ SCENARIOS: dict[str, Callable[[Run], None]] = {
     "lifecycle": scenario_lifecycle,                  # 13
     "resize-hotkey": scenario_resize_hotkey,          # 16
     "unicode-typing": scenario_unicode_typing,
+    "go-to-session": scenario_go_to_session,          # tier W, overlay only
     "no-focus-steal": scenario_no_focus_steal,        # 10 (tier W)
     "tray": scenario_tray,                            # tier W, overlay only
+    "tray-answer": scenario_tray_answer,              # tier W, overlay only, informational
     "overlay-pointer": scenario_overlay_pointer,      # 11 (tier W, overlay only)
     "safe-mode": scenario_safe_mode,                  # 12 (tier W)
     "capture-exclusion": scenario_capture_exclusion,  # tier W, informational (restarts the HUD twice)
@@ -2186,15 +2562,15 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(f"{', '.join(sorted(TIER_W_ONLY))} run only with --injector sendinput")
     if args.window_mode == "overlay" and not tier_w:
         parser.error("overlay gestures require --injector sendinput")
-    overlay_names = {"overlay-pointer", "tray"}
+    overlay_names = OVERLAY_SCENARIOS
     if args.scenarios and any((n in overlay_names) != (args.window_mode == "overlay") for n in args.scenarios):
-        parser.error("overlay-pointer and tray require --window-mode overlay; other scenarios require fullscreen")
+        parser.error(f"{', '.join(sorted(overlay_names))} require --window-mode overlay; "
+                     "other scenarios require fullscreen")
     names = args.scenarios or [n for n in SCENARIOS
                                if (tier_w or n not in TIER_W_ONLY)
                                and ((n in overlay_names) == (args.window_mode == "overlay"))]
     # Real link handoffs ("portal-reading", "card-link") can let a browser take
-    # the foreground seconds later (Edge first-run UI covered the HUD for every
-    # later scenario, ), so they run after everything else that
+    # the foreground seconds later, so they run after everything else that
     # injects input. "restart" replaces the HUD and only uses MCP; it stays last.
     # Before those, required scenarios run first in the fresh HUD and
     # informational ones follow in the same boot. A list naming the other window
@@ -2207,7 +2583,8 @@ def main(argv: list[str] | None = None) -> int:
     # The pid keeps parallel runs started in the same second apart.
     out = args.out or REPO / "test_results/gestures" / sha / f"{time.strftime('%Y%m%dT%H%M%S')}-{os.getpid()}"
     out.mkdir(parents=True, exist_ok=True)
-    run = Run(exe=args.exe.resolve(), out=out, injector=args.injector, window_mode=args.window_mode)
+    run = Run(exe=args.exe.resolve(), out=out, injector=args.injector, window_mode=args.window_mode,
+              go_to_probe="go-to-session" in names)
     started = time.monotonic()
     results: list[dict] = []
     failure = None

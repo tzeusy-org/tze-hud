@@ -186,6 +186,68 @@ async fn caret_blink_wakes_at_toggle_not_every_frame() {
     );
 }
 
+/// With Windows caret blinking off
+/// (`runtime.caret_blink_ms = 0`) a focused composer draws a steady caret and
+/// schedules no caret wake; a token change applies to a composer that already
+/// has focus and keeps its draft.
+#[tokio::test]
+async fn steady_caret_draws_with_no_caret_wake() {
+    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(320, 200).await);
+    *compositor.local_composer_state.lock().unwrap() = Some(Some(caret_test_draft()));
+    assert!(compositor.drain_local_composer_and_needs_render());
+    assert!(compositor.next_animation_deadline().is_some(), "blinking");
+
+    compositor.set_token_map(HashMap::from([(
+        tze_hud_config::tokens::CARET_BLINK_MS_KEY.to_owned(),
+        "0".to_owned(),
+    )]));
+    assert!(
+        compositor.local_composer.is_some(),
+        "focus and draft survive the token change"
+    );
+    // Whatever phase the blinking caret was in, the steady caret is shown:
+    // at most one frame to draw it, then nothing.
+    compositor.composer_caret_blink_start = std::time::Instant::now()
+        .checked_sub(CARET_BLINK_HALF_PERIOD)
+        .expect("test clock must have enough uptime to rewind one half-period");
+    compositor.drain_local_composer_and_needs_render();
+    assert_eq!(
+        compositor.composer_caret_rendered_phase,
+        Some(true),
+        "drawn"
+    );
+    for _ in 0..100 {
+        assert!(!compositor.drain_local_composer_and_needs_render());
+    }
+    assert_eq!(compositor.next_animation_deadline(), None, "no caret wake");
+}
+
+/// A 250 ms Windows blink time wakes at the 250 ms
+/// toggle; typing restarts the caret solid.
+#[tokio::test]
+async fn windows_blink_time_sets_the_caret_wake() {
+    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(320, 200).await);
+    compositor.set_token_map(HashMap::from([(
+        tze_hud_config::tokens::CARET_BLINK_MS_KEY.to_owned(),
+        "250".to_owned(),
+    )]));
+    *compositor.local_composer_state.lock().unwrap() = Some(Some(caret_test_draft()));
+    assert!(compositor.drain_local_composer_and_needs_render());
+    let start = compositor.composer_caret_blink_start;
+    let half = std::time::Duration::from_millis(250);
+    assert_eq!(compositor.next_animation_deadline(), Some(start + half));
+    assert_eq!(compositor.composer_caret_rendered_phase, Some(true));
+    compositor.composer_caret_blink_start = std::time::Instant::now()
+        .checked_sub(half)
+        .expect("test clock must have enough uptime to rewind one half-period");
+    assert!(compositor.drain_local_composer_and_needs_render(), "toggle");
+    assert_eq!(compositor.composer_caret_rendered_phase, Some(false));
+    // A keystroke resets the phase: solid again.
+    *compositor.local_composer_state.lock().unwrap() = Some(Some(caret_test_draft()));
+    assert!(compositor.drain_local_composer_and_needs_render());
+    assert_eq!(compositor.composer_caret_rendered_phase, Some(true));
+}
+
 fn countdown_notification_scene() -> SceneGraph {
     countdown_notification_scene_on(SceneGraph::new(1280.0, 720.0))
 }
@@ -293,6 +355,7 @@ async fn idle_with_notification_renders_only_at_fade() {
                 label: label.into(),
                 callback_id: Some(label.into()),
                 url: None,
+                role: None,
             })
             .collect();
     }
@@ -380,6 +443,7 @@ async fn idle_with_notification_renders_only_at_fade() {
                 label: label.into(),
                 callback_id: Some(label.into()),
                 url: None,
+                role: None,
             })
             .collect();
     }
@@ -405,7 +469,7 @@ async fn idle_with_notification_renders_only_at_fade() {
     let version = scene.version;
     assert!(matches!(
         scene.activate_notification(&link, 240),
-        Some(tze_hud_scene::graph::NotificationActivation::OpenUrl(_))
+        Some(tze_hud_scene::graph::NotificationActivation::OpenUrl { .. })
     ));
     assert!(scene.pending_actions.is_empty());
     assert!(scene.overlay.notification_choices.is_empty());
@@ -1102,4 +1166,83 @@ async fn hidden_notification_sets_no_fade_deadline() {
     scene.set_owner_hidden(SurfaceClasses::NONE);
     build(&mut compositor, &mut scene);
     assert!(compositor.next_animation_deadline_at(now).is_some());
+}
+
+/// A destructive card waiting for an answer costs what any card does: its
+/// only wake is the fade start. Frames run only while a hold sweeps or an
+/// early release drains, and stop the moment either lands.
+#[tokio::test]
+async fn idle_destructive_card_renders_only_during_hold_or_drain() {
+    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(320, 200).await);
+    let clock = std::sync::Arc::new(tze_hud_scene::clock::TestClock::new(1_000));
+    let mut scene =
+        countdown_notification_scene_on(SceneGraph::new_with_clock(1280.0, 720.0, clock.clone()));
+    if let ZoneContent::Notification(payload) = &mut scene
+        .zone_registry
+        .active_publishes
+        .get_mut("notification-area")
+        .unwrap()[0]
+        .content
+    {
+        payload.actions = vec![NotificationAction {
+            label: "Delete".into(),
+            callback_id: Some("delete".into()),
+            url: None,
+            role: Some(tze_hud_scene::types::ActionRole::Destructive),
+        }];
+    }
+    compositor.populate_zone_hit_regions(&mut scene, 1280.0, 720.0);
+    compositor.update_publication_animations(&scene);
+    let fade_start = {
+        let s = compositor.pub_animation_states["notification-area"]
+            .values()
+            .next()
+            .unwrap();
+        s.first_seen + std::time::Duration::from_millis(s.ttl_ms.unwrap())
+    };
+    let idle = |compositor: &Compositor, scene: &SceneGraph| {
+        !compositor.has_inflight_animation(scene)
+            && compositor.next_animation_deadline() == Some(fade_start)
+    };
+    assert!(
+        idle(&compositor, &scene),
+        "waiting adds no frames or timers"
+    );
+    clock.advance(5_000);
+    assert!(idle(&compositor, &scene));
+
+    let region = scene
+        .overlay
+        .zone_hit_regions
+        .iter()
+        .find(|r| matches!(r.kind, ZoneInteractionKind::Action { index: 0 }))
+        .unwrap()
+        .clone();
+    let epoch = scene.geometry_epoch;
+    scene.begin_notification_hold(region.clone(), None);
+    assert_ne!(scene.geometry_epoch, epoch, "the press renders");
+    for _ in 0..5 {
+        assert!(
+            compositor.has_inflight_animation(&scene),
+            "the sweep frames"
+        );
+        clock.advance(100);
+    }
+    clock.advance(100);
+    assert!(
+        idle(&compositor, &scene),
+        "a full sweep waits for completion"
+    );
+    assert!(scene.take_completed_notification_hold(600).is_some());
+    assert!(idle(&compositor, &scene));
+
+    scene.begin_notification_hold(region, None);
+    clock.advance(300);
+    assert!(scene.cancel_notification_hold(600, 100));
+    assert!(
+        compositor.has_inflight_animation(&scene),
+        "the drain frames"
+    );
+    clock.advance(100);
+    assert!(idle(&compositor, &scene), "a landed drain idles");
 }

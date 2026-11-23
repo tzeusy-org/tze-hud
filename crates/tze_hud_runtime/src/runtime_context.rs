@@ -31,7 +31,7 @@
 use std::sync::Arc;
 
 use tze_hud_config::TzeHudConfig;
-use tze_hud_scene::config::{ConfigLoader, DisplayProfile, HudChords, ResolvedConfig};
+use tze_hud_scene::config::{DisplayProfile, HudChords, ResolvedConfig};
 use tze_hud_scene::types::ResourceBudget;
 
 use crate::mutation_budget_bridge::DEFAULT_MAX_GUEST_SESSIONS;
@@ -310,7 +310,7 @@ impl RuntimeContext {
 // ─── Shared runtime context type alias ───────────────────────────────────────
 
 /// Cheaply-cloneable handle to the shared runtime context.
-pub type SharedRuntimeContext = Arc<RuntimeContext>;
+pub(crate) type SharedRuntimeContext = Arc<RuntimeContext>;
 
 // ─── Unit tests ───────────────────────────────────────────────────────────────
 

@@ -16,9 +16,10 @@ The 2026-10-02 reset is complete (T0–T5 in `docs/scope.md`): the project was
 cut back from a much larger "agent presence engine" vision, and `docs/api.md`
 is the API reference. The old doctrine, RFCs, and
 OpenSpec specs live only at git tag `pre-reset-2026-10-02` — history, not
-requirements. Do not restore them or design against them. T6–T10 remain
-partially implemented or awaiting acceptance; `docs/scope.md` separates source
-evidence from the outstanding work and Windows owner checks.
+requirements. Do not restore them or design against them. T6–T14 remain
+partially implemented or awaiting acceptance; `docs/scope.md` is a one-screen
+status table plus the list of open Windows owner checks. Per-change evidence
+lives in PR descriptions and beads.
 
 ## Technology
 
@@ -58,9 +59,23 @@ publish attaches), `hud_input` (replies, acked in the same call), and
 The PSK stays in `~/.config/tze-hud/<hostname>.psk`; a private nonsecret endpoint
 record retains the actual pairing port. The project MCP stdio adapter discovers
 one paired host without `HUD_HOST`; multiple hosts require explicit `HUD_HOST`.
+Claude hook state uses the same adapter scope. Set `TZE_HUD_MIRROR=1` in workspace settings to opt into its portal mirror.
 An old key without metadata uses 9090; an old custom port needs re-pairing or
-explicit selection. Ordinary Python clients still use `HUD_HOST`. The adapter
+explicit selection. Ordinary Python clients still use `HUD_HOST`. Each adapter
+is its own HUD session: it owns only its cards, portals and input, captions
+its cards and titles its portals with its folder name, and releases them on a
+clean exit. The adapter
 runs on Linux/WSL; native Windows/macOS client lifetime support is not claimed.
+
+On Windows, a notification card offers **Go to** when its scoped label
+(the folder or `display_name`) matches exactly one eligible top-level window
+title as a whole token. An explicit owner press raises that window. Windows
+Terminal exposes only the active tab's title, and a matching tmux terminal can
+only be raised as a whole window. A session without a window on the HUD
+machine has no match. A local terminal showing SSH can match when its title
+carries the label. Set `CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1` to preserve a
+shell's folder-based title at the cost of Claude Code's conversation titles
+and status glyph.
 
 For sessions outside this repository, use the managed user-scope installation
 in [ai-bootstrap PR63](https://github.com/tzeusy-org/ai-bootstrap/pull/63).

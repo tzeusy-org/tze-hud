@@ -219,6 +219,19 @@ prints redacted discovery information without launching another window.
   fighting it, logged as a warning). Explicit `--width`/`--height` gives a
   single window on the primary. Screenshot one monitor with
   `hud_admin.py screenshot --display N` (or `--all`).
+
+  Auto-sized overlays keep native physical dimensions across DPI changes; the
+  scale factor does not multiply those dimensions again. The production sizing
+  plan matches the event's registered window ID to that window's monitor. An
+  unknown ID leaves winit's size writer unchanged, even if a primary monitor
+  record exists; registration and the existing surface catch-up/refit sequence
+  reconcile creation-time drift. Already matched geometry requests no refit;
+  minimized no-activate restore remains separate from the five-per-ten-second
+  geometry budget. The `hud-670ds` unit proof covers DPI 1.0/1.5/2.0 and unequal
+  native rectangles through those production plans. It does not prove actual
+  `WM_DPICHANGED` delivery, OS acceptance of each request or owner mixed-DPI and
+  sleep/wake outcomes. Logical `ui.scale`, stable display-key acceptance and
+  those physical-owner checks retain their separate scope.
 - **Global chords.** Ctrl+Shift+F12 pauses agents and opens the control panel,
   Ctrl+Shift+F11 opens it with agents running, Ctrl+Shift+F10 shows a pairing
   code. They work without focusing the HUD; see `docs/api.md`.
@@ -236,10 +249,9 @@ prints redacted discovery information without launching another window.
 The skill scripts are Python and take the MCP URL as input, so they run
 unchanged against `http://127.0.0.1:9090/mcp`:
 
-- `th-hud-publish`: `python .claude/skills/th-hud-publish/scripts/publish.py --url http://127.0.0.1:9090/mcp ...`
+- `th-hud-publish` and `user-test` use the shared publisher:
+  `python .claude/skills/th-hud-publish/scripts/publish.py --url http://127.0.0.1:9090/mcp ...`
 - `hud-projection`: set `HUD_MCP_URL=http://127.0.0.1:9090/mcp` and the agent PSK.
-- `user-test`: `publish_zone_batch.py` and `publish_widget_batch.py` work when
-  given a local `--url` (or `HUD_HOST=127.0.0.1`).
 
 ## Running the gates
 
@@ -531,6 +543,13 @@ mode validates the bundle and typed parameters, then uses the existing retained
 `classic` or `blueprint`; `--tokens FILE` reads a flat `[design_tokens]` TOML
 table, with an explicit `--theme` taking precedence over its selector. Positive
 `--width`/`--height` are bounded to 8192 per axis and 16M pixels total.
+GPU fixture mode additionally requires both dimensions to fit the selected
+adapter's texture capability, requested on the headless device alongside the
+other downlevel limits. A capable llvmpipe adapter supports 3840×2160 capture;
+unsupported dimensions fail before frame construction/capture with the actual
+per-axis limit and a request to reduce them. The manifest records the requested
+device's `max_texture_dimension_2d`. CPU widget mode keeps the bounds above and
+requires no GPU.
 
 Fixture mode also accepts `--config FILE` to capture a local owner configuration,
 including widget `initial_params`, through production scene startup. It validates
@@ -650,8 +669,22 @@ added occupancy (target: combined gesture step at most four minutes). Native
 failures remain failures in these artifacts. Scenario 11 (`overlay-pointer`)
 and `tray` are in the step's `GESTURES_REQUIRED`
 list, so their failure, or a setup failure, fails `windows-build` in its last
-step and withholds the `dev` prerelease; merges are unaffected. This checks hosted software-rendered mechanics; owner GPU,
+step and withholds the `dev` prerelease; merges are unaffected. The overlay run
+also carries the informational `tray-answer` (a real tray left click with a
+question waiting, then Esc and a keystroke that must reach Notepad); an icon
+in overflow leaves it a limited proof. This checks hosted software-rendered mechanics; owner GPU,
 DWM transparency, multiple monitors and DPI acceptance remain separate.
+
+On the disposable GitHub-hosted runner, the fullscreen step attempts to
+suppress Edge onboarding through a browser policy and restores the previous
+value afterward. The link scenarios still hand their URLs to the Windows
+default browser. [Edge first-run policy](https://learn.microsoft.com/en-us/deployedge/microsoft-edge-policies/hidefirstrunexperience)
+
+Each link click checks the physical cursor and records the HWND and PID under
+it and in the foreground immediately before SendInput. These samples describe
+the windows observed before injection. The HUD's launch count and feedback are
+the link activation evidence.
+
 An original scenario failure is preserved if its failure screenshot also
 fails (`diagnostic_error`). Desktop captures check GDI results and release
 their owned DCs and bitmap on error.

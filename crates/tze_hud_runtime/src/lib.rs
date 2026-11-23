@@ -6,14 +6,16 @@
 //!
 //! | Authority | Module | Role |
 //! |-----------|--------|------|
-//! | Resource accounting | `tze_hud_resource` | Decoded-byte budget registry; GC; dedup |
+//! | Resource accounting | `tze_hud_resource` | Decoded-byte budget registry; dedup |
 //! | Mutation budgets | `tze_hud_runtime::mutation_budget_bridge` | Per-session and aggregate hard caps |
 //! | Override state | `tze_hud_runtime::shell::safe_mode` | Sole writer of safe-mode state |
 //! | Scene orchestration | `tze_hud_runtime` (this crate) | Wires authority modules; drives pipeline |
 //!
 //! ## Threads
 //!
-//! Four fixed thread groups — no dynamic spawning after startup:
+//! Three long-lived thread groups (main, compositor, the Tokio pool);
+//! short-lived helper threads (font fallback, restart, update, link launch,
+//! watchers) start on demand:
 //!
 //! - **Main thread**: winit event loop, input drain, local feedback,
 //!   surface.present() when signalled by the frame-ready watch.
@@ -28,8 +30,8 @@
 //!
 //! | Feature | Purpose |
 //! |---------|---------|
-//! | `headless` | Enable headless GPU surface (required for CI and tests) |
 //! | `dev-mode` | Allow `HeadlessConfig { config_toml: None }` — grants unrestricted capabilities to all agents; opt into compositor/telemetry headless work observations. **MUST NOT be enabled in production binaries.** Safe for integration tests, examples, and local development. |
+//! | `test-harness` | Expose `windowed::HeadlessEventLoopHarness` and headless gRPC listener adoption for end-to-end fixtures. Not for production builds. |
 //!
 //! In unit tests (compiled with `cfg(test)`), the `dev-mode` bypass is also
 //! available without the feature flag, because unit tests run inside the
@@ -54,11 +56,13 @@ pub(crate) mod mcp;
 pub(crate) mod mutation_budget_bridge;
 pub(crate) mod net_addrs;
 pub mod operator;
+pub mod os_fonts;
 pub(crate) mod os_prefs;
 pub mod pairing;
 pub(crate) mod pipeline;
 pub mod portal;
 pub mod portal_tokens;
+pub(crate) mod question_placement;
 pub(crate) mod runtime_context;
 pub(crate) mod scene_startup;
 pub use scene_startup::{SceneStartupResult, run_scene_startup};

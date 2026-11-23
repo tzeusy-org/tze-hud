@@ -33,10 +33,10 @@ use super::install::{InstallPaths, same_path};
 pub const PUBLIC_KEY: &str = include_str!("../../../../app/tze_hud_app/minisign.pub");
 
 /// Release downloads for the repository; `TZE_HUD_RELEASES_URL` overrides it.
-pub const DEFAULT_RELEASES_URL: &str = "https://github.com/tzeusy-org/tze-hud/releases";
-pub const RELEASES_URL_ENV: &str = "TZE_HUD_RELEASES_URL";
+const DEFAULT_RELEASES_URL: &str = "https://github.com/tzeusy-org/tze-hud/releases";
+const RELEASES_URL_ENV: &str = "TZE_HUD_RELEASES_URL";
 /// Whole-download budget per file.
-pub const FETCH_TIMEOUT: Duration = Duration::from_secs(120);
+const FETCH_TIMEOUT: Duration = Duration::from_secs(120);
 
 const MAX_EXE_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_SIG_BYTES: u64 = 4096;
@@ -339,7 +339,7 @@ pub fn stage(
 /// Park the running exe as `tze_hud.old.exe`, move the staged exe into place
 /// and run `handoff`. If anything fails, `tze_hud.exe` is the original again
 /// ([`Failure::RestoreFailed`] when even that is impossible).
-pub fn swap_in(
+fn swap_in(
     paths: &InstallPaths,
     handoff: impl FnOnce() -> Result<(), String>,
 ) -> Result<(), Failure> {

@@ -5,8 +5,8 @@ only on a GitHub-hosted VM (the guard there requires `GITHUB_ACTIONS=true`).
 `SendInput` injects keyboard-shaped virtual-key events for text the active
 layout can type, Unicode packets (VK_PACKET) only when asked, absolute pointer
 moves on the primary display and 120-unit wheel notches. Every injection calls
-the harness guard first. SendInput's return value is logged, never asserted:
-assertions rest on HUD state.
+the harness guard first. Link clicks can check the target again before queuing
+input. SendInput's return value is logged. Scenario outcomes use HUD state.
 
 Python stdlib only; read-only shell accessibility uses built-in Windows
 PowerShell and the framework UIAutomationClient assemblies.
@@ -290,6 +290,26 @@ def _windows_of(pid: int) -> list[int]:
     return found
 
 
+
+def _window_snapshot(hwnd: int) -> dict | None:
+    pid, bounds = wintypes.DWORD(), wintypes.RECT()
+    title = ctypes.create_unicode_buffer(512)
+    if (not hwnd or not user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+            or not user32.GetWindowRect(hwnd, ctypes.byref(bounds))):
+        return None
+    user32.GetWindowTextW(hwnd, title, len(title))
+    return {"hwnd": hwnd, "pid": pid.value, "title": title.value,
+            "rect": [bounds.left, bounds.top, bounds.right, bounds.bottom]}
+
+
+def window_snapshot(pid: int) -> dict | None:
+    windows = _windows_of(pid)
+    return _window_snapshot(windows[0]) if windows else None
+
+
+def foreground_snapshot() -> dict | None:
+    return _window_snapshot(user32.GetForegroundWindow())
+
 def bring_to_front(pid: int) -> bool:
     """Ask Windows to foreground `pid`'s window (no input injected)."""
     windows = _windows_of(pid)
@@ -335,6 +355,23 @@ def cursor_position() -> tuple[int, int]:
     if not user32.GetCursorPos(ctypes.byref(point)):
         raise ctypes.WinError(ctypes.get_last_error())
     return point.x, point.y
+
+
+def click_target_snapshot() -> dict:
+    """Sample the physical cursor, window at that point, and foreground."""
+    def identity(hwnd: int | None) -> dict | None:
+        pid = wintypes.DWORD()
+        if not hwnd or not user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid)) or not pid.value:
+            return None
+        return {"hwnd": hwnd, "pid": pid.value}
+
+    point = wintypes.POINT()
+    has_cursor = user32.GetCursorPos(ctypes.byref(point))
+    return {
+        "cursor": [point.x, point.y] if has_cursor else None,
+        "at_cursor": identity(user32.WindowFromPoint(point)) if has_cursor else None,
+        "foreground": identity(user32.GetForegroundWindow()),
+    }
 
 
 def edit_rect(pid: int) -> tuple[int, int, int, int] | None:
@@ -441,9 +478,11 @@ class SendInput:
         self.guard = guard
         self.calls: list[dict] = []
 
-    def _send(self, what: str, items: list[INPUT]) -> None:
+    def _send(self, what: str, items: list[INPUT], *, before_send: Callable[[], None] | None = None) -> None:
         self.guard()
         array = (INPUT * len(items))(*items)
+        if before_send is not None:
+            before_send()
         sent = user32.SendInput(len(items), array, ctypes.sizeof(INPUT))
         # Logged, never an assertion.
         self.calls.append({"what": what, "requested": len(items), "sent": sent,
@@ -462,16 +501,18 @@ class SendInput:
             raise ValueError("only the left button is used")
         self._send("left down" if down else "left up", [_mouse(LEFT_DOWN if down else LEFT_UP)])
 
-    def click(self, button: int = 1, repeat: int = 1) -> None:
+    def click(self, button: int = 1, repeat: int = 1, *, before_send: Callable[[], None] | None = None) -> None:
         """Button 1 clicks; 4 and 5 are one wheel notch up or down (as in X11)."""
         if button in (4, 5):
             delta = WHEEL_DELTA if button == 4 else -WHEEL_DELTA
-            self._send(f"wheel {repeat}x{delta}", [_mouse(WHEEL, data=delta) for _ in range(repeat)])
+            self._send(f"wheel {repeat}x{delta}", [_mouse(WHEEL, data=delta) for _ in range(repeat)],
+                       before_send=before_send)
             return
         flags = {1: (LEFT_DOWN, LEFT_UP), 3: (RIGHT_DOWN, RIGHT_UP)}
         if button not in flags:
             raise ValueError(f"button {button}")
-        self._send(f"click button {button} x{repeat}", [_mouse(flag) for _ in range(repeat) for flag in flags[button]])
+        self._send(f"click button {button} x{repeat}", [_mouse(flag) for _ in range(repeat) for flag in flags[button]],
+                   before_send=before_send)
 
     def key(self, chord: str) -> None:
         vks = chord_vks(chord)

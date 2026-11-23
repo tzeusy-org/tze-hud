@@ -842,7 +842,7 @@ const INLINE_PARSE_BYTE_THRESHOLD: usize = 4096;
 /// `MarkdownPrimer`) that gets reused across multiple, independently
 /// constructed `SceneGraph`s — e.g. a benchmark/test loop that builds a fresh
 /// scene per scenario iteration while reusing one `Compositor`, such as
-/// `scroll_reshape_reuse_hud991cj` — can dispatch a legitimate prime for a NEW
+/// `scroll_reshape_reuse` — can dispatch a legitimate prime for a NEW
 /// scene whose `version` is *lower* than the value already recorded from a
 /// PRIOR scene. Gating on that raw number then makes `publish_if_newer` treat
 /// the new scene's correctly-parsed background result as "stale" and silently,
@@ -2554,6 +2554,251 @@ fn parse_hex_color(s: &str) -> Option<Rgba> {
 mod tests {
     use super::*;
 
+    fn map(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+        pairs
+            .iter()
+            .map(|&(k, v)| (k.to_owned(), v.to_owned()))
+            .collect()
+    }
+
+    #[test]
+    fn thematic_break_offsets_follow_the_separator_token() {
+        for valid in [
+            "---", "***", "___", "----", "- - -", "  ---  ", "* * *", "-- -",
+        ] {
+            assert!(is_thematic_break(valid), "{valid}");
+        }
+        for invalid in ["", "--", "**", "---x", "abc", "-*-", "a---", "==="] {
+            assert!(!is_thematic_break(invalid), "{invalid}");
+        }
+        let source = "A\n---\nB\n---\nC";
+        let no_overrides = MarkdownTokens::from_token_map(&HashMap::new());
+        assert_eq!(
+            (
+                no_overrides.separator_color,
+                no_overrides.separator_thickness_px
+            ),
+            (None, 1.0)
+        );
+        let plain = parse_markdown_subset(source, &no_overrides);
+        assert_eq!(&*plain.plain_text, source);
+        assert!(plain.thematic_breaks.is_empty());
+
+        let themed = MarkdownTokens::from_token_map(&map(&[
+            ("portal.divider.color", "#2A3344"),
+            ("portal.divider.thickness_px", "2"),
+        ]));
+        assert_eq!(themed.separator_color, parse_hex_color("#2A3344"));
+        assert_eq!(themed.separator_thickness_px, 2.0);
+        assert_eq!(tokens().separator_thickness_px, 1.0);
+        let divided = parse_markdown_subset(source, &themed);
+        let text = &*divided.plain_text;
+        assert_eq!(text, "A\n\nB\n\nC");
+        assert_eq!(divided.thematic_breaks, [2, 5]);
+    }
+
+    #[test]
+    fn headings_and_emphasis_style_the_correct_multibyte_ranges() {
+        let overrides = MarkdownTokens::from_token_map(&map(&[
+            ("typography.heading.1.weight", "900"),
+            ("typography.heading.2.scale", "2.0"),
+            ("typography.heading.3.weight", "500"),
+            ("typography.bold.weight", "800"),
+        ]));
+        assert_eq!(overrides.heading_weight[0], 900);
+        assert_eq!(overrides.heading_weight[1], 700);
+        assert_eq!(overrides.heading_weight[2], 500);
+        assert_eq!(overrides.heading_scale[1], 2.0);
+        assert_eq!(overrides.bold_weight, 800);
+        let defaults = MarkdownTokens::from_token_map(&HashMap::new());
+        assert_eq!(defaults.heading_weight, tokens().heading_weight);
+        assert_eq!(defaults.heading_scale, tokens().heading_scale);
+        assert_eq!(defaults.heading_weight[0], 700);
+        assert_eq!(defaults.bold_weight, 700);
+        for theme in [defaults, overrides] {
+            for index in 0..6 {
+                let input = format!("{} 見出し", "#".repeat(index + 1));
+                let parsed = parse_markdown_subset(&input, &theme);
+                assert_eq!(&*parsed.plain_text, "見出し");
+                let span = &parsed.spans[0];
+                let scale = theme.heading_scale[index];
+                assert_eq!(span.attr.weight, Some(theme.heading_weight[index]));
+                assert_eq!(span.attr.size_scale, (scale != 1.0).then_some(scale));
+                assert_eq!(&parsed.plain_text[span.start_byte..span.end_byte], "見出し");
+            }
+            for (input, weight, italic) in [
+                ("Hello **太字**!", Some(theme.bold_weight), false),
+                ("Hello *太字*!", None, true),
+                ("Hello ***太字***!", Some(theme.bold_weight), true),
+            ] {
+                let parsed = parse_markdown_subset(input, &theme);
+                assert_eq!(&*parsed.plain_text, "Hello 太字!");
+                assert!(
+                    parsed.spans.iter().any(|span| {
+                        &parsed.plain_text[span.start_byte..span.end_byte] == "太字"
+                            && (span.attr.weight, span.attr.italic) == (weight, italic)
+                    }),
+                    "{input}"
+                );
+            }
+        }
+        for text in ["", "plain text 👨‍👩‍👧‍👦"] {
+            let plain = parse(text);
+            assert_eq!(&*plain.plain_text, text);
+            assert!(plain.spans.is_empty());
+        }
+        for text in [
+            "# Title\n\nHello **world** and *folks*.\n\n- item one\n- item two",
+            "# 日本語タイトル 👩‍💻\n\n**太字** と *斜体* テキスト。\n\n`コード`",
+        ] {
+            let mixed = parse(text);
+            assert!(!mixed.spans.is_empty());
+            for span in &mixed.spans {
+                assert!(
+                    span.start_byte < span.end_byte
+                        && mixed
+                            .plain_text
+                            .get(span.start_byte..span.end_byte)
+                            .is_some(),
+                    "{text:?}: invalid span {}..{}",
+                    span.start_byte,
+                    span.end_byte
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn transcript_spacing_and_list_metadata_use_configured_and_default_values() {
+        let defaults = tokens();
+        assert_eq!(
+            (
+                defaults.line_height_multiplier,
+                defaults.heading_margin_top,
+                defaults.heading_margin_bottom,
+                defaults.list_item_spacing
+            ),
+            (1.4, 0.0, 0.0, 0.0),
+        );
+        let compact = parse("Intro\n# Heading\n- first\n* second\n+ third");
+        assert_eq!(
+            &*compact.plain_text,
+            "Intro\nHeading\n• first\n• second\n• third"
+        );
+        let ordered = parse("1) alpha\n2) beta\n3. gamma");
+        assert_eq!(ordered.plain_text.as_ref(), "1) alpha\n2) beta\n3. gamma");
+        for (parsed, prefixes) in [
+            (compact, ["• ", "• ", "• "]),
+            (ordered, ["1) ", "2) ", "3. "]),
+        ] {
+            assert_eq!(parsed.list_items.len(), prefixes.len());
+            for (span, prefix) in parsed.list_items.iter().zip(prefixes) {
+                assert_eq!(
+                    &parsed.plain_text[span.item_start_byte..span.content_start_byte],
+                    prefix
+                );
+            }
+        }
+        let themed = MarkdownTokens::from_token_map(&map(&[
+            ("typography.line_height.multiplier", "1.6"),
+            ("spacing.heading.top", "1"),
+            ("spacing.heading.bottom", "1.5"),
+            ("spacing.list.item", "1"),
+        ]));
+        assert_eq!(
+            (
+                themed.heading_margin_top,
+                themed.heading_margin_bottom,
+                themed.list_item_spacing
+            ),
+            (1.0, 1.5, 1.0)
+        );
+        let parsed = parse_markdown_subset("Intro\n# Heading", &themed);
+        assert_eq!(&*parsed.plain_text, "Intro\n\nHeading\n");
+        assert_eq!(parsed.line_height_multiplier, 1.6);
+        for invalid in ["0.5", "10.0", "NaN"] {
+            let settings = map(&[("typography.line_height.multiplier", invalid)]);
+            assert_eq!(
+                MarkdownTokens::from_token_map(&settings).line_height_multiplier,
+                1.4
+            );
+        }
+    }
+
+    #[test]
+    fn code_color_backdrops_and_copy_ranges_are_independent() {
+        let source = "Use `fmt` and ``か`ん``.\n```sh\nls -la\necho hi\n```";
+        let mut theme =
+            MarkdownTokens::from_token_map(&map(&[("color.code.background", "#333333")]));
+        assert_eq!(theme.code_background, parse_hex_color("#333"));
+        for foreground in [None, Some(Rgba::WHITE)] {
+            theme.code_color = foreground;
+            let parsed = parse_markdown_subset(source, &theme);
+            assert_eq!(&*parsed.plain_text, "Use fmt and か`ん.\nls -la\necho hi\n");
+            let &[(start, end)] = parsed.code_blocks.as_slice() else {
+                panic!("expected exactly one fenced copy range");
+            };
+            assert_eq!(&parsed.plain_text[start..end], "ls -la\necho hi");
+            let monospace: Vec<_> = parsed
+                .spans
+                .iter()
+                .filter(|span| span.attr.monospace)
+                .collect();
+            for part in ["fmt", "か`ん", "ls -la", "echo hi"] {
+                assert!(
+                    monospace.iter().any(
+                        |span| parsed.plain_text[span.start_byte..span.end_byte].contains(part)
+                    ),
+                    "{part}"
+                );
+            }
+            for span in monospace {
+                assert!(parsed.plain_text.is_char_boundary(span.start_byte));
+                assert!(parsed.plain_text.is_char_boundary(span.end_byte));
+                assert_eq!(span.attr.color, foreground);
+                assert_eq!(span.attr.background_color, theme.code_background);
+            }
+            let inline: Vec<_> = parsed
+                .code_panels
+                .iter()
+                .filter(|span| matches!(span.kind, CodePanelKind::Inline) && span.end_byte <= start)
+                .map(|span| &parsed.plain_text[span.start_byte..span.end_byte])
+                .collect();
+            assert_eq!(inline, ["fmt", "か`ん"]);
+            assert!(
+                parsed
+                    .code_panels
+                    .iter()
+                    .any(|span| matches!(span.kind, CodePanelKind::Block)
+                        && span.end_byte > span.start_byte)
+            );
+        }
+        assert!(parse(source).code_panels.is_empty());
+        let foreground = MarkdownTokens::from_token_map(&map(&[("color.code.text", "#FFFFFF")]));
+        let ink_only = parse_markdown_subset(source, &foreground);
+        assert!(ink_only.code_panels.is_empty());
+        let ink = ink_only
+            .spans
+            .iter()
+            .find(|span| span.attr.monospace)
+            .unwrap();
+        assert_eq!(ink.attr.color, Some(Rgba::WHITE));
+        assert_eq!(ink.attr.background_color, None);
+        let indented = parse("    fn hello() {}");
+        assert_eq!(&*indented.plain_text, "fn hello() {}");
+        assert!(indented.spans.iter().any(|span| span.attr.monospace));
+        let three = parse("`a` and `b` and `c`");
+        assert_eq!(&*three.plain_text, "a and b and c");
+        assert!(
+            three
+                .spans
+                .iter()
+                .filter(|span| span.attr.monospace)
+                .map(|span| &three.plain_text[span.start_byte..span.end_byte])
+                .eq(["a", "b", "c"])
+        );
+    }
+
     fn tokens() -> MarkdownTokens {
         MarkdownTokens::default()
     }
@@ -2562,288 +2807,6 @@ mod tests {
         parse_markdown_subset(s, &tokens())
     }
 
-    // ─── Transcript turn separators ────────────────────────────
-
-    fn tokens_with_separator() -> MarkdownTokens {
-        MarkdownTokens {
-            separator_color: Some(Rgba::new(0.16, 0.2, 0.27, 1.0)),
-            ..MarkdownTokens::default()
-        }
-    }
-
-    #[test]
-    fn is_thematic_break_recognizes_valid_markers() {
-        for s in [
-            "---", "***", "___", "----", "- - -", "  ---  ", "* * *", "-- -",
-        ] {
-            assert!(is_thematic_break(s), "{s:?} should be a thematic break");
-        }
-        // Fewer than 3 markers, mixed markers, or any other character disqualify.
-        for s in ["", "--", "**", "---x", "abc", "-*-", "a---", "==="] {
-            assert!(
-                !is_thematic_break(s),
-                "{s:?} should NOT be a thematic break"
-            );
-        }
-    }
-
-    /// With a separator token set, a `---` line becomes a divider: recorded in
-    /// `thematic_breaks`, rendered as a blank line (not literal `---` text).
-    #[test]
-    fn thematic_break_recorded_with_separator_token() {
-        let parsed = parse_markdown_subset("A\n---\nB", &tokens_with_separator());
-        assert_eq!(parsed.thematic_breaks.len(), 1, "one divider recorded");
-        let plain = parsed.plain_text.as_ref();
-        assert!(
-            !plain.contains("---"),
-            "divider is not literal text: {plain:?}"
-        );
-        // The recorded offset is at the divider's blank line (1 newline before it).
-        let off = parsed.thematic_breaks[0];
-        let lines_before = plain[..off].chars().filter(|&c| c == '\n').count();
-        assert_eq!(
-            lines_before, 1,
-            "divider sits on the blank line between A and B"
-        );
-        // Both entries survive around the divider.
-        assert!(plain.starts_with('A'));
-        assert!(plain.ends_with('B'));
-    }
-
-    /// Without a separator token, `---` keeps the prior behavior — ordinary text,
-    /// no divider recorded (minimal blast radius for non-portal surfaces).
-    #[test]
-    fn thematic_break_ignored_without_separator_token() {
-        let parsed = parse("A\n---\nB");
-        assert!(
-            parsed.thematic_breaks.is_empty(),
-            "no divider without the token"
-        );
-        assert!(
-            parsed.plain_text.contains("---"),
-            "without the token, --- renders as literal text"
-        );
-    }
-
-    /// Multiple entries produce one divider between each adjacent pair.
-    #[test]
-    fn multiple_thematic_breaks_recorded_in_order() {
-        let parsed = parse_markdown_subset("A\n---\nB\n---\nC", &tokens_with_separator());
-        assert_eq!(parsed.thematic_breaks.len(), 2);
-        assert!(
-            parsed.thematic_breaks[0] < parsed.thematic_breaks[1],
-            "sorted"
-        );
-    }
-
-    #[test]
-    fn separator_tokens_resolve_from_map() {
-        use std::collections::HashMap;
-        let mut map = HashMap::new();
-        map.insert("portal.divider.color".to_owned(), "#2A3344".to_owned());
-        map.insert("portal.divider.thickness_px".to_owned(), "2".to_owned());
-        let t = MarkdownTokens::from_token_map(&map);
-        assert!(t.separator_color.is_some(), "separator color resolved");
-        assert_eq!(t.separator_thickness_px, 2.0);
-
-        // Absent token → no separator, default thickness.
-        let empty = MarkdownTokens::from_token_map(&HashMap::new());
-        assert!(empty.separator_color.is_none());
-        assert_eq!(empty.separator_thickness_px, 1.0);
-    }
-
-    // ── Task 2.4 — Subset construct tests ─────────────────────────────────────
-
-    /// H1 heading strips `#` marker and applies bold weight.
-    #[test]
-    fn heading_h1_stripped_and_styled() {
-        let md = parse("# Hello World");
-        assert_eq!(
-            &*md.plain_text, "Hello World",
-            "H1 heading must strip # prefix"
-        );
-        assert!(
-            md.spans.iter().any(|s| s.attr.weight == Some(700)
-                && md.plain_text[s.start_byte..s.end_byte].contains("Hello")),
-            "H1 must have weight=700 span"
-        );
-    }
-
-    /// H2–H6 headings each get the correct level-specific weight from tokens.
-    #[test]
-    fn headings_h1_through_h6_have_correct_weights() {
-        for level in 1u8..=6 {
-            let marker = "#".repeat(level as usize);
-            let input = format!("{marker} Text");
-            let md = parse(&input);
-            assert_eq!(&*md.plain_text, "Text", "level {level}: expected 'Text'");
-            let expected_weight = MarkdownTokens::default().heading_weight[(level - 1) as usize];
-            assert!(
-                md.spans
-                    .iter()
-                    .any(|s| s.attr.weight == Some(expected_weight)),
-                "H{level} must carry weight={expected_weight}"
-            );
-        }
-    }
-
-    /// Strong (`**text**`) renders as bold.
-    #[test]
-    fn strong_renders_bold() {
-        let md = parse("Hello **world**!");
-        assert_eq!(&*md.plain_text, "Hello world!");
-        let bold_span = md.spans.iter().find(|s| s.attr.weight == Some(700));
-        assert!(bold_span.is_some(), "strong must produce weight=700 span");
-        let span = bold_span.unwrap();
-        assert_eq!(&md.plain_text[span.start_byte..span.end_byte], "world");
-    }
-
-    /// Emphasis (`*text*`) renders as italic.
-    #[test]
-    fn emphasis_renders_italic() {
-        let md = parse("Hello *world*!");
-        assert_eq!(&*md.plain_text, "Hello world!");
-        let italic_span = md.spans.iter().find(|s| s.attr.italic);
-        assert!(italic_span.is_some(), "emphasis must produce italic span");
-        let span = italic_span.unwrap();
-        assert_eq!(&md.plain_text[span.start_byte..span.end_byte], "world");
-    }
-
-    /// Bold+italic (`***text***`) renders as both bold and italic.
-    #[test]
-    fn bold_italic_renders_both() {
-        let md = parse("***bold-italic***");
-        assert_eq!(&*md.plain_text, "bold-italic");
-        assert!(
-            md.spans
-                .iter()
-                .any(|s| s.attr.weight == Some(700) && s.attr.italic),
-            "bold-italic must produce weight=700 and italic=true"
-        );
-    }
-
-    /// Inline code (`\`code\``) uses monospace family.
-    #[test]
-    fn inline_code_uses_monospace() {
-        let md = parse("Use `fmt::Display` here.");
-        assert_eq!(&*md.plain_text, "Use fmt::Display here.");
-        let code_span = md.spans.iter().find(|s| s.attr.monospace);
-        assert!(
-            code_span.is_some(),
-            "inline code must produce monospace span"
-        );
-        let span = code_span.unwrap();
-        assert_eq!(
-            &md.plain_text[span.start_byte..span.end_byte],
-            "fmt::Display"
-        );
-    }
-
-    /// Fenced code block (``` ``` ```) renders body as monospace.
-    #[test]
-    fn fenced_code_block_body_is_monospace() {
-        let input = "```\nlet x = 1;\nprintln!(\"{x}\");\n```";
-        let md = parse(input);
-        assert!(
-            md.plain_text.contains("let x = 1;"),
-            "fenced block body must be in output"
-        );
-        assert!(
-            md.plain_text.contains("println!"),
-            "fenced block body second line must be in output"
-        );
-        assert!(
-            md.spans.iter().any(|s| s.attr.monospace),
-            "fenced block must produce monospace spans"
-        );
-    }
-
-    /// Indented code block (4-space indent) renders as monospace.
-    #[test]
-    fn indented_code_block_is_monospace() {
-        let input = "    fn hello() {}";
-        let md = parse(input);
-        assert_eq!(&*md.plain_text, "fn hello() {}");
-        assert!(
-            md.spans.iter().any(|s| s.attr.monospace),
-            "indented block must produce monospace span"
-        );
-    }
-
-    /// Unordered list items (`- item`) render with bullet prefix.
-    #[test]
-    fn unordered_list_items_have_bullet() {
-        let input = "- alpha\n- beta\n- gamma";
-        let md = parse(input);
-        assert!(
-            md.plain_text.contains("• alpha"),
-            "list item must have bullet; got: {:?}",
-            md.plain_text
-        );
-        assert!(md.plain_text.contains("• beta"));
-        assert!(md.plain_text.contains("• gamma"));
-    }
-
-    /// Ordered list items (`1. item`) render with their ordinal preserved.
-    ///
-    /// Before the ordinal was stripped and replaced with "• ",
-    /// causing "1. first" to appear as "• first".  This test codifies the
-    /// correct behaviour: the ordinal number and punctuation are preserved.
-    #[test]
-    fn ordered_list_items_preserve_ordinal() {
-        let input = "1. first\n2. second";
-        let md = parse(input);
-        assert!(
-            md.plain_text.contains("1. first"),
-            "ordered list item must preserve ordinal: got {:?}",
-            md.plain_text
-        );
-        assert!(
-            md.plain_text.contains("2. second"),
-            "ordered list item must preserve ordinal: got {:?}",
-            md.plain_text
-        );
-        // Unordered bullet must NOT appear for ordered lists.
-        assert!(
-            !md.plain_text.contains("• first"),
-            "ordered list must not render with unordered bullet"
-        );
-    }
-
-    /// Link `[text](url)` renders as styled text; destination is omitted.
-    #[test]
-    fn link_renders_text_not_url() {
-        let md = parse("[release notes](https://example.com)");
-        assert_eq!(
-            &*md.plain_text, "release notes",
-            "link must render only link text"
-        );
-        assert!(
-            !md.plain_text.contains("example.com"),
-            "link destination must not appear in output"
-        );
-    }
-
-    /// Link text styled with token link color if present.
-    #[test]
-    fn link_styled_with_token_color() {
-        let t = MarkdownTokens {
-            link_color: Some(Rgba::new(0.0, 0.5, 1.0, 1.0)),
-            ..MarkdownTokens::default()
-        };
-        let md = parse_markdown_subset("[click here](https://x.com)", &t);
-        assert_eq!(&*md.plain_text, "click here");
-        let link_span = md.spans.iter().find(|s| s.attr.color.is_some());
-        assert!(
-            link_span.is_some(),
-            "link must carry color override when token set"
-        );
-    }
-
-    // ── Task 2.4 — Excluded construct tests ───────────────────────────────────
-
-    /// Excluded constructs render as literal source: content is never dropped
-    /// and the markers stay visible (images must round-trip exactly).
     #[test]
     fn excluded_constructs_render_literally() {
         let cases: &[(&str, &str, &[&str])] = &[
@@ -2873,66 +2836,52 @@ mod tests {
         );
     }
 
-    /// hud-ljhku.2 replaces the old non-navigable contract: an HTTPS link keeps
-    /// its validated target on a [`LinkSpan`] while only its text is drawn.
     #[test]
-    fn https_link_keeps_its_href_and_draws_only_text() {
-        let md = parse("see [the docs](https://example.com/guide) now");
-        assert_eq!(&*md.plain_text, "see the docs now");
-        assert_eq!(
-            md.links,
-            vec![LinkSpan {
-                start_byte: 4,
-                end_byte: 12,
-                href: "https://example.com/guide".into(),
-            }]
-        );
+    fn https_link_text_and_destinations_share_exact_byte_ranges() {
+        type LinkCase<'a> = (&'a str, &'a str, &'a [(&'a str, &'a str)]);
+        let cases: &[LinkCase<'_>] = &[
+            (
+                "see [the docs](https://example.com/guide) now",
+                "see the docs now",
+                &[("the docs", "https://example.com/guide")],
+            ),
+            (
+                "[**bold** tail](https://example.com/a)",
+                "bold tail",
+                &[("bold tail", "https://example.com/a")],
+            ),
+            (
+                "go to https://example.com/x. or <https://example.org>!",
+                "go to https://example.com/x. or https://example.org!",
+                &[
+                    ("https://example.com/x", "https://example.com/x"),
+                    ("https://example.org", "https://example.org/"),
+                ],
+            ),
+            ("[doc](fn(arg))", "doc", &[]),
+            ("[a](u1) and [b](u2)", "a and b", &[]),
+        ];
+        for (input, text, spans) in cases {
+            let parsed = parse(input);
+            assert_eq!(parsed.plain_text.as_ref(), *text);
+            let visible = parsed
+                .links
+                .iter()
+                .map(|span| (&text[span.start_byte..span.end_byte], span.href.as_ref()));
+            assert!(
+                visible.eq(spans.iter().copied()),
+                "{input}: {:?}",
+                parsed.links
+            );
+        }
         let long = format!("[x](https://example.com/{})", "a".repeat(2048));
-        assert!(
-            parse(&long).links.is_empty(),
-            "over 2048 bytes is not a link"
-        );
-    }
-
-    /// Emphasis inside link text stays one link with the inner styling.
-    #[test]
-    fn https_link_with_emphasis_is_one_link() {
-        let md = parse("[**bold** tail](https://example.com/a)");
-        assert_eq!(&*md.plain_text, "bold tail");
-        assert_eq!(md.links.len(), 1);
-        assert_eq!((md.links[0].start_byte, md.links[0].end_byte), (0, 9));
-    }
-
-    /// R2.1 S5: bare and angle-bracket HTTPS URLs are links; trailing
-    /// punctuation stays outside.
-    #[test]
-    fn bare_and_angle_https_urls_autolink() {
-        let md = parse("go to https://example.com/x. or <https://example.org>!");
-        assert_eq!(
-            &*md.plain_text,
-            "go to https://example.com/x. or https://example.org!"
-        );
-        let hrefs: Vec<_> = md.links.iter().map(|l| &*l.href).collect();
-        assert_eq!(hrefs, ["https://example.com/x", "https://example.org/"]);
-        assert_eq!(
-            &md.plain_text[md.links[0].start_byte..md.links[0].end_byte],
-            "https://example.com/x"
-        );
-        assert!(
-            parse("xhttps://example.com").links.is_empty(),
-            "mid-word is text"
-        );
-    }
-
-    /// R2.1 S6: other schemes are plain text: no target, no link color.
-    #[test]
-    fn overlong_bare_url_runs_stay_plain_and_bounded() {
-        // hud-ljhku.2 review: a whitespace-free run of `https://` repeats is
-        // longer than any link; it renders as plain text without a quadratic scan.
+        for input in ["xhttps://example.com", &long] {
+            assert!(parse(input).links.is_empty(), "{input}");
+        }
         let run = "https://".repeat(5_000);
-        let parsed = parse_markdown_subset(&run, &tokens());
+        let parsed = parse(&run);
         assert!(parsed.links.is_empty());
-        assert_eq!(parsed.plain_text.len(), run.len());
+        assert_eq!(parsed.plain_text.as_ref(), run);
     }
 
     #[test]
@@ -2961,345 +2910,6 @@ mod tests {
         );
     }
 
-    /// Fenced code block contents are copy targets, without the fences.
-    #[test]
-    fn fenced_blocks_record_copy_ranges() {
-        let md = parse("intro\n```sh\nls -la\necho hi\n```\nafter");
-        let (s, e) = md.code_blocks[0];
-        assert_eq!(&md.plain_text[s..e], "ls -la\necho hi");
-        assert_eq!(md.code_blocks.len(), 1);
-    }
-
-    // ── Task 2.5 — Zero per-frame parse cost ──────────────────────────────────
-
-    /// Cache hit for the same content string is guaranteed after prime().
-    #[test]
-    fn cache_hit_after_prime() {
-        let mut cache = MarkdownCache::new();
-        let t = tokens();
-        let content = "# Hello\n**world**";
-
-        // First call primes the cache.
-        let first = cache.prime(content, &t).clone();
-        // Second call must hit the cache (no re-parse — same result).
-        let second = cache.prime(content, &t).clone();
-
-        assert_eq!(
-            first, second,
-            "cached result must be identical to parsed result"
-        );
-        assert_eq!(cache.len(), 1, "only one cache entry for the same content");
-    }
-
-    /// Two different content strings produce separate cache entries.
-    #[test]
-    fn different_content_different_cache_entries() {
-        let mut cache = MarkdownCache::new();
-        let t = tokens();
-
-        cache.prime("# Hello", &t);
-        cache.prime("# World", &t);
-
-        assert_eq!(cache.len(), 2, "two distinct content strings → two entries");
-    }
-
-    /// `get` returns None for content not yet primed.
-    #[test]
-    fn cache_miss_before_prime() {
-        let cache = MarkdownCache::new();
-        assert!(
-            cache.get("unparsed content", &tokens()).is_none(),
-            "cache must be empty before prime"
-        );
-    }
-
-    /// Large payload (65535 bytes) primes without panic.
-    #[test]
-    fn large_payload_65535_bytes_primes_without_panic() {
-        let content = "a".repeat(65535);
-        let mut cache = MarkdownCache::new();
-        let _ = cache.prime(&content, &tokens());
-        assert_eq!(cache.len(), 1);
-    }
-
-    /// `evict_except` removes stale entries.
-    #[test]
-    fn evict_removes_stale_entries() {
-        let mut cache = MarkdownCache::new();
-        let t = tokens();
-
-        let content_a = "# Keep";
-        let content_b = "# Evict";
-        cache.prime(content_a, &t);
-        cache.prime(content_b, &t);
-        assert_eq!(cache.len(), 2);
-
-        // Key folds content + token identity, so derive it via
-        // compute_key rather than a raw content hash.
-        let keep_key = MarkdownCache::compute_key(content_a, &t);
-        cache.evict_except(&[keep_key]);
-
-        assert_eq!(cache.len(), 1, "evict_except must remove stale entry");
-        assert!(
-            cache.get(content_a, &t).is_some(),
-            "kept entry must remain after eviction"
-        );
-        assert!(
-            cache.get(content_b, &t).is_none(),
-            "evicted entry must be gone"
-        );
-    }
-
-    // ── MarkdownTokens tests ───────────────────────────────────────────────────
-
-    /// Empty token map produces defaults.
-    #[test]
-    fn empty_token_map_gives_defaults() {
-        let map = HashMap::new();
-        let t = MarkdownTokens::from_token_map(&map);
-        let d = MarkdownTokens::default();
-        assert_eq!(t.heading_weight, d.heading_weight);
-        assert_eq!(t.heading_scale, d.heading_scale);
-        assert!(t.link_color.is_none());
-        assert!(t.code_monospace); // defaults to true
-    }
-
-    /// Token map with heading weight overrides.
-    #[test]
-    fn token_map_heading_weight_overrides() {
-        let mut map = HashMap::new();
-        map.insert("typography.heading.1.weight".to_string(), "900".to_string());
-        map.insert("typography.heading.3.weight".to_string(), "500".to_string());
-        let t = MarkdownTokens::from_token_map(&map);
-        assert_eq!(t.heading_weight[0], 900, "H1 weight should be overridden");
-        assert_eq!(t.heading_weight[2], 500, "H3 weight should be overridden");
-        // Unset levels use defaults.
-        assert_eq!(
-            t.heading_weight[1],
-            MarkdownTokens::default().heading_weight[1]
-        );
-    }
-
-    /// Token map with link color override.
-    #[test]
-    fn token_map_link_color_override() {
-        let mut map = HashMap::new();
-        map.insert("color.link.text".to_string(), "#0066FF".to_string());
-        let t = MarkdownTokens::from_token_map(&map);
-        assert!(t.link_color.is_some(), "link color must be set from token");
-        let c = t.link_color.unwrap();
-        // #0066FF sRGB → r≈0, g≈0.14, b≈1.0 after gamma conversion — just
-        // check that blue dominates.
-        assert!(c.b > c.r, "blue must dominate for #0066FF");
-    }
-
-    // ── Portal markdown-subset token preference (Promotion P2) ──────
-
-    /// When BOTH a portal-scoped key and its generic counterpart are set, the
-    /// portal key wins for the markdown-subset code/link styling the transcript
-    /// renders (preference).
-    #[test]
-    fn portal_transcript_keys_win_over_generic() {
-        let mut map = HashMap::new();
-        // Generic (would-be) values.
-        map.insert("color.link.text".to_string(), "#FF0000".to_string()); // red
-        map.insert("color.code.text".to_string(), "#FF0000".to_string());
-        map.insert("color.code.background".to_string(), "#FF0000".to_string());
-        map.insert(
-            "typography.code.family".to_string(),
-            "sans-serif".to_string(),
-        );
-        // Portal-scoped overrides (must win).
-        map.insert(
-            "portal.transcript.link_color".to_string(),
-            "#0000FF".to_string(),
-        ); // blue
-        map.insert(
-            "portal.transcript.code_text".to_string(),
-            "#0000FF".to_string(),
-        );
-        map.insert(
-            "portal.transcript.code_background".to_string(),
-            "#0000FF".to_string(),
-        );
-        map.insert(
-            "portal.transcript.code_font_family".to_string(),
-            "monospace".to_string(),
-        );
-
-        let t = MarkdownTokens::from_token_map(&map);
-        let link = t.link_color.expect("link color set");
-        assert!(
-            link.b > link.r,
-            "portal link_color (blue) must win over generic (red)"
-        );
-        let code_fg = t.code_color.expect("code fg set");
-        assert!(
-            code_fg.b > code_fg.r,
-            "portal code_text (blue) must win over generic (red)"
-        );
-        let code_bg = t.code_background.expect("code bg set");
-        assert!(
-            code_bg.b > code_bg.r,
-            "portal code_background (blue) must win over generic (red)"
-        );
-        assert!(
-            t.code_monospace,
-            "portal code_font_family=monospace must win over generic sans-serif"
-        );
-    }
-
-    /// When a portal-scoped key is UNSET, the generic key is used (fallback), so
-    /// nothing regresses for maps that only carry the generic keys.
-    #[test]
-    fn portal_transcript_falls_back_to_generic_when_portal_unset() {
-        let mut map = HashMap::new();
-        map.insert("color.link.text".to_string(), "#00CC44".to_string()); // green
-        map.insert("color.code.background".to_string(), "#00CC44".to_string());
-        map.insert(
-            "typography.code.family".to_string(),
-            "sans-serif".to_string(),
-        );
-        // No portal.transcript.* keys present.
-
-        let t = MarkdownTokens::from_token_map(&map);
-        let link = t.link_color.expect("link color falls back to generic");
-        assert!(
-            link.g > link.r && link.g > link.b,
-            "generic green link used as fallback"
-        );
-        assert!(
-            t.code_background.is_some(),
-            "generic code background used as fallback"
-        );
-        assert!(
-            !t.code_monospace,
-            "generic sans-serif code family used as fallback"
-        );
-    }
-
-    /// With neither the portal nor the generic key set, the markdown-subset code/
-    /// link styling stays unset (canonical default = unset), so the transcript
-    /// renders exactly as before promotion (propagation/default).
-    #[test]
-    fn portal_transcript_unset_leaves_defaults() {
-        let map = HashMap::new();
-        let t = MarkdownTokens::from_token_map(&map);
-        assert!(t.link_color.is_none(), "link unset by default");
-        assert!(t.code_color.is_none(), "code fg unset by default");
-        assert!(t.code_background.is_none(), "code bg unset by default");
-        assert!(t.code_monospace, "code family defaults to monospace");
-    }
-
-    /// A profile swap (changing only the portal-scoped keys) reskins the resolved
-    /// markdown tokens on the next resolve — the propagation the AC requires.
-    /// Distinct portal values yield distinct resolved colors.
-    #[test]
-    fn portal_transcript_profile_swap_reskins_markdown_tokens() {
-        let mut profile_a = HashMap::new();
-        profile_a.insert(
-            "portal.transcript.code_background".to_string(),
-            "#111111".to_string(),
-        );
-        let a = MarkdownTokens::from_token_map(&profile_a);
-
-        let mut profile_b = HashMap::new();
-        profile_b.insert(
-            "portal.transcript.code_background".to_string(),
-            "#EEEEEE".to_string(),
-        );
-        let b = MarkdownTokens::from_token_map(&profile_b);
-
-        assert_ne!(
-            a.code_background, b.code_background,
-            "swapping portal.transcript.code_background must reskin the markdown tokens"
-        );
-    }
-
-    /// `parse_hex_color` handles #RGB, #RRGGBB, and #RRGGBBAA.
-    #[test]
-    fn parse_hex_color_formats() {
-        let white6 = parse_hex_color("#FFFFFF").expect("#RRGGBB");
-        assert_eq!(white6.a, 1.0);
-
-        let black3 = parse_hex_color("#000").expect("#RGB");
-        assert_eq!(black3.r, 0.0);
-
-        let semi = parse_hex_color("#FFFFFF80").expect("#RRGGBBAA");
-        assert!(semi.a > 0.4 && semi.a < 0.6, "alpha ~0.5 from 0x80");
-    }
-
-    // ── Plain text and mixed content ──────────────────────────────────────────
-
-    /// Plain text (no markdown) passes through unchanged.
-    #[test]
-    fn plain_text_passes_through() {
-        let md = parse("Hello, world!");
-        assert_eq!(&*md.plain_text, "Hello, world!");
-        assert!(
-            md.spans.is_empty(),
-            "plain text must produce no styled spans"
-        );
-    }
-
-    /// Empty input produces empty output.
-    #[test]
-    fn empty_input_produces_empty_output() {
-        let md = parse("");
-        assert_eq!(&*md.plain_text, "");
-        assert!(md.spans.is_empty());
-    }
-
-    /// Multi-line content with mixed constructs covers all spans.
-    #[test]
-    fn mixed_content_spans_cover_plain_text() {
-        let input = "# Title\n\nHello **world** and *folks*.\n\n- item one\n- item two";
-        let md = parse(input);
-        // Every styled span must be a valid range in plain_text.
-        for span in &md.spans {
-            assert!(
-                span.start_byte <= span.end_byte,
-                "span start must be <= end"
-            );
-            assert!(
-                span.end_byte <= md.plain_text.len(),
-                "span end must be <= plain_text.len()"
-            );
-            assert!(
-                md.plain_text.is_char_boundary(span.start_byte),
-                "span start must be a char boundary"
-            );
-            assert!(
-                md.plain_text.is_char_boundary(span.end_byte),
-                "span end must be a char boundary"
-            );
-        }
-    }
-
-    /// Multi-byte UTF-8 content (emoji, CJK) does not panic and produces valid boundaries.
-    #[test]
-    fn multibyte_utf8_content_valid_boundaries() {
-        let input = "# 日本語タイトル\n\n**太字** と *斜体* テキスト。\n\n`コード`";
-        let md = parse(input);
-        for span in &md.spans {
-            assert!(
-                md.plain_text.is_char_boundary(span.start_byte),
-                "start_byte must be char boundary"
-            );
-            assert!(
-                md.plain_text.is_char_boundary(span.end_byte),
-                "end_byte must be char boundary"
-            );
-        }
-    }
-
-    // ── Adversarial / DoS-resistance ──────────────────────────────────────────
-
-    /// Pathological 64 KiB inputs must terminate without stack overflow and
-    /// must not silently drop or alter content. This table asserts correctness
-    /// only; it is NOT a speed guard (a quadratic regression still passes here,
-    /// just slowly). Speed for the backtick and nested-link floods is guarded by
-    /// `adversarial_floods_stay_within_budget`.
     #[test]
     fn adversarial_inputs_terminate_and_preserve_content() {
         #[derive(Clone, Copy)]
@@ -3414,597 +3024,6 @@ mod tests {
         }
     }
 
-    // ── Paren/backtick semantic correctness tests ────────────────
-
-    /// Normal link `[text](url)` is correctly parsed after paren table is built.
-    ///
-    /// Ensures the paren-table lookup does not regress link parsing semantics.
-    #[test]
-    fn paren_table_link_semantic_correctness() {
-        let md = parse("[hello](https://example.com)");
-        assert_eq!(
-            &*md.plain_text, "hello",
-            "link text must be extracted, URL dropped"
-        );
-    }
-
-    /// Link with nested parens in URL `[text](url(1))` is handled correctly.
-    ///
-    /// The paren table uses a depth-matching stack, so nested parens in the
-    /// link destination match the outermost `)`.
-    #[test]
-    fn paren_table_nested_parens_in_url() {
-        let md = parse("[doc](fn(arg))");
-        // The link text should be emitted; the URL (including inner parens) is dropped.
-        assert_eq!(
-            &*md.plain_text, "doc",
-            "nested parens in URL must not break link parsing"
-        );
-    }
-
-    /// Multiple links on one line are all parsed correctly.
-    #[test]
-    fn paren_table_multiple_links_on_one_line() {
-        let md = parse("[a](u1) and [b](u2)");
-        assert_eq!(
-            &*md.plain_text, "a and b",
-            "multiple links must all be parsed correctly"
-        );
-    }
-
-    /// Inline code spans are correctly parsed after the backtick memo is built.
-    ///
-    /// Ensures `BacktickCloseMemo` does not regress code-span parsing semantics.
-    #[test]
-    fn backtick_memo_inline_code_semantic_correctness() {
-        let md = parse("Use `fmt::Display` here.");
-        assert_eq!(&*md.plain_text, "Use fmt::Display here.");
-        assert!(
-            md.spans.iter().any(|s| s.attr.monospace),
-            "inline code must produce a monospace span"
-        );
-        let span = md.spans.iter().find(|s| s.attr.monospace).unwrap();
-        assert_eq!(
-            &md.plain_text[span.start_byte..span.end_byte],
-            "fmt::Display"
-        );
-    }
-
-    /// Double-backtick code spans (`` ``code`` ``) are parsed correctly.
-    ///
-    /// Tests that tick_count=2 memo entries do not interfere with tick_count=1.
-    #[test]
-    fn backtick_memo_double_tick_span_correctness() {
-        let md = parse("Look at ``a`b`` here.");
-        assert_eq!(&*md.plain_text, "Look at a`b here.");
-        assert!(
-            md.spans.iter().any(|s| s.attr.monospace),
-            "double-tick code span must produce a monospace span"
-        );
-    }
-
-    /// Multiple code spans on one line are all parsed correctly.
-    #[test]
-    fn backtick_memo_multiple_spans_on_one_line() {
-        let md = parse("`a` and `b` and `c`");
-        assert_eq!(&*md.plain_text, "a and b and c");
-        assert_eq!(
-            md.spans.iter().filter(|s| s.attr.monospace).count(),
-            3,
-            "three separate code spans must each produce a monospace span"
-        );
-    }
-
-    // ──: styling-gap fixes ─────────────────────────────────────────
-    //
-    // (a) heading_scale is now applied via size_scale on StyleAttr/StyledSpan.
-    // (b) color.code.background is now read from tokens and applied.
-    // (c) bold weight comes from tokens.bold_weight, not a hardcoded 700.
-    // (d) ordered-list ordinal is preserved, not replaced with "• ".
-
-    /// (a) Heading scale: default-token headings carry `size_scale` from the token table.
-    #[test]
-    fn heading_size_scale_applied() {
-        for (input, idx) in [("# Hello", 0), ("### Section", 2)] {
-            let md = parse(input);
-            let scale = md
-                .spans
-                .iter()
-                .find_map(|s| s.attr.size_scale)
-                .unwrap_or_else(|| panic!("{input}: no size_scale span in {:?}", md.spans));
-            let expected = MarkdownTokens::default().heading_scale[idx];
-            assert!(
-                (scale - expected).abs() < 1e-5,
-                "{input}: size_scale {scale} != token {expected}"
-            );
-        }
-    }
-
-    /// (a) Heading scale: H5 uses scale 1.0 — size_scale is None (no scaling needed).
-    ///
-    /// When the scale equals 1.0 exactly the field is set to None to avoid a
-    /// no-op Metrics override in the renderer.
-    #[test]
-    fn heading_h5_scale_one_is_none() {
-        let t = MarkdownTokens {
-            heading_scale: [1.75, 1.50, 1.25, 1.10, 1.00, 0.90],
-            ..MarkdownTokens::default()
-        };
-        let md = parse_markdown_subset("##### H5", &t);
-        // Default H5 scale is 1.00: None expected (no-op suppressed).
-        assert!(
-            md.spans.iter().all(|s| s.attr.size_scale.is_none()
-                || (s.attr.size_scale.unwrap() - 1.0).abs() > f32::EPSILON),
-            "H5 with scale 1.0 must not emit size_scale=Some(1.0); spans: {:?}",
-            md.spans
-        );
-    }
-
-    /// (a) Heading scale from custom token map flows through.
-    #[test]
-    fn heading_scale_from_custom_token_map() {
-        let mut map = HashMap::new();
-        map.insert("typography.heading.2.scale".to_string(), "2.0".to_string());
-        let t = MarkdownTokens::from_token_map(&map);
-        let md = parse_markdown_subset("## Big", &t);
-        let scale_span = md.spans.iter().find(|s| s.attr.size_scale.is_some());
-        assert!(
-            scale_span.is_some(),
-            "H2 with custom scale must carry size_scale"
-        );
-        let scale = scale_span.unwrap().attr.size_scale.unwrap();
-        assert!(
-            (scale - 2.0).abs() < 1e-5,
-            "H2 size_scale must equal custom token value 2.0; got {scale}"
-        );
-    }
-
-    /// (b) code_background token populates background_color, NOT the text foreground color.
-    ///
-    /// Previously the bug caused code_background to bleed into `StyleAttr::color` (the
-    /// text foreground) when no code_color was set.  The correct behavior is:
-    /// - `background_color` carries the backdrop panel color
-    /// - `color` (text foreground) stays `None` when code_color is unset
-    #[test]
-    fn code_background_token_applied_to_inline_code() {
-        let t = MarkdownTokens {
-            code_background: Some(Rgba::new(0.1, 0.1, 0.1, 1.0)),
-            code_color: None,
-            ..MarkdownTokens::default()
-        };
-        let md = parse_markdown_subset("Use `fmt` here.", &t);
-        let code_span = md.spans.iter().find(|s| s.attr.monospace);
-        assert!(
-            code_span.is_some(),
-            "inline code must produce a monospace span"
-        );
-        let span = code_span.unwrap();
-        // code_background must NOT bleed into the text foreground color.
-        assert!(
-            span.attr.color.is_none(),
-            "code span text color must be None when only code_background is set (not code_color); \
-             got {:?} — code_background is a backdrop panel, not a text color modifier",
-            span.attr.color
-        );
-        // code_background must populate background_color instead.
-        let bg = span.attr.background_color;
-        assert!(
-            bg.is_some(),
-            "code span background_color must be Some when code_background token is set; got None"
-        );
-        let c = bg.unwrap();
-        assert!(
-            (c.r - 0.1_f32).abs() < 1e-3,
-            "code span background_color.r must match code_background.r; got {c:?}"
-        );
-        // A CodePanelSpan of kind Inline must also be recorded.
-        assert!(
-            md.code_panels
-                .iter()
-                .any(|p| matches!(p.kind, CodePanelKind::Inline)),
-            "code_panels must contain an Inline entry for the inline code span"
-        );
-    }
-
-    /// (b) code_color takes priority over code_background for the text foreground;
-    /// code_background still goes to background_color regardless.
-    #[test]
-    fn code_color_takes_priority_over_code_background() {
-        let t = MarkdownTokens {
-            code_color: Some(Rgba::new(0.9, 0.9, 0.9, 1.0)),
-            code_background: Some(Rgba::new(0.1, 0.1, 0.1, 1.0)),
-            ..MarkdownTokens::default()
-        };
-        let md = parse_markdown_subset("Use `fmt` here.", &t);
-        let code_span = md.spans.iter().find(|s| s.attr.monospace);
-        assert!(
-            code_span.is_some(),
-            "inline code must produce a monospace span"
-        );
-        let span = code_span.unwrap();
-        // code_color (0.9) must be the text foreground.
-        let c = span.attr.color.unwrap();
-        assert!(
-            (c.r - 0.9_f32).abs() < 1e-3,
-            "code_color must be the text foreground; got color r={} (expected ~0.9)",
-            c.r
-        );
-        // code_background (0.1) must be the backdrop panel, not blended into text color.
-        let bg = span.attr.background_color.unwrap();
-        assert!(
-            (bg.r - 0.1_f32).abs() < 1e-3,
-            "code_background must be background_color; got bg.r={} (expected ~0.1)",
-            bg.r
-        );
-    }
-
-    /// (b) color.code.background token key is parsed by from_token_map.
-    #[test]
-    fn token_map_code_background_parsed() {
-        let mut map = HashMap::new();
-        map.insert("color.code.background".to_string(), "#333333".to_string());
-        let t = MarkdownTokens::from_token_map(&map);
-        assert!(
-            t.code_background.is_some(),
-            "color.code.background token must populate code_background"
-        );
-    }
-
-    /// (b) code_panel spans are emitted for fenced code blocks.
-    #[test]
-    fn code_panel_spans_emitted_for_fenced_block() {
-        let t = MarkdownTokens {
-            code_background: Some(Rgba::new(0.05, 0.05, 0.15, 1.0)),
-            ..MarkdownTokens::default()
-        };
-        let md = parse_markdown_subset("```\nfn foo() {}\n```\n", &t);
-        let block_panel = md
-            .code_panels
-            .iter()
-            .find(|p| matches!(p.kind, CodePanelKind::Block));
-        assert!(
-            block_panel.is_some(),
-            "code_panels must contain a Block entry for a fenced code block; got: {:?}",
-            md.code_panels
-        );
-        // The panel must cover at least the fenced content bytes.
-        let panel = block_panel.unwrap();
-        assert!(
-            panel.start_byte < panel.end_byte,
-            "Block panel must span a non-empty byte range; got [{}, {}]",
-            panel.start_byte,
-            panel.end_byte
-        );
-    }
-
-    /// (b) code_panel spans are emitted for inline code spans.
-    #[test]
-    fn code_panel_spans_emitted_for_inline_code() {
-        let t = MarkdownTokens {
-            code_background: Some(Rgba::new(0.05, 0.05, 0.15, 1.0)),
-            ..MarkdownTokens::default()
-        };
-        let md = parse_markdown_subset("Use `fmt` and `clippy`.", &t);
-        let inline_panels: Vec<_> = md
-            .code_panels
-            .iter()
-            .filter(|p| matches!(p.kind, CodePanelKind::Inline))
-            .collect();
-        assert_eq!(
-            inline_panels.len(),
-            2,
-            "two inline code spans must produce two Inline code_panels; got: {:?}",
-            md.code_panels
-        );
-    }
-
-    /// (b) No code_panels emitted when code_background token is absent.
-    #[test]
-    fn no_code_panels_without_code_background_token() {
-        let t = MarkdownTokens {
-            code_background: None,
-            code_color: Some(Rgba::new(0.8, 0.8, 0.8, 1.0)),
-            ..MarkdownTokens::default()
-        };
-        let md = parse_markdown_subset("Use `fmt` here.\n```\ncode\n```\n", &t);
-        assert!(
-            md.code_panels.is_empty(),
-            "code_panels must be empty when code_background token is None; got: {:?}",
-            md.code_panels
-        );
-    }
-
-    /// (c) Bold weight comes from tokens (typography.bold.weight), not hardcoded 700.
-    #[test]
-    fn bold_weight_comes_from_token() {
-        let t = MarkdownTokens {
-            bold_weight: 800,
-            ..MarkdownTokens::default()
-        };
-        let md = parse_markdown_subset("Hello **world**!", &t);
-        let bold_span = md.spans.iter().find(|s| s.attr.weight == Some(800));
-        assert!(
-            bold_span.is_some(),
-            "bold span must carry weight from token (800); got spans: {:?}",
-            md.spans
-        );
-        // Must NOT carry the old hardcoded 700 when token says 800.
-        assert!(
-            !md.spans.iter().any(|s| s.attr.weight == Some(700)),
-            "bold span must use token weight 800, not hardcoded 700"
-        );
-    }
-
-    /// (c) Bold-italic weight also comes from tokens.
-    #[test]
-    fn bold_italic_weight_comes_from_token() {
-        let t = MarkdownTokens {
-            bold_weight: 900,
-            ..MarkdownTokens::default()
-        };
-        let md = parse_markdown_subset("***bold-italic***", &t);
-        let bi_span = md
-            .spans
-            .iter()
-            .find(|s| s.attr.italic && s.attr.weight == Some(900));
-        assert!(
-            bi_span.is_some(),
-            "bold-italic span must carry weight from token (900); got spans: {:?}",
-            md.spans
-        );
-    }
-
-    /// (c) typography.bold.weight token key is parsed by from_token_map.
-    #[test]
-    fn token_map_bold_weight_parsed() {
-        let mut map = HashMap::new();
-        map.insert("typography.bold.weight".to_string(), "800".to_string());
-        let t = MarkdownTokens::from_token_map(&map);
-        assert_eq!(
-            t.bold_weight, 800,
-            "typography.bold.weight token must populate bold_weight"
-        );
-    }
-
-    /// (d) Ordered-list paren-delimited items preserve ordinal.
-    #[test]
-    fn ordered_list_paren_delimiter_preserves_ordinal() {
-        let input = "1) alpha\n2) beta";
-        let md = parse(input);
-        assert!(
-            md.plain_text.contains("1) alpha"),
-            "paren-delimited ordered list must preserve ordinal; got: {:?}",
-            md.plain_text
-        );
-        assert!(
-            md.plain_text.contains("2) beta"),
-            "second paren-delimited item must preserve ordinal; got: {:?}",
-            md.plain_text
-        );
-    }
-
-    /// (d) Unordered lists still render with bullet (regression guard).
-    #[test]
-    fn unordered_list_still_uses_bullet_after_fix() {
-        let input = "- item one\n* item two\n+ item three";
-        let md = parse(input);
-        assert!(
-            md.plain_text.contains("• item one"),
-            "unordered '-' list must keep bullet; got: {:?}",
-            md.plain_text
-        );
-        assert!(
-            md.plain_text.contains("• item two"),
-            "unordered '*' list must keep bullet; got: {:?}",
-            md.plain_text
-        );
-        assert!(
-            md.plain_text.contains("• item three"),
-            "unordered '+' list must keep bullet; got: {:?}",
-            md.plain_text
-        );
-    }
-
-    // ── Block-spacing token tests ─────────────────────────────────
-
-    /// `line_height_multiplier` token parses correctly from token map.
-    #[test]
-    fn token_line_height_multiplier_parses() {
-        let mut map = std::collections::HashMap::new();
-        map.insert(
-            "typography.line_height.multiplier".to_string(),
-            "1.8".to_string(),
-        );
-        let tokens = MarkdownTokens::from_token_map(&map);
-        assert!(
-            (tokens.line_height_multiplier - 1.8).abs() < 0.001,
-            "line_height_multiplier must parse from token map; got {}",
-            tokens.line_height_multiplier
-        );
-    }
-
-    /// `line_height_multiplier` clamps to [1.0, 4.0].
-    #[test]
-    fn token_line_height_multiplier_clamped() {
-        let mut map_low = std::collections::HashMap::new();
-        map_low.insert(
-            "typography.line_height.multiplier".to_string(),
-            "0.5".to_string(),
-        );
-        let tokens_low = MarkdownTokens::from_token_map(&map_low);
-        assert_eq!(
-            tokens_low.line_height_multiplier, 1.4,
-            "line_height_multiplier must ignore out-of-bounds low value and remain default 1.4"
-        );
-
-        let mut map_high = std::collections::HashMap::new();
-        map_high.insert(
-            "typography.line_height.multiplier".to_string(),
-            "10.0".to_string(),
-        );
-        let tokens_high = MarkdownTokens::from_token_map(&map_high);
-        assert_eq!(
-            tokens_high.line_height_multiplier, 1.4,
-            "line_height_multiplier must ignore out-of-bounds high value and remain default 1.4"
-        );
-    }
-
-    /// `heading_margin_top` and `heading_margin_bottom` tokens parse correctly.
-    #[test]
-    fn token_heading_margins_parse() {
-        let mut map = std::collections::HashMap::new();
-        map.insert("spacing.heading.top".to_string(), "2.0".to_string());
-        map.insert("spacing.heading.bottom".to_string(), "1.5".to_string());
-        let tokens = MarkdownTokens::from_token_map(&map);
-        assert!(
-            (tokens.heading_margin_top - 2.0).abs() < 0.001,
-            "heading_margin_top must parse; got {}",
-            tokens.heading_margin_top
-        );
-        assert!(
-            (tokens.heading_margin_bottom - 1.5).abs() < 0.001,
-            "heading_margin_bottom must parse; got {}",
-            tokens.heading_margin_bottom
-        );
-    }
-
-    /// `list_item_spacing` token parses correctly.
-    #[test]
-    fn token_list_item_spacing_parses() {
-        let mut map = std::collections::HashMap::new();
-        map.insert("spacing.list.item".to_string(), "1.0".to_string());
-        let tokens = MarkdownTokens::from_token_map(&map);
-        assert!(
-            (tokens.list_item_spacing - 1.0).abs() < 0.001,
-            "list_item_spacing must parse; got {}",
-            tokens.list_item_spacing
-        );
-    }
-
-    /// Default tokens have expected default values.
-    #[test]
-    fn token_defaults_are_canonical() {
-        let tokens = MarkdownTokens::default();
-        assert!(
-            (tokens.line_height_multiplier - 1.4).abs() < 0.001,
-            "default line_height_multiplier must be 1.4; got {}",
-            tokens.line_height_multiplier
-        );
-        assert!(
-            tokens.heading_margin_top.abs() < 0.001,
-            "default heading_margin_top must be 0.0; got {}",
-            tokens.heading_margin_top
-        );
-        assert!(
-            tokens.heading_margin_bottom.abs() < 0.001,
-            "default heading_margin_bottom must be 0.0; got {}",
-            tokens.heading_margin_bottom
-        );
-        assert!(
-            (tokens.list_item_spacing - 0.0).abs() < 0.001,
-            "default list_item_spacing must be 0.0; got {}",
-            tokens.list_item_spacing
-        );
-    }
-
-    #[test]
-    fn default_markdown_block_spacing_is_compact_for_streamed_transcripts() {
-        let tokens = MarkdownTokens::default();
-        assert!(
-            tokens.heading_margin_top.abs() < 0.001,
-            "streamed transcript headings should not insert an extra blank line by default; got top margin {}",
-            tokens.heading_margin_top
-        );
-        assert!(
-            tokens.heading_margin_bottom.abs() < 0.001,
-            "streamed transcript headings should not insert an extra blank line below by default; got bottom margin {}",
-            tokens.heading_margin_bottom
-        );
-
-        let md = parse_markdown_subset("Intro\n# Heading\n- first\n- second", &tokens);
-        assert_eq!(
-            md.plain_text.as_ref(),
-            "Intro\nHeading\n• first\n• second",
-            "default portal markdown should keep transcript block flow compact"
-        );
-    }
-
-    /// `parse_markdown_subset` propagates `line_height_multiplier` into
-    /// `ParsedMarkdown.line_height_multiplier`.
-    #[test]
-    fn parsed_markdown_carries_line_height_multiplier() {
-        let mut map = std::collections::HashMap::new();
-        map.insert(
-            "typography.line_height.multiplier".to_string(),
-            "1.6".to_string(),
-        );
-        let tokens = MarkdownTokens::from_token_map(&map);
-        let md = parse_markdown_subset("hello world", &tokens);
-        assert!(
-            (md.line_height_multiplier - 1.6).abs() < 0.001,
-            "ParsedMarkdown must carry line_height_multiplier from tokens; got {}",
-            md.line_height_multiplier
-        );
-    }
-
-    /// List items produce `ListItemSpan` entries with correct `content_start_byte`
-    /// greater than `item_start_byte` (hanging-indent metadata is non-trivial).
-    #[test]
-    fn list_items_produce_hanging_indent_metadata() {
-        let input = "- first item\n- second item";
-        let md = parse(input);
-        assert!(
-            !md.list_items.is_empty(),
-            "unordered list must produce ListItemSpan entries; got none. plain_text: {:?}",
-            md.plain_text
-        );
-        for span in &md.list_items {
-            assert!(
-                span.content_start_byte > span.item_start_byte,
-                "content_start_byte ({}) must be > item_start_byte ({}) \
-                 to encode a non-zero bullet prefix for hanging indent",
-                span.content_start_byte,
-                span.item_start_byte
-            );
-        }
-    }
-
-    /// Ordered list items also produce `ListItemSpan` entries.
-    #[test]
-    fn ordered_list_items_produce_hanging_indent_metadata() {
-        let input = "1. alpha\n2. beta\n3. gamma";
-        let md = parse(input);
-        assert_eq!(
-            md.list_items.len(),
-            3,
-            "three ordered list items must produce three ListItemSpan entries; \
-             got {}. plain_text: {:?}",
-            md.list_items.len(),
-            md.plain_text
-        );
-    }
-
-    /// With `heading_margin_top >= 1.0`, a heading preceded by content gets an
-    /// extra blank line before it in `plain_text`.
-    #[test]
-    fn heading_top_margin_emits_blank_line_before_heading() {
-        let tokens = MarkdownTokens {
-            heading_margin_top: 1.0,
-            ..MarkdownTokens::default()
-        };
-        let input = "Some text\n# Heading";
-        let md = parse_markdown_subset(input, &tokens);
-        assert_eq!(
-            md.plain_text.as_ref(),
-            "Some text\n\nHeading",
-            "heading with explicit top margin must be preceded by extra whitespace",
-        );
-    }
-
-    // ── MarkdownPrimer — async swap-in ────────────────────────────
-
-    /// Build a `PrimeJob` for `content`, marking it as a cache miss (content
-    /// attached) so the primer parses it.
     fn miss_job(content: &str) -> PrimeJob {
         let tokens = Arc::new(MarkdownTokens::default());
         PrimeJob {
@@ -4014,9 +3033,6 @@ mod tests {
         }
     }
 
-    /// Block until the primer's snapshot contains `key`, or fail after `tries`
-    /// short sleeps.  The background parse thread publishes asynchronously, so a
-    /// test that needs the *completed* swap must poll rather than read once.
     fn wait_for_key(primer: &MarkdownPrimer, key: &[u8; 32], tries: u32) -> Arc<MarkdownCache> {
         for _ in 0..tries {
             let snap = primer.load();
@@ -4028,143 +3044,38 @@ mod tests {
         panic!("primer never published an entry for the expected key");
     }
 
-    /// A small payload is parsed inline and is visible in the snapshot
-    /// immediately after `prime` returns (no thread hop, no torn read).
     #[test]
-    fn primer_small_payload_swaps_in_synchronously() {
+    fn primer_swaps_inline_carries_live_entries_and_resets() {
         let primer = MarkdownPrimer::new();
-        let job = miss_job("**bold** text");
-        let key = job.key;
+        let alpha = miss_job("**alpha**");
+        let beta = miss_job("beta");
+        let [alpha_key, beta_key] = [alpha.key, beta.key];
+        primer.prime(vec![alpha.clone(), beta]);
 
-        primer.prime(vec![job]);
+        let before = primer.load();
+        assert_eq!(before.len(), 2);
+        let parsed = before
+            .get_by_key(&alpha_key)
+            .expect("inline result is visible");
+        assert_eq!(parsed.plain_text.as_ref(), "alpha");
+        assert!(before.get_by_key(&beta_key).is_some());
 
-        let snap = primer.load();
-        let parsed = snap
-            .get_by_key(&key)
-            .expect("small payload must be present synchronously after prime");
-        assert!(parsed.plain_text.contains("bold"));
-    }
-
-    /// A large payload (above the inline threshold) is parsed on the background
-    /// thread and swapped in atomically; the result is eventually visible and
-    /// correct.
-    #[test]
-    fn primer_large_payload_swaps_in_off_thread() {
-        let primer = MarkdownPrimer::new();
-        // Exceed INLINE_PARSE_BYTE_THRESHOLD so the background path is taken.
-        let big = "# Title\n\n".to_string() + &"word **emphasis** ".repeat(2000);
-        assert!(big.len() > INLINE_PARSE_BYTE_THRESHOLD);
-        let job = miss_job(&big);
-        let key = job.key;
-
-        primer.prime(vec![job]);
-
-        // The swap completes asynchronously; poll for it.
-        let snap = wait_for_key(&primer, &key, 200);
-        let parsed = snap
-            .get_by_key(&key)
-            .expect("large payload eventually present");
-        assert!(parsed.plain_text.contains("Title"));
-        assert!(parsed.plain_text.contains("emphasis"));
-    }
-
-    /// Removing a node from the live set evicts its entry on the next prime
-    /// (the new snapshot is exactly the live set).
-    #[test]
-    fn primer_evicts_dead_entries_on_reprime() {
-        let primer = MarkdownPrimer::new();
-        let job_a = miss_job("alpha");
-        let job_b = miss_job("beta");
-        let key_a = job_a.key;
-        let key_b = job_b.key;
-
-        primer.prime(vec![job_a.clone(), job_b]);
-        let snap = primer.load();
-        assert!(snap.get_by_key(&key_a).is_some());
-        assert!(snap.get_by_key(&key_b).is_some());
-        assert_eq!(snap.len(), 2);
-
-        // Re-prime with only A live: B must be evicted, A carried forward.
-        // A is already cached, so pass `content: None` (carry-forward path).
-        let carry_a = PrimeJob {
-            key: key_a,
+        primer.prime(vec![PrimeJob {
             content: None,
-            tokens: Arc::new(MarkdownTokens::default()),
-        };
-        primer.prime(vec![carry_a]);
-        let snap = primer.load();
-        assert!(
-            snap.get_by_key(&key_a).is_some(),
-            "live entry carried forward"
-        );
-        assert!(snap.get_by_key(&key_b).is_none(), "dead entry evicted");
-        assert_eq!(snap.len(), 1);
-    }
-
-    /// `reset` empties the snapshot so token-map changes never serve stale
-    /// styling.
-    #[test]
-    fn primer_reset_clears_snapshot() {
-        let primer = MarkdownPrimer::new();
-        let job = miss_job("# Heading");
-        primer.prime(vec![job]);
-        assert!(!primer.is_empty());
-
+            ..alpha
+        }]);
+        let after = primer.load();
+        assert_eq!(after.len(), 1);
+        assert!(Arc::ptr_eq(
+            &parsed.plain_text,
+            &after.get_by_key(&alpha_key).unwrap().plain_text
+        ));
+        assert!(after.get_by_key(&beta_key).is_none());
         primer.reset();
-        assert!(primer.is_empty(), "reset must clear the snapshot");
+        assert!(primer.is_empty());
+        assert_eq!(before.len(), 2, "held reader snapshot stays intact");
     }
 
-    /// regression (primer-level): a `MarkdownPrimer` that has already
-    /// serviced many unrelated `prime()` dispatches (modeling a `Compositor`
-    /// reused across many prior scenes/content generations) must still land a
-    /// background-parsed snapshot for a brand-new large payload.
-    ///
-    /// Before the fix, `MarkdownPrimer::prime` trusted a caller-supplied
-    /// `scene_version: u64` as its stale-clobber ordering token
-    /// (`published_version`). That token is only meaningful if the caller's
-    /// numbering is globally monotonic across the primer's ENTIRE lifetime —
-    /// but callers legitimately reset their own numbering per `SceneGraph`
-    /// instance (`version` restarts at 0 for every new scene). A `Compositor`
-    /// reused across scenes (confirmed in `scroll_reshape_reuse_hud991cj`)
-    /// could therefore dispatch a later, LOWER-numbered prime that
-    /// `publish_if_newer` would treat as stale and silently, permanently drop
-    /// — even though it was the most recent, correct dispatch.
-    ///
-    /// `prime()` no longer accepts a caller-supplied version at all (the API
-    /// changed as part of the fix): every dispatch claims a fresh internal
-    /// epoch from `MarkdownPrimer::next_epoch`, which can only ever increase.
-    /// This test proves that guarantee holds even after many prior dispatches.
-    #[test]
-    fn primer_lands_large_payload_after_many_prior_dispatches() {
-        let primer = MarkdownPrimer::new();
-
-        // Model many prior "scenes" worth of small (inline-path) dispatches —
-        // each one advances the primer's internal epoch, exactly as repeated
-        // commit-time primes would in a long-lived Compositor session.
-        for i in 0..50u32 {
-            primer.prime(vec![miss_job(&format!("prior scene {i}"))]);
-        }
-
-        // A brand-new large payload (background-thread path) must still land,
-        // not be dropped as "stale" relative to the prior dispatches.
-        let big = "# New Scene\n\n".to_string() + &"word **emphasis** ".repeat(2000);
-        assert!(big.len() > INLINE_PARSE_BYTE_THRESHOLD);
-        let job = miss_job(&big);
-        let key = job.key;
-        primer.prime(vec![job]);
-
-        let snap = wait_for_key(&primer, &key, 200);
-        let parsed = snap.get_by_key(&key).expect(
-            "large payload must land even after many prior prime() dispatches \
-                 -- hud-u4lq2 regression",
-        );
-        assert!(parsed.plain_text.contains("New Scene"));
-        assert!(parsed.plain_text.contains("emphasis"));
-    }
-
-    /// A stale background result for an older epoch must not clobber a newer
-    /// snapshot already published.  We exercise the guard directly via
-    /// `publish_if_newer`.
     #[test]
     fn primer_stale_publish_does_not_clobber_newer() {
         let cache = arc_swap::ArcSwap::from_pointee(MarkdownCache::new());
@@ -4195,169 +3106,159 @@ mod tests {
         );
     }
 
-    /// Concurrent readers loading during an in-flight prime always observe a
-    /// complete snapshot (old-or-new), never a torn map.
     #[test]
     fn primer_reader_never_sees_torn_state() {
-        use std::sync::atomic::{AtomicBool, Ordering};
-        let primer = Arc::new(MarkdownPrimer::new());
+        use std::sync::Barrier;
 
-        // Seed an initial complete snapshot.
-        let seed = miss_job("seed content");
-        let seed_key = seed.key;
-        primer.prime(vec![seed]);
-
-        let stop = Arc::new(AtomicBool::new(false));
-        let reader_primer = Arc::clone(&primer);
-        let reader_stop = Arc::clone(&stop);
-        let reader = std::thread::spawn(move || {
-            // Every snapshot the reader sees must be internally consistent:
-            // either it has the seed key (old) or it has the new keys (new),
-            // and its len matches its contents — never partially filled.
-            while !reader_stop.load(Ordering::Relaxed) {
-                let snap = reader_primer.load();
-                // A snapshot is valid as long as len() == number of present
-                // entries it reports; get_by_key on a present key returns a
-                // fully-formed ParsedMarkdown (Arc<str> non-dangling).
-                if let Some(p) = snap.get_by_key(&seed_key) {
-                    assert!(!p.plain_text.is_empty());
-                }
-            }
-        });
-
-        // Hammer the primer with alternating live sets. Each `prime()` call
-        // claims a fresh, strictly-increasing internal epoch on its own
-        //, so no caller-supplied version is needed here.
-        for v in 2..200u64 {
-            let content = format!("# Doc {v}\n\n{}", "body ".repeat(1000));
-            primer.prime(vec![miss_job(&content)]);
+        let primer = MarkdownPrimer::new();
+        let old = [miss_job("old heading"), miss_job("old body")];
+        let large = "# New Scene\n\n".to_owned() + &"word **emphasis** ".repeat(600);
+        assert!(large.len() > INLINE_PARSE_BYTE_THRESHOLD);
+        let new = [miss_job("new heading"), miss_job(&large)];
+        // Prior inline primes advance the epoch before the background parse.
+        for i in 0..50 {
+            primer.prime(vec![miss_job(&format!("prior scene {i}"))]);
         }
-        stop.store(true, Ordering::Relaxed);
-        reader.join().unwrap();
+        primer.prime(old.to_vec());
+        let start = Barrier::new(2);
+        std::thread::scope(|threads| {
+            threads.spawn(|| {
+                start.wait();
+                for _ in 0..500 {
+                    let snapshot = primer.load();
+                    let has_pair = |jobs: &[PrimeJob; 2]| {
+                        jobs.iter()
+                            .all(|job| snapshot.get_by_key(&job.key).is_some())
+                    };
+                    assert_eq!(snapshot.len(), 2);
+                    assert_ne!(has_pair(&old), has_pair(&new));
+                    std::thread::yield_now();
+                }
+            });
+            start.wait();
+            for i in 0..200 {
+                primer.prime(if i % 2 == 0 {
+                    new.to_vec()
+                } else {
+                    old.to_vec()
+                });
+            }
+            primer.prime(new.to_vec());
+            let after = wait_for_key(&primer, &new[0].key, 200);
+            assert_eq!(after.len(), 2);
+            let text = &after.get_by_key(&new[1].key).unwrap().plain_text;
+            assert!(text.contains("New Scene") && text.contains("emphasis"));
+        });
     }
 
-    // ── Per-tile markdown token scoping ───────────────────────────
-
-    /// A map that sets BOTH a portal-scoped and a generic key for link color,
-    /// plus a portal-only code background (no generic fallback), so the two
-    /// scopes resolve provably different token sets.
-    fn scoped_token_map() -> std::collections::HashMap<String, String> {
-        let mut map = std::collections::HashMap::new();
-        // Both keys present: portal prefers its own; generic must use the
-        // generic fallback and never the portal key.
-        map.insert(
-            "portal.transcript.link_color".to_string(),
-            "#0080ff".to_string(),
-        );
-        map.insert("color.link.text".to_string(), "#ff0000".to_string());
-        // Portal-only key with NO generic fallback: generic must resolve None.
-        map.insert(
-            "portal.transcript.code_background".to_string(),
-            "#112233".to_string(),
-        );
-        // Portal-only divider namespace: generic must ignore it entirely.
-        map.insert("portal.divider.color".to_string(), "#00ff00".to_string());
-        map
-    }
-
-    /// (b) A non-portal (`Generic`) surface must NOT receive `portal.transcript.*`
-    /// (or any `portal.*`) preference, while the portal surface does.
     #[test]
-    fn generic_scope_never_receives_portal_preferences() {
-        let map = scoped_token_map();
-        let portal = MarkdownTokens::from_token_map_scoped(&map, MarkdownScope::Portal);
-        let generic = MarkdownTokens::from_token_map_scoped(&map, MarkdownScope::Generic);
-
-        // Link color: portal prefers the portal key; generic uses the generic
-        // fallback — the two must differ, proving no portal leak.
-        assert_eq!(portal.link_color, parse_hex_color("#0080ff"));
+    fn markdown_cache_separates_scopes_and_holds_only_live_entries() {
+        let tokens = map(&[
+            ("portal.transcript.link_color", "#0080ff"),
+            ("color.link.text", "#ff0000"),
+            ("portal.transcript.code_background", "#112233"),
+            ("portal.divider.color", "#00ff00"),
+        ]);
+        let portal = MarkdownTokens::from_token_map_scoped(&tokens, MarkdownScope::Portal);
+        let generic = MarkdownTokens::from_token_map_scoped(&tokens, MarkdownScope::Generic);
+        let roles = |t: &MarkdownTokens| (t.link_color, t.code_background, t.separator_color);
         assert_eq!(
-            generic.link_color,
-            parse_hex_color("#ff0000"),
-            "generic scope must resolve the generic key, never the portal key"
+            roles(&portal),
+            (
+                parse_hex_color("#0080ff"),
+                parse_hex_color("#112233"),
+                parse_hex_color("#00ff00")
+            )
         );
-        assert_ne!(portal.link_color, generic.link_color);
-
-        // Code background is a portal-only key here (no generic fallback set):
-        // portal resolves it, generic must leave it None.
-        assert_eq!(portal.code_background, parse_hex_color("#112233"));
+        assert_eq!(roles(&generic), (parse_hex_color("#ff0000"), None, None));
         assert_eq!(
-            generic.code_background, None,
-            "a portal-only key must never reach a non-portal surface"
+            roles(&MarkdownTokens::from_token_map(&tokens)),
+            roles(&portal)
         );
 
-        // Divider is portal-namespaced: portal enables it, generic disables it.
-        assert_eq!(portal.separator_color, parse_hex_color("#00ff00"));
-        assert_eq!(
-            generic.separator_color, None,
-            "portal.divider.* must never reach a non-portal surface"
-        );
-
-        // The default portal wrapper stays identical to the explicit Portal scope
-        // (v1 behavior unchanged).
-        let default_portal = MarkdownTokens::from_token_map(&map);
-        assert_eq!(default_portal.link_color, portal.link_color);
-        assert_eq!(default_portal.code_background, portal.code_background);
-        assert_eq!(default_portal.separator_color, portal.separator_color);
-    }
-
-    /// (a) The parse cache must not mis-serve entries across differing token
-    /// sets: the SAME content under two different token sets yields two distinct
-    /// cached parses keyed independently (no collision).
-    #[test]
-    fn same_content_two_token_sets_do_not_collide_in_cache() {
-        let map = scoped_token_map();
-        let portal = MarkdownTokens::from_token_map_scoped(&map, MarkdownScope::Portal);
-        let generic = MarkdownTokens::from_token_map_scoped(&map, MarkdownScope::Generic);
-        // The two scopes genuinely differ, so their parses must differ too.
-        assert_ne!(portal.link_color, generic.link_color);
-
-        let content = "[docs](https://example.com)";
-
-        // Distinct keys for the same content under the two token sets.
-        let key_portal = MarkdownCache::compute_key(content, &portal);
-        let key_generic = MarkdownCache::compute_key(content, &generic);
-        assert_ne!(
-            key_portal, key_generic,
-            "content + token identity must produce distinct keys per token set"
-        );
-
-        // Priming the same content under each token set produces TWO entries,
-        // each serving its own parse — never one clobbering the other.
+        let text = "[docs](https://example.com)";
         let mut cache = MarkdownCache::new();
-        let parsed_portal = cache.prime(content, &portal).clone();
-        let parsed_generic = cache.prime(content, &generic).clone();
+        let keys = [&portal, &generic].map(|tokens| {
+            let key = MarkdownCache::compute_key(text, tokens);
+            assert!(cache.get_by_key(&key).is_none());
+            let parsed = cache.prime(text, tokens).clone();
+            assert_eq!(cache.prime(text, tokens), &parsed);
+            assert_eq!(cache.get_by_key(&key), Some(&parsed));
+            assert_eq!(cache.get(text, tokens), Some(&parsed));
+            assert_ne!(key, MarkdownCache::compute_key("different text", tokens));
+            key
+        });
+        assert_ne!(keys[0], keys[1]);
+        assert_eq!(cache.len(), 2);
+        for (key, tokens) in keys.iter().zip([&portal, &generic]) {
+            let parsed = cache.get_by_key(key).unwrap();
+            assert_eq!(
+                parsed.spans.iter().find_map(|span| span.attr.color),
+                tokens.link_color
+            );
+        }
+        let large = "a".repeat(65_535);
+        assert_eq!(cache.prime(&large, &portal).plain_text.as_ref(), large);
+        assert_eq!(cache.len(), 3);
+        cache.evict_except(&[keys[0]]);
+        assert_eq!(cache.len(), 1);
+        assert!(cache.get_by_key(&keys[0]).is_some());
+        assert!(cache.get_by_key(&keys[1]).is_none());
+        assert!(cache.get(&large, &portal).is_none());
+    }
+
+    #[test]
+    fn portal_transcript_tokens_override_and_fall_back_to_generic() {
+        let mut tokens = map(&[
+            ("color.link.text", "#00CC44"),
+            ("color.code.text", "#FF0000"),
+            ("color.code.background", "#00CC44"),
+            ("typography.code.family", "sans-serif"),
+        ]);
+        let roles = |t: MarkdownTokens| {
+            (
+                t.link_color,
+                t.code_color,
+                t.code_background,
+                t.code_monospace,
+            )
+        };
         assert_eq!(
-            cache.len(),
-            2,
-            "same content under two token sets must occupy two distinct entries"
+            roles(MarkdownTokens::from_token_map(&HashMap::new())),
+            (None, None, None, true)
         );
+        let green = parse_hex_color("#00CC44");
+        assert_eq!(
+            roles(MarkdownTokens::from_token_map(&tokens)),
+            (green, parse_hex_color("#FF0000"), green, false)
+        );
+        tokens.extend(map(&[
+            ("portal.transcript.link_color", "#0000FF"),
+            ("portal.transcript.code_text", "#0000FF"),
+            ("portal.transcript.code_background", "#0000FF"),
+            ("portal.transcript.code_font_family", "monospace"),
+        ]));
+        let blue = parse_hex_color("#0000FF");
+        assert_eq!(
+            roles(MarkdownTokens::from_token_map(&tokens)),
+            (blue, blue, blue, true)
+        );
+        tokens.insert("portal.transcript.code_background".into(), "#EEEEEE".into());
+        assert_eq!(
+            MarkdownTokens::from_token_map(&tokens).code_background,
+            parse_hex_color("#EEEEEE")
+        );
+    }
 
-        // Each key resolves to the parse produced under its own token set.
-        assert_eq!(cache.get_by_key(&key_portal), Some(&parsed_portal));
-        assert_eq!(cache.get_by_key(&key_generic), Some(&parsed_generic));
+    #[test]
+    fn parse_hex_color_formats() {
+        let white6 = parse_hex_color("#FFFFFF").expect("#RRGGBB");
+        assert_eq!(white6.a, 1.0);
 
-        // And the parses themselves differ: the portal link carries a color
-        // override span; the generic one (no generic link color here... actually
-        // generic sets #ff0000) also colors, but with a DIFFERENT color — so the
-        // parsed outputs are not equal.
-        assert_ne!(
-            parsed_portal, parsed_generic,
-            "the two token sets must yield materially different parses"
-        );
-        let portal_link_color = parsed_portal
-            .spans
-            .iter()
-            .find_map(|s| s.attr.color)
-            .expect("portal link span must carry a color");
-        let generic_link_color = parsed_generic
-            .spans
-            .iter()
-            .find_map(|s| s.attr.color)
-            .expect("generic link span must carry a color");
-        assert_ne!(
-            portal_link_color, generic_link_color,
-            "portal vs generic link color must differ (no cross-scope mis-serve)"
-        );
+        let black3 = parse_hex_color("#000").expect("#RGB");
+        assert_eq!(black3.r, 0.0);
+
+        let semi = parse_hex_color("#FFFFFF80").expect("#RRGGBBAA");
+        assert!(semi.a > 0.4 && semi.a < 0.6, "alpha ~0.5 from 0x80");
     }
 }

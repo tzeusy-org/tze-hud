@@ -1,12 +1,7 @@
 //! Animation-state update methods for the compositor.
 //!
-//! Moved from `renderer/mod.rs` (the animation-update method cluster, approx.
-//! L4288–5095 at plan date) by Step R-5 of the renderer module split.
-//! No logic was changed; only visibility modifiers were added
-//! where Rust's module-privacy rules require them.
-//!
 //! Animation-state **types** (`ZoneAnimationState`, `PublicationAnimationState`,
-//! `StreamRevealState`) remain in `draw_cmds.rs` (placed there by Step R-1).
+//! `StreamRevealState`) live in `draw_cmds.rs`.
 //! This file contains only the `impl Compositor` methods that operate on those
 //! types.
 
@@ -175,18 +170,20 @@ impl Compositor {
         now: std::time::Instant,
     ) {
         // Resolve transition durations from design tokens (— no literals).
+        use tze_hud_scene::portal_defaults;
+        let default_ms = |v: &str| portal_defaults::number(v) as u32;
         let transition_in_ms: u32 = self
             .token_map
             .get("portal.transition.in_ms")
             .and_then(|v| v.parse::<u32>().ok())
             .filter(|&n| n > 0)
-            .unwrap_or(120); // matches PortalPartTokens::defaults::TRANSITION_IN_MS
+            .unwrap_or_else(|| default_ms(portal_defaults::TRANSITION_IN_MS));
         let transition_out_ms: u32 = self
             .token_map
             .get("portal.transition.out_ms")
             .and_then(|v| v.parse::<u32>().ok())
             .filter(|&n| n > 0)
-            .unwrap_or(80); // matches PortalPartTokens::defaults::TRANSITION_OUT_MS
+            .unwrap_or_else(|| default_ms(portal_defaults::TRANSITION_OUT_MS));
 
         // Build current content state for all scrollable tiles.
         let current: HashMap<SceneId, bool> = scene
@@ -800,12 +797,15 @@ impl Compositor {
             .filter(|_| !self.drawn_owner_hidden.zones)
             .flat_map(|zone| zone.values())
             .filter_map(|s| s.fade_start_deadline());
+        // A steady caret (Windows caret blinking off) never toggles.
         let caret_toggle = self
             .local_composer
             .as_ref()
             .filter(|_| !self.notification_keyboard_active)
-            .map(|_| {
-                let half = crate::renderer::image_cache::CARET_BLINK_HALF_PERIOD.as_nanos();
+            .and(self.composer_caret_blink)
+            .filter(|half| !half.is_zero())
+            .map(|half| {
+                let half = half.as_nanos();
                 let elapsed = now
                     .saturating_duration_since(self.composer_caret_blink_start)
                     .as_nanos();
@@ -821,6 +821,57 @@ impl Compositor {
             .filter(|wr| wr.has_active_transition())
             .map(|_| now + crate::widget::WIDGET_TRANSITION_TICK);
         fade_starts.chain(caret_toggle).chain(widget_tick).min()
+    }
+
+    /// Fraction (0..=1) of notification action `interaction_id` covered by
+    /// the hold fill, or `None` when it has none. A hold sweeps across over
+    /// `notification.action.hold.ms`; a hold released early drains back over
+    /// `motion.state.ms`. Under reduced motion a hold shows the full fill at
+    /// once and a release removes it. Computed from scene time alone.
+    pub(super) fn notification_hold_fill(
+        &self,
+        scene: &SceneGraph,
+        interaction_id: &str,
+    ) -> Option<f32> {
+        use tze_hud_config::tokens;
+        use tze_hud_scene::graph::zone_ops::hold_progress;
+        let reduced = tokens::os_reduce_motion(&self.token_map);
+        let now = scene.now_monotonic_us();
+        if let Some(hold) = &scene.overlay.notification_hold {
+            if hold.region.interaction_id == interaction_id {
+                let hold_ms = tokens::notification_action_hold_ms(&self.token_map);
+                return Some(if reduced {
+                    1.0
+                } else {
+                    hold_progress(hold.started_mono_us, now, hold_ms)
+                });
+            }
+        }
+        let drain = scene
+            .overlay
+            .notification_hold_drain
+            .as_ref()
+            .filter(|d| !reduced && d.interaction_id == interaction_id)?;
+        let drain_ms = tokens::resolve_motion_duration_ms(&self.token_map, "motion.state.ms");
+        let left = drain.progress * (1.0 - hold_progress(drain.released_mono_us, now, drain_ms));
+        (left > 0.0).then_some(left)
+    }
+
+    /// Whether a hold is still sweeping (it stops at full, and under reduced
+    /// motion) or a drain still draining.
+    fn notification_hold_animating(&self, scene: &SceneGraph) -> bool {
+        let fill = |id: &str| self.notification_hold_fill(scene, id);
+        let overlay = &scene.overlay;
+        let sweeping = overlay
+            .notification_hold
+            .as_ref()
+            .and_then(|h| fill(&h.region.interaction_id))
+            .is_some_and(|f| f < 1.0);
+        let draining = overlay
+            .notification_hold_drain
+            .as_ref()
+            .is_some_and(|d| fill(&d.interaction_id).is_some());
+        sweeping || draining
     }
 
     /// Whether any per-frame animation, fade, reveal, or scroll smoothing is
@@ -905,6 +956,13 @@ impl Compositor {
                 .values()
                 .any(|zone| zone.values().any(|s| s.is_fading_at(now)))
         {
+            return true;
+        }
+
+        // A destructive action's hold sweep or its early-release drain. A
+        // waiting destructive card, a swept-full hold awaiting completion and
+        // reduced motion's static fill all cost no frames.
+        if zones_shown && self.notification_hold_animating(scene) {
             return true;
         }
 

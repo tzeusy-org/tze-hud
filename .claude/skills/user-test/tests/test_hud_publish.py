@@ -1,8 +1,11 @@
 """CLI fallback sends the documented MCP verbs without implicit input ACKs."""
 
+import http.client
 import importlib.util
 import io
 import json
+import urllib.error
+import urllib.request
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -23,13 +26,16 @@ def wire(monkeypatch):
     replies = []
 
     def urlopen(request, timeout):
-        assert timeout > 30  # The supported input wait must fit the HTTP timeout.
         assert request.get_header("Authorization") == "Bearer fixture-key"
         body = json.loads(request.data)
         assert body["jsonrpc"] == "2.0"
         assert body["method"] == "tools/call"
+        # Question waits fit 65 s. Cleanup may use the shorter clear timeout.
+        assert timeout in ((20, 65) if body["params"]["name"] == "hud_clear" else (65,))
         requests.append(body["params"])
         reply = replies.pop(0) if replies else {"ok": True}
+        if isinstance(reply, BaseException):
+            raise reply
         envelope = {
             "jsonrpc": "2.0",
             "id": body["id"],
@@ -40,7 +46,7 @@ def wire(monkeypatch):
         }
         return io.BytesIO(json.dumps(envelope).encode())
 
-    monkeypatch.setattr(publish.urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
     return requests, replies, resolve
 
 
@@ -96,14 +102,14 @@ def wire(monkeypatch):
             {"surface": "widget:allocated", "ttl_ms": 10000},
         ),
         (
-            ["--zone", "notification-area", "--content", '{"body":"Ship?","actions":[{"label":"Yes","callback_id":"yes"}]}', "--wait-ms", "30000"],
+            ["--zone", "notification-area", "--content", '{"body":"Ship?","actions":[{"label":"Yes","callback_id":"yes"}]}', "--wait-ms", "55000"],
             "hud_publish",
-            {"surface":"zone:notification-area", "content":{"body":"Ship?","actions":[{"label":"Yes","callback_id":"yes"}]}, "wait_ms":30000},
+            {"surface":"zone:notification-area", "content":{"body":"Ship?","actions":[{"label":"Yes","callback_id":"yes"}]}, "wait_ms":55000},
         ),
         (
-            ["--input", "--wait-ms", "30000", "--max-items", "20"],
+            ["--input", "--wait-ms", "55000", "--max-items", "20"],
             "hud_input",
-            {"wait_ms": 30000, "max_items": 20},
+            {"wait_ms": 55000, "max_items": 20},
         ),
         (
             ["--input", "--ack", "handled-1", "--ack", "handled-2"],
@@ -143,7 +149,7 @@ def test_legacy_and_widget_batch_reports_partial_failure_without_replay(
         json.dumps(
             [
                 {"zone": "subtitle", "content": "legacy", "ttl_ms": 2000},
-                {"surface": "widget:allocated", "params": {"progress": 0.5}},
+                {"widget": "allocated", "params": {"progress": 0.5}},
             ]
         )
     )
@@ -163,6 +169,49 @@ def test_legacy_and_widget_batch_reports_partial_failure_without_replay(
         },
     ]
     assert len(json.loads(capsys.readouterr().out)["published"]) == 2
+
+
+@pytest.mark.parametrize("entries", [[], [{"s": "widget:allocated", "held": True}]])
+def test_cleanup_refuses_undiscovered_or_held_widget(wire, entries):
+    requests, replies, _ = wire
+    replies.append({"surfaces": entries})
+    assert publish.main([
+        "--surface", "widget:allocated", "--params", '{"progress":0.5}', "--cleanup-on-exit",
+    ]) == 5
+    assert requests == [{"name": "hud_surfaces", "arguments": {}}]
+
+
+@pytest.mark.parametrize("failure,exit_code", [("none", 1), ("http", 3), ("interrupt", 130)])
+def test_cleanup_clears_only_accepted_or_uncertain_widgets(wire, tmp_path, failure, exit_code):
+    requests, replies, _ = wire
+    names = ["accepted", "refused", "maybe", "later"]
+    replies.extend([
+        {"surfaces": [{"s": f"widget:{name}"} for name in names]},
+        {"ok": True},
+        {"ok": True},
+        {"code": "WIDGET_PARAMETER_INVALID", "hint": "fixture"},
+    ])
+    if failure == "http":
+        replies.append(urllib.error.HTTPError("http://fixture/mcp", 503, "", {}, None))
+    elif failure == "interrupt":
+        replies.append(KeyboardInterrupt())
+    path = tmp_path / "batch.json"
+    path.write_text(json.dumps([
+        {"zone": "subtitle", "content": "leave until TTL", "ttl_ms": 10000},
+        *[{"widget": name, "params": {"progress": 0.5}} for name in names],
+    ]))
+
+    assert publish.main(["--messages-file", str(path), "--cleanup-on-exit"]) == exit_code
+    published = ["zone:subtitle", "widget:accepted", "widget:refused", "widget:maybe"]
+    cleared = ["widget:accepted", "widget:maybe"]
+    if failure == "none":
+        published.append("widget:later")
+        cleared.append("widget:later")
+    assert requests[0] == {"name": "hud_surfaces", "arguments": {}}
+    assert [(r["name"], r["arguments"]["surface"]) for r in requests[1:]] == [
+        *[("hud_publish", surface) for surface in published],
+        *[("hud_clear", surface) for surface in cleared],
+    ]
 
 
 def test_invalid_later_batch_item_prevents_all_network_work(wire, tmp_path):
@@ -187,7 +236,7 @@ def test_invalid_later_batch_item_prevents_all_network_work(wire, tmp_path):
         ["--zone", "subtitle", "--clear", "--ttl-ms", "100"],
         ["--zone", "subtitle", "--hold"],
         ["--zone", "subtitle", "--hold", "--ttl-ms", "100", "--key", "ignored"],
-        ["--input", "--wait-ms", "30001"],
+        ["--input", "--wait-ms", "55001"],
         ["--input", "--max-items", "0"],
         ["--list-surfaces", "--ack", "unowned"],
         ["--surface", "widget:allocated", "--clear", "--key", "unsupported"],
@@ -224,11 +273,11 @@ def test_invalid_payload_never_reaches_network(wire, flags):
 def test_http_failure_is_not_replayed_or_echoed(wire, monkeypatch, capsys):
     requests, _, _ = wire
     fail = Mock(
-        side_effect=publish.urllib.error.HTTPError(
+        side_effect=urllib.error.HTTPError(
             "http://fixture/mcp", 503, "fixture-key", {}, io.BytesIO(b"fixture-key")
         )
     )
-    monkeypatch.setattr(publish.urllib.request, "urlopen", fail)
+    monkeypatch.setattr(urllib.request, "urlopen", fail)
     assert publish.main(["--zone", "subtitle", "--content", "hello"]) == 3
     assert fail.call_count == 1
     assert requests == []
@@ -240,20 +289,20 @@ def test_batch_transport_failure_preserves_receipts_and_stops(
     wire, monkeypatch, tmp_path, capsys, failure, exit_code
 ):
     requests, _, _ = wire
-    original = publish.urllib.request.urlopen
+    original = urllib.request.urlopen
     calls = []
 
     def interrupted(request, timeout):
         calls.append(request)
         if len(calls) == 2:
             if failure == "truncated":
-                raise publish.http.client.IncompleteRead(b"fixture-key", 10)
-            raise publish.urllib.error.HTTPError(
+                raise http.client.IncompleteRead(b"fixture-key", 10)
+            raise urllib.error.HTTPError(
                 "http://fixture/mcp", 503, "unavailable", {}, io.BytesIO()
             )
         return original(request, timeout)
 
-    monkeypatch.setattr(publish.urllib.request, "urlopen", interrupted)
+    monkeypatch.setattr(urllib.request, "urlopen", interrupted)
     path = tmp_path / "batch.json"
     path.write_text(
         json.dumps(

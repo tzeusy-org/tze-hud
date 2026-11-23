@@ -17,25 +17,25 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 
 /// How long an answer is reused by `/admin/status` and the pairing card.
-pub const CACHE_TTL: Duration = Duration::from_secs(5);
+pub(crate) const CACHE_TTL: Duration = Duration::from_secs(5);
 
 /// Where the owner is pointed for the fix.
-pub const FIX_HINT: &str =
+pub(crate) const FIX_HINT: &str =
     "run tze_hud.exe --allow-remote with the same --mcp-port/--grpc-port overrides as the HUD";
 
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-pub const PROFILE_DOMAIN: u32 = 1;
+pub(crate) const PROFILE_DOMAIN: u32 = 1;
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-pub const PROFILE_PRIVATE: u32 = 2;
+pub(crate) const PROFILE_PRIVATE: u32 = 2;
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-pub const PROFILE_PUBLIC: u32 = 4;
+pub(crate) const PROFILE_PUBLIC: u32 = 4;
 
 const PROTO_TCP: i32 = 6;
 const PROTO_ANY: i32 = 256;
 
 /// One inbound-relevant firewall rule, as read from `INetFwRule`.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Rule {
+pub(crate) struct Rule {
     pub name: String,
     pub enabled: bool,
     pub inbound: bool,
@@ -54,7 +54,7 @@ pub struct Rule {
 
 /// The firewall policy state that matters for inbound decisions.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct FirewallSnapshot {
+pub(crate) struct FirewallSnapshot {
     /// Profiles whose firewall is on.
     pub enabled: u32,
     /// Profiles whose default inbound action is Block.
@@ -65,7 +65,7 @@ pub struct FirewallSnapshot {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TailnetInbound {
+pub(crate) enum TailnetInbound {
     Allowed,
     Blocked {
         reason: BlockReason,
@@ -78,18 +78,18 @@ pub enum TailnetInbound {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BlockReason {
+pub(crate) enum BlockReason {
     BlockRule,
     NoAllowRule,
 }
 
 impl TailnetInbound {
-    pub fn is_blocked(&self) -> bool {
+    pub(crate) fn is_blocked(&self) -> bool {
         matches!(self, Self::Blocked { .. })
     }
 
     /// The `tailnet_inbound` object of `/admin/status`.
-    pub fn to_json(&self) -> Value {
+    pub(crate) fn to_json(&self) -> Value {
         match self {
             Self::Allowed => json!({"state": "allowed"}),
             Self::NotApplicable => json!({"state": "not_applicable"}),
@@ -113,7 +113,7 @@ impl TailnetInbound {
 /// Only rules on a profile that is both active and enabled count. `tailnet_bound`
 /// false (nothing listens on a tailnet address) is `NotApplicable`; a failed
 /// snapshot read is `Unknown`.
-pub fn decide(
+pub(crate) fn decide(
     tailnet_bound: bool,
     snapshot: &Result<FirewallSnapshot, String>,
     exe: &Path,
@@ -326,13 +326,13 @@ fn remote_hits(spec: &str, cover: bool) -> bool {
 }
 
 /// Reads the policy and decides, with a short cache. Cheap to share.
-pub struct FirewallProbe {
+pub(crate) struct FirewallProbe {
     eval: Box<dyn Fn() -> TailnetInbound + Send + Sync>,
     cache: Mutex<Option<(Instant, TailnetInbound)>>,
 }
 
 impl FirewallProbe {
-    pub fn new(eval: impl Fn() -> TailnetInbound + Send + Sync + 'static) -> Self {
+    pub(crate) fn new(eval: impl Fn() -> TailnetInbound + Send + Sync + 'static) -> Self {
         Self {
             eval: Box::new(eval),
             cache: Mutex::new(None),
@@ -341,7 +341,7 @@ impl FirewallProbe {
 
     /// The real probe: tailnet addresses come from `binds` at evaluation time,
     /// `extra_ports` (e.g. the gRPC port) are checked alongside their ports.
-    pub fn system(binds: Arc<Mutex<Vec<SocketAddr>>>, extra_ports: Vec<u16>) -> Self {
+    pub(crate) fn system(binds: Arc<Mutex<Vec<SocketAddr>>>, extra_ports: Vec<u16>) -> Self {
         Self::new(move || {
             let tailnet: Vec<SocketAddr> = binds
                 .lock()
@@ -360,7 +360,7 @@ impl FirewallProbe {
     }
 
     /// A fresh cached answer, if any. Never blocks.
-    pub fn cached(&self) -> Option<TailnetInbound> {
+    pub(crate) fn cached(&self) -> Option<TailnetInbound> {
         self.cached_with_clock(Instant::now)
     }
 
@@ -374,20 +374,20 @@ impl FirewallProbe {
 
     /// Drop the cached answer, so the next check reads the firewall again
     /// (after the HUD changed its rules).
-    pub fn forget(&self) {
+    pub(crate) fn forget(&self) {
         *self.cache.lock().unwrap_or_else(|e| e.into_inner()) = None;
     }
 
     /// The last answer however old, for showing while a fresh one is
     /// checked. Never blocks.
-    pub fn last(&self) -> Option<TailnetInbound> {
+    pub(crate) fn last(&self) -> Option<TailnetInbound> {
         let cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
         cache.as_ref().map(|(_, v)| v.clone())
     }
 
     /// The cached answer or a fresh evaluation. Blocks on a cache miss (COM
     /// enumeration can take a while): call from a blocking context.
-    pub fn current(&self) -> TailnetInbound {
+    pub(crate) fn current(&self) -> TailnetInbound {
         self.current_with_clock(Instant::now)
     }
 

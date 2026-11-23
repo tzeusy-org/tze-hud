@@ -1292,11 +1292,11 @@ pub(super) fn apply_portal_resize_pointer_event(
 /// Persist a detached snapshot after the caller has released shared/scene guards.
 fn persist_element_store_in_background(
     store: tze_hud_scene::element_store::ElementStore,
-    path: Option<std::path::PathBuf>,
+    file: Option<tze_hud_protocol::session::ElementStoreFile>,
 ) {
-    if let Some(path) = path {
+    if let Some(file) = file {
         std::thread::spawn(move || {
-            if let Err(error) = crate::element_store::persist_element_store_to_path(&store, &path) {
+            if let Err(error) = file.save(&store) {
                 tracing::warn!(%error, "element store persist failed");
             }
         });
@@ -1445,7 +1445,7 @@ impl WinitApp {
         };
         use tze_hud_scene::element_store::ElementType;
 
-        let (store_snapshot, persist_path, new_geometry) = {
+        let (store_snapshot, persist_file, new_geometry) = {
             let Ok(mut state) = self.state.shared_state.try_lock() else {
                 tracing::warn!("persist_drag_release: could not acquire shared_state lock");
                 return;
@@ -1480,13 +1480,13 @@ impl WinitApp {
             }
 
             let store_snapshot = state.element_store.clone();
-            let persist_path = state.element_store_path.clone();
-            (store_snapshot, persist_path, new_geometry)
+            let persist_file = state.element_store_file.clone();
+            (store_snapshot, persist_file, new_geometry)
         };
 
         // Persist element store on a background thread (avoids blocking the
         // winit event loop with sync disk I/O).
-        persist_element_store_in_background(store_snapshot, persist_path);
+        persist_element_store_in_background(store_snapshot, persist_file);
 
         // Broadcast ElementRepositionedEvent so gRPC subscribers are notified.
         if let Some(ref tx) = self.state.element_repositioned_tx {
@@ -1563,7 +1563,7 @@ impl WinitApp {
             return;
         }
 
-        let (store_snapshot, persist_path) = {
+        let (store_snapshot, persist_file) = {
             let Ok(mut state) = self.state.shared_state.try_lock() else {
                 tracing::warn!(
                     "persist_portal_member_overrides: could not acquire shared_state lock"
@@ -1578,11 +1578,11 @@ impl WinitApp {
             );
             (
                 state.element_store.clone(),
-                state.element_store_path.clone(),
+                state.element_store_file.clone(),
             )
         };
 
-        persist_element_store_in_background(store_snapshot, persist_path);
+        persist_element_store_in_background(store_snapshot, persist_file);
     }
 
     /// Called from `about_to_wait` after composer-draft flush.  Drives
@@ -2626,6 +2626,18 @@ mod tests {
         let display_w = 1920.0_f32;
         let display_h = 1080.0_f32;
         let tokens = PortalWindowTokens::default();
+        // Production hit testing builds its tokens from the resolved portal
+        // tokens; with nothing configured they are the input crate's default.
+        let part = tze_hud_config::resolve_portal_tokens(&Default::default());
+        assert_eq!(
+            tokens,
+            PortalWindowTokens {
+                min_width_px: part.window_min_width_px,
+                min_height_px: part.window_min_height_px,
+                resize_step_px: part.window_resize_step_px,
+                affordance_px: part.window_resize_affordance_px,
+            }
+        );
 
         let down_a = PointerEvent {
             x: 496.0,

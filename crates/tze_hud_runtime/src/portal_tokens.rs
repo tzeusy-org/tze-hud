@@ -16,7 +16,7 @@ mod tests {
     /// Previously `PortalVisualTokens::default()` contained hand-coded floats that
     /// diverged from the config defaults by up to 3 ULPs of rounding. This test
     /// enforces the post-consolidation invariant: there is one canonical palette,
-    /// and any future change to `tze_hud_config::portal_tokens::defaults` propagates
+    /// and any future change to `tze_hud_scene::portal_defaults` propagates
     /// here automatically — a change to one side that diverges from the other will
     /// fail this test.
     #[test]

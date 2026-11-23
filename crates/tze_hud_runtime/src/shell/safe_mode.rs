@@ -39,7 +39,7 @@ use super::chrome::ChromeState;
 
 /// Result of [`enter_safe_mode`].
 #[derive(Debug)]
-pub struct SafeModeEntryResult {
+pub(crate) struct SafeModeEntryResult {
     /// Whether this call performed the transition.
     pub entered: bool,
     /// Number of leases that were suspended.
@@ -50,7 +50,7 @@ pub struct SafeModeEntryResult {
 
 /// Result of [`exit_safe_mode`].
 #[derive(Debug)]
-pub struct SafeModeExitResult {
+pub(crate) struct SafeModeExitResult {
     /// Whether this call transitioned safe mode from active to inactive.
     ///
     /// An idempotent exit has no compositor-visible effect, so callers use
@@ -63,7 +63,7 @@ pub struct SafeModeExitResult {
 }
 
 /// Enter safe mode. A no-op result is returned if safe mode is already active.
-pub async fn enter_safe_mode(
+pub(crate) async fn enter_safe_mode(
     shared_state: &Arc<Mutex<SharedState>>,
     chrome_state: &Arc<RwLock<ChromeState>>,
     portals: Option<&tze_hud_mcp::PortalHandle>,
@@ -133,7 +133,7 @@ pub async fn enter_safe_mode(
 ///
 /// Agents do not re-request leases: identity, capability scope, and resource
 /// budget are preserved across the ACTIVE -> SUSPENDED -> ACTIVE cycle.
-pub async fn exit_safe_mode(
+pub(crate) async fn exit_safe_mode(
     shared_state: &Arc<Mutex<SharedState>>,
     chrome_state: &Arc<RwLock<ChromeState>>,
     portals: Option<&tze_hud_mcp::PortalHandle>,
@@ -209,7 +209,7 @@ mod tests {
             ),
             runtime_widget_store: None,
             element_store: tze_hud_scene::element_store::ElementStore::default(),
-            element_store_path: None,
+            element_store_file: None,
             safe_mode_atomic: Arc::new(AtomicBool::new(false)),
             active_tab_mirror: Arc::new(std::sync::Mutex::new(None)),
             token_store: TokenStore::new(),
@@ -391,7 +391,7 @@ mod tests {
     }
 
     /// While safe mode is active `SharedState.safe_mode_atomic` is set, which
-    /// makes the session server reject MutationBatch with SAFE_MODE_ACTIVE.
+    /// makes the session server reject Publish with SAFE_MODE_ACTIVE.
     #[tokio::test]
     async fn test_mutations_rejected_via_shared_state_flag() {
         let fx = Fixture::new();

@@ -25,6 +25,7 @@ use crate::operator::status::{UnplacedReason, UnplacedZone};
 use tze_hud_compositor::{DisplayLayout, DisplayRect, FrameTarget, WindowSurface};
 use tze_hud_config::displays::{is_legacy_display_key, normalize_display_key};
 use tze_hud_scene::Rect;
+use winit::dpi::PhysicalSize;
 use winit::event_loop::ActiveEventLoop;
 use winit::monitor::MonitorHandle;
 use winit::window::{Window, WindowAttributes, WindowId, WindowLevel};
@@ -71,11 +72,11 @@ impl MonitorSpec {
     }
 
     /// This monitor's bounds in scene pixels, given the primary's origin.
-    pub fn scene_origin(&self, primary: &MonitorSpec) -> (i32, i32) {
+    pub(super) fn scene_origin(&self, primary: &MonitorSpec) -> (i32, i32) {
         (self.x - primary.x, self.y - primary.y)
     }
 
-    pub fn scene_rect(&self, primary: &MonitorSpec) -> Rect {
+    pub(super) fn scene_rect(&self, primary: &MonitorSpec) -> Rect {
         let (x, y) = self.scene_origin(primary);
         Rect::new(x as f32, y as f32, self.width as f32, self.height as f32)
     }
@@ -287,6 +288,9 @@ pub(super) fn display_log_line(key: &str, spec: &MonitorSpec, primary: bool) -> 
     )
 }
 
+/// The zone whose question cards are placed per display.
+const QUESTION_ZONE: &str = "notification-area";
+
 /// Each monitor's scale factor for appearance: the primary's, and that of
 /// every zone placed on a connected secondary.
 pub(super) fn display_scales(
@@ -303,6 +307,15 @@ pub(super) fn display_scales(
                 .find(|m| m.name == display)
                 .map(|m| (zone.clone(), m.scale))
         })
+        // Both movable surfaces draw at the selected monitor's scale.
+        .chain(secondaries.iter().flat_map(|m| {
+            [QUESTION_ZONE, "control-panel"].map(|surface| {
+                (
+                    tze_hud_compositor::placed_zone_key(surface, &m.name),
+                    m.scale,
+                )
+            })
+        }))
         .collect();
     crate::appearance::DisplayScales {
         primary: primary.scale,
@@ -358,14 +371,14 @@ pub(super) struct DisplayTargets {
 
 impl DisplayTargets {
     /// Report `name`'s surface as lost (once, however often it is seen).
-    pub fn report_lost(&mut self, name: &str) {
+    pub(super) fn report_lost(&mut self, name: &str) {
         if !self.lost.iter().any(|n| n == name) {
             self.lost.push(name.to_owned());
         }
     }
 
     /// Report that `name` presented a frame.
-    pub fn report_healthy(&mut self, name: &str) {
+    pub(super) fn report_healthy(&mut self, name: &str) {
         if !self.healthy.iter().any(|n| n == name) {
             self.healthy.push(name.to_owned());
         }
@@ -397,28 +410,28 @@ pub(super) struct PresentLedger {
 
 impl PresentLedger {
     /// A frame with `signature` differs from what is on screen.
-    pub fn needs_present(&self, signature: u64) -> bool {
+    pub(super) fn needs_present(&self, signature: u64) -> bool {
         self.presented != Some(signature)
     }
 
     /// A present may be attempted at `now` (not backing off).
-    pub fn ready(&self, now: Instant) -> bool {
+    pub(super) fn ready(&self, now: Instant) -> bool {
         self.retry.is_none_or(|(at, _)| now >= at)
     }
 
     /// Owed a frame and the retry time has come.
-    pub fn retry_due(&self, now: Instant) -> bool {
+    pub(super) fn retry_due(&self, now: Instant) -> bool {
         self.retry.is_some_and(|(at, _)| now >= at)
     }
 
     /// When the owed frame should be retried.
-    pub fn retry_at(&self) -> Option<Instant> {
+    pub(super) fn retry_at(&self) -> Option<Instant> {
         self.retry.map(|(at, _)| at)
     }
 
     /// Record a present attempt of `signature` made at `now`. Returns true
     /// the first time a present submits.
-    pub fn record(&mut self, signature: u64, submitted: bool, now: Instant) -> bool {
+    pub(super) fn record(&mut self, signature: u64, submitted: bool, now: Instant) -> bool {
         if submitted {
             self.presented = Some(signature);
             self.retry = None;
@@ -432,17 +445,17 @@ impl PresentLedger {
     }
 
     /// The window already shows the current frame: nothing is owed.
-    pub fn settle(&mut self) {
+    pub(super) fn settle(&mut self) {
         self.retry = None;
     }
 
     /// Forget what is on screen (reconfigured or new surface).
-    pub fn invalidate(&mut self) {
+    pub(super) fn invalidate(&mut self) {
         self.presented = None;
     }
 
     #[cfg(test)]
-    pub fn owed(&self) -> bool {
+    pub(super) fn owed(&self) -> bool {
         self.retry.is_some()
     }
 }
@@ -456,7 +469,7 @@ pub(super) struct SecondaryTarget {
 }
 
 impl SecondaryTarget {
-    pub fn frame_target(&self) -> FrameTarget {
+    pub(super) fn frame_target(&self) -> FrameTarget {
         let (width, height) = tze_hud_compositor::CompositorSurface::size(self.surface.as_ref());
         FrameTarget {
             x: self.origin.0 as f32,
@@ -629,9 +642,29 @@ pub(super) fn secondary_index(secondaries: &[SecondaryDisplay], id: WindowId) ->
     secondaries.iter().position(|s| s.window.id() == id)
 }
 
+/// Resolve a DPI event only against registered windows, using native physical
+/// dimensions without applying the scale factor again. A creation-time event
+/// may arrive before registration; leave its writer default alone, then let
+/// display sync fit that window once it is registered.
+pub(super) fn scale_change_target<'a>(
+    window_id: WindowId,
+    primary: Option<(WindowId, &'a MonitorSpec)>,
+    secondaries: impl IntoIterator<Item = (WindowId, &'a MonitorSpec)>,
+) -> Option<PhysicalSize<u32>> {
+    primary
+        .into_iter()
+        .chain(secondaries)
+        .find_map(|(id, spec)| {
+            (id == window_id).then_some(PhysicalSize::new(spec.width, spec.height))
+        })
+}
+
 /// Final swapchain outcomes: successful secondary present and deferred encodes.
-pub(super) type SecondaryPresentation =
-    (bool, Vec<tze_hud_compositor::surface::PresentAvailability>);
+pub(super) type SecondaryPresentation = (
+    bool,
+    Vec<tze_hud_compositor::surface::PresentAvailability>,
+    Vec<tze_hud_scene::SceneId>,
+);
 
 /// One of the overlay windows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -872,7 +905,7 @@ impl RefitBudget {
     }
 
     /// Spend one re-fit at `now` if the budget allows it.
-    pub fn take(&mut self, now: Instant) -> bool {
+    pub(super) fn take(&mut self, now: Instant) -> bool {
         if self
             .window_start
             .is_none_or(|start| now.duration_since(start) >= REFIT_WINDOW)
@@ -1434,6 +1467,11 @@ impl super::WinitApp {
     /// `specs` is the already accepted overlay plan, never fresh OS discovery.
     pub(super) fn publish_displays_for(&mut self, primary: &MonitorSpec, specs: &[MonitorSpec]) {
         let layout = display_layout(primary, specs, &self.state.zone_targets);
+        *self
+            .state
+            .placement_layout
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = layout.clone();
         let zones_on = |name: &str| -> Vec<String> {
             let mut zones: Vec<String> = self
                 .state
@@ -1620,22 +1658,25 @@ impl super::WinitApp {
     }
 
     /// Present every secondary's pending frame (main thread).
-    pub(super) fn present_secondaries(
-        &self,
-    ) -> (bool, Vec<tze_hud_compositor::surface::PresentAvailability>) {
+    pub(super) fn present_secondaries(&self) -> SecondaryPresentation {
         use tze_hud_compositor::surface::PendingPresent;
         let mut presented = false;
         let mut deferred = Vec::new();
+        let mut cards = Vec::new();
         for display in &self.state.secondaries {
-            match display.surface.present_pending_texture_status() {
-                PendingPresent::Presented => presented = true,
+            let (status, ids) = display.surface.present_pending_texture_with_cards();
+            match status {
+                PendingPresent::Presented => {
+                    presented = true;
+                    cards.extend(ids);
+                }
                 PendingPresent::Empty => {}
                 PendingPresent::DeferredEncoding => {
                     deferred.push(display.surface.present_availability())
                 }
             }
         }
-        (presented, deferred)
+        (presented, deferred, cards)
     }
 
     /// Apply the overlay capture decision per window (see [`capture_window`]).
@@ -2014,7 +2055,20 @@ mod tests {
         ]);
         let scales = display_scales(&primary, &secondaries, &zones);
         assert_eq!(scales.primary, 1.25);
-        assert_eq!(scales.zones, HashMap::from([("subtitle".to_string(), 2.0)]));
+        assert_eq!(
+            scales.zones,
+            HashMap::from([
+                ("subtitle".to_string(), 2.0),
+                // Each secondary also scales questions and the panel.
+                (
+                    "notification-area@DISPLAY6".to_string(),
+                    secondaries[0].scale
+                ),
+                ("notification-area@DISPLAY8".to_string(), 2.0),
+                ("control-panel@DISPLAY6".to_string(), secondaries[0].scale),
+                ("control-panel@DISPLAY8".to_string(), 2.0),
+            ])
+        );
     }
 
     /// A DPI change alone is the same place: the window is kept.
@@ -2027,6 +2081,25 @@ mod tests {
         };
         assert!(before.same_place(&after));
         assert!(!before.same_place(&spec("DISPLAY6", 3840, 0)));
+    }
+
+    #[test]
+    fn a_question_placed_on_a_secondary_takes_its_scale() {
+        let (primary, mut secondaries) = rig();
+        secondaries[1].scale = 1.5;
+        let scales = display_scales(&primary, &secondaries, &HashMap::new());
+        assert_eq!(
+            scales.zones,
+            HashMap::from([
+                (
+                    "notification-area@DISPLAY6".to_string(),
+                    secondaries[0].scale
+                ),
+                ("notification-area@DISPLAY8".to_string(), 1.5),
+                ("control-panel@DISPLAY6".to_string(), secondaries[0].scale),
+                ("control-panel@DISPLAY8".to_string(), 1.5),
+            ])
+        );
     }
 
     #[test]
@@ -2312,6 +2385,102 @@ mod tests {
     /// The sizes Windows left the overlays at during the owner's replug.
     #[test]
     fn overlay_geometry_and_visibility_recovery() {
+        // DPI labels describe the layout; the requested dimensions are always
+        // native physical pixels, including at 150% and 200% scaling.
+        let primary_id = WindowId::from(1);
+        let secondary_150_id = WindowId::from(2);
+        let secondary_200_id = WindowId::from(3);
+        let unknown_id = WindowId::from(4);
+        let primary = MonitorSpec {
+            width: 1920,
+            height: 1080,
+            scale: 1.0,
+            ..spec("DPI100", 0, 0)
+        };
+        let secondary_150 = MonitorSpec {
+            width: 2560,
+            height: 1440,
+            scale: 1.5,
+            ..spec("DPI150", 1920, 0)
+        };
+        let secondary_200 = MonitorSpec {
+            scale: 2.0,
+            ..spec("DPI200", -3840, 0)
+        };
+        let registered_primary = Some((primary_id, &primary));
+        let secondaries = [
+            (secondary_150_id, &secondary_150),
+            (secondary_200_id, &secondary_200),
+        ];
+        for (id, expected) in [
+            (primary_id, PhysicalSize::new(1920, 1080)),
+            (secondary_150_id, PhysicalSize::new(2560, 1440)),
+            (secondary_200_id, PhysicalSize::new(3840, 2160)),
+        ] {
+            assert_eq!(
+                scale_change_target(id, registered_primary, secondaries),
+                Some(expected)
+            );
+        }
+        assert_eq!(
+            scale_change_target(unknown_id, registered_primary, secondaries),
+            None,
+            "an unknown or stale ID must not resize another overlay"
+        );
+        // The same creation-time ID receives no override until it is actually
+        // registered, then resolves to its own monitor rather than the primary.
+        assert_eq!(
+            scale_change_target(secondary_200_id, registered_primary, [secondaries[0]]),
+            None
+        );
+        assert_eq!(
+            scale_change_target(secondary_200_id, registered_primary, secondaries),
+            Some(PhysicalSize::new(3840, 2160))
+        );
+        for (primary_window, primary_spec) in [
+            (None, Some(&primary)),
+            (Some(primary_id), None),
+            (None, None),
+        ] {
+            let registered_primary = primary_window.zip(primary_spec);
+            assert_eq!(
+                scale_change_target(primary_id, registered_primary, secondaries),
+                None,
+                "primary geometry alone or primary identity alone is insufficient"
+            );
+            assert_eq!(
+                scale_change_target(secondary_150_id, registered_primary, secondaries),
+                Some(PhysicalSize::new(2560, 1440)),
+                "a registered secondary does not require a primary record"
+            );
+        }
+        // Display sync first catches the surface up to the current window,
+        // then the existing recovery plan corrects logical-size creation drift.
+        for (monitor, logical_size, native_size) in [
+            (&primary, (1920, 1080), (1920, 1080)),
+            (&secondary_150, (1707, 960), (2560, 1440)),
+            (&secondary_200, (1920, 1080), (3840, 2160)),
+        ] {
+            let position = (monitor.x, monitor.y);
+            if logical_size != native_size {
+                assert_eq!(
+                    overlay_refit(Some(position), logical_size, monitor),
+                    Some((position, native_size))
+                );
+                assert_eq!(
+                    overlay_recovery(false, Some(position), logical_size, monitor),
+                    OverlayRecovery::Refit(position, native_size)
+                );
+            }
+            assert_eq!(overlay_refit(Some(position), native_size, monitor), None);
+            assert_eq!(
+                overlay_recovery(false, Some(position), native_size, monitor),
+                OverlayRecovery::Matched,
+                "native geometry converges without more work at DPI {}",
+                monitor.scale
+            );
+        }
+
         let d8 = spec("DISPLAY8", 17, -2160);
         assert_eq!(overlay_refit(Some((17, -2160)), (3840, 2160), &d8), None);
         for drifted in [(3862, 2182), (237, 39)] {

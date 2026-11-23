@@ -11,11 +11,11 @@ use tze_hud_scene::config::{ConfigError, ConfigErrorCode};
 use crate::raw::RawConfig;
 
 /// Default global durable footprint ceiling (256 MiB).
-pub const DEFAULT_MAX_TOTAL_BYTES: u64 = 256 * 1024 * 1024;
+const DEFAULT_MAX_TOTAL_BYTES: u64 = 256 * 1024 * 1024;
 /// Default per-agent durable footprint ceiling (64 MiB).
-pub const DEFAULT_MAX_AGENT_BYTES: u64 = 64 * 1024 * 1024;
+const DEFAULT_MAX_AGENT_BYTES: u64 = 64 * 1024 * 1024;
 /// Default runtime widget asset store directory (relative to cache root).
-pub const DEFAULT_STORE_DIRNAME: &str = "runtime_widget_assets";
+const DEFAULT_STORE_DIRNAME: &str = "runtime_widget_assets";
 
 /// Resolved runtime widget asset store settings used by runtime startup.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -26,7 +26,10 @@ pub struct RuntimeWidgetAssetStoreConfig {
 }
 
 /// Validate runtime widget asset budget relationship in raw config.
-pub fn validate_runtime_widget_asset_budgets(raw: &RawConfig, errors: &mut Vec<ConfigError>) {
+pub(crate) fn validate_runtime_widget_asset_budgets(
+    raw: &RawConfig,
+    errors: &mut Vec<ConfigError>,
+) {
     if let Some(section) = raw.widget_runtime_assets.as_ref() {
         let max_total = section.max_total_bytes.unwrap_or(DEFAULT_MAX_TOTAL_BYTES);
         let max_agent = section.max_agent_bytes.unwrap_or(DEFAULT_MAX_AGENT_BYTES);
@@ -85,7 +88,7 @@ pub fn resolve_runtime_widget_asset_store(
 }
 
 /// Resolve store path from raw config + optional config parent.
-pub fn resolve_store_path(raw: &RawConfig, config_parent: Option<&Path>) -> PathBuf {
+fn resolve_store_path(raw: &RawConfig, config_parent: Option<&Path>) -> PathBuf {
     if let Some(path_str) = raw
         .widget_runtime_assets
         .as_ref()

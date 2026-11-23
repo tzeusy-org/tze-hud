@@ -1,11 +1,5 @@
 //! Widget and drag-handle geometry methods for the compositor.
 //!
-//! Moved from `renderer/mod.rs` (the "Widget/drag geometry" cluster,
-//! formerly ~L7084–7345 at plan date) by Step R-8 of the renderer module
-//! split. No logic was changed; only the `pub(super)` visibility
-//! modifier was added to `collect_drag_handle_entries` and
-//! `append_drag_handle_vertices` so that `hit_regions.rs` can call them.
-//!
 //! ## Methods in this file
 //!
 //! - `resolve_widget_geometry` — convert a `WidgetInstance`/`WidgetDefinition`

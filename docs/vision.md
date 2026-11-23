@@ -71,8 +71,10 @@ Surfaces on that lifecycle, in priority order:
   the owner's choice, set in the config or an in-HUD settings card, and switch
   without a restart. Models never choose them.
 - **Every screen, natively.** The HUD puts one overlay on each monitor, at
-  that monitor's resolution and scale, times one owner-set UI scale. The
-  primary monitor keeps the default layout. Agents need no notion of displays
+  that monitor's resolution and scale, times the Windows text size and one
+  owner-set UI scale. The
+  primary monitor keeps the default layout; new questions appear on the
+  monitor of the window you are working in (an owner setting). Agents need no notion of displays
   unless they opt into one.
 
 ## Trust model

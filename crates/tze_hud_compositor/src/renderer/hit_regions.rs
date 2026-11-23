@@ -1,12 +1,5 @@
 //! Hit-region population methods for the compositor.
 //!
-//! Moved from `renderer/mod.rs` (the "Hit regions" cluster,
-//! formerly ~L7346–7899 at plan date) by Step R-8 of the renderer module
-//! split. No logic was changed; only the `pub(super)` visibility
-//! modifier was added to `populate_drag_handle_hit_regions_from` and
-//! `collect_context_menu` so that callers in sibling modules can
-//! access them.
-//!
 //! ## Methods in this file
 //!
 //! - `populate_drag_handle_hit_regions_from` — populate drag-handle hit regions
@@ -328,6 +321,18 @@ pub fn populate_notification_hit_regions(
     )
 }
 
+/// [`populate_notification_hit_regions`] across the displays of `layout`:
+/// per-display stacks, as a windowed frame draws them.
+pub fn populate_notification_hit_regions_on(
+    scene: &mut SceneGraph,
+    layout: &crate::display::DisplayLayout,
+    sw: f32,
+    sh: f32,
+    token_map: &HashMap<String, String>,
+) -> u32 {
+    populate_notification_hit_regions_in(scene, layout, sw, sh, token_map, &Default::default())
+}
+
 /// [`populate_notification_hit_regions`] with zones resolved through a
 /// multi-display `layout` (regions land in scene coordinates).
 fn populate_notification_hit_regions_in(
@@ -347,17 +352,35 @@ fn populate_notification_hit_regions_in(
     // Sort zone names for deterministic tab-order assignment across frames.
     // HashMap iteration order is nondeterministic; sorting ensures keyboard
     // focus cycling is stable when multiple interactive zones are present.
-    let mut zone_names: Vec<String> = scene
+    let paint_order: HashMap<String, usize> = scene
         .shown_zone_publishes()
-        .map(|(name, _)| name.clone())
+        .enumerate()
+        .map(|(rank, (name, _))| (name.clone(), rank))
         .collect();
+    let mut zone_names: Vec<_> = paint_order.keys().cloned().collect();
     zone_names.sort_unstable();
 
-    for zone_name in &zone_names {
-        let publishes = match scene.zone_registry.active_publishes.get(zone_name) {
-            Some(p) => p,
-            None => continue,
-        };
+    let active = &scene.zone_registry.active_publishes;
+    let stacks: Vec<_> = zone_names
+        .iter()
+        .filter_map(|name| active.get_key_value(name))
+        .flat_map(|(name, publishes)| super::zone_stacks_for(layout, name, publishes))
+        .collect();
+    let split_ranks: Vec<(String, HashMap<tze_hud_scene::SceneId, usize>)> = zone_names
+        .iter()
+        .filter(|name| stacks.iter().filter(|s| s.name == *name).count() > 1)
+        .filter_map(|name| {
+            let publishes = active.get(name)?;
+            let ranks = Compositor::stack_order(scene, name, publishes)
+                .into_iter()
+                .enumerate()
+                .map(|(rank, index)| (publishes[index].publication_id, rank))
+                .collect();
+            Some((name.clone(), ranks))
+        })
+        .collect();
+    for stack in &stacks {
+        let (zone_name, publishes) = (stack.name, &*stack.publishes);
         if publishes.is_empty() {
             continue;
         }
@@ -371,10 +394,10 @@ fn populate_notification_hit_regions_in(
         }
 
         let policy = &zone_def.rendering_policy;
-        let zone_tokens = tze_hud_config::tokens::for_zone(token_map, zone_name);
-        let (zx, zy, zw, zh) = super::zone_geometry_in(
+        let zone_tokens = tze_hud_config::tokens::for_zone(token_map, &stack.token_key());
+        let (zx, zy, zw, zh) = super::stack_geometry_in(
             layout,
-            zone_name,
+            stack,
             &scene.effective_zone_geometry(zone_def),
             sw,
             sh,
@@ -398,9 +421,22 @@ fn populate_notification_hit_regions_in(
 
             // ── Dismiss (×) button ────────────────────────────────────────
             // Top-right corner of the slot; same bounds the renderer draws.
-            let dismiss_bounds =
-                super::notification_style::dismiss_bounds(zone_name, &zone_tokens, policy, card);
+            let dismiss_bounds = super::notification_style::dismiss_bounds(
+                zone_name,
+                &zone_tokens,
+                policy,
+                card,
+                record.caption.as_deref(),
+            );
             let dismiss_id = notification_dismiss_interaction_id(zone_name, record);
+            let style = super::notification_style::NotificationStyle::for_zone(
+                zone_name,
+                &zone_tokens,
+                policy,
+            );
+            let goto = super::notification_style::go_to_control(scene, record, &style, card)
+                .map(|(rect, _)| rect);
+            let goto_id = goto.map(|_| notification_go_to_interaction_id(zone_name, record));
             let action_rects = layouts
                 .borrow_mut()
                 .resolve(&zone_tokens, zone_name, record, policy, card.width)
@@ -417,6 +453,11 @@ fn populate_notification_hit_regions_in(
             });
             let focus = if scene.overlay.notification_focus.as_ref() == Some(&dismiss_id) {
                 Some(NotificationControl::Close)
+            } else if goto_id
+                .as_ref()
+                .is_some_and(|id| Some(id) == scene.overlay.notification_focus.as_ref())
+            {
+                Some(NotificationControl::GoTo)
             } else {
                 (0..action_rects.len())
                     .find(|&index| {
@@ -436,6 +477,9 @@ fn populate_notification_hit_regions_in(
                     bounds: card,
                     actions: action_rects.clone(),
                     close: dismiss_bounds,
+                    goto,
+                    has_window_caption: record.window_token.is_some()
+                        && style.caption(record.caption.as_deref()).is_some(),
                     focus,
                     chosen,
                     state: "shown",
@@ -455,6 +499,19 @@ fn populate_notification_hit_regions_in(
                 tab_order,
             });
             tab_order += 1;
+            if let Some((bounds, interaction_id)) = goto.zip(goto_id) {
+                scene.overlay.zone_hit_regions.push(ZoneHitRegion {
+                    zone_name: zone_name.clone(),
+                    publication_id: record.publication_id,
+                    published_at_wall_us: record.published_at_wall_us,
+                    publisher_namespace: record.publisher_namespace.clone(),
+                    bounds,
+                    kind: ZoneInteractionKind::GoTo,
+                    interaction_id,
+                    tab_order,
+                });
+                tab_order += 1;
+            }
 
             // ── Action buttons ────────────────────────────────────────────
             let n_actions = n_payload.actions.len().min(MAX_NOTIFICATION_ACTIONS);
@@ -478,6 +535,36 @@ fn populate_notification_hit_regions_in(
             }
         }
     }
+    // A zone split across displays tabs through its cards in the one stack
+    // order its cards would draw in on a single display, crossing windows.
+    for (zone_name, ranks) in split_ranks {
+        let members: Vec<usize> = (0..scene.overlay.zone_hit_regions.len())
+            .filter(|&i| scene.overlay.zone_hit_regions[i].zone_name == zone_name)
+            .collect();
+        let regions = &mut scene.overlay.zone_hit_regions;
+        let mut orders: Vec<u32> = members.iter().map(|&i| regions[i].tab_order).collect();
+        orders.sort_unstable();
+        let mut by_stack = members.clone();
+        by_stack.sort_by_key(|&i| {
+            (
+                ranks.get(&regions[i].publication_id).copied(),
+                regions[i].tab_order,
+            )
+        });
+        let reordered: Vec<_> = by_stack.iter().map(|&i| regions[i].clone()).collect();
+        for ((&slot, mut region), order) in members.iter().zip(reordered).zip(orders) {
+            region.tab_order = order;
+            regions[slot] = region;
+        }
+    }
+    // Pointer queries are vector-first: later-painted zone groups go first.
+    // Stable sorting preserves publication/control precedence inside a zone;
+    // tab_order keeps the independent ascending-name keyboard traversal.
+    // Runtime jump/close controls are appended/inserted by the caller later.
+    scene
+        .overlay
+        .zone_hit_regions
+        .sort_by_key(|region| std::cmp::Reverse(paint_order[&region.zone_name]));
     prune_chrome_states(scene);
     tab_order
 }
@@ -491,6 +578,16 @@ pub(super) fn notification_dismiss_interaction_id(
     format!(
         "zone:{}:dismiss:{}:{}",
         zone_name, record.publication_id, record.publisher_namespace,
+    )
+}
+
+pub(super) fn notification_go_to_interaction_id(
+    zone_name: &str,
+    record: &ZonePublishRecord,
+) -> String {
+    format!(
+        "zone:{}:goto:{}:{}",
+        zone_name, record.publication_id, record.publisher_namespace
     )
 }
 

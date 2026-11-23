@@ -7,7 +7,7 @@
 # On Windows, double-clicking tze_hud.exe installs it per user and writes this
 # file to %APPDATA%\tze_hud\config.toml if none exists. Or copy tze_hud.exe and
 # this file as tze_hud.toml next to it. No other files are needed: the gauge,
-# progress-bar, status-indicator, countdown, KPI and stepper bundles are built into the exe.
+# progress-bar, status-indicator, countdown, elapsed, KPI and stepper bundles are built into the exe.
 #
 # Usage:
 #   tze_hud --window-mode overlay
@@ -35,6 +35,11 @@ safe_mode_hotkey = "Ctrl+Shift+F12"
 panel_hotkey = "Ctrl+Shift+F11"
 # Show the pairing code.
 pairing_hotkey = "Ctrl+Shift+F10"
+# Focus the newest question, or else the portal waiting for your reply.
+# answer_hotkey = "Ctrl+Shift+F9"
+# Hide all, or show all when everything is hidden. Left unset on purpose: an
+# unset hide key yields to another key already on Ctrl+Shift+F8.
+# hide_hotkey = "Ctrl+Shift+F8"
 # Launch settings the control panel edits (flags and env vars win over these):
 # mcp_port = 9090      # 0 disables; read at start
 # grpc_port = 50051    # 0 disables; read at start
@@ -42,7 +47,7 @@ pairing_hotkey = "Ctrl+Shift+F10"
 # log_level = "info"   # log file: error, warn, info, debug, trace
 # debug_zones = false  # zone outlines
 
-# Widget bundles: gauge, progress-bar, status-indicator, countdown, KPI and stepper are built into the
+# Widget bundles: gauge, progress-bar, status-indicator, countdown, elapsed, KPI and stepper are built into the
 # exe. To override one (or add your own), add a [widget_bundles] table with
 # `paths = ["dir"]` (relative to this file); each subdirectory holding a
 # widget.toml is loaded, and a bundle with the same type name replaces the
@@ -118,7 +123,7 @@ height_pct = 0.0861111
 # ── Countdown widget instance ─────────────────────────────────────────────────
 # Model parameters: ends_in_ms (integer deadline<=24h), label, severity.
 # Starts counting on presentation; stays at 0:00 until clear/expiry. No idle
-# countdown wake until published. KPI and stepper are bundles only.
+# countdown wake until published. Elapsed, KPI and stepper are bundles only.
 # Left of the progress card, clear of the subtitle zone; 360x124 logical px.
 [[tabs.widgets]]
 widget_type = "countdown"

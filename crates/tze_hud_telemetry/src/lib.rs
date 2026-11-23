@@ -5,9 +5,7 @@
 
 pub mod collector;
 pub mod idle_efficiency;
-pub mod publish_load;
 pub mod record;
-pub mod validation;
 #[cfg(any(test, feature = "dev-mode"))]
 pub mod work_counts;
 
@@ -21,17 +19,9 @@ pub use idle_efficiency::{
     QUIESCENT_SCENARIO_VERSION, QUIESCENT_SETTLING_MIN_MS, QuiescentEfficiencyArtifact,
     QuiescentEfficiencyValidation, QuiescentMeasurementStatus,
 };
-pub use publish_load::{
-    ByteAccountingMode, PublishLoadArtifact, PublishLoadCalibrationStatus, PublishLoadIdentity,
-    PublishLoadMetrics, PublishLoadMode, PublishLoadThresholds, PublishLoadTraceability,
-    PublishLoadTransport, PublishLoadVerdict,
-};
 pub use record::{
     DegradationDirection, DegradationEvent, DegradationRecoverySource, FrameTelemetry,
     LatencyBucket, SessionSummary,
-};
-pub use validation::{
-    AssertionOutcome, BudgetAssertion, CalibrationDimension, HardwareFactors, ValidationReport,
 };
 #[cfg(any(test, feature = "dev-mode"))]
 pub use work_counts::WorkCounts;

@@ -605,16 +605,32 @@ fn widget_occupancy_latest_wins_uses_most_recent() {
     scene
         .publish_to_widget(
             "gauge",
-            std::collections::HashMap::from([(
-                "level".to_string(),
-                WidgetParameterValue::F32(0.2),
-            )]),
+            std::collections::HashMap::from([
+                ("level".to_string(), WidgetParameterValue::F32(0.2)),
+                (
+                    "label".to_string(),
+                    WidgetParameterValue::String("CPU".into()),
+                ),
+            ]),
             "agent.a",
             None,
             0,
             None,
         )
         .unwrap();
+    let label = |scene: &SceneGraph| {
+        scene
+            .widget_registry
+            .get_occupancy("gauge", tab_id)
+            .unwrap()
+            .effective_params
+            .get("label")
+            .cloned()
+    };
+    assert_eq!(
+        label(&scene),
+        Some(WidgetParameterValue::String("CPU".into()))
+    );
     scene
         .publish_to_widget(
             "gauge",
@@ -641,6 +657,11 @@ fn widget_occupancy_latest_wins_uses_most_recent() {
     assert!(
         matches!(level, Some(WidgetParameterValue::F32(v)) if (*v - 0.9).abs() < 1e-6),
         "LatestWins: most recent level (0.9) should win, got: {level:?}"
+    );
+    assert_eq!(
+        label(&scene),
+        Some(WidgetParameterValue::String(String::new())),
+        "LatestWins uses the schema default for a label omitted by the newest publisher"
     );
 }
 
@@ -738,15 +759,17 @@ fn widget_occupancy_stack_top_after_depth_cap() {
 fn widget_occupancy_merge_by_key_merges_all_keys_over_defaults() {
     let (mut scene, tab_id) = scene_with_gauge(ContentionPolicy::MergeByKey { max_keys: 8 });
 
-    // "cpu" key sets level=0.4; "mem" key sets level=0.6.
-    // Since both touch the same param ("level"), the last-inserted key wins.
+    // The newer key wins for the shared level and leaves the older label intact.
     scene
         .publish_to_widget(
             "gauge",
-            std::collections::HashMap::from([(
-                "level".to_string(),
-                WidgetParameterValue::F32(0.4),
-            )]),
+            std::collections::HashMap::from([
+                ("level".to_string(), WidgetParameterValue::F32(0.4)),
+                (
+                    "label".to_string(),
+                    WidgetParameterValue::String("cpu".into()),
+                ),
+            ]),
             "agent.a",
             Some("cpu".to_string()),
             0,
@@ -756,13 +779,10 @@ fn widget_occupancy_merge_by_key_merges_all_keys_over_defaults() {
     scene
         .publish_to_widget(
             "gauge",
-            std::collections::HashMap::from([
-                ("level".to_string(), WidgetParameterValue::F32(0.6)),
-                (
-                    "label".to_string(),
-                    WidgetParameterValue::String("mem".to_string()),
-                ),
-            ]),
+            std::collections::HashMap::from([(
+                "level".to_string(),
+                WidgetParameterValue::F32(0.6),
+            )]),
             "agent.b",
             Some("mem".to_string()),
             0,
@@ -786,11 +806,11 @@ fn widget_occupancy_merge_by_key_merges_all_keys_over_defaults() {
         "MergeByKey: last-inserted key's level (0.6) should win, got: {level:?}"
     );
 
-    // "label" was only set by "mem" — should appear in effective_params.
+    // The later publication omits the older key’s label.
     let label = occ.effective_params.get("label");
     assert!(
-        matches!(label, Some(WidgetParameterValue::String(s)) if s == "mem"),
-        "MergeByKey: label from 'mem' key should be 'mem', got: {label:?}"
+        matches!(label, Some(WidgetParameterValue::String(s)) if s == "cpu"),
+        "MergeByKey: label from the older key should be 'cpu', got: {label:?}"
     );
 
     // "severity" was not set by either key — should fall back to schema default.
@@ -1386,6 +1406,70 @@ fn widget_ttl_only_expired_publication_removed_when_mixed() {
         remaining[0].publisher_namespace, "agent.permanent",
         "the permanent publication should survive"
     );
+
+    // A temporary peer can cover a partially updated owner. Expiry must
+    // restore that owner's full publication rather than schema defaults.
+    let (mut scene, tab, clock) =
+        scene_with_gauge_and_clock(ContentionPolicy::Stack { max_depth: 4 });
+    scene
+        .publish_to_widget(
+            "gauge",
+            HashMap::from([
+                ("level".into(), WidgetParameterValue::F32(0.3)),
+                ("label".into(), WidgetParameterValue::String("CPU".into())),
+            ]),
+            "agent.a",
+            None,
+            0,
+            None,
+        )
+        .unwrap();
+    scene
+        .publish_to_widget(
+            "gauge",
+            HashMap::from([("level".into(), WidgetParameterValue::F32(0.8))]),
+            "agent.a",
+            None,
+            0,
+            None,
+        )
+        .unwrap();
+    scene
+        .publish_to_widget(
+            "gauge",
+            HashMap::from([
+                ("level".into(), WidgetParameterValue::F32(0.9)),
+                ("label".into(), WidgetParameterValue::String("peer".into())),
+            ]),
+            "agent.short",
+            None,
+            0,
+            Some(1_500_000),
+        )
+        .unwrap();
+    assert_eq!(scene.widget_registry.active_for_widget("gauge").len(), 3);
+    clock.advance(600);
+    assert_eq!(scene.drain_expired_widget_publications(), 1);
+    let remaining = scene.widget_registry.active_for_widget("gauge");
+    assert_eq!(remaining.len(), 2);
+    assert!(remaining.iter().all(|r| r.publisher_namespace == "agent.a"));
+    assert_eq!(
+        remaining.last().unwrap().params["level"],
+        WidgetParameterValue::F32(0.8)
+    );
+    let expected = WidgetParameterValue::String("CPU".into());
+    assert_eq!(
+        scene.widget_registry.instances["gauge"].current_params["label"], expected,
+        "TTL cleanup restores omitted publication values"
+    );
+    assert_eq!(
+        scene
+            .widget_registry
+            .get_occupancy("gauge", tab)
+            .unwrap()
+            .effective_params["label"],
+        expected
+    );
 }
 
 /// WHEN drain_expired_widget_publications removes a publication THEN the
@@ -1527,6 +1611,267 @@ fn clear_widget_for_publisher_refreshes_current_params_from_remaining_publish() 
         }
         other => panic!("expected remaining F32 level after clear, got {other:?}"),
     }
+
+    // Publication-local values must survive every cleanup that restores a
+    // remaining owner. Current instance values alone do not establish this.
+    let mut failures = Vec::new();
+    for (policy, cleanup) in [
+        (ContentionPolicy::LatestWins, "none"),
+        (ContentionPolicy::Replace, "none"),
+        (ContentionPolicy::Stack { max_depth: 4 }, "clear"),
+        (ContentionPolicy::Stack { max_depth: 4 }, "lease"),
+        (ContentionPolicy::Stack { max_depth: 4 }, "origin"),
+        (ContentionPolicy::MergeByKey { max_keys: 4 }, "clear"),
+    ] {
+        let (mut scene, tab, clock) = scene_with_gauge_and_clock(policy);
+        let origin = SceneId::new();
+        let cpu = WidgetParameterValue::String("CPU".into());
+        scene
+            .publish_to_widget_for_origin(
+                "gauge",
+                HashMap::from([
+                    ("level".into(), WidgetParameterValue::F32(0.3)),
+                    ("label".into(), cpu.clone()),
+                ]),
+                "agent.a",
+                Some("cpu".into()),
+                0,
+                None,
+                None,
+                Some(origin),
+            )
+            .unwrap();
+        clock.advance(10);
+        scene
+            .publish_to_widget_for_origin(
+                "gauge",
+                HashMap::from([("level".into(), WidgetParameterValue::F32(0.8))]),
+                "agent.a",
+                Some("cpu".into()),
+                120,
+                Some(7_000_000),
+                None,
+                Some(origin),
+            )
+            .unwrap();
+        let records = scene.widget_registry.active_for_widget("gauge");
+        let expected_count = if matches!(policy, ContentionPolicy::Stack { .. }) {
+            2
+        } else {
+            1
+        };
+        assert_eq!(
+            records.len(),
+            expected_count,
+            "preserve {policy:?} record count"
+        );
+        let newest = records.last().unwrap();
+        assert_eq!(newest.params["level"], WidgetParameterValue::F32(0.8));
+        assert_eq!(newest.merge_key.as_deref(), Some("cpu"));
+        assert_eq!(newest.publication_origin, Some(origin));
+        assert_eq!(newest.published_at_wall_us, 1_010_000);
+        assert_eq!(newest.expires_at_wall_us, Some(7_000_000));
+        assert_eq!(newest.transition_ms, 120);
+        let expected_label = if policy == ContentionPolicy::Replace {
+            None
+        } else {
+            Some(&cpu)
+        };
+        let occupancy = scene.widget_registry.get_occupancy("gauge", tab).unwrap();
+        for (source, params) in [
+            ("record", &newest.params),
+            ("occupancy", &occupancy.effective_params),
+        ] {
+            if params.get("label") != expected_label {
+                failures.push(format!(
+                    "{policy:?}/{cleanup} {source} lost publication label: {params:?}"
+                ));
+            }
+        }
+        // A failed mixed update must not overwrite any retained publication.
+        let before = serde_json::to_value(&scene).unwrap();
+        assert!(
+            scene
+                .publish_to_widget_for_origin(
+                    "gauge",
+                    HashMap::from([
+                        ("level".into(), WidgetParameterValue::F32(f32::NAN)),
+                        (
+                            "label".into(),
+                            WidgetParameterValue::String("invalid".into())
+                        ),
+                    ]),
+                    "agent.a",
+                    Some("cpu".into()),
+                    0,
+                    None,
+                    None,
+                    Some(origin)
+                )
+                .is_err()
+        );
+        assert_eq!(serde_json::to_value(&scene).unwrap(), before);
+        if cleanup == "none" {
+            continue;
+        }
+        let peer_origin = SceneId::new();
+        let peer_lease = SceneId::new();
+        scene
+            .publish_to_widget_for_origin(
+                "gauge",
+                HashMap::from([
+                    ("level".into(), WidgetParameterValue::F32(0.9)),
+                    ("label".into(), WidgetParameterValue::String("peer".into())),
+                ]),
+                "agent.b",
+                Some("peer".into()),
+                0,
+                None,
+                (cleanup == "lease").then_some(peer_lease),
+                Some(peer_origin),
+            )
+            .unwrap();
+        match cleanup {
+            "clear" => scene
+                .clear_widget_for_publisher("gauge", "agent.b")
+                .unwrap(),
+            "lease" => scene.clear_publications_for_lease(peer_lease),
+            "origin" => scene.clear_publications_for_origin(peer_origin),
+            _ => unreachable!(),
+        }
+        assert_eq!(
+            scene.widget_registry.active_for_widget("gauge").len(),
+            expected_count
+        );
+        assert_eq!(
+            scene.widget_registry.instances["gauge"].current_params["level"],
+            WidgetParameterValue::F32(0.8)
+        );
+        if scene.widget_registry.instances["gauge"].current_params["label"] != cpu {
+            failures.push(format!(
+                "{policy:?}/{cleanup} restored defaults instead of CPU"
+            ));
+        }
+    }
+    // Identity is exact, even where MergeByKey itself treats None/empty keys
+    // alike. Lease-bound origins normalize away; preclaim origins do not.
+    for (identity, retain) in [
+        ("same", true),
+        ("namespace", false),
+        ("key", false),
+        ("empty-key", false),
+        ("lease", false),
+        ("origin", false),
+        ("absent-origin", false),
+        ("leased-origin", true),
+        ("owner-audience", false),
+        ("runtime-audience", false),
+    ] {
+        let (mut scene, tab) = scene_with_gauge(ContentionPolicy::LatestWins);
+        let origin = SceneId::new();
+        let lease = SceneId::new();
+        let bound_lease = (identity == "leased-origin").then_some(lease);
+        scene
+            .publish_to_widget_for_origin(
+                "gauge",
+                HashMap::from([
+                    ("level".into(), WidgetParameterValue::F32(0.3)),
+                    ("label".into(), WidgetParameterValue::String("CPU".into())),
+                ]),
+                "agent.a",
+                None,
+                0,
+                None,
+                bound_lease,
+                Some(origin),
+            )
+            .unwrap();
+        let protected = match identity {
+            "owner-audience" => Some(crate::WidgetParamAudience::Owner),
+            "runtime-audience" => Some(crate::WidgetParamAudience::Runtime),
+            _ => None,
+        };
+        if let Some(audience) = protected {
+            scene
+                .widget_registry
+                .definitions
+                .get_mut("gauge")
+                .unwrap()
+                .parameter_schema[1]
+                .audience = audience;
+            scene
+                .set_widget_param_local(
+                    "gauge",
+                    "label",
+                    WidgetParameterValue::String("authoritative".into()),
+                )
+                .unwrap();
+        }
+        let namespace = if identity == "namespace" {
+            "agent.b"
+        } else {
+            "agent.a"
+        };
+        let key = match identity {
+            "key" => Some("new".into()),
+            "empty-key" => Some(String::new()),
+            _ => None,
+        };
+        let next_lease = if identity == "lease" {
+            Some(lease)
+        } else {
+            bound_lease
+        };
+        let next_origin = match identity {
+            "origin" | "leased-origin" => Some(SceneId::new()),
+            "absent-origin" => None,
+            _ => Some(origin),
+        };
+        scene
+            .publish_to_widget_for_origin(
+                "gauge",
+                HashMap::from([("level".into(), WidgetParameterValue::F32(0.8))]),
+                namespace,
+                key,
+                0,
+                None,
+                next_lease,
+                next_origin,
+            )
+            .unwrap();
+        let record = &scene.widget_registry.active_for_widget("gauge")[0];
+        let expected = retain.then(|| WidgetParameterValue::String("CPU".into()));
+        if record.params.get("label") != expected.as_ref() {
+            failures.push(format!(
+                "{identity} inherited outside exact model identity: {:?}",
+                record.params
+            ));
+        }
+        let effective = scene
+            .widget_registry
+            .get_occupancy("gauge", tab)
+            .unwrap()
+            .effective_params;
+        let expected = WidgetParameterValue::String(
+            if protected.is_some() {
+                "authoritative"
+            } else if retain {
+                "CPU"
+            } else {
+                ""
+            }
+            .into(),
+        );
+        if effective["label"] != expected {
+            failures.push(format!(
+                "{identity} occupancy crossed identity/audience: {effective:?}"
+            ));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "publication-local partial failures: {failures:?}"
+    );
 }
 
 /// WHEN clear_widget_for_publisher is called with a different namespace
@@ -1709,67 +2054,6 @@ fn clear_publications_for_lease_removes_only_that_leases_widget_pubs() {
     }
 }
 
-/// WHEN ClearWidget is sent as a scene mutation batch
-/// THEN it removes the agent's publications via the standard pipeline.
-#[test]
-fn clear_widget_via_mutation_batch() {
-    use crate::mutation::{MutationBatch, SceneMutation};
-
-    let (mut scene, _tab) = scene_with_gauge(ContentionPolicy::Stack { max_depth: 4 });
-
-    // Publish as two agents
-    scene
-        .publish_to_widget(
-            "gauge",
-            std::collections::HashMap::from([(
-                "level".to_string(),
-                WidgetParameterValue::F32(0.5),
-            )]),
-            "agent.a",
-            None,
-            0,
-            None,
-        )
-        .unwrap();
-    scene
-        .publish_to_widget(
-            "gauge",
-            std::collections::HashMap::from([(
-                "level".to_string(),
-                WidgetParameterValue::F32(0.3),
-            )]),
-            "agent.b",
-            None,
-            0,
-            None,
-        )
-        .unwrap();
-    assert_eq!(scene.widget_registry.active_for_widget("gauge").len(), 2);
-
-    // Send ClearWidget from "agent.a"
-    let batch = MutationBatch {
-        batch_id: SceneId::new(),
-        agent_namespace: "agent.a".to_string(),
-        mutations: vec![SceneMutation::ClearWidget {
-            widget_name: "gauge".to_string(),
-            instance_id: None,
-        }],
-        timing_hints: None,
-        lease_id: None,
-    };
-    let result = scene.apply_batch(&batch);
-    assert!(result.applied, "ClearWidget batch should be accepted");
-
-    // Only "agent.b"'s publication should remain
-    let remaining = scene.widget_registry.active_for_widget("gauge");
-    assert_eq!(
-        remaining.len(),
-        1,
-        "agent.a's publication should be cleared"
-    );
-    assert_eq!(remaining[0].publisher_namespace, "agent.b");
-}
-
 /// The owner's auto-clear limit clears a publication that has no expiry of its
 /// own, applies to what is showing when it is set, and never extends an
 /// earlier agent expiry.
@@ -1924,46 +2208,147 @@ fn widget_deadline_presentation_retention_cadence_and_safe_mode() {
     assert_eq!(scene.next_widget_deadline_wall_us(), None);
 }
 
+/// The count-up twin: admission copies the direction from the declaration
+/// (a transport cannot set it), the start is snapshotted at presentation,
+/// label-only republishes keep it and resending the value restarts it. It
+/// wakes only for a visible display change, never while hidden or paused,
+/// and stops waking once cleared.
 #[test]
-fn scheduled_widget_snapshots_at_late_apply_and_clear_cancels_only_its_publisher() {
-    use crate::mutation::{MutationBatch, SceneMutation};
+fn widget_elapsed_presentation_retention_cadence_and_safe_mode() {
     use crate::{Clock, WidgetDeadline};
     let (mut scene, _, clock) = scene_with_gauge_and_clock(ContentionPolicy::LatestWins);
+    scene
+        .widget_registry
+        .definitions
+        .get_mut("gauge")
+        .unwrap()
+        .parameter_schema
+        .push(crate::WidgetParameterDeclaration {
+            name: "started_ms_ago".into(),
+            audience: Default::default(),
+            param_type: crate::WidgetParamType::Deadline,
+            default_value: WidgetParameterValue::Deadline(WidgetDeadline::relative(0)),
+            constraints: Some(crate::WidgetParamConstraints {
+                deadline_counts_up: true,
+                ..Default::default()
+            }),
+        });
+    let elapsed = |scene: &SceneGraph| {
+        let WidgetParameterValue::Deadline(d) =
+            &scene.widget_registry.instances["gauge"].current_params["started_ms_ago"]
+        else {
+            panic!("deadline")
+        };
+        d.clone()
+    };
+    let publish = |scene: &mut SceneGraph, name: &str, value: WidgetParameterValue| {
+        scene
+            .publish_to_widget(
+                "gauge",
+                HashMap::from([(name.to_string(), value)]),
+                "a",
+                None,
+                0,
+                None,
+            )
+            .unwrap();
+        scene.refresh_widget_current_params("gauge");
+    };
+    assert_eq!(
+        scene.next_widget_deadline_wall_us(),
+        None,
+        "never published"
+    );
+    // A transport-supplied direction is ignored; the declaration decides.
+    publish(
+        &mut scene,
+        "started_ms_ago",
+        WidgetParameterValue::Deadline(WidgetDeadline::relative(600_000)),
+    );
+    let started = elapsed(&scene);
+    assert!(started.counts_up);
+    assert_eq!(started.display_at(clock.now_us()), "10 min");
+    assert_eq!(
+        scene.next_widget_deadline_wall_us(),
+        Some(clock.now_us() + 60_000_000),
+        "one wake per minute past two minutes"
+    );
+    clock.advance(90_000);
+    publish(
+        &mut scene,
+        "label",
+        WidgetParameterValue::String("renamed".into()),
+    );
+    assert_eq!(elapsed(&scene), started, "a label-only republish keeps it");
+    assert_eq!(elapsed(&scene).display_at(clock.now_us()), "11 min");
+    publish(
+        &mut scene,
+        "started_ms_ago",
+        WidgetParameterValue::Deadline(WidgetDeadline::relative(0)),
+    );
+    assert_eq!(
+        elapsed(&scene).display_at(clock.now_us()),
+        "0:00",
+        "resent restarts"
+    );
+    assert_eq!(
+        scene.next_widget_deadline_wall_us(),
+        Some(clock.now_us() + 1_000_000)
+    );
+    scene.pause_widget_ttls();
+    assert_eq!(scene.next_widget_deadline_wall_us(), None, "paused");
+    clock.advance(42_000);
+    scene.resume_widget_ttls();
+    assert_eq!(
+        elapsed(&scene).display_at(clock.now_us()),
+        "0:42",
+        "the clock kept going"
+    );
+    scene.overlay.owner_hidden.widgets = true;
+    assert_eq!(scene.next_widget_deadline_wall_us(), None, "hidden");
+    scene.overlay.owner_hidden.widgets = false;
+    assert!(scene.next_widget_deadline_wall_us().is_some());
+    scene.clear_widget_for_publisher("gauge", "a").unwrap();
+    assert_eq!(scene.next_widget_deadline_wall_us(), None, "cleared");
+}
+
+#[test]
+fn scheduled_widget_snapshots_at_late_apply_and_clear_cancels_only_its_publisher() {
+    use crate::{Clock, Publication, Publisher, WidgetDeadline};
+    let (mut scene, _, clock) = scene_with_gauge_and_clock(ContentionPolicy::LatestWins);
     add_test_deadline(&mut scene);
-    let make_batch = |namespace: &str| MutationBatch {
-        batch_id: SceneId::new(),
-        agent_namespace: namespace.into(),
-        lease_id: None,
-        timing_hints: None,
-        mutations: vec![SceneMutation::PublishToWidget {
-            widget_name: "gauge".into(),
-            params: HashMap::from([(
-                "ends_in_ms".into(),
-                WidgetParameterValue::Deadline(WidgetDeadline::relative(300_000)),
-            )]),
-            merge_key: None,
-            transition_ms: 0,
-            ttl_us: Some(10_000_000),
-            expires_at_wall_us: None,
-        }],
+    let gauge = || Publication::Widget {
+        widget_name: "gauge".into(),
+        params: HashMap::from([(
+            "ends_in_ms".into(),
+            WidgetParameterValue::Deadline(WidgetDeadline::relative(300_000)),
+        )]),
+        merge_key: None,
+        transition_ms: 0,
+        ttl_us: Some(10_000_000),
+        expires_at_wall_us: None,
     };
     let due = clock.now_us() + 10_000_000;
     let origin = SceneId::new();
-    scene.schedule_batch_for_origin(due, make_batch("a"), Some(origin));
-    scene.schedule_batch(due, make_batch("b"));
+    let from_session = Publisher {
+        origin: Some(origin),
+        ..Publisher::namespace("a")
+    };
+    scene.schedule_publication(due, from_session, gauge());
+    scene.schedule_publication(due, Publisher::namespace("b"), gauge());
     assert_eq!(scene.agent_holdings("a").widgets, 1);
     assert!(scene.hold_widget_publications("gauge", "a", Some(clock.now_us() + 20_000_000)));
     scene.pause_widget_ttls();
     scene.clear_widget_for_publisher("gauge", "b").unwrap();
-    assert_eq!(scene.scheduled_batches.len(), 1);
+    assert_eq!(scene.scheduled_publications.len(), 1);
     assert_eq!(scene.next_widget_deadline_wall_us(), None);
     clock.advance(15_000);
-    assert!(scene.apply_due_batches().is_empty());
-    assert_eq!(scene.scheduled_batches.len(), 1);
+    assert!(scene.apply_due_publications().is_empty());
+    assert_eq!(scene.scheduled_publications.len(), 1);
     assert_eq!(scene.next_timed_content_wall_us(), None);
     scene.resume_widget_ttls();
-    let results = scene.apply_due_batches();
-    assert!(results.iter().all(|r| r.applied));
+    let results = scene.apply_due_publications();
+    assert!(results.iter().all(|r| r.result.is_ok()));
     let record = &scene.widget_registry.active_for_widget("gauge")[0];
     assert_eq!(record.publication_origin, Some(origin));
     assert_eq!(record.expires_at_wall_us, Some(clock.now_us() + 20_000_000));
@@ -1972,26 +2357,29 @@ fn scheduled_widget_snapshots_at_late_apply_and_clear_cancels_only_its_publisher
     };
     assert_eq!(d.at_wall_us, Some(clock.now_us() + 300_000_000));
     assert_eq!(d.display_at(clock.now_us()), "5 min");
-    // Due admission is atomic even if the schema changes after enqueue.
-    let mut invalid = make_batch("a");
-    invalid.mutations.push(SceneMutation::PublishToWidget {
+    // A due publication that no longer validates changes nothing.
+    let invalid = Publication::Widget {
         widget_name: "missing".into(),
         params: HashMap::new(),
         merge_key: None,
         transition_ms: 0,
         ttl_us: None,
         expires_at_wall_us: None,
-    });
+    };
     let before = record.clone();
-    scene.schedule_batch(clock.now_us(), invalid);
-    assert!(!scene.apply_due_batches()[0].applied);
+    scene.schedule_publication(clock.now_us(), Publisher::namespace("a"), invalid);
+    assert!(scene.apply_due_publications()[0].result.is_err());
     assert_eq!(
         scene.widget_registry.active_for_widget("gauge")[0].params,
         before.params
     );
-    scene.schedule_batch(clock.now_us() + 10_000_000, make_batch("a"));
+    scene.schedule_publication(
+        clock.now_us() + 10_000_000,
+        Publisher::namespace("a"),
+        gauge(),
+    );
     scene.clear_widget_for_publisher("gauge", "a").unwrap();
-    assert!(scene.scheduled_batches.is_empty());
+    assert!(scene.scheduled_publications.is_empty());
     assert_eq!(scene.next_timed_content_wall_us(), None);
 
     // Terminal ownership ends even while a due batch is waiting for resume.
@@ -2000,14 +2388,18 @@ fn scheduled_widget_snapshots_at_late_apply_and_clear_cancels_only_its_publisher
         let (mut scene, _, clock) = scene_with_gauge_and_clock(ContentionPolicy::LatestWins);
         add_test_deadline(&mut scene);
         let lease = scene.grant_lease("a", 86_400_000);
-        let mut owned = make_batch("a");
-        owned.lease_id = Some(lease);
-        let peer = make_batch("b");
-        let peer_id = peer.batch_id;
+        let owned = Publisher {
+            lease_id: Some(lease),
+            ..Publisher::namespace("a")
+        };
         let peer_origin = SceneId::new();
+        let peer = Publisher {
+            origin: Some(peer_origin),
+            ..Publisher::namespace("b")
+        };
         let due = clock.now_us() + 10_000_000;
-        scene.schedule_batch(due, owned);
-        scene.schedule_batch_for_origin(due, peer, Some(peer_origin));
+        scene.schedule_publication(due, owned, gauge());
+        let peer_id = scene.schedule_publication(due, peer, gauge());
         scene.pause_widget_ttls();
         scene.suspend_all_leases(clock.now_millis());
         clock.advance(if suspension_timeout {
@@ -2015,8 +2407,8 @@ fn scheduled_widget_snapshots_at_late_apply_and_clear_cancels_only_its_publisher
         } else {
             10_000
         });
-        assert!(scene.apply_due_batches().is_empty());
-        assert_eq!(scene.scheduled_batches.len(), 2);
+        assert!(scene.apply_due_publications().is_empty());
+        assert_eq!(scene.scheduled_publications.len(), 2);
         if suspension_timeout {
             let expired = scene.expire_leases();
             assert_eq!(expired.len(), 1);
@@ -2024,21 +2416,21 @@ fn scheduled_widget_snapshots_at_late_apply_and_clear_cancels_only_its_publisher
         } else {
             scene.revoke_lease(lease).unwrap();
         }
-        assert_eq!(scene.scheduled_batches.len(), 1);
-        assert_eq!(scene.scheduled_batches[0].batch.batch_id, peer_id);
+        assert_eq!(scene.scheduled_publications.len(), 1);
+        assert_eq!(scene.scheduled_publications[0].id, peer_id);
         assert_eq!(scene.agent_holdings("a").widgets, 0);
         assert_eq!(scene.agent_holdings("b").widgets, 1);
         assert_eq!(scene.next_timed_content_wall_us(), None);
         scene.resume_all_leases(clock.now_millis());
         scene.resume_widget_ttls();
-        let results = scene.apply_due_batches();
+        let results = scene.apply_due_publications();
         assert_eq!(results.len(), 1);
-        assert!(results[0].applied);
+        assert!(results[0].result.is_ok());
         let records = scene.widget_registry.active_for_widget("gauge");
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].publisher_namespace, "b");
         assert_eq!(records[0].publication_origin, Some(peer_origin));
-        assert!(scene.apply_due_batches().is_empty());
+        assert!(scene.apply_due_publications().is_empty());
         assert_eq!(scene.agent_holdings("a").widgets, 0);
     }
 }

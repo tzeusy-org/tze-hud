@@ -195,12 +195,16 @@ mod keyboard;
 mod lifecycle;
 mod monitor_identity;
 mod network;
+mod notification_hold;
 mod panel_input;
 mod portal;
+mod press_guard;
 #[cfg(any(target_os = "windows", test))]
 pub(crate) mod shell_presence;
 mod wake;
 mod widgets;
+mod window_go_to;
+mod window_match;
 
 #[cfg(test)]
 mod test_support;
@@ -278,7 +282,6 @@ fn publish_degradation_transition(
 ///
 /// All fields are `Arc`-wrapped or `Send` so the app handler can be moved into
 /// the winit event loop.
-#[allow(dead_code)] // several fields are read by the compositor/shutdown path; not all are used yet
 struct WindowedRuntimeState {
     config: WindowedConfig,
     wake: WindowedWake,
@@ -328,9 +331,6 @@ struct WindowedRuntimeState {
     system_card: crate::shell::system_card::SystemCardHandle,
     /// Frame rate cap and zone outlines, changed live by the control panel.
     live: Arc<crate::launch::LiveSettings>,
-    /// First-run pairing (`None` when the MCP port is disabled); the pairing
-    /// chord and `--pair` open it.
-    pairing: Option<Arc<crate::pairing::Pairing>>,
     /// The control panel (`None` without a network runtime).
     control_panel: Option<crate::shell::control_panel::ControlPanelHandle>,
     /// Main-thread bookkeeping for the open panel: focus handoff, the
@@ -357,8 +357,6 @@ struct WindowedRuntimeState {
     /// a clone so a runtime mode switch does not sever connected sessions from
     /// later degradation transitions.
     degradation_notices: Option<tze_hud_protocol::session_server::DegradationNoticeSender>,
-    /// Compositor and surface (Some until compositor thread is spawned and takes the compositor).
-    compositor: Option<Compositor>,
     /// The window surface (main thread owns this for the lifetime of the window).
     window_surface: Option<Arc<WindowSurface>>,
     /// Input processor for local feedback.
@@ -374,8 +372,6 @@ struct WindowedRuntimeState {
     ///
     /// Stateless with respect to focus; focus is owned by `focus_manager`.
     keyboard_processor: KeyboardProcessor,
-    /// Telemetry collector.
-    telemetry: TelemetryCollector,
     /// Frame pipeline (ArcSwap hit-test snapshot, overflow counters).
     pipeline: FramePipeline,
     /// Shutdown token.
@@ -443,6 +439,9 @@ struct WindowedRuntimeState {
     secondaries: Vec<displays::SecondaryDisplay>,
     /// Secondary surfaces + layout for the compositor thread.
     display_targets: displays::SharedDisplayTargets,
+    /// The overlaid displays, secondaries in window order: where new
+    /// question cards may be placed, and which window shows a card.
+    placement_layout: Arc<StdMutex<tze_hud_compositor::DisplayLayout>>,
     /// Set when the monitor layout may have changed; re-synced next turn.
     displays_dirty: displays::DisplaysDirty,
     /// Creates secondary surfaces on the compositor's device.
@@ -458,6 +457,10 @@ struct WindowedRuntimeState {
     /// The window the cursor was last reported in; `CursorMoved` positions
     /// are relative to it.
     cursor_window: Option<WindowId>,
+    /// The overlay window that last took keyboard focus (`Some` index into
+    /// `secondaries`, `None` for the primary). Tab onto a card on another
+    /// display moves keys to that display's window.
+    keyboard_window: Option<usize>,
     /// Times each secondary's window was recreated after its surface was
     /// lost; capped so a persistently failing monitor is left alone.
     secondary_recreates: std::collections::HashMap<String, u32>,
@@ -471,7 +474,12 @@ struct WindowedRuntimeState {
     /// began on. A release activates a dismiss/action button only when it
     /// lands on the same affordance the press started on.
     zone_press: Option<String>,
+    /// Fresh-card press guard ([`press_guard::PressGuard`]).
+    press_guard: press_guard::PressGuard,
     notification_link_opener: crate::shell::link::LinkOpener,
+    /// The newest pressed link's local feedback.
+    link_feedback: Option<crate::shell::link::LinkFeedback>,
+    window_go_to: window_go_to::WindowGoTo,
     context_menu_press: Option<widgets::ContextMenuPress>,
     context_menu_open: bool,
     context_menu_dismiss_pending: bool,
@@ -487,6 +495,13 @@ struct WindowedRuntimeState {
     /// `resumed()`. After that call the field is no longer needed but is kept
     /// for potential hot-reload use.
     global_tokens: std::collections::HashMap<String, String>,
+    /// `portal.window.resize_affordance_px` resolved from `global_tokens`,
+    /// so the per-turn cursor pass need not resolve every portal token.
+    /// Cleared whenever `global_tokens` is replaced.
+    resize_affordance_px: std::cell::Cell<Option<f32>>,
+    /// The window last given a non-arrow cursor shape: the pointer's
+    /// window, which may be a secondary display's overlay.
+    cursor_shape_window: Option<WindowId>,
     /// Live design tokens: the control panel and config edits
     /// change them; `global_tokens`, the portal driver and the compositor
     /// follow on their next turn. `None` in tests that build no scene.
@@ -535,6 +550,8 @@ struct WindowedRuntimeState {
     /// Cursor the last pointer event resolved over portal text, links, copy
     /// buttons or the composer; `None` leaves the affordance cursor (hud-ljhku.2).
     reading_cursor: Option<tze_hud_input::PortalCursor>,
+    /// Last-frame bounds of the HUD controls a primary press would act on.
+    pressable_regions: Vec<HitRegion>,
     /// Per-portal resize state machines keyed by tile `SceneId`.
     ///
     /// Holds `PortalResizeState` for every portal tile that has been focused
@@ -578,6 +595,10 @@ struct WindowedRuntimeState {
     /// IME composition in progress for the focused composer (hud-ljhku.13),
     /// forwarded with each echo snapshot; never part of the draft.
     composer_preedit: Option<tze_hud_compositor::ComposerPreedit>,
+    /// Kept drafts of unfocused composers for the compositor to draw, and the
+    /// set last sent there (sent again only when it changes).
+    kept_composer_drafts_state: tze_hud_compositor::KeptComposerDraftsHandle,
+    kept_drafts_drawn: Vec<(tze_hud_scene::SceneId, String)>,
     /// Shared handle carrying the current keyboard-focus owner to the compositor's
     /// chrome-layer ring pass. Written each frame in `about_to_wait`
     /// from the active tab's `FocusManager` owner; the compositor draws the ring
@@ -864,6 +885,7 @@ impl WinitApp {
             return;
         };
         self.state.global_tokens = (*map).clone();
+        self.state.resize_affordance_px.set(None);
         self.state
             .portal_projection_driver
             .apply_token_map(self.state.global_tokens.clone());
@@ -875,6 +897,26 @@ impl WinitApp {
 }
 
 impl WinitApp {
+    /// Whether this turn left scene work for a later one: a deferred drain,
+    /// input retained because the scene lock was busy, or link feedback not
+    /// yet drawn. Settling can
+    /// complete while retained input still waits on a lock that another
+    /// thread (such as an availability waiter) briefly holds.
+    fn has_deferred_scene_work(&self, drain: &PortalProjectionDrain) -> bool {
+        drain.is_deferred()
+            || !self.state.pending_keyboard_events.is_empty()
+            || !self.state.pending_scroll.is_empty()
+            || self.state.pending_pointer_move
+            || !self.state.pending_pointer_buttons.is_empty()
+            || self.state.link_feedback.as_ref().is_some_and(|f| !f.drawn)
+            || self.state.press_guard.observation_due
+            || self
+                .state
+                .primary_drag_gesture
+                .as_ref()
+                .is_some_and(|gesture| gesture.terminal.is_some())
+    }
+
     /// Settle the scene-side main-thread work for one event-loop turn: flush
     /// the composer draft, retry deferred keystrokes, dispatch MCP portal ops,
     /// and drain the portal projection into the scene. Needs no window or
@@ -907,6 +949,7 @@ impl WinitApp {
         // so geometry changes (resize/drag) stay fresh without a focus event.
         self.clear_focus_on_removed_tile();
         self.push_focus_ring_owner();
+        self.push_kept_composer_drafts();
         // Publish the resize-grip hover target: when the pointer sits
         // over the focused portal's bottom-right resize corner, the compositor
         // lights that tile's grip in hover_color. Same per-frame + latest-wins
@@ -923,6 +966,11 @@ impl WinitApp {
         self.drain_pending_keyboard_events();
         // Retry pointer input that found the scene lock busy.
         let retained_pointer_changed = self.drain_retained_pointer_input();
+        let link_feedback_changed = self.settle_link_feedback(Instant::now());
+        let go_to_changed = self.settle_go_to(Instant::now());
+        let hold_changed = self.settle_notification_hold();
+        let guard_changed = self.settle_press_guard();
+        self.recover_chrome_capture();
         // Render the portals.
         // Must run AFTER composer flush so draft state is settled before portal
         // content is refreshed.  Uses try_lock on the scene to avoid blocking
@@ -935,7 +983,11 @@ impl WinitApp {
         let drag_scene_changed = pruned_drag.scene_changed()
             || settled_drag
             || chrome_scene_changed
-            || retained_pointer_changed;
+            || retained_pointer_changed
+            || link_feedback_changed
+            || go_to_changed
+            || hold_changed
+            || guard_changed;
         if self.state.input_processor.chrome_feedback_cancel_pending || pruned_drag.is_deferred() {
             // Chrome cleanup can consume its pending flag before the separate
             // drag-feedback borrow. Preserve either unfinished phase through the
@@ -1041,6 +1093,8 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         self.synthesize_left_release_if_physically_up();
         self.refresh_widget_hover_tracking();
         self.update_overlay_cursor_hittest();
+        // The cursor follows controls that appear or leave under a resting pointer.
+        self.update_portal_cursor_icon();
         let portal_drain = self.settle_scene_work();
         let settled_scene_changed = portal_drain.scene_changed();
 
@@ -1114,6 +1168,19 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                 crate::idle_efficiency::RuntimeWakeupSource::AnimationDeadline,
             ));
         }
+        // A shown link result ends once; an open handoff waits for its worker's wake.
+        if let Some(at) = self.state.link_feedback.as_ref().and_then(|f| f.until) {
+            deadlines.push(Deadline::new(
+                at,
+                crate::idle_efficiency::RuntimeWakeupSource::AnimationDeadline,
+            ));
+        }
+        if let Some(at) = self.state.window_go_to.next_deadline() {
+            deadlines.push(Deadline::new(
+                at,
+                crate::idle_efficiency::RuntimeWakeupSource::AnimationDeadline,
+            ));
+        }
         let mut inspected_scene_deadlines = false;
         if let Ok(state) = self.state.shared_state.try_lock()
             && let Ok(scene) = state.scene.try_lock()
@@ -1131,6 +1198,27 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                     deadlines.push(deadline);
                 }
             }
+            // A destructive hold fires on time even when no frame is drawn
+            // (reduced motion, or a sweep already full).
+            let (hold_ms, _) = notification_hold::hold_timing(&self.state.global_tokens);
+            if let Some(due) = scene.notification_hold_due_mono_us(hold_ms) {
+                let remaining_us = due.saturating_sub(scene.now_monotonic_us());
+                deadlines.push(Deadline::new(
+                    now + std::time::Duration::from_micros(remaining_us),
+                    crate::idle_efficiency::RuntimeWakeupSource::AnimationDeadline,
+                ));
+            }
+            // A press guard ending under a still pointer brings back hover
+            // and the hand without pointer motion.
+            if let Some(until) = self.state.press_guard.until_us()
+                && until > scene.now_monotonic_us()
+            {
+                let remaining_us = until - scene.now_monotonic_us();
+                deadlines.push(Deadline::new(
+                    now + std::time::Duration::from_micros(remaining_us),
+                    crate::idle_efficiency::RuntimeWakeupSource::AnimationDeadline,
+                ));
+            }
             if let Some(menu) = &scene.overlay.drag_handle_context_menu {
                 const AUTO_DISMISS_NS: u64 = 3_000_000_000;
                 let remaining_ns = menu
@@ -1146,16 +1234,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         if let Some(listen) = self.sync_cursor_entry_listening() {
             event_loop.listen_device_events(listen);
         }
-        let has_deferred_scene_work = portal_drain.is_deferred()
-            || !self.state.pending_keyboard_events.is_empty()
-            || !self.state.pending_scroll.is_empty()
-            || self.state.pending_pointer_move
-            || !self.state.pending_pointer_buttons.is_empty()
-            || self
-                .state
-                .primary_drag_gesture
-                .as_ref()
-                .is_some_and(|gesture| gesture.terminal.is_some());
+        let has_deferred_scene_work = self.has_deferred_scene_work(&portal_drain);
         if !inspected_scene_deadlines || has_deferred_scene_work {
             // Lock contention is not a deadline. Install one coalesced waiter
             // that wakes the main loop only after the shared scene is actually
@@ -1391,6 +1470,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
             }
         }
         // ── Create compositor + surface (async in a blocking context) ──────
+        crate::os_fonts::install();
         // We need an async context to call Compositor::new_windowed.
         // Use a temporary single-thread Tokio runtime here — this runs only
         // at startup and is dropped immediately after.
@@ -1501,6 +1581,8 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         // additional allocations or locks on the hot path.
         self.state.local_composer_state = Arc::clone(&compositor.local_composer_state);
         self.state.focus_ring_owner_state = Arc::clone(&compositor.focus_ring_owner_state);
+        self.state.kept_composer_drafts_state = Arc::clone(&compositor.kept_composer_drafts_state);
+        self.state.kept_drafts_drawn.clear();
         self.state.resize_grip_hover_state = Arc::clone(&compositor.resize_grip_hover_state);
         self.state.tile_close_hover_state = Arc::clone(&compositor.tile_close_hover_state);
         self.state.drag_handle_hover_state = Arc::clone(&compositor.drag_handle_hover_state);
@@ -1555,6 +1637,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         let system_card_for_compositor = self.state.system_card.clone();
         let control_panel_for_compositor = self.state.control_panel.clone();
         let mut control_panel_seen = 0u64;
+        let mut control_panel_visit = None;
         let live_for_compositor = Arc::clone(&self.state.live);
         let mut live_seen = 0u64;
         // The compositor was given the tokens in effect when it started
@@ -1563,6 +1646,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         let mut tokens_seen = self.state.tokens_seen;
         let mut closed_notice_seen = 0u64;
         let capture_inbox = self.state.capture_inbox.clone();
+        let match_presented_windows = self.state.window_go_to.enabled();
         let display_targets = Arc::clone(&self.state.display_targets);
         let displays_dirty = Arc::clone(&self.state.displays_dirty);
         // A handed-over instance reports ready after its first submitted frame.
@@ -1789,7 +1873,18 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                     let panel_changed = control_panel_for_compositor
                         .as_ref()
                         .and_then(|panel| panel.model_if_changed(&mut control_panel_seen))
-                        .is_some_and(|model| compositor.set_control_panel(model));
+                        .is_some_and(|panel| {
+                            let previous_visit = control_panel_visit;
+                            control_panel_visit = panel.as_ref().map(|panel| panel.visit);
+                            let pixels_changed = match panel {
+                                Some(panel) => compositor
+                                    .set_control_panel_on_display(Some(panel.model), panel.display),
+                                None => compositor.set_control_panel(None),
+                            };
+                            // An identical model can reopen between turns. Build
+                            // once to publish its geometry under the new visit.
+                            pixels_changed || control_panel_visit != previous_visit
+                        });
                     // Its closed-state notice (hidden content) likewise.
                     let notice_changed = control_panel_for_compositor
                         .as_ref()
@@ -1819,8 +1914,9 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                         false,
                     );
 
-                    // ── Stage 3: Mutation Intake ───────────────────────────
-                    // (placeholder — real mutations come via gRPC session)
+                    // Stage 3 (mutation intake) has no step here: gRPC and MCP
+                    // handlers apply their changes under the scene lock between
+                    // frames, and Stage 4 commits whatever they left.
 
                     // ── Stage 4: Scene Commit + HitTest Snapshot ──────────
                     // Lock the scene directly (never lock SharedState here).
@@ -1940,14 +2036,15 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                             // `WindowedFrameBuild`. Crucially this phase does NOT
                             // touch the swapchain surface — so it never blocks on
                             // vsync while the lock is held.
-                            let build = render.expect("full frame plan builds a frame");
+                            let mut build = render.expect("full frame plan builds a frame");
                             // Hand the panel the geometry this frame draws, so a
                             // click hits what is on screen.
                             if let Some(panel) = &control_panel_for_compositor
+                                && let Some(visit) = control_panel_visit
                                 && let Some((generation, geometry)) =
                                     compositor.control_panel_geometry(surf_w as f32, surf_h as f32)
                             {
-                                panel.set_geometry(generation, || geometry.clone());
+                                panel.set_geometry(visit, generation, || geometry.clone());
                             }
                             // Hit-region refresh + hit-test snapshot are still
                             // computed under the lock, from the geometry we are
@@ -1958,12 +2055,15 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                                 &mut scene,
                                 surface_for_compositor.as_ref(),
                             );
+                            if match_presented_windows {
+                                build.bind_notification_candidates(&scene);
+                            }
                             let new_snap = crate::pipeline::HitTestSnapshot::from_scene(&scene);
                             hit_test_snapshot.store(Arc::new(new_snap));
                             let built_scene_version = scene.version;
                             let built_geometry_epoch = scene.geometry_epoch;
                             // ── Batch-correlated present ack drain ──
-                            // SceneGraph::apply_batch records internal batch ids.
+                            // SceneGraph::publish records internal publication IDs.
                             // Drain under the scene lock before GPU submission;
                             // a failed primary attempt can consume ids without a
                             // telemetry sample. Broadcast after local GPU work,
@@ -2050,7 +2150,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                                     present_wall_us,
                                     // 16-byte big-endian UUID, matching the
                                     // scene_id_to_bytes / bytes_to_scene_id wire
-                                    // contract used for MutationBatch.batch_id.
+                                    // contract for FramePresented.batch_ids.
                                     batch_ids: presented_batch_ids
                                         .iter()
                                         .map(|id| id.as_uuid().as_bytes().to_vec())
@@ -2275,16 +2375,23 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                 self.state
                     .displays_dirty
                     .store(true, std::sync::atomic::Ordering::Release);
-                let spec = match secondary {
-                    Some(i) => Some(&self.state.secondaries[i].spec),
-                    None => self.state.primary_monitor.as_ref(),
-                };
-                if let Some(spec) = spec
+                let size = displays::scale_change_target(
+                    window_id,
+                    self.state
+                        .window
+                        .as_ref()
+                        .zip(self.state.primary_monitor.as_ref())
+                        .map(|(window, spec)| (window.id(), spec)),
+                    self.state
+                        .secondaries
+                        .iter()
+                        .map(|display| (display.window.id(), &display.spec)),
+                );
+                if let Some(size) = size
                     && self.state.effective_mode == WindowMode::Overlay
                     && self.state.config.overlay_auto_size
                 {
-                    let _ = inner_size_writer
-                        .request_inner_size(winit::dpi::PhysicalSize::new(spec.width, spec.height));
+                    let _ = inner_size_writer.request_inner_size(size);
                 }
             }
 
@@ -2379,7 +2486,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                 self.state.cursor_y = y;
                 self.state.cursor_window = Some(window_id);
                 self.state.cursor_left_window = false;
-                if self.panel_pointer_moved(secondary.is_none()) {
+                if self.panel_pointer_moved(secondary) {
                     self.update_overlay_cursor_hittest();
                     return;
                 }
@@ -2443,7 +2550,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                     }
                     _ => step.to_px(delta_y, tze_hud_input::WHEEL_LINE_PX, 0.0),
                 };
-                if self.panel_wheel(panel_dy, secondary.is_none()) {
+                if self.panel_wheel(panel_dy, secondary) {
                     return;
                 }
                 self.enqueue_scroll_event(delta_x, delta_y, step);
@@ -2468,7 +2575,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                 // ── Control panel: owns the keyboard while open ─────────────
                 // Chords (pause, panel, pairing) are global hotkeys and never
                 // arrive here.
-                if self.panel_key_event(&event) {
+                if self.panel_key_event(secondary, &event) {
                     return;
                 }
 
@@ -2573,7 +2680,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
             }
             WindowEvent::Ime(winit::event::Ime::Commit(text)) => {
                 self.state.composer_preedit = None;
-                if self.panel_text(&text) {
+                if self.panel_text(secondary, &text) {
                     return;
                 }
                 if let Some(source) = wake_source {
@@ -2662,10 +2769,9 @@ impl WindowedRuntime {
     /// "The main thread MUST
     /// run the winit event loop."
     ///
-    /// Once its threads have stopped, this arms
-    /// [`crate::threads::arm_exit_deadline`]: the caller must exit the process
-    /// within [`crate::threads::EXIT_DEADLINE`] of the return, or it is
-    /// terminated.
+    /// After the runtime shuts down the compositor and network runtimes, it
+    /// gives the process five seconds to finish teardown before terminating it.
+    /// Callers should exit promptly after this method returns.
     ///
     /// # Errors
     ///
@@ -2683,7 +2789,10 @@ impl WindowedRuntime {
         let wake = WindowedWake::new(event_loop.create_proxy());
         // Main-thread focus/draft mirror read by the `/admin/status` probe.
         let surface_ui = crate::operator::surface_status::UiHandle::default();
-        let notification_link_opener = crate::shell::link::LinkOpener::default();
+        let notification_link_opener = crate::shell::link::LinkOpener {
+            wake: Some(wake.main_work_notifier()),
+            ..Default::default()
+        };
         let render_wake = wake.render_notifier();
         let portal_ingress_wake = wake.main_work_notifier();
 
@@ -2699,6 +2808,10 @@ impl WindowedRuntime {
             .config_toml
             .as_deref()
             .and_then(|toml| toml::from_str(toml).ok());
+        let go_to_apps = raw_config_for_startup
+            .as_ref()
+            .and_then(|raw| raw.runtime.as_ref())
+            .and_then(|runtime| runtime.go_to_apps.clone());
         let zone_displays = raw_config_for_startup
             .as_ref()
             .map(tze_hud_config::displays::zone_display_assignments)
@@ -2748,7 +2861,7 @@ impl WindowedRuntime {
                     raw,
                     config_parent_buf.as_deref(),
                     &mut scene,
-                    crate::os_prefs::animations_enabled(),
+                    crate::os_prefs::read(),
                 );
                 // Stash SVG assets for compositor registration after init_widget_renderer.
                 pending_widget_svgs = startup_result.widget_svg_assets;
@@ -2815,6 +2928,18 @@ impl WindowedRuntime {
                 .with_answer_window(cfg.answer_window_ms)
                 .with_capture(capture),
         );
+        let placement_layout = Arc::new(StdMutex::new(Default::default()));
+        let display_probe: Arc<dyn crate::question_placement::DisplayProbe> =
+            Arc::new(crate::question_placement::Win32Probe);
+        crate::question_placement::install(
+            &mut shared_scene
+                .try_lock()
+                .expect("startup holds no scene lock"),
+            cfg.config_toml.as_deref(),
+            &live.publication_defaults,
+            Arc::clone(&placement_layout),
+            Arc::clone(&display_probe),
+        );
         let appearance = Arc::new(crate::appearance::Appearance::for_startup(
             raw_config_for_startup.as_ref(),
             cfg.config_file_path.as_deref().map(std::path::Path::new),
@@ -2822,7 +2947,7 @@ impl WindowedRuntime {
             Arc::clone(&shared_scene),
             render_wake.clone(),
             wake.main_work_notifier(),
-            crate::os_prefs::animations_enabled,
+            crate::os_prefs::read,
         ));
         let cfg_agents_empty = cfg.agents.load().is_empty();
         let agent_store = Arc::new(crate::agent_store::AgentStore::open(
@@ -2851,7 +2976,10 @@ impl WindowedRuntime {
             ),
             runtime_widget_store: runtime_widget_store.clone(),
             element_store: startup_element_store,
-            element_store_path: Some(startup_element_store_path),
+            element_store_file: Some(tze_hud_protocol::session::ElementStoreFile {
+                path: startup_element_store_path,
+                write: crate::element_store::persist_element_store_to_path,
+            }),
             safe_mode_atomic: Arc::clone(&safe_mode_atomic),
             active_tab_mirror: Arc::clone(&active_tab_mirror),
             token_store: TokenStore::new(),
@@ -3114,6 +3242,9 @@ impl WindowedRuntime {
         let mut tray_deps = None;
         let control_panel = network_rt.as_ref().map(|rt| {
             let deps = crate::shell::control_panel::ControlPanelDeps {
+                clipboard: Default::default(),
+                display_probe: Arc::clone(&display_probe),
+                display_layout: Arc::clone(&placement_layout),
                 scene: Arc::clone(&shared_scene),
                 pause: crate::shell::control_panel::PauseControl::new(
                     Arc::clone(&shared_state),
@@ -3173,6 +3304,7 @@ impl WindowedRuntime {
         {
             if let Some(panel) = &control_panel {
                 panel.set_quit(Arc::clone(&quit));
+                panel.set_answer(answer_keyboard.tray_hook(wake.main_work_notifier()));
             }
             let presence = shell_presence::native::Bridge::install(
                 control_panel.clone(),
@@ -3247,7 +3379,6 @@ impl WindowedRuntime {
         );
 
         let app_state = WindowedRuntimeState {
-            pairing,
             control_panel,
             config: cfg,
             wake,
@@ -3270,12 +3401,10 @@ impl WindowedRuntime {
             frame_ready_tx: Some(frame_ready_tx),
             frame_presented_tx,
             degradation_notices,
-            compositor: None,
             window_surface: None,
             input_processor: input_processor_with_system_gestures(),
             focus_manager: FocusManager::new(),
             keyboard_processor: KeyboardProcessor::new(),
-            telemetry: TelemetryCollector::new(),
             pipeline: FramePipeline::new(),
             shutdown,
             quiescent_failed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -3298,17 +3427,22 @@ impl WindowedRuntime {
             primary_monitor: None,
             secondaries: Vec::new(),
             display_targets: Default::default(),
+            placement_layout,
             displays_dirty: Default::default(),
             surface_factory: None,
             zone_displays,
             display_keys: Vec::new(),
             zone_targets: Default::default(),
             cursor_window: None,
+            keyboard_window: None,
             secondary_recreates: Default::default(),
             overlay_refits: Default::default(),
             press_window: None,
             zone_press: None,
+            press_guard: Default::default(),
             notification_link_opener,
+            link_feedback: None,
+            window_go_to: window_go_to::WindowGoTo::new(go_to_apps),
             context_menu_press: None,
             context_menu_open: false,
             context_menu_dismiss_pending: false,
@@ -3316,6 +3450,8 @@ impl WindowedRuntime {
             answer_keyboard,
             primary_drag_gesture: None,
             global_tokens: startup_compositor_tokens,
+            resize_affordance_px: Default::default(),
+            cursor_shape_window: None,
             appearance: Some(appearance),
             tokens_seen: 0,
             capture_seen: 0,
@@ -3324,6 +3460,7 @@ impl WindowedRuntime {
             input_event_tx,
             composer_pointer_drag_anchor: None,
             reading_cursor: None,
+            pressable_regions: Vec::new(),
             portal_resize_states: std::collections::HashMap::new(),
             consumed_portal_resize_keydowns: std::collections::HashSet::new(),
             consumed_shell_shortcut_keydowns: std::collections::HashSet::new(),
@@ -3334,6 +3471,8 @@ impl WindowedRuntime {
             // compositor.  Separate Arc so it works before compositor is created.
             local_composer_state: Arc::new(StdMutex::new(None)),
             composer_preedit: None,
+            kept_composer_drafts_state: Arc::new(StdMutex::new(None)),
+            kept_drafts_drawn: Vec::new(),
             focus_ring_owner_state: Arc::new(StdMutex::new(None)),
             surface_ui,
             // Placeholder; replaced in resumed() with the compositor's Arc.
@@ -3451,7 +3590,8 @@ impl WindowedRuntime {
 /// time for portal OUTPUT reading (hud-ljhku.2): `SM_CXDRAG`/`SM_CYDRAG` at
 /// the system DPI and `GetDoubleClickTime` on Windows, the defaults elsewhere.
 fn input_processor_with_system_gestures() -> InputProcessor {
-    #[allow(unused_mut)]
+    // Only the Windows block below adjusts it.
+    #[cfg_attr(not(windows), allow(unused_mut))]
     let mut processor = InputProcessor::new();
     #[cfg(windows)]
     {

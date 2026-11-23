@@ -84,9 +84,9 @@ use icon::*;
 // Re-export the externally consumed shared state; renderer-only helpers stay
 // in private imports.
 pub use control_panel::{
-    ControlPanelGeometry, ControlPanelModel, PanelBadge, PanelBody, PanelChip, PanelConnect,
-    PanelControl, PanelFocus, PanelHit, PanelHitTarget, PanelItem, PanelNotice, PanelPart,
-    PanelRect, PanelSection, PanelSpan, PanelTone, estimate_control_panel_geometry,
+    ControlPanelGeometry, ControlPanelModel, PanelBadge, PanelBody, PanelCaret, PanelChip,
+    PanelConnect, PanelControl, PanelFocus, PanelHit, PanelHitTarget, PanelItem, PanelNotice,
+    PanelPart, PanelRect, PanelSection, PanelSpan, PanelTone, estimate_control_panel_geometry,
 };
 pub use focus_ring::{FocusRingOwner, FocusRingOwnerHandle};
 pub use system_card::{SystemCardKind, SystemCardModel};
@@ -110,7 +110,8 @@ pub type DragHandleHoverHandle = Arc<StdMutex<Option<SceneId>>>;
 use image_cache::ImageTextureEntry;
 use image_cache::apply_composer_slot;
 pub use image_cache::{
-    ComposerPreedit, ComposerVisualLayoutHandle, LocalComposerState, LocalComposerStateHandle,
+    ComposerPreedit, ComposerVisualLayoutHandle, KeptComposerDraftsHandle, LocalComposerState,
+    LocalComposerStateHandle,
 };
 use text::*;
 use token_colors::*;
@@ -221,8 +222,6 @@ pub struct Compositor {
     /// Opt-in work counts for the most recent completed headless frame.
     #[cfg(any(test, feature = "dev-mode"))]
     work_observation: work_observation::WorkObservation,
-    /// Latest real window-surface lifecycle outcome.
-    latest_surface_recovery: Option<SurfaceRecoveryOutcome>,
     /// When true, the clear color uses alpha=0 for transparent overlay mode.
     pub overlay_mode: bool,
     /// When true, the chrome pass draws the safe-mode overlay (see
@@ -230,12 +229,12 @@ pub struct Compositor {
     safe_mode_overlay: bool,
     /// Runtime system card / toast (see [`Compositor::set_system_card`]).
     system_card: Option<SystemCardModel>,
-    /// Runtime control panel (see [`Compositor::set_control_panel`]); while
-    /// open it replaces the system card in the final chrome pass.
+    /// Runtime control panel (see [`Compositor::set_control_panel`]).
     control_panel: Option<ControlPanelModel>,
+    control_panel_display: Option<String>,
     /// Last panel layout, keyed by surface size; cleared on model or token
     /// change.
-    control_panel_layout: Option<((u32, u32), control_panel::ControlPanelLayout)>,
+    control_panel_layout: Option<((u32, u32, u32), control_panel::ControlPanelLayout)>,
     /// Bumped on every panel re-layout so the runtime can skip unchanged
     /// geometry.
     control_panel_layout_generation: u64,
@@ -362,6 +361,9 @@ pub struct Compositor {
     /// scale ([`tze_hud_config::tokens::secondary_zone_tokens`]); rebuilt by
     /// `set_token_map`. Read through [`Compositor::zone_tokens`].
     secondary_zone_tokens: HashMap<String, HashMap<String, String>>,
+    /// While a stack placed on another display is walked: its zone and the
+    /// token key that zone resolves by ([`Compositor::tokens_for_stack`]).
+    placed_stack: std::cell::RefCell<Option<(String, String)>>,
     /// Startup-resolved zone curves and fallback exit span, never parsed per frame.
     zone_motion: easing::ZoneMotion,
     /// Decoded RGBA image bytes indexed by `ResourceId`.
@@ -620,9 +622,18 @@ pub struct Compositor {
     /// (background rect + caret rect).  Cleared when the handle delivers
     /// `None` (composer deactivated).
     pub(crate) local_composer: Option<LocalComposerState>,
+    /// Caret blink half-period from the token map (`runtime.caret_blink_ms`,
+    /// the Windows caret blink time): `None` when Windows caret blinking is
+    /// off, so the caret is steady and schedules no wake.
+    pub(crate) composer_caret_blink: Option<std::time::Duration>,
+    /// Kept drafts of unfocused composers, delivered through
+    /// `kept_composer_drafts_state`.
+    pub kept_composer_drafts_state: KeptComposerDraftsHandle,
+    /// The drained kept drafts, drawn without caret or selection.
+    pub(crate) kept_composers: Vec<LocalComposerState>,
     /// Reference instant for the composer caret blink phase.
     ///
-    /// The caret toggles solid/hidden every [`image_cache::CARET_BLINK_HALF_PERIOD`]
+    /// The caret toggles solid/hidden every `composer_caret_blink`
     /// measured from this instant.  Reset to "now" whenever a new draft state is
     /// applied (keystroke / caret move) so the caret is solid immediately after
     /// typing.  Computed per-frame in `collect_composer_text_item`; the model is
@@ -837,6 +848,123 @@ pub(crate) fn zone_geometry_in(
     }
 }
 
+/// One display's share of a shown zone's publications. A notification-area
+/// question placed on another display draws in its own stack there, laid out
+/// on that display's rect; everything else keeps one stack per zone.
+pub(crate) struct ZoneStack<'a> {
+    pub(crate) name: &'a String,
+    pub(crate) publishes: std::borrow::Cow<'a, [ZonePublishRecord]>,
+    /// The display (bounds, name) this stack resolves on, when it is not
+    /// the zone's own.
+    pub(crate) display: Option<(Rect, String)>,
+}
+
+impl ZoneStack<'_> {
+    fn zone_display(layout: &crate::display::DisplayLayout, zone: &str) -> Option<Rect> {
+        layout
+            .zone_display_rect(zone)
+            .or_else(|| layout.displays().iter().find(|d| d.primary).map(|d| d.rect))
+    }
+
+    fn placed_display(
+        layout: &crate::display::DisplayLayout,
+        own: Option<Rect>,
+        preference: Option<&str>,
+    ) -> Option<(Rect, String)> {
+        let display = preference?;
+        let rect = layout
+            .display_rect(display)
+            .filter(|rect| Some(*rect) != own)?;
+        Some((rect, crate::display::normalize_display_name(display)))
+    }
+
+    /// The key this stack's tokens resolve by: the zone, or the zone placed
+    /// on another display (that monitor's scale).
+    pub(crate) fn token_key(&self) -> std::borrow::Cow<'_, str> {
+        match &self.display {
+            Some((_, display)) => crate::display::placed_zone_key(self.name, display).into(),
+            None => self.name.as_str().into(),
+        }
+    }
+}
+
+/// Shown zones in paint order, the notification area split per display.
+pub(crate) fn zone_stacks_in<'a>(
+    layout: &crate::display::DisplayLayout,
+    scene: &'a SceneGraph,
+) -> Vec<ZoneStack<'a>> {
+    scene
+        .shown_zone_publishes()
+        .flat_map(|(name, publishes)| zone_stacks_for(layout, name, publishes))
+        .collect()
+}
+
+/// [`zone_stacks_in`] for one zone. Records keep their stack order inside
+/// each display; a display that is the zone's own, or is not connected,
+/// draws with the zone's stack (S7: a disconnected display's cards fall back).
+pub(crate) fn zone_stacks_for<'a>(
+    layout: &crate::display::DisplayLayout,
+    name: &'a String,
+    publishes: &'a Vec<ZonePublishRecord>,
+) -> Vec<ZoneStack<'a>> {
+    let own = ZoneStack::zone_display(layout, name);
+    let elsewhere = |record: &ZonePublishRecord| {
+        ZoneStack::placed_display(layout, own, record.display.as_deref())
+    };
+    if !publishes.iter().any(|record| elsewhere(record).is_some()) {
+        return vec![ZoneStack {
+            name,
+            publishes: std::borrow::Cow::Borrowed(publishes),
+            display: None,
+        }];
+    }
+    type Placed = Option<(Rect, String)>;
+    let mut stacks: Vec<(Placed, Vec<ZonePublishRecord>)> = vec![(None, Vec::new())];
+    for record in publishes {
+        let display = elsewhere(record);
+        match stacks.iter_mut().find(|(d, _)| *d == display) {
+            Some((_, records)) => records.push(record.clone()),
+            None => stacks.push((display, vec![record.clone()])),
+        }
+    }
+    stacks
+        .into_iter()
+        .filter(|(_, records)| !records.is_empty())
+        .map(|(display, records)| ZoneStack {
+            name,
+            publishes: std::borrow::Cow::Owned(records),
+            display,
+        })
+        .collect()
+}
+
+/// A stack's zone bounds in canvas pixels: on its display when it has one.
+pub(crate) fn stack_geometry_in(
+    layout: &crate::display::DisplayLayout,
+    stack: &ZoneStack<'_>,
+    policy: &GeometryPolicy,
+    sw: f32,
+    sh: f32,
+) -> (f32, f32, f32, f32) {
+    match &stack.display {
+        Some((display, _)) => {
+            let (x, y, w, h) =
+                Compositor::resolve_zone_geometry(policy, display.width, display.height);
+            (x + display.x, y + display.y, w, h)
+        }
+        None => zone_geometry_in(layout, stack.name, policy, sw, sh),
+    }
+}
+
+/// Clears [`Compositor::tokens_for_stack`]'s override when dropped.
+pub(super) struct StackTokens<'a>(&'a std::cell::RefCell<Option<(String, String)>>);
+
+impl Drop for StackTokens<'_> {
+    fn drop(&mut self) {
+        self.0.borrow_mut().take();
+    }
+}
+
 /// Backends the windowed compositor requests: Vulkan on Linux, D3D12 and
 /// Vulkan on Windows, Metal on macOS. Headless hardware selection uses all
 /// backends; forced software selection defers GL until primary backends have
@@ -901,18 +1029,29 @@ impl Compositor {
         let (_instance, adapter) = selected_adapter.ok_or(CompositorError::NoAdapter)?;
         let adapter_info = CompositorAdapterInfo::from(adapter.get_info());
 
+        // Keep downlevel compatibility, but allow offscreen frames at the
+        // adapter's native texture size, as the windowed device does.
+        let mut required_limits = wgpu::Limits::downlevel_defaults();
+        required_limits.max_texture_dimension_2d = adapter.limits().max_texture_dimension_2d;
         let (device, queue) = adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
                     label: Some("tze_hud_compositor"),
                     required_features: wgpu::Features::empty(),
-                    required_limits: wgpu::Limits::downlevel_defaults(),
+                    required_limits,
                     memory_hints: wgpu::MemoryHints::default(),
                 },
                 None,
             )
             .await
             .map_err(|e| CompositorError::DeviceCreation(e.to_string()))?;
+
+        let max_dimension = device.limits().max_texture_dimension_2d;
+        if width > max_dimension || height > max_dimension {
+            return Err(CompositorError::DeviceCreation(format!(
+                "headless dimensions {width}x{height} exceed this device's {max_dimension}px per-axis texture limit; reduce width and height to <= {max_dimension}"
+            )));
+        }
 
         let pipeline = Self::create_pipeline(&device);
         let clear_pipeline =
@@ -956,11 +1095,11 @@ impl Compositor {
             last_animation_frame_at: None,
             #[cfg(any(test, feature = "dev-mode"))]
             work_observation: work_observation::WorkObservation::default(),
-            latest_surface_recovery: None,
             overlay_mode: false,
             safe_mode_overlay: false,
             system_card: None,
             control_panel: None,
+            control_panel_display: None,
             control_panel_layout: None,
             control_panel_layout_generation: 0,
             closed_notice: None,
@@ -985,6 +1124,7 @@ impl Compositor {
             last_scroll_smooth_at: None,
             token_map: HashMap::new(),
             secondary_zone_tokens: HashMap::new(),
+            placed_stack: Default::default(),
             zone_motion: easing::ZoneMotion::from_token_map(&HashMap::new()),
             markdown_primer: crate::markdown::MarkdownPrimer::new(),
             node_key_cache: HashMap::new(),
@@ -1022,6 +1162,9 @@ impl Compositor {
             drag_handle_hover_state: Arc::new(StdMutex::new(None)),
             drag_handle_hover: None,
             local_composer: None,
+            composer_caret_blink: Some(image_cache::CARET_BLINK_HALF_PERIOD),
+            kept_composer_drafts_state: Arc::new(StdMutex::new(None)),
+            kept_composers: Vec::new(),
             composer_caret_blink_start: std::time::Instant::now(),
             composer_caret_rendered_phase: None,
             composer_layout: image_cache::ComposerLayout::default(),
@@ -1306,11 +1449,11 @@ impl Compositor {
             last_animation_frame_at: None,
             #[cfg(any(test, feature = "dev-mode"))]
             work_observation: work_observation::WorkObservation::default(),
-            latest_surface_recovery: None,
             overlay_mode: false,
             safe_mode_overlay: false,
             system_card: None,
             control_panel: None,
+            control_panel_display: None,
             control_panel_layout: None,
             control_panel_layout_generation: 0,
             closed_notice: None,
@@ -1335,6 +1478,7 @@ impl Compositor {
             last_scroll_smooth_at: None,
             token_map: HashMap::new(),
             secondary_zone_tokens: HashMap::new(),
+            placed_stack: Default::default(),
             zone_motion: easing::ZoneMotion::from_token_map(&HashMap::new()),
             markdown_primer: crate::markdown::MarkdownPrimer::new(),
             node_key_cache: HashMap::new(),
@@ -1372,6 +1516,9 @@ impl Compositor {
             drag_handle_hover_state: Arc::new(StdMutex::new(None)),
             drag_handle_hover: None,
             local_composer: None,
+            composer_caret_blink: Some(image_cache::CARET_BLINK_HALF_PERIOD),
+            kept_composer_drafts_state: Arc::new(StdMutex::new(None)),
+            kept_composers: Vec::new(),
             composer_caret_blink_start: std::time::Instant::now(),
             composer_caret_rendered_phase: None,
             composer_layout: image_cache::ComposerLayout::default(),
@@ -1408,6 +1555,9 @@ impl Compositor {
     pub fn attach_text_fit(&mut self, fit: Arc<TextFitMeasurer>) {
         fit.set_display_layout(self.display_layout.clone());
         fit.set_tokens(self.token_map.clone());
+        if let Some(bytes) = self.configured_max_truncation_input_bytes {
+            fit.set_max_truncation_input_bytes(bytes);
+        }
         if let Some(renderer) = &mut self.widget_renderer {
             renderer.set_text_fit(Arc::clone(&fit));
         }
@@ -1427,10 +1577,31 @@ impl Compositor {
         zone_geometry_in(&self.display_layout, zone_name, policy, sw, sh)
     }
 
-    /// Record an actual window-surface lifecycle outcome without widening any
-    /// scene, protocol, or agent-visible contract.
-    pub(super) fn record_surface_recovery_outcome(&mut self, outcome: SurfaceRecoveryOutcome) {
-        self.latest_surface_recovery = Some(outcome);
+    /// Resolve `stack`'s tokens through [`Self::zone_tokens`] until the
+    /// returned guard drops, so a card placed on another display draws, lays
+    /// out and fits at that monitor's scale.
+    pub(super) fn tokens_for_stack(&self, stack: &ZoneStack<'_>) -> StackTokens<'_> {
+        *self.placed_stack.borrow_mut() = stack
+            .display
+            .as_ref()
+            .map(|_| (stack.name.clone(), stack.token_key().into_owned()));
+        StackTokens(&self.placed_stack)
+    }
+
+    /// Shown zone stacks in paint order; see [`zone_stacks_in`].
+    pub(super) fn zone_stacks<'a>(&self, scene: &'a SceneGraph) -> Vec<ZoneStack<'a>> {
+        zone_stacks_in(&self.display_layout, scene)
+    }
+
+    /// A stack's bounds; see [`stack_geometry_in`].
+    pub(super) fn stack_geometry(
+        &self,
+        stack: &ZoneStack<'_>,
+        policy: &GeometryPolicy,
+        sw: f32,
+        sh: f32,
+    ) -> (f32, f32, f32, f32) {
+        stack_geometry_in(&self.display_layout, stack, policy, sw, sh)
     }
 
     /// Attempt a recovery transition queued by a real window-surface acquire
@@ -1448,7 +1619,7 @@ impl Compositor {
             return WindowSurfaceRecoveryStatus::default();
         };
 
-        let status = match outcome {
+        match outcome {
             SurfaceRecoveryOutcome::Reconfigured { trigger } => {
                 let (width, height) = surface.size();
                 self.width = width;
@@ -1468,18 +1639,7 @@ impl Compositor {
                 );
                 WindowSurfaceRecoveryStatus::Terminal
             }
-        };
-        self.record_surface_recovery_outcome(outcome);
-        status
-    }
-
-    /// Drain the detailed outcome from a real surface recovery transition.
-    ///
-    /// Draining this compositor-private lifecycle evidence does not widen
-    /// WAL, protobuf, or agent-visible APIs.
-    #[allow(dead_code)] // Available for compositor-private lifecycle inspection.
-    pub(crate) fn take_latest_surface_recovery(&mut self) -> Option<SurfaceRecoveryOutcome> {
-        self.latest_surface_recovery.take()
+        }
     }
 
     /// Create a render pipeline targeting a specific texture format.
@@ -1730,6 +1890,14 @@ impl Compositor {
     /// The tokens `zone` draws with: its monitor's px per dp when it is
     /// placed on a secondary at another scale, else `token_map`.
     pub(crate) fn zone_tokens(&self, zone: &str) -> &HashMap<String, String> {
+        if let Some((placed_zone, key)) = self.placed_stack.borrow().as_ref()
+            && placed_zone == zone
+        {
+            return self
+                .secondary_zone_tokens
+                .get(key)
+                .unwrap_or(&self.token_map);
+        }
         self.secondary_zone_tokens
             .get(zone)
             .unwrap_or(&self.token_map)
@@ -1740,6 +1908,9 @@ impl Compositor {
     /// and alert roles use their canonical token defaults.
     pub fn set_token_map(&mut self, map: HashMap<String, String>) {
         self.zone_motion = easing::ZoneMotion::from_token_map(&map);
+        // A focused composer keeps its focus and draft; only the blink
+        // changes (a steady caret from the next frame when blinking is off).
+        self.composer_caret_blink = image_cache::caret_blink_from_tokens(&map);
         // `font.sans` / `font.mono` / `font.serif` (and the runtime-set fonts
         // dir, `fonts::RUNTIME_FONTS_DIR_KEY`) select the
         // font roles; a no-op unless they changed (see `set_font_config`).
@@ -1805,6 +1976,7 @@ impl Compositor {
     ///
     /// Returns `true` when a new draft (keystroke / caret move) was applied.
     pub(crate) fn drain_local_composer_state(&mut self) -> bool {
+        self.drain_kept_composer_drafts();
         let new_draft = apply_composer_slot(&self.local_composer_state, &mut self.local_composer);
         if new_draft {
             // Reset the blink phase so the caret is solid right after typing or
@@ -1829,6 +2001,49 @@ impl Compositor {
             self.drag_handle_hover = *slot;
         }
         new_draft
+    }
+
+    /// Apply a pending kept-draft set; returns whether one was delivered.
+    pub(crate) fn drain_kept_composer_drafts(&mut self) -> bool {
+        let Some(kept) = self
+            .kept_composer_drafts_state
+            .lock()
+            .ok()
+            .and_then(|mut slot| slot.take())
+        else {
+            return false;
+        };
+        self.kept_composers = kept
+            .into_iter()
+            .map(|(node_id, text)| LocalComposerState {
+                text,
+                cursor_byte: 0,
+                selection_anchor: 0,
+                at_capacity: false,
+                node_id,
+                placeholder: None,
+                preedit: None,
+                preedit_range: None,
+            })
+            .collect();
+        true
+    }
+
+    /// The composers drawn this frame with their layouts: the focused echo,
+    /// then each kept draft as one unscrolled line.
+    pub(crate) fn drawn_composers(
+        &self,
+    ) -> impl Iterator<Item = (&LocalComposerState, image_cache::ComposerLayout)> {
+        let focused = self.local_composer.as_ref();
+        let kept = self
+            .kept_composers
+            .iter()
+            .filter(move |kept| focused.is_none_or(|cs| cs.node_id != kept.node_id))
+            .map(|kept| (kept, image_cache::ComposerLayout::default()));
+        focused
+            .map(|cs| (cs, self.composer_layout))
+            .into_iter()
+            .chain(kept)
     }
 
     /// Drain the local composer echo slot and report whether the idle render
@@ -1859,6 +2074,7 @@ impl Compositor {
     ///
     /// [`caret_visible_at`]: image_cache::caret_visible_at
     pub fn drain_local_composer_and_needs_render(&mut self) -> bool {
+        let kept_changed = self.drain_kept_composer_drafts();
         let was_active = self.local_composer.is_some() && !self.notification_keyboard_active;
         let previous_focus_ring_owner = self.focus_ring_owner;
         let previous_resize_grip_hover = self.resize_grip_hover;
@@ -1869,14 +2085,19 @@ impl Compositor {
         // The caret only changes pixels when its phase flips; between toggles an
         // idle focused composer costs nothing (`next_animation_deadline` wakes us
         // at the next toggle).
-        let caret_visible = is_active
-            .then(|| image_cache::caret_visible_at(self.composer_caret_blink_start.elapsed()));
+        let caret_visible = is_active.then(|| {
+            image_cache::caret_visible_at(
+                self.composer_caret_blink_start.elapsed(),
+                self.composer_caret_blink,
+            )
+        });
         let caret_toggled = caret_visible != self.composer_caret_rendered_phase;
         self.composer_caret_rendered_phase = caret_visible;
         // `draft_applied` → pending echo / caret move.
         // `was_active != is_active` → activation, and the deactivation frame that
         //                clears the overlay drawn last frame.
         draft_applied
+            || kept_changed
             || was_active != is_active
             || caret_toggled
             || previous_tile_close_hover != self.tile_close_hover
@@ -1909,9 +2130,9 @@ impl Compositor {
     /// [`TextMarkdownNode`]: tze_hud_scene::types::TextMarkdownNode
     /// Cumulative per-frame text `shape_until_scroll` count.
     ///
-    /// Zero when no text renderer is initialised. Used by the scroll-reshape
-    /// benchmark/regression to prove that a pure scroll performs no re-shapes.
-    #[allow(dead_code)] // used by the scroll-reshape benchmark
+    /// Zero when no text renderer is initialised. Tests use it to prove that
+    /// a pure scroll or an unchanged frame performs no re-shapes.
+    #[cfg(any(test, feature = "dev-mode"))]
     pub(crate) fn text_shape_call_count(&self) -> u64 {
         self.text_rasterizer
             .as_ref()
@@ -1921,12 +2142,9 @@ impl Compositor {
 
     /// Cumulative markdown-cache-miss count on the render path. See
     /// [`Self::markdown_cache_miss_count`]'s field doc for what a nonzero,
-    /// growing count means. Currently consumed only by
-    /// `renderer::tests::markdown_primer::reused_compositor_across_scenes_lands_markdown_primer_hud_u4lq2`
-    /// and its sibling baseline test; `#[allow(dead_code)]` covers the non-test
-    /// build (the field itself keeps incrementing regardless, for log-visible
-    /// `tracing::warn!` observability at the call site in `text.rs`).
-    #[allow(dead_code)]
+    /// growing count means. Read by tests; the field itself keeps counting
+    /// for the `tracing::warn!` at its increment in `text.rs`.
+    #[cfg(test)]
     pub(crate) fn markdown_cache_miss_count(&self) -> u64 {
         self.markdown_cache_miss_count.get()
     }
@@ -2515,7 +2733,7 @@ impl Compositor {
         surf_w: u32,
         surf_h: u32,
     ) -> EncodeInputs {
-        let sources = self.collect_encode_sources(scene, surf_w, surf_h);
+        let sources = self.collect_encode_sources(scene, surf_w, surf_h, true);
         self.prepare_encode_inputs(sources, (surf_w, surf_h))
     }
 
@@ -2528,6 +2746,7 @@ impl Compositor {
         scene: &SceneGraph,
         surf_w: u32,
         surf_h: u32,
+        panel_on_primary: bool,
     ) -> EncodeSources {
         let sw = surf_w as f32;
         let sh = surf_h as f32;
@@ -2551,7 +2770,7 @@ impl Compositor {
             vec![]
         };
         let (card_items, notice_items) = if has_text_rasterizer {
-            self.final_chrome_text_items(sw, sh)
+            self.final_chrome_text_items(sw, sh, panel_on_primary)
         } else {
             (vec![], 0)
         };

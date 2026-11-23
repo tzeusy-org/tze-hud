@@ -68,7 +68,7 @@ pub enum HotkeyStatus {
 
 impl HotkeyStatus {
     /// One banner line for `role`'s chord, or `None` when there is nothing to say.
-    pub fn banner_line(&self, role: ChordRole) -> Option<String> {
+    pub(crate) fn banner_line(&self, role: ChordRole) -> Option<String> {
         let (label, does, lost) = match role {
             ChordRole::Pause => ("safe", "pauses agents", "use the tray icon's Pause"),
             ChordRole::Panel => ("panel", "opens the control panel", "use the pause chord"),
@@ -115,7 +115,7 @@ impl HotkeyStatus {
     }
 
     /// A `*_hotkey` value for `/admin/status`: `null` when not applicable.
-    pub fn to_json(&self) -> Value {
+    fn to_json(&self) -> Value {
         match self {
             Self::NotApplicable => Value::Null,
             Self::Registered { chord } => {
@@ -220,7 +220,7 @@ pub fn report_outcome(
 
 /// Native overlay observations, sampled on demand rather than per frame.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
-pub struct OverlayWindowState {
+pub(crate) struct OverlayWindowState {
     pub visible: bool,
     pub iconic: bool,
     pub topmost: bool,
@@ -249,7 +249,7 @@ pub(crate) fn set_window_state_probe(probe: WindowStateProbe) {
 /// One overlaid display for `/admin/status`; its list index is the
 /// `/admin/screenshot?display=<i>` index (0 = primary).
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
-pub struct DisplayStatus {
+pub(crate) struct DisplayStatus {
     /// Config key for `[displays."<key>"]`: EDID model+serial, with
     /// `@<connector>` when two monitors share one; the OS name when the
     /// monitor has no stable identity.
@@ -271,7 +271,7 @@ pub struct DisplayStatus {
 /// A configured zone placement (`[displays."<key>"]`) that has no overlay
 /// window; the zone renders on the primary instead.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
-pub struct UnplacedZone {
+pub(crate) struct UnplacedZone {
     pub zone: String,
     /// The display key the zone is configured for, as written in config.
     pub display: String,
@@ -281,7 +281,7 @@ pub struct UnplacedZone {
 /// Why a configured display has no overlay window.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum UnplacedReason {
+pub(crate) enum UnplacedReason {
     /// Retired Windows enumeration key; ignored even if that OS name is connected.
     LegacyKey,
     /// No connected monitor matches that key.
@@ -295,7 +295,7 @@ static DISPLAYS: Mutex<(Vec<DisplayStatus>, Vec<UnplacedZone>)> =
     Mutex::new((Vec::new(), Vec::new()));
 
 /// Record the overlaid displays (main thread, on startup and every change).
-pub fn set_displays(displays: Vec<DisplayStatus>, unplaced_zones: Vec<UnplacedZone>) {
+pub(crate) fn set_displays(displays: Vec<DisplayStatus>, unplaced_zones: Vec<UnplacedZone>) {
     *DISPLAYS.lock().unwrap_or_else(|e| e.into_inner()) = (displays, unplaced_zones);
 }
 
@@ -311,7 +311,7 @@ pub(crate) fn display_rects() -> Vec<tze_hud_scene::Rect> {
 }
 
 /// The name of display `index` in `/admin/status` order, if connected.
-pub fn display_name(index: usize) -> Option<String> {
+pub(super) fn display_name(index: usize) -> Option<String> {
     DISPLAYS
         .lock()
         .unwrap_or_else(|e| e.into_inner())
@@ -336,7 +336,7 @@ fn displays_json() -> (Value, Value) {
 }
 
 /// `role`'s recorded outcome, `NotApplicable` until one is set.
-pub fn hotkey(role: ChordRole) -> HotkeyStatus {
+pub(crate) fn hotkey(role: ChordRole) -> HotkeyStatus {
     HOTKEYS.lock().unwrap_or_else(|e| e.into_inner())[slot(role)].clone()
 }
 
@@ -350,7 +350,7 @@ pub fn set_build_info(info: BuildInfo) {
 }
 
 /// Full git SHA of this build, `"unknown"` before [`set_build_info`].
-pub fn build_sha() -> String {
+pub(crate) fn build_sha() -> String {
     BUILD_INFO
         .get()
         .map_or_else(|| "unknown".to_owned(), |b| b.sha.clone())
@@ -358,14 +358,14 @@ pub fn build_sha() -> String {
 
 /// The release channel this build came from (`dev`, `stable`, …),
 /// `"dev"` before [`set_build_info`].
-pub fn build_channel() -> String {
+pub(crate) fn build_channel() -> String {
     BUILD_INFO
         .get()
         .map_or_else(|| "dev".to_owned(), |b| b.channel.clone())
 }
 
 /// `<channel>-<sha7>`, how toasts name this build.
-pub fn build_label() -> String {
+pub(crate) fn build_label() -> String {
     BUILD_INFO.get().map_or_else(
         || "unknown".to_owned(),
         |b| super::update::label(&b.channel, &b.sha),
@@ -373,18 +373,18 @@ pub fn build_label() -> String {
 }
 
 /// Process start, as far as this crate can tell: the first time it is asked.
-pub fn process_start() -> Instant {
+pub(crate) fn process_start() -> Instant {
     *PROCESS_START.get_or_init(Instant::now)
 }
 
 /// CPU seconds (user + kernel) consumed by this process so far.
-pub fn process_cpu_secs() -> Option<f64> {
+fn process_cpu_secs() -> Option<f64> {
     imp::process_cpu_secs()
 }
 
 #[cfg(target_os = "linux")]
 mod imp {
-    pub fn process_cpu_secs() -> Option<f64> {
+    pub(super) fn process_cpu_secs() -> Option<f64> {
         let stat = std::fs::read_to_string("/proc/self/stat").ok()?;
         // Fields after the parenthesised comm: state is field 3, utime 14, stime 15.
         let rest = &stat[stat.rfind(')')? + 2..];
@@ -407,7 +407,7 @@ mod imp {
         ((u64::from(t.dwHighDateTime) << 32) | u64::from(t.dwLowDateTime)) as f64 / 1e7
     }
 
-    pub fn process_cpu_secs() -> Option<f64> {
+    pub(super) fn process_cpu_secs() -> Option<f64> {
         let (mut created, mut exited) = (FILETIME::default(), FILETIME::default());
         let (mut kernel, mut user) = (FILETIME::default(), FILETIME::default());
         // SAFETY: the pseudo-handle is always valid and the out-pointers are live locals.
@@ -434,9 +434,11 @@ mod imp {
 
 /// What `/admin/status` reads from. Cheap to clone.
 #[derive(Clone)]
-pub struct StatusSource {
+pub(crate) struct StatusSource {
     pub scene: Option<Arc<tokio::sync::Mutex<tze_hud_scene::SceneGraph>>>,
     pub portals: Option<tze_hud_mcp::PortalHandle>,
+    /// Live MCP session scopes behind `sessions`.
+    pub sessions: Option<Arc<tze_hud_mcp::scopes::Scopes>>,
     pub startup: Option<crate::operator::diagnostics::StartupDiagnostics>,
     pub agents: SharedAgents,
     pub binds: Arc<Mutex<Vec<SocketAddr>>>,
@@ -461,7 +463,7 @@ pub struct StatusSource {
 }
 
 /// Window over which `cpu_pct_2s` is sampled.
-pub const CPU_SAMPLE: Duration = Duration::from_secs(2);
+pub(crate) const CPU_SAMPLE: Duration = Duration::from_secs(2);
 
 fn pct(cpu_delta: f64, wall_delta: f64) -> Value {
     if wall_delta > 0.0 {
@@ -472,10 +474,50 @@ fn pct(cpu_delta: f64, wall_delta: f64) -> Value {
 }
 
 impl StatusSource {
+    /// Each live MCP session: agent, label and how much it holds (zones,
+    /// widgets and portals).
+    async fn sessions_json(&self) -> Vec<Value> {
+        let Some(sessions) = &self.sessions else {
+            return Vec::new();
+        };
+        let live = sessions.list();
+        let mut held: Vec<usize> = match &self.scene {
+            Some(scene) => {
+                let scene = scene.lock().await;
+                live.iter()
+                    .map(|s| {
+                        let h = scene.scope_holdings(&s.namespace);
+                        h.zones + h.widgets
+                    })
+                    .collect()
+            }
+            None => vec![0; live.len()],
+        };
+        if let Some(hub) = self.portals.as_ref().and_then(|p| p.hub.lock().ok()) {
+            for (count, s) in held.iter_mut().zip(&live) {
+                *count += hub.list(&s.namespace).len();
+            }
+        }
+        live.into_iter()
+            .zip(held)
+            .map(|(s, holdings)| {
+                json!({
+                    "agent": s.agent,
+                    "label": s.label,
+                    "holdings": holdings,
+                    "last_call_ms": s.last_call_ms,
+                    "state": s.presence.map(|presence| presence.state),
+                    "reason": s.presence.and_then(|presence| presence.reason),
+                    "since_ms": s.presence.map(|presence| presence.since_ms),
+                })
+            })
+            .collect()
+    }
+
     /// Build the status object. With `sample_cpu`, sleeps [`CPU_SAMPLE`] to
     /// measure `cpu_pct_2s` (percent of one core over the window); without
     /// it, answers at once with `cpu_pct_2s` null (polling harnesses).
-    pub async fn render(&self, sample_cpu: bool) -> Value {
+    pub(crate) async fn render(&self, sample_cpu: bool) -> Value {
         let (cpu0, t0) = (process_cpu_secs(), Instant::now());
         if sample_cpu {
             tokio::time::sleep(CPU_SAMPLE).await;
@@ -522,8 +564,11 @@ impl StatusSource {
             self.portals.as_ref(),
             self.startup.as_ref(),
         );
+        let sessions = self.sessions_json().await;
         json!({
             "holdings": holdings,
+            // Live MCP sessions, so a leaked scope is visible.
+            "sessions": sessions,
             "warnings": warnings,
             "version": env!("CARGO_PKG_VERSION"),
             "sha": build.map_or("unknown", |b| b.sha.as_str()),
@@ -536,6 +581,7 @@ impl StatusSource {
             "agents": agents,
             "safe_mode": self.safe_mode.load(Ordering::Relaxed),
             "tray": tray_status(),
+            "panel_display": surfaces.panel_display,
             "session_locked": session_locked(),
             "safe_mode_hotkey": hotkey(ChordRole::Pause).to_json_for(ChordRole::Pause),
             "panel_hotkey": hotkey(ChordRole::Panel).to_json_for(ChordRole::Panel),
@@ -554,6 +600,9 @@ impl StatusSource {
             "notifications": surfaces.notifications,
             "widgets": surfaces.widgets,
             "link_launches": surfaces.link_launches,
+            "window_activations": surfaces.window_activations,
+            "cursor": surfaces.cursor,
+            "link_feedback": surfaces.link_feedback,
             "clipboard_writes": crate::clipboard::writes(),
             "cpu_pct_2s": cpu_pct_2s,
             "cpu_pct_avg": cpu_pct_avg,
@@ -575,6 +624,12 @@ impl StatusSource {
                 .as_ref()
                 .and_then(|a| a.reload_status())
                 .map_or(Value::Null, |s| json!(s)),
+            // The Windows preferences the tokens follow:
+            // {text_scale, caret_blink_ms}; null without a config.
+            "os_prefs": self
+                .appearance
+                .as_ref()
+                .map_or(Value::Null, |a| a.os_prefs_json()),
         })
     }
 }

@@ -26,7 +26,6 @@
 use proptest::prelude::*;
 use tze_hud_scene::{
     graph::SceneGraph,
-    mutation::{MAX_BATCH_SIZE, MutationBatch, SceneMutation},
     test_scenes::assert_layer0_invariants,
     types::{
         FontFamily, Node, NodeData, Rect, Rgba, SceneId, SolidColorNode, TextAlign,
@@ -407,49 +406,6 @@ proptest! {
         );
     }
 
-    /// Oversized batch (> MAX_BATCH_SIZE) is rejected with no state change.
-    #[test]
-    fn prop_oversized_batch_rejected_cleanly(
-        excess in 1usize..=10usize,
-    ) {
-        let mut graph = SceneGraph::new(1920.0, 1080.0);
-        let lease = graph.grant_lease(AGENT, 300_000);
-        let tab = graph.create_tab("Tab", 0).unwrap();
-
-        let n = MAX_BATCH_SIZE + excess;
-        let mutations: Vec<SceneMutation> = (0..n)
-            .map(|z| SceneMutation::CreateTile {
-                tab_id: tab,
-                namespace: AGENT.into(),
-                lease_id: lease,
-                bounds: Rect::new(0.0, 0.0, 10.0, 10.0),
-                z_order: z as u32,
-            })
-            .collect();
-
-        let batch = MutationBatch {
-            batch_id: SceneId::new(),
-            agent_namespace: AGENT.into(),
-            mutations,
-            timing_hints: None,
-            lease_id: Some(lease),
-        };
-
-        let result = graph.apply_batch(&batch);
-        prop_assert!(!result.applied, "oversized batch must be rejected");
-        prop_assert_eq!(
-            graph.tile_count(),
-            0,
-            "no tiles must be created when batch is rejected"
-        );
-
-        let violations = assert_layer0_invariants(&graph);
-        prop_assert!(
-            violations.is_empty(),
-            "Layer 0 violation after oversized batch: {violations:?}"
-        );
-    }
-
     /// Stale/random SceneIds passed as tile/tab targets must produce structured
     /// errors without crashing or corrupting state.
     #[test]
@@ -480,70 +436,6 @@ proptest! {
         prop_assert!(
             violations.is_empty(),
             "Layer 0 violation after stale-id ops: {violations:?}"
-        );
-    }
-
-    /// Mix of valid and invalid mutations in a single batch must be all-or-nothing.
-    #[test]
-    fn prop_mixed_valid_invalid_batch_all_or_nothing(
-        n_valid_before in 0usize..=5usize,
-        n_valid_after in 0usize..=5usize,
-    ) {
-        let mut graph = SceneGraph::new(1920.0, 1080.0);
-        let lease = graph.grant_lease(AGENT, 300_000);
-        let tab = graph.create_tab("Tab", 0).unwrap();
-
-        let mut mutations: Vec<SceneMutation> = Vec::new();
-
-        for z in 0..n_valid_before {
-            mutations.push(SceneMutation::CreateTile {
-                tab_id: tab,
-                namespace: AGENT.into(),
-                lease_id: lease,
-                bounds: Rect::new(z as f32 * 60.0, 0.0, 50.0, 50.0),
-                z_order: (z + 1) as u32,
-            });
-        }
-
-        // Insert one invalid mutation in the middle.
-        mutations.push(SceneMutation::CreateTile {
-            tab_id: tab,
-            namespace: AGENT.into(),
-            lease_id: lease,
-            bounds: Rect::new(0.0, 0.0, -50.0, 50.0), // invalid — negative width
-            z_order: 999,
-        });
-
-        for z in 0..n_valid_after {
-            mutations.push(SceneMutation::CreateTile {
-                tab_id: tab,
-                namespace: AGENT.into(),
-                lease_id: lease,
-                bounds: Rect::new(z as f32 * 60.0, 100.0, 50.0, 50.0),
-                z_order: (z + 200) as u32,
-            });
-        }
-
-        let batch = MutationBatch {
-            batch_id: SceneId::new(),
-            agent_namespace: AGENT.into(),
-            mutations,
-            timing_hints: None,
-            lease_id: Some(lease),
-        };
-
-        let result = graph.apply_batch(&batch);
-        prop_assert!(!result.applied, "batch with invalid mutation must be rejected");
-        prop_assert_eq!(
-            graph.tile_count(),
-            0,
-            "no tiles must survive rejected batch (all-or-nothing)"
-        );
-
-        let violations = assert_layer0_invariants(&graph);
-        prop_assert!(
-            violations.is_empty(),
-            "Layer 0 violations after rejected mixed batch: {violations:?}"
         );
     }
 

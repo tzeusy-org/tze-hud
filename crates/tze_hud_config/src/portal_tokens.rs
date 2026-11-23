@@ -1,4 +1,4 @@
-//! Portal part inventory and token mapping for the text-stream portal pilot.
+//! Portal part inventory and the design tokens each part reads.
 //!
 //! - Portal part inventory (frame, header, composer, transcript body, divider,
 //!   collapsed card)
@@ -9,18 +9,13 @@
 //! - Window geometry bounds (min size, resize step, affordance size)
 //! - Scroll-position indicator styling
 //!
-//! **Pre-promotion rule:** the exemplar adapter MUST source every published visual
-//! value from the runtime's resolved token set (via `PortalPartTokens`) rather than
-//! literal values. A profile/token change MUST reskin the portal end-to-end without
-//! touching adapter logic.
+//! The portal renderer takes every visual value from `PortalPartTokens`, so a
+//! theme or token change reskins the portal without touching portal logic.
 //!
-//! ## Canonical portal token keys (profile-scoped, pre-promotion)
+//! ## Portal token keys
 //!
-//! These keys are **portal-scoped**: they are prefixed with `portal.` to avoid
-//! colliding with canonical component-shape-language keys. They are resolvable
-//! via profile-scoped overrides and fall back to the canonical token defaults.
-//! At promotion time they will be canonicalized in the `text-portal` component
-//! type contract via a separate component-shape-language delta.
+//! Keys are prefixed with `portal.` and fall back to the canonical token
+//! defaults; `[design_tokens]` and themes override them.
 //!
 //! | Key | Part | Property |
 //! |-----|------|----------|
@@ -105,25 +100,26 @@ use tracing::warn;
 /// These are the authoritative key names for the portal part inventory.
 /// At promotion time, a `text-portal` component type contract will canonicalize
 /// them through the component-shape-language delta.
-pub const PORTAL_TOKEN_FRAME_BACKGROUND: &str = "portal.frame.background";
-pub const PORTAL_TOKEN_FRAME_OPACITY: &str = "portal.frame.opacity";
-pub const PORTAL_TOKEN_FRAME_BORDER_COLOR: &str = "portal.frame.border_color";
+pub(crate) const PORTAL_TOKEN_FRAME_BACKGROUND: &str = "portal.frame.background";
+pub(crate) const PORTAL_TOKEN_FRAME_OPACITY: &str = "portal.frame.opacity";
+pub(crate) const PORTAL_TOKEN_FRAME_BORDER_COLOR: &str = "portal.frame.border_color";
 
-pub const PORTAL_TOKEN_HEADER_TEXT_COLOR: &str = "portal.header.text_color";
-pub const PORTAL_TOKEN_HEADER_FONT_SIZE: &str = "portal.header.font_size";
+pub(crate) const PORTAL_TOKEN_HEADER_TEXT_COLOR: &str = "portal.header.text_color";
+const PORTAL_TOKEN_HEADER_FONT_SIZE: &str = "portal.header.font_size";
 
-pub const PORTAL_TOKEN_COMPOSER_BACKGROUND: &str = "portal.composer.background";
-pub const PORTAL_TOKEN_COMPOSER_TEXT_COLOR: &str = "portal.composer.text_color";
-pub const PORTAL_TOKEN_COMPOSER_FONT_SIZE: &str = "portal.composer.font_size";
+pub(crate) const PORTAL_TOKEN_COMPOSER_BACKGROUND: &str = "portal.composer.background";
+pub(crate) const PORTAL_TOKEN_COMPOSER_TEXT_COLOR: &str = "portal.composer.text_color";
+const PORTAL_TOKEN_COMPOSER_FONT_SIZE: &str = "portal.composer.font_size";
 /// Border / indicator color shown when the composer draft reaches its byte cap.
 /// Rendered as a visual signal that no further input will be accepted until
 /// the user deletes content. Defaults to a muted amber to convey "limit reached"
 /// without alarming the user.
-pub const PORTAL_TOKEN_COMPOSER_AT_CAPACITY_COLOR: &str = "portal.composer.at_capacity_color";
+pub(crate) const PORTAL_TOKEN_COMPOSER_AT_CAPACITY_COLOR: &str =
+    "portal.composer.at_capacity_color";
 
-pub const PORTAL_TOKEN_TRANSCRIPT_BACKGROUND: &str = "portal.transcript.background";
+pub(crate) const PORTAL_TOKEN_TRANSCRIPT_BACKGROUND: &str = "portal.transcript.background";
 pub const PORTAL_TOKEN_TRANSCRIPT_TEXT_COLOR: &str = "portal.transcript.text_color";
-pub const PORTAL_TOKEN_TRANSCRIPT_FONT_SIZE: &str = "portal.transcript.font_size";
+const PORTAL_TOKEN_TRANSCRIPT_FONT_SIZE: &str = "portal.transcript.font_size";
 
 /// Per-turn role-attribution color for non-assistant agent-side OUTPUT turns
 /// (tool / status / error / other), distinguishing them from the assistant's
@@ -133,7 +129,7 @@ pub const PORTAL_TOKEN_TRANSCRIPT_FONT_SIZE: &str = "portal.transcript.font_size
 /// over that turn's text — never a hardcoded compositor color. Ambient by
 /// design: a muted family-consistent hue that reads as "system/tool scaffolding"
 /// beside the brighter assistant text without escalating attention.
-pub const PORTAL_TOKEN_TRANSCRIPT_SYSTEM_COLOR: &str = "portal.transcript.system_color";
+pub(crate) const PORTAL_TOKEN_TRANSCRIPT_SYSTEM_COLOR: &str = "portal.transcript.system_color";
 
 // ── Transcript markdown-subset styling  ─────────────
 //
@@ -153,16 +149,19 @@ pub const PORTAL_TOKEN_TRANSCRIPT_SYSTEM_COLOR: &str = "portal.transcript.system
 // different token sets does not share an incompatible parse.
 /// Background fill behind fenced/inline code spans in the transcript (RGBA hex).
 /// Prefer over the generic `color.code.background`.
-pub const PORTAL_TOKEN_TRANSCRIPT_CODE_BACKGROUND: &str = "portal.transcript.code_background";
+pub(crate) const PORTAL_TOKEN_TRANSCRIPT_CODE_BACKGROUND: &str =
+    "portal.transcript.code_background";
 /// Foreground color for code spans in the transcript (RGBA hex). Prefer over the
 /// generic `color.code.text`.
-pub const PORTAL_TOKEN_TRANSCRIPT_CODE_TEXT: &str = "portal.transcript.code_text";
+pub(crate) const PORTAL_TOKEN_TRANSCRIPT_CODE_TEXT: &str = "portal.transcript.code_text";
 /// Link text color in the transcript (RGBA hex). Prefer over the generic
 /// `color.link.text`.
-pub const PORTAL_TOKEN_TRANSCRIPT_LINK_COLOR: &str = "portal.transcript.link_color";
+pub(crate) const PORTAL_TOKEN_TRANSCRIPT_LINK_COLOR: &str = "portal.transcript.link_color";
 /// Code font family for the transcript (`"monospace"` | `"sans-serif"` | …).
 /// Prefer over the generic `typography.code.family`.
-pub const PORTAL_TOKEN_TRANSCRIPT_CODE_FONT_FAMILY: &str = "portal.transcript.code_font_family";
+#[cfg(test)]
+pub(crate) const PORTAL_TOKEN_TRANSCRIPT_CODE_FONT_FAMILY: &str =
+    "portal.transcript.code_font_family";
 
 // ── Degraded / disconnect tokens  ─────────
 //
@@ -175,13 +174,13 @@ pub const PORTAL_TOKEN_TRANSCRIPT_CODE_FONT_FAMILY: &str = "portal.transcript.co
 /// Dimmed transcript text color shown while the portal is disconnected/stale.
 /// Distinctly muted relative to the live `transcript.text_color` so a viewer
 /// reads the retained window as inactive without it vanishing.
-pub const PORTAL_TOKEN_TRANSCRIPT_DIM_TEXT_COLOR: &str = "portal.transcript.dim_text_color";
+pub(crate) const PORTAL_TOKEN_TRANSCRIPT_DIM_TEXT_COLOR: &str = "portal.transcript.dim_text_color";
 /// Dimmed transcript background shown while the portal is disconnected/stale.
-pub const PORTAL_TOKEN_TRANSCRIPT_DIM_BACKGROUND: &str = "portal.transcript.dim_background";
+pub(crate) const PORTAL_TOKEN_TRANSCRIPT_DIM_BACKGROUND: &str = "portal.transcript.dim_background";
 /// Color of the content-free stale/disconnect marker. Muted amber to convey
 /// "ambient stale state" without escalating attention (spec: going stale does
 /// not self-escalate attention).
-pub const PORTAL_TOKEN_STALE_MARKER_COLOR: &str = "portal.stale_marker.color";
+pub(crate) const PORTAL_TOKEN_STALE_MARKER_COLOR: &str = "portal.stale_marker.color";
 
 /// Color of the visible disconnect badge: a small token-styled
 /// geometry affordance — the existing left-edge lifecycle-accent bar,
@@ -192,18 +191,18 @@ pub const PORTAL_TOKEN_STALE_MARKER_COLOR: &str = "portal.stale_marker.color";
 /// portal has dropped (geometry-only; no content or identity disclosed).
 /// Shares the `STALE_MARKER_COLOR` hue by default so the geometry badge and
 /// the text marker read as the same ambient state.
-pub const PORTAL_TOKEN_DISCONNECT_BADGE_COLOR: &str = "portal.disconnect_badge.color";
+pub(crate) const PORTAL_TOKEN_DISCONNECT_BADGE_COLOR: &str = "portal.disconnect_badge.color";
 /// Width (px) of the disconnect badge. Geometry only, mirrors
 /// `PORTAL_TOKEN_LIFECYCLE_ACCENT_WIDTH_PX` since the badge reuses the same
 /// left-edge accent-bar rendering.
-pub const PORTAL_TOKEN_DISCONNECT_BADGE_WIDTH_PX: &str = "portal.disconnect_badge.width_px";
+const PORTAL_TOKEN_DISCONNECT_BADGE_WIDTH_PX: &str = "portal.disconnect_badge.width_px";
 
 /// Color of the ambient unread-output-count indicator. A presence
 /// engine surfaces a quiet count, never a loud notification badge — this
 /// defaults to the same muted-slate tone as the other ambient/quiet-signal
 /// tokens (`transcript.dim_text_color`, `composer.placeholder_color`) rather
 /// than an alarming accent.
-pub const PORTAL_TOKEN_UNREAD_INDICATOR_COLOR: &str = "portal.unread_indicator.color";
+pub(crate) const PORTAL_TOKEN_UNREAD_INDICATOR_COLOR: &str = "portal.unread_indicator.color";
 
 /// Color of the ambient awaiting-reply (question) indicator. Set
 /// when the owning LLM marks a published output as `expects_reply`, signaling
@@ -211,14 +210,14 @@ pub const PORTAL_TOKEN_UNREAD_INDICATOR_COLOR: &str = "portal.unread_indicator.c
 /// presence semantic, not a chatbot affordance. Ambient by design, matching
 /// the muted tone of the other quiet-signal tokens; a presence engine never
 /// escalates this into an alert.
-pub const PORTAL_TOKEN_AWAITING_REPLY_COLOR: &str = "portal.awaiting_reply.color";
+pub(crate) const PORTAL_TOKEN_AWAITING_REPLY_COLOR: &str = "portal.awaiting_reply.color";
 
 /// Color of the friendly first-run empty-portal treatment shown when a
 /// connected portal's retained transcript is empty, replacing the literal
 /// `<empty projection stream>`. Quiet and inviting — a presence engine's empty
 /// surface reads as calm and ready, never as an error — so it defaults to the
 /// same muted quiet-signal family as the other ambient tokens.
-pub const PORTAL_TOKEN_EMPTY_STATE_COLOR: &str = "portal.empty_state.color";
+pub(crate) const PORTAL_TOKEN_EMPTY_STATE_COLOR: &str = "portal.empty_state.color";
 
 /// Color of the connecting-state marker shown while a portal is attached but its owning
 /// session has never connected (`has_ever_connected == false`). Deliberately a
@@ -226,7 +225,7 @@ pub const PORTAL_TOKEN_EMPTY_STATE_COLOR: &str = "portal.empty_state.color";
 /// marker (`portal.stale_marker.color`) so a starting-up portal never reads as a
 /// failing one. Ambient by design — connecting is a quiet, non-attention signal,
 /// so it matches the muted-tone convention of the other quiet-signal tokens.
-pub const PORTAL_TOKEN_CONNECTING_MARKER_COLOR: &str = "portal.connecting_marker.color";
+pub(crate) const PORTAL_TOKEN_CONNECTING_MARKER_COLOR: &str = "portal.connecting_marker.color";
 
 // ── Agent activity / streaming-cursor tokens ─────────────────────────────────
 //
@@ -242,12 +241,12 @@ pub const PORTAL_TOKEN_CONNECTING_MARKER_COLOR: &str = "portal.connecting_marker
 /// notification. Ambient tone, distinct from the amber (stale/at-capacity),
 /// slate (unread/dim), periwinkle (awaiting-reply), sage (empty), and cyan
 /// (connecting) signal tones so "writing" carries its own quiet meaning.
-pub const PORTAL_TOKEN_ACTIVITY_CUE_COLOR: &str = "portal.activity_cue.color";
+pub(crate) const PORTAL_TOKEN_ACTIVITY_CUE_COLOR: &str = "portal.activity_cue.color";
 /// Color of the ambient streaming cursor painted at the transcript tail while
 /// the agent is actively appending. Same activity semantic as
 /// `portal.activity_cue.color`; kept as a separate key so a profile can style
 /// the tail live-writing treatment independently of the header cue.
-pub const PORTAL_TOKEN_STREAMING_CURSOR_COLOR: &str = "portal.streaming_cursor.color";
+pub(crate) const PORTAL_TOKEN_STREAMING_CURSOR_COLOR: &str = "portal.streaming_cursor.color";
 
 // ── Viewer-turn delivery-acknowledgement tokens ──────────────────────────────
 //
@@ -267,18 +266,18 @@ pub const PORTAL_TOKEN_STREAMING_CURSOR_COLOR: &str = "portal.streaming_cursor.c
 /// (stale/at-capacity), slate (unread/dim/timestamp), periwinkle
 /// (awaiting-reply), sage (empty), cyan (connecting), and lavender (activity)
 /// tones so "sending" carries its own quiet meaning.
-pub const PORTAL_TOKEN_DELIVERY_INFLIGHT_COLOR: &str = "portal.delivery.inflight_color";
+pub(crate) const PORTAL_TOKEN_DELIVERY_INFLIGHT_COLOR: &str = "portal.delivery.inflight_color";
 /// Color of the ambient delivered (Delivered/Handled) viewer-turn delivery cue —
 /// the owning adapter has taken (or fully handled) the reply. A calm confirming
 /// mint-teal; ambient by design (a quiet "reached" tick), never a loud success
 /// flash.
-pub const PORTAL_TOKEN_DELIVERY_DELIVERED_COLOR: &str = "portal.delivery.delivered_color";
+pub(crate) const PORTAL_TOKEN_DELIVERY_DELIVERED_COLOR: &str = "portal.delivery.delivered_color";
 /// Color of the ambient failed (Rejected/Expired) viewer-turn delivery cue — the
 /// reply was rejected by the adapter or expired before delivery. A muted, warm
 /// clay tone that reads as "did not arrive" WITHOUT the alarm of the amber stale
 /// marker or a red error: the failed cue stays ambient on the turn
 /// and never escalates the portal's interruption class.
-pub const PORTAL_TOKEN_DELIVERY_FAILED_COLOR: &str = "portal.delivery.failed_color";
+pub(crate) const PORTAL_TOKEN_DELIVERY_FAILED_COLOR: &str = "portal.delivery.failed_color";
 
 // ── Ambient per-turn timestamp tokens ────────────────────────────────────────
 //
@@ -295,14 +294,14 @@ pub const PORTAL_TOKEN_DELIVERY_FAILED_COLOR: &str = "portal.delivery.failed_col
 /// content or an alert. Defaults to the shared muted-slate quiet-signal tone
 /// (matching `portal.transcript.dim_text_color` / `portal.unread_indicator.color`)
 /// because a timestamp is quiet secondary metadata, not its own semantic accent.
-pub const PORTAL_TOKEN_TIMESTAMP_COLOR: &str = "portal.timestamp.color";
+pub(crate) const PORTAL_TOKEN_TIMESTAMP_COLOR: &str = "portal.timestamp.color";
 /// Visibility/granularity of the ambient per-turn arrival timestamp, governed by
 /// the portal's component profile: `off` (no stamps — the calm default), `per_turn`
 /// (a stamp on every turn), or `grouped` (a stamp only when a turn's arrival minute
 /// differs from the previous shown turn's, so consecutive same-minute turns share
 /// one). Governs presentation, never the clock domain — the value always derives
 /// from the runtime-assigned wall-clock arrival time.
-pub const PORTAL_TOKEN_TIMESTAMP_GRANULARITY: &str = "portal.timestamp.granularity";
+pub(crate) const PORTAL_TOKEN_TIMESTAMP_GRANULARITY: &str = "portal.timestamp.granularity";
 
 // ── Lifecycle affordance tokens  ───────
 //
@@ -316,25 +315,25 @@ pub const PORTAL_TOKEN_TIMESTAMP_GRANULARITY: &str = "portal.timestamp.granulari
 
 /// Accent shown while the projected session is actively working (`Active`).
 /// Calm teal-green: "live" without demanding attention.
-pub const PORTAL_TOKEN_LIFECYCLE_ACTIVE_COLOR: &str = "portal.lifecycle.active_color";
+pub(crate) const PORTAL_TOKEN_LIFECYCLE_ACTIVE_COLOR: &str = "portal.lifecycle.active_color";
 /// Accent shown while the session is attached/ready but not actively producing
 /// output (`Attached`). Soft blue: present and reachable.
-pub const PORTAL_TOKEN_LIFECYCLE_ATTACHED_COLOR: &str = "portal.lifecycle.attached_color";
+pub(crate) const PORTAL_TOKEN_LIFECYCLE_ATTACHED_COLOR: &str = "portal.lifecycle.attached_color";
 /// Accent shown while the session needs attention — degraded or HUD-unavailable
 /// (`Degraded` / `HudUnavailable`). Ambient amber: "attention earned" without
 /// alarming, consistent with the stale-marker convention.
-pub const PORTAL_TOKEN_LIFECYCLE_ATTENTION_COLOR: &str = "portal.lifecycle.attention_color";
+pub(crate) const PORTAL_TOKEN_LIFECYCLE_ATTENTION_COLOR: &str = "portal.lifecycle.attention_color";
 /// Accent shown while the session is winding down or gone — detached, cleanup
 /// pending, or expired (`Detached` / `CleanupPending` / `Expired`). Muted slate:
 /// reads as "inactive" without vanishing.
-pub const PORTAL_TOKEN_LIFECYCLE_INACTIVE_COLOR: &str = "portal.lifecycle.inactive_color";
+pub(crate) const PORTAL_TOKEN_LIFECYCLE_INACTIVE_COLOR: &str = "portal.lifecycle.inactive_color";
 /// Width (px) of the lifecycle affordance accent bar painted along the portal
 /// tile's left edge. Geometry only — the accent *color* is token-resolved via the
 /// four `portal.lifecycle.*_color` keys above; this token sizes the bar so the
 /// adapter/compositor never hardcodes a literal width either.
-pub const PORTAL_TOKEN_LIFECYCLE_ACCENT_WIDTH_PX: &str = "portal.lifecycle.accent_width_px";
+const PORTAL_TOKEN_LIFECYCLE_ACCENT_WIDTH_PX: &str = "portal.lifecycle.accent_width_px";
 
-pub const PORTAL_TOKEN_DIVIDER_COLOR: &str = "portal.divider.color";
+pub(crate) const PORTAL_TOKEN_DIVIDER_COLOR: &str = "portal.divider.color";
 
 /// Color of the in-transcript unread divider. The
 /// rule marks the boundary before the oldest retained unseen agent-authored turn
@@ -345,35 +344,34 @@ pub const PORTAL_TOKEN_DIVIDER_COLOR: &str = "portal.divider.color";
 /// muted steel-blue in the cool ambient family, harmonizing with the slate
 /// `portal.unread_indicator.color` count while reading brighter than the plain
 /// separator.
-pub const PORTAL_TOKEN_UNREAD_DIVIDER_COLOR: &str = "portal.unread_divider.color";
+pub(crate) const PORTAL_TOKEN_UNREAD_DIVIDER_COLOR: &str = "portal.unread_divider.color";
 
-pub const PORTAL_TOKEN_COLLAPSED_BACKGROUND: &str = "portal.collapsed_card.background";
-pub const PORTAL_TOKEN_COLLAPSED_TEXT_COLOR: &str = "portal.collapsed_card.text_color";
+pub(crate) const PORTAL_TOKEN_COLLAPSED_BACKGROUND: &str = "portal.collapsed_card.background";
+pub(crate) const PORTAL_TOKEN_COLLAPSED_TEXT_COLOR: &str = "portal.collapsed_card.text_color";
 pub const PORTAL_TOKEN_COLLAPSED_FONT_SIZE: &str = "portal.collapsed_card.font_size";
 
-pub const PORTAL_TOKEN_TRANSITION_IN_MS: &str = "portal.transition.in_ms";
-pub const PORTAL_TOKEN_TRANSITION_OUT_MS: &str = "portal.transition.out_ms";
+pub(crate) const PORTAL_TOKEN_TRANSITION_IN_MS: &str = "portal.transition.in_ms";
+pub(crate) const PORTAL_TOKEN_TRANSITION_OUT_MS: &str = "portal.transition.out_ms";
 
 // ── Window management tokens ──────────────────────
 
 /// Minimum portal width in pixels (legibility bound ).
-pub const PORTAL_TOKEN_WINDOW_MIN_WIDTH_PX: &str = "portal.window.min_width_px";
+const PORTAL_TOKEN_WINDOW_MIN_WIDTH_PX: &str = "portal.window.min_width_px";
 /// Minimum portal height in pixels (legibility bound ).
-pub const PORTAL_TOKEN_WINDOW_MIN_HEIGHT_PX: &str = "portal.window.min_height_px";
+const PORTAL_TOKEN_WINDOW_MIN_HEIGHT_PX: &str = "portal.window.min_height_px";
 /// Pixels per focus-scoped Ctrl+`+`/`=`/`-` resize step.
-pub const PORTAL_TOKEN_WINDOW_RESIZE_STEP_PX: &str = "portal.window.resize_step_px";
+const PORTAL_TOKEN_WINDOW_RESIZE_STEP_PX: &str = "portal.window.resize_step_px";
 /// Width/height of the pointer capture region on frame edges/corners.
-pub const PORTAL_TOKEN_WINDOW_RESIZE_AFFORDANCE_PX: &str = "portal.window.resize_affordance_px";
+const PORTAL_TOKEN_WINDOW_RESIZE_AFFORDANCE_PX: &str = "portal.window.resize_affordance_px";
 
 // ── Scroll-position indicator tokens ─────────────────────────────────────
 
 /// Thumb color for scroll-position indicator (RGBA hex); redaction-safe.
-pub const PORTAL_TOKEN_SCROLL_INDICATOR_COLOR: &str = "portal.scroll_indicator.color";
+pub(crate) const PORTAL_TOKEN_SCROLL_INDICATOR_COLOR: &str = "portal.scroll_indicator.color";
 /// Track width of the scroll-position indicator in px.
-pub const PORTAL_TOKEN_SCROLL_INDICATOR_WIDTH_PX: &str = "portal.scroll_indicator.width_px";
+const PORTAL_TOKEN_SCROLL_INDICATOR_WIDTH_PX: &str = "portal.scroll_indicator.width_px";
 /// Minimum thumb height in px — prevents thumb from vanishing on deep content.
-pub const PORTAL_TOKEN_SCROLL_INDICATOR_MIN_HEIGHT_PX: &str =
-    "portal.scroll_indicator.min_height_px";
+const PORTAL_TOKEN_SCROLL_INDICATOR_MIN_HEIGHT_PX: &str = "portal.scroll_indicator.min_height_px";
 
 // ── Composer caret / selection / placeholder tokens ──────────────────────────
 //
@@ -388,31 +386,30 @@ pub const PORTAL_TOKEN_SCROLL_INDICATOR_MIN_HEIGHT_PX: &str =
 /// Composer caret glyph color (RGBA hex). Sourced independently from the composer
 /// text color so a profile can accent the caret. Defaults to the composer text
 /// color for a no-visual-regression default.
-pub const PORTAL_TOKEN_COMPOSER_CARET_COLOR: &str = "portal.composer.caret_color";
+pub(crate) const PORTAL_TOKEN_COMPOSER_CARET_COLOR: &str = "portal.composer.caret_color";
 /// Composer selection-highlight background color (RGBA hex, alpha-bearing). Mirrors
 /// the compositor's existing calm-blue selection tint.
-pub const PORTAL_TOKEN_COMPOSER_SELECTION_COLOR: &str = "portal.composer.selection_color";
+pub(crate) const PORTAL_TOKEN_COMPOSER_SELECTION_COLOR: &str = "portal.composer.selection_color";
 /// OUTPUT (transcript) selection highlight (RGBA hex, alpha-bearing). Unset, it
 /// follows `portal.composer.selection_color`, so themes keep one selection
 /// treatment (hud-ljhku.2).
 pub const PORTAL_TOKEN_TRANSCRIPT_SELECTION_COLOR: &str = "portal.transcript.selection_color";
 /// Composer empty-draft placeholder text color (RGBA hex). Dimmed relative to the
 /// live composer text so an empty prompt reads as a hint, not typed content.
-pub const PORTAL_TOKEN_COMPOSER_PLACEHOLDER_COLOR: &str = "portal.composer.placeholder_color";
+pub(crate) const PORTAL_TOKEN_COMPOSER_PLACEHOLDER_COLOR: &str =
+    "portal.composer.placeholder_color";
 
 // ── Focus-ring tokens (vd-focus-ring-outside-portal-tokens) ──────────────────
 //
-// The keyboard focus ring's color/width previously came only from
-// `tze_hud_input::DEFAULT_FOCUS_RING_*`, outside profile control. These portal
-// keys bring the ring under the portal token surface; the compositor already
-// resolves `portal.focus_ring.*` from its token map, and these defaults mirror the
-// `tze_hud_input` focus-ring blue (linear ≈ 0.2/0.5/1.0) at 2px so the visible
-// ring is unchanged by default.
+// These portal keys put the keyboard focus ring under the portal token
+// surface; the compositor resolves `portal.focus_ring.*` from its token map.
+// Their defaults in `tze_hud_scene::portal_defaults` are the one definition;
+// the compositor parses an unset color like any token value.
 
 /// Keyboard focus-ring stroke color (RGBA hex).
-pub const PORTAL_TOKEN_FOCUS_RING_COLOR: &str = "portal.focus_ring.color";
+pub(crate) const PORTAL_TOKEN_FOCUS_RING_COLOR: &str = "portal.focus_ring.color";
 /// Keyboard focus-ring stroke width in px.
-pub const PORTAL_TOKEN_FOCUS_RING_WIDTH_PX: &str = "portal.focus_ring.width_px";
+const PORTAL_TOKEN_FOCUS_RING_WIDTH_PX: &str = "portal.focus_ring.width_px";
 
 // ── Resize-grip affordance tokens (vd-crude-resize-handle-grip) ──────────────
 //
@@ -423,15 +420,15 @@ pub const PORTAL_TOKEN_FOCUS_RING_WIDTH_PX: &str = "portal.focus_ring.width_px";
 // keys define the styling surface it and the exemplar consume.
 
 /// Resize-grip mark color (RGBA hex) — the dot-grid/diagonal grip glyph.
-pub const PORTAL_TOKEN_WINDOW_RESIZE_GRIP_COLOR: &str = "portal.window.resize_grip.color";
+pub(crate) const PORTAL_TOKEN_WINDOW_RESIZE_GRIP_COLOR: &str = "portal.window.resize_grip.color";
 /// Resize-grip hover tint (RGBA hex) — brighter accent while the pointer is over
 /// the resize affordance.
-pub const PORTAL_TOKEN_WINDOW_RESIZE_GRIP_HOVER_COLOR: &str =
+pub(crate) const PORTAL_TOKEN_WINDOW_RESIZE_GRIP_HOVER_COLOR: &str =
     "portal.window.resize_grip.hover_color";
 /// Resize-grip visual extent in px (the square the grip mark occupies at the
 /// corner). Distinct from `portal.window.resize_affordance_px`, which sizes the
 /// invisible pointer capture band.
-pub const PORTAL_TOKEN_WINDOW_RESIZE_GRIP_SIZE_PX: &str = "portal.window.resize_grip.size_px";
+const PORTAL_TOKEN_WINDOW_RESIZE_GRIP_SIZE_PX: &str = "portal.window.resize_grip.size_px";
 
 // ── Spatial-rhythm + transcript-measure tokens (vd-no-token-rhythm-padding-measure) ─
 //
@@ -442,19 +439,19 @@ pub const PORTAL_TOKEN_WINDOW_RESIZE_GRIP_SIZE_PX: &str = "portal.window.resize_
 // full-width transcript wrapping until a profile opts into a narrower measure.
 
 /// Content inset (px) applied inside portal surfaces (composer/transcript padding).
-pub const PORTAL_TOKEN_SPACING_CONTENT_INSET_PX: &str = "portal.spacing.content_inset_px";
+const PORTAL_TOKEN_SPACING_CONTENT_INSET_PX: &str = "portal.spacing.content_inset_px";
 /// Portal header strip height in px.
-pub const PORTAL_TOKEN_SPACING_HEADER_HEIGHT_PX: &str = "portal.spacing.header_height_px";
+const PORTAL_TOKEN_SPACING_HEADER_HEIGHT_PX: &str = "portal.spacing.header_height_px";
 /// Vertical gap (px) between stacked portal sections (header / transcript / composer).
-pub const PORTAL_TOKEN_SPACING_SECTION_GAP_PX: &str = "portal.spacing.section_gap_px";
+const PORTAL_TOKEN_SPACING_SECTION_GAP_PX: &str = "portal.spacing.section_gap_px";
 /// Maximum transcript line measure in px before wrapping (readability cap).
 /// `0` means unbounded — wrap to the full transcript width (current behavior).
-pub const PORTAL_TOKEN_TRANSCRIPT_MAX_MEASURE_PX: &str = "portal.transcript.max_measure_px";
+const PORTAL_TOKEN_TRANSCRIPT_MAX_MEASURE_PX: &str = "portal.transcript.max_measure_px";
 
 // ── Ambient per-turn timestamp granularity ───────────────────────────────────
 
 /// Component-profile-governed visibility/granularity of the ambient per-turn
-/// arrival timestamp. Resolved from [`PORTAL_TOKEN_TIMESTAMP_GRANULARITY`].
+/// arrival timestamp. Resolved from `portal.timestamp.granularity`.
 ///
 /// This governs PRESENTATION only — how often a stamp is shown — never the clock
 /// domain. Every presented time still derives from the runtime-assigned
@@ -481,7 +478,7 @@ impl TimestampGranularity {
     /// `grouped` (ASCII-case-insensitive); any other value returns `None` so the
     /// resolver falls back to the default, mirroring the warn-and-default handling
     /// of the color/numeric portal tokens.
-    pub fn parse(value: &str) -> Option<Self> {
+    fn parse(value: &str) -> Option<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
             "off" => Some(Self::Off),
             "per_turn" | "per-turn" => Some(Self::PerTurn),
@@ -489,237 +486,13 @@ impl TimestampGranularity {
             _ => None,
         }
     }
-
-    /// Canonical token string for this granularity — the inverse of [`parse`] and
-    /// the value carried on the resolved handshake string map.
-    ///
-    /// [`parse`]: Self::parse
-    pub fn as_token_str(self) -> &'static str {
-        match self {
-            Self::Off => "off",
-            Self::PerTurn => "per_turn",
-            Self::Grouped => "grouped",
-        }
-    }
 }
 
 // ── Portal token fallback defaults ───────────────────────────────────────────
 
-/// Default values for portal tokens (used when token is absent from resolved map).
-///
-/// These defaults are deliberately distinct from the 30 canonical tokens so the
-/// profile-swap test can distinguish between the canonical and portal layers.
-/// Colors use the same palette as the existing exemplar adapter literals,
-/// expressed as resolved token defaults rather than inline constants.
-///
-/// These string constants are the **single source of truth** for the default portal
-/// palette. `tze_hud_portal::tokens::PortalVisualTokens::default()` derives
-/// from `PortalPartTokens::default()` (which parses these constants) via
-/// `portal_visual_tokens_from_part_tokens`, so changing a value here propagates to
-/// both sides automatically.
-mod defaults {
-    /// Portal frame backdrop fill (RGBA hex). Opaque near-black that matches the
-    /// transcript pane (`TRANSCRIPT_BACKGROUND`) so the thin frame gap around the
-    /// panes reads as off-black — backdrop-independent (identical regardless of
-    /// the desktop wallpaper behind the HUD).
-    ///
-    /// this was `#111720` — an OPAQUE slate that resolves to
-    /// rgba(0.067,0.090,0.125,1.0). On the runtime-handshake token path (the
-    /// production path: the exemplar/portal driver adopts the runtime's resolved
-    /// tokens) an unset `portal.frame.background` falls back to this default, so
-    /// the opaque slate painted the frame rim a visible GREY around the black
-    /// panes. Owner live A/B on the real-GPU HUD chose the opaque near-black
-    /// `#0A0D11` for backdrop-independence and pane-color match. (The exemplar's
-    /// translucent-black glass `#0000004D` — what `--ignore-runtime-tokens`
-    /// rendered — was rejected because 30%-black varies with the wallpaper
-    /// behind it.) Aligning the canonical default to the reviewed value fixes
-    /// the handshake, in-process, and bridged drivers from a single source.
-    pub const FRAME_BACKGROUND: &str = "#0A0D11";
-    pub const FRAME_OPACITY: &str = "0.98";
-    pub const FRAME_BORDER_COLOR: &str = "#2A3344";
-
-    pub const HEADER_TEXT_COLOR: &str = "#F5F8FF";
-    pub const HEADER_FONT_SIZE: &str = "16";
-
-    /// Reviewed native two-pane INPUT fill: black at 95% opacity. Keeping this
-    /// in the canonical portal profile makes resident projections and the
-    /// exemplar resolve the same pane treatment without adapter-authored style.
-    pub const COMPOSER_BACKGROUND: &str = "#000000F2";
-    pub const COMPOSER_TEXT_COLOR: &str = "#E0E8F4";
-    pub const COMPOSER_FONT_SIZE: &str = "16";
-    /// Muted amber — conveys "limit reached" without alarming the user.
-    pub const COMPOSER_AT_CAPACITY_COLOR: &str = "#B87333";
-
-    /// Reviewed native two-pane OUTPUT fill: black at 95% opacity.
-    pub const TRANSCRIPT_BACKGROUND: &str = "#000000F2";
-    pub const TRANSCRIPT_TEXT_COLOR: &str = "#E6EFFA";
-    pub const TRANSCRIPT_FONT_SIZE: &str = "16";
-    /// Per-turn role attribution for non-assistant agent-side turns (tool /
-    /// status / error / other). A cool slate — dimmer and bluer than the bright
-    /// assistant text (`TRANSCRIPT_TEXT_COLOR` #E6EFFA) so tool/system
-    /// scaffolding recedes behind the model's own prose, while staying in the
-    /// portal's cool ambient family (near the slate unread count / divider).
-    pub const TRANSCRIPT_SYSTEM_COLOR: &str = "#8A97AD";
-
-    // Degraded / disconnect treatment. Dim text/background read as
-    // "inactive" relative to the live transcript palette above; the stale
-    // marker uses a muted amber (matching the at-capacity convention) so it is
-    // ambient, not alarming.
-    pub const TRANSCRIPT_DIM_TEXT_COLOR: &str = "#6B7689";
-    pub const TRANSCRIPT_DIM_BACKGROUND: &str = "#07090C";
-    pub const STALE_MARKER_COLOR: &str = "#B87333";
-    /// Same hue as `STALE_MARKER_COLOR` — the geometry badge and the text
-    /// marker read as one ambient "stale" signal.
-    pub const DISCONNECT_BADGE_COLOR: &str = "#B87333";
-    /// Mirrors `LIFECYCLE_ACCENT_WIDTH_PX`: the badge reuses the same
-    /// left-edge accent-bar geometry.
-    pub const DISCONNECT_BADGE_WIDTH_PX: &str = "4";
-    /// Muted slate — same ambient tone as `TRANSCRIPT_DIM_TEXT_COLOR` /
-    /// `COMPOSER_PLACEHOLDER_COLOR` so the unread count reads as a quiet
-    /// signal, not an alert.
-    pub const UNREAD_INDICATOR_COLOR: &str = "#6B7689";
-    /// Muted periwinkle — distinct hue from the amber (stale/at-capacity) and
-    /// slate (unread/dim) ambient tones so a question reads as its own quiet
-    /// signal rather than colliding with an existing meaning.
-    pub const AWAITING_REPLY_COLOR: &str = "#7B85C4";
-    /// Muted sage — a calm, welcoming green-slate for the first-run empty state,
-    /// distinct from the amber (stale/at-capacity), slate (unread/dim), and
-    /// periwinkle (awaiting-reply) tones so an empty surface reads as its own
-    /// quiet "ready" signal rather than an error or an existing meaning.
-    pub const EMPTY_STATE_COLOR: &str = "#5F8A78";
-    /// Muted cyan — a calm "spinning up" hue for the never-connected connecting
-    /// state. Its cool cyan is deliberately
-    /// distinct from the amber `STALE_MARKER_COLOR` (degraded/disconnected) so a
-    /// starting-up portal never reads as failing; it is also distinct from the
-    /// sage empty-state and periwinkle awaiting-reply tones so connecting carries
-    /// its own quiet meaning.
-    pub const CONNECTING_MARKER_COLOR: &str = "#4C93A6";
-
-    /// Muted lavender-grey — a calm "writing" hue for the ambient agent-activity
-    /// header cue. Distinct from the amber (stale/at-capacity), slate
-    /// (unread/dim), periwinkle (awaiting-reply), sage (empty), and cyan
-    /// (connecting) tones so an active-append signal reads as its own quiet
-    /// meaning rather than colliding with an existing one, and deliberately
-    /// low-contrast so continuous streaming never escalates attention.
-    pub const ACTIVITY_CUE_COLOR: &str = "#8A8FB0";
-    /// Muted lavender — the transcript-tail streaming cursor. Shares the activity
-    /// family with `ACTIVITY_CUE_COLOR` but a hair brighter so the tail cursor is
-    /// perceptible as "live writing here" while staying ambient.
-    pub const STREAMING_CURSOR_COLOR: &str = "#A6ABC8";
-
-    /// Muted steel-blue — the ambient in-flight (Pending/Deferred) viewer-turn
-    /// delivery cue. A calm "in transit" tone distinct from the amber
-    /// (stale/at-capacity), slate (unread/dim/timestamp), periwinkle
-    /// (awaiting-reply), sage (empty), cyan (connecting), and lavender (activity)
-    /// families so "sending" reads as its own quiet signal.
-    pub const DELIVERY_INFLIGHT_COLOR: &str = "#6E8CA8";
-    /// Muted mint-teal — the ambient delivered (Delivered/Handled) viewer-turn
-    /// delivery cue. A calm confirming "reached" tone; kept ambient (a hair cooler
-    /// and clearer than the sage empty-state green) so a delivery tick never reads
-    /// as a loud success flash.
-    pub const DELIVERY_DELIVERED_COLOR: &str = "#57A88E";
-    /// Muted warm clay — the ambient failed (Rejected/Expired) viewer-turn delivery
-    /// cue. Deliberately NOT the amber `STALE_MARKER_COLOR` nor an alarm red: per
-    /// rule a failed delivery stays ambient on the turn and never escalates the
-    /// portal's interruption class, so the tone reads as "did not arrive" quietly.
-    pub const DELIVERY_FAILED_COLOR: &str = "#B5827A";
-
-    /// Muted slate — the ambient per-turn arrival timestamp. Shares the quiet
-    /// secondary tone of `TRANSCRIPT_DIM_TEXT_COLOR` / `UNREAD_INDICATOR_COLOR` /
-    /// `COMPOSER_PLACEHOLDER_COLOR` so a stamp reads as subordinate metadata, not
-    /// as primary turn content or an alert.
-    pub const TIMESTAMP_COLOR: &str = "#6B7689";
-    /// Ambient timestamps default OFF — visibility is profile-governed and the base
-    /// surface stays calm (a presence engine, not a chat log). A component profile
-    /// opts in with `per_turn` or `grouped`. Mirrors [`TimestampGranularity::Off`].
-    pub const TIMESTAMP_GRANULARITY: &str = "off";
-
-    // Lifecycle affordance accents — ambient, mutually distinct (see token-key
-    // docs above). Active: calm teal-green; attached/ready: soft blue;
-    // attention: amber (distinct from the stale marker); inactive: muted slate.
-    pub const LIFECYCLE_ACTIVE_COLOR: &str = "#4FA88A";
-    pub const LIFECYCLE_ATTACHED_COLOR: &str = "#5A8FC0";
-    pub const LIFECYCLE_ATTENTION_COLOR: &str = "#C28A3D";
-    pub const LIFECYCLE_INACTIVE_COLOR: &str = "#5A6373";
-    /// Left-edge accent bar width (px). Slim enough to read as a margin marker
-    /// (like an editor's gutter indicator) without crowding the transcript text.
-    pub const LIFECYCLE_ACCENT_WIDTH_PX: &str = "4";
-
-    pub const DIVIDER_COLOR: &str = "#46536E";
-    /// Muted steel-blue — brighter and bluer than the plain turn separator
-    /// (`DIVIDER_COLOR` #46536E) so the unread boundary reads as distinct, while
-    /// staying in the cool ambient family alongside the slate unread count
-    /// (`UNREAD_INDICATOR_COLOR` #6B7689). Ambient, not alarming.
-    pub const UNREAD_DIVIDER_COLOR: &str = "#586A8C";
-
-    // Collapsed/minimized portal card backdrop. Off-black in the portal palette
-    // family — a hair lifted from the frame (`FRAME_BACKGROUND` #0A0D11) so a
-    // minimized card stays perceptible against the desktop, but no longer reads
-    // as the grey it used to (`#1A1F28`). The expanded frame's `#0A0D11`
-    // treatment did not cover the minimized state, which kept a
-    // separate grey token, so window-mgmt minimize still flashed grey.
-    pub const COLLAPSED_BACKGROUND: &str = "#12161C";
-    pub const COLLAPSED_TEXT_COLOR: &str = "#C8D6E8";
-    pub const COLLAPSED_FONT_SIZE: &str = "14";
-
-    pub const TRANSITION_IN_MS: &str = "120";
-    pub const TRANSITION_OUT_MS: &str = "80";
-
-    // window management defaults
-    /// Legible minimum portal width (px). Chosen to fit at least two columns of
-    /// readable text at default font size.
-    pub const WINDOW_MIN_WIDTH_PX: &str = "240";
-    /// Legible minimum portal height (px). Chosen to fit at least three lines of
-    /// text plus header and composer.
-    pub const WINDOW_MIN_HEIGHT_PX: &str = "160";
-    /// Pixels per Ctrl+`+`/`-` resize step. Large enough to feel meaningful,
-    /// small enough for fine control.
-    pub const WINDOW_RESIZE_STEP_PX: &str = "32";
-    /// Width of the pointer capture region on frame edges/corners (px).
-    /// 8px balances discoverability with accidental activation avoidance.
-    pub const WINDOW_RESIZE_AFFORDANCE_PX: &str = "8";
-
-    // scroll-indicator defaults
-    pub const SCROLL_INDICATOR_COLOR: &str = "#4A5568";
-    pub const SCROLL_INDICATOR_WIDTH_PX: &str = "4";
-    pub const SCROLL_INDICATOR_MIN_HEIGHT_PX: &str = "24";
-
-    // Composer caret / selection / placeholder defaults.
-    /// Caret glyph color — equal to `COMPOSER_TEXT_COLOR` so the default profile's
-    /// caret is visually unchanged; a profile may override to accent the caret.
-    pub const COMPOSER_CARET_COLOR: &str = "#E0E8F4";
-    /// Selection highlight — calm blue at ~0.45 alpha; mirrors the compositor's
-    /// existing inline default (`#3A7BD5` @ 0x73).
-    pub const COMPOSER_SELECTION_COLOR: &str = "#3A7BD573";
-    /// Empty-draft placeholder text — dimmed slate (matches the disconnect dim
-    /// text) so an empty prompt reads as a hint.
-    pub const COMPOSER_PLACEHOLDER_COLOR: &str = "#6B7689";
-
-    // Focus-ring defaults — mirror `tze_hud_input::DEFAULT_FOCUS_RING_*`
-    // (linear ≈ 0.2/0.5/1.0 at 2px). Expressed as the same sRGB fractions.
-    pub const FOCUS_RING_COLOR: &str = "#3380FF";
-    pub const FOCUS_RING_WIDTH_PX: &str = "2";
-
-    // Resize-grip affordance defaults — a muted-slate dot grip that brightens on
-    // hover, occupying a 14px corner square.
-    pub const WINDOW_RESIZE_GRIP_COLOR: &str = "#5A6373";
-    pub const WINDOW_RESIZE_GRIP_HOVER_COLOR: &str = "#8A93A6";
-    pub const WINDOW_RESIZE_GRIP_SIZE_PX: &str = "14";
-
-    // Spatial-rhythm + transcript-measure defaults.
-    /// Content inset — matches the composer text margin the compositor uses today.
-    pub const SPACING_CONTENT_INSET_PX: &str = "6";
-    /// Header strip height. Matches the header/drag-band height the compositor
-    /// uses today (the declared surface `Header` part drives the draggable header
-    /// band via `SceneGraph::portal_header_band_anchors`, so this default MUST
-    /// equal `PORTAL_HEADER_DRAG_BAND_PX_DEFAULT` = 52 to keep the band unchanged).
-    /// `portal.header.drag_band_px` remains the raw-tile-fallback knob.
-    pub const SPACING_HEADER_HEIGHT_PX: &str = "52";
-    /// Inter-section vertical gap.
-    pub const SPACING_SECTION_GAP_PX: &str = "8";
-    /// Transcript measure cap — `0` = unbounded (wrap to full width, today's behavior).
-    pub const TRANSCRIPT_MAX_MEASURE_PX: &str = "0";
-}
+/// Portal token fallback defaults: one definition, shared with the input crate
+/// (window and scroll-indicator geometry) and the compositor.
+use tze_hud_scene::portal_defaults as defaults;
 
 // ── PortalPartTokens ──────────────────────────────────────────────────────────
 
@@ -737,7 +510,7 @@ pub struct PortalPartTokens {
     // Frame (outer backdrop + border)
     pub frame_background: Rgba,
     pub frame_opacity: f32,
-    pub frame_border_color: Rgba,
+    frame_border_color: Rgba,
 
     // Header strip
     pub header_text_color: Rgba,
@@ -750,7 +523,7 @@ pub struct PortalPartTokens {
     /// Indicator color rendered when the draft is at its byte cap.
     /// Applied as a distinct visual signal within the composer region; never
     /// hardcoded in the compositor — always token-driven.
-    pub composer_at_capacity_color: Rgba,
+    composer_at_capacity_color: Rgba,
 
     // Transcript body
     pub transcript_background: Rgba,
@@ -759,7 +532,7 @@ pub struct PortalPartTokens {
     /// Per-turn role-attribution color for non-assistant agent-side OUTPUT turns
     /// (tool / status / error / other), distinct from `transcript_text_color`
     /// used for the assistant's own conversational turns.
-    pub transcript_system_color: Rgba,
+    transcript_system_color: Rgba,
 
     // Degraded / disconnect treatment.
     /// Dimmed transcript text shown while the portal is disconnected/stale.
@@ -807,12 +580,12 @@ pub struct PortalPartTokens {
     // adapter never hardcodes these hues and never issues a round trip to render
     // them.
     /// Color of the ambient in-flight (Pending/Deferred) viewer-turn delivery cue.
-    pub delivery_inflight_color: Rgba,
+    delivery_inflight_color: Rgba,
     /// Color of the ambient delivered (Delivered/Handled) viewer-turn delivery cue.
     pub delivery_delivered_color: Rgba,
     /// Color of the ambient failed (Rejected/Expired) viewer-turn delivery cue.
     /// Muted, not an alarm: a failed cue stays ambient on the turn.
-    pub delivery_failed_color: Rgba,
+    delivery_failed_color: Rgba,
 
     // Ambient per-turn timestamps. Secondary presentation of each
     // unit's runtime-assigned wall-clock arrival time; the adapter never hardcodes
@@ -867,34 +640,33 @@ pub struct PortalPartTokens {
 
     // Scroll-position indicators
     /// Scroll indicator thumb color — geometry-only, carries no content.
-    pub scroll_indicator_color: Rgba,
+    scroll_indicator_color: Rgba,
     /// Scroll indicator track width in px.
-    pub scroll_indicator_width_px: f32,
+    scroll_indicator_width_px: f32,
     /// Minimum scroll indicator thumb height in px.
-    pub scroll_indicator_min_height_px: f32,
+    scroll_indicator_min_height_px: f32,
 
     // Composer caret / selection / placeholder (vd-caret-selection-placeholder-not-tokenized).
     /// Caret glyph color — sourced independently from the composer text color.
-    pub composer_caret_color: Rgba,
+    composer_caret_color: Rgba,
     /// Selection-highlight background color (alpha-bearing).
-    pub composer_selection_color: Rgba,
+    pub(crate) composer_selection_color: Rgba,
     /// Empty-draft placeholder text color (dimmed hint).
-    pub composer_placeholder_color: Rgba,
+    composer_placeholder_color: Rgba,
 
     // Keyboard focus ring (vd-focus-ring-outside-portal-tokens).
-    /// Focus-ring stroke color — under portal profile control, no longer only
-    /// `tze_hud_input::DEFAULT_FOCUS_RING_COLOR`.
-    pub focus_ring_color: Rgba,
+    /// Focus-ring stroke color, under portal profile control.
+    focus_ring_color: Rgba,
     /// Focus-ring stroke width in px.
-    pub focus_ring_width_px: f32,
+    focus_ring_width_px: f32,
 
     // Resize-grip affordance (vd-crude-resize-handle-grip).
     /// Resize-grip mark color (the dot-grid grip glyph).
     pub resize_grip_color: Rgba,
     /// Resize-grip hover tint.
-    pub resize_grip_hover_color: Rgba,
+    resize_grip_hover_color: Rgba,
     /// Resize-grip visual extent in px (the grip square at the corner).
-    pub resize_grip_size_px: f32,
+    resize_grip_size_px: f32,
 
     // Spatial rhythm + transcript measure (vd-no-token-rhythm-padding-measure).
     /// Content inset (px) inside portal surfaces.
@@ -904,7 +676,7 @@ pub struct PortalPartTokens {
     /// Vertical gap (px) between stacked portal sections.
     pub section_gap_px: f32,
     /// Transcript optimal-measure cap in px; `0.0` = unbounded (full-width wrap).
-    pub transcript_max_measure_px: f32,
+    transcript_max_measure_px: f32,
 }
 
 impl Default for PortalPartTokens {
@@ -2353,17 +2125,6 @@ mod tests {
         );
         // Unknown values resolve to None so the resolver falls back to default.
         assert_eq!(TimestampGranularity::parse("hourly"), None);
-    }
-
-    #[test]
-    fn timestamp_granularity_token_string_round_trips() {
-        for g in [
-            TimestampGranularity::Off,
-            TimestampGranularity::PerTurn,
-            TimestampGranularity::Grouped,
-        ] {
-            assert_eq!(TimestampGranularity::parse(g.as_token_str()), Some(g));
-        }
     }
 
     #[test]

@@ -1,7 +1,7 @@
 //! Read-only ownership metadata. No content, cleanup, lease renewal or clock writes.
 
 use super::SceneGraph;
-use crate::mutation::SceneMutation;
+use super::publish::Publication;
 use crate::types::{LeaseState, SceneId, ZONE_TILE_Z_MIN};
 
 /// One borrowed ownership record. `id` omits the canonical kind prefix.
@@ -80,74 +80,65 @@ impl SceneGraph {
                 &mut visit,
             );
         }
-        for pending in &self.scheduled_batches {
-            let paused = self.widget_time_paused()
-                && pending
-                    .batch
-                    .mutations
-                    .iter()
-                    .any(|m| matches!(m, SceneMutation::PublishToWidget { .. }));
-            for mutation in &pending.batch.mutations {
-                let (id, kind, expiry, uncertain) = match mutation {
-                    SceneMutation::PublishToZone {
-                        zone_name,
-                        expires_at_wall_us,
-                        content,
-                        held,
-                        ..
-                    } => (
-                        zone_name,
-                        "zone",
-                        *expires_at_wall_us,
-                        paused
-                            || (!held
-                                && expires_at_wall_us.is_none()
-                                && matches!(content, crate::types::ZoneContent::Notification(_))),
-                    ),
-                    SceneMutation::PublishToWidget {
-                        widget_name,
-                        expires_at_wall_us,
-                        ttl_us,
-                        ..
-                    } => {
-                        let auto_clear = self
-                            .widget_registry
-                            .instances
-                            .get(widget_name)
-                            .and_then(|i| i.auto_clear_ms);
-                        (
-                            widget_name,
-                            "widget",
-                            *expires_at_wall_us,
-                            paused
-                                || (expires_at_wall_us.is_none() && ttl_us.is_some())
-                                || auto_clear.is_some(),
-                        )
-                    }
-                    _ => continue,
-                };
-                let content = if uncertain {
-                    None
-                } else {
-                    expiry.map(|at| at.max(pending.present_at_wall_us))
-                };
-                let life = self.holding_lifetime(
+        for pending in &self.scheduled_publications {
+            let (id, kind, expiry, uncertain) = match &pending.publication {
+                Publication::Zone {
+                    zone_name,
+                    expires_at_wall_us,
                     content,
-                    pending.batch.lease_id,
-                    pending.publication_origin,
-                    if paused { "suspended" } else { "scheduled" },
-                    uncertain,
-                    now,
-                );
-                emit_holding(
-                    &pending.batch.agent_namespace,
-                    id,
-                    kind,
-                    life,
-                    now,
-                    &mut visit,
-                );
-            }
+                    held,
+                    ..
+                } => (
+                    zone_name,
+                    "zone",
+                    *expires_at_wall_us,
+                    !held
+                        && expires_at_wall_us.is_none()
+                        && matches!(content, crate::types::ZoneContent::Notification(_)),
+                ),
+                Publication::Widget {
+                    widget_name,
+                    expires_at_wall_us,
+                    ttl_us,
+                    ..
+                } => {
+                    let auto_clear = self
+                        .widget_registry
+                        .instances
+                        .get(widget_name)
+                        .and_then(|i| i.auto_clear_ms);
+                    (
+                        widget_name,
+                        "widget",
+                        *expires_at_wall_us,
+                        self.widget_time_paused()
+                            || (expires_at_wall_us.is_none() && ttl_us.is_some())
+                            || auto_clear.is_some(),
+                    )
+                }
+            };
+            let paused = kind == "widget" && self.widget_time_paused();
+            let content = if uncertain {
+                None
+            } else {
+                expiry.map(|at| at.max(pending.present_at_wall_us))
+            };
+            let life = self.holding_lifetime(
+                content,
+                pending.publisher.lease_id,
+                pending.publisher.origin,
+                if paused { "suspended" } else { "scheduled" },
+                uncertain,
+                now,
+            );
+            emit_holding(
+                &pending.publisher.namespace,
+                id,
+                kind,
+                life,
+                now,
+                &mut visit,
+            );
         }
         for tile in self.tiles.values() {
             // Zone backing tiles occupy the runtime band; authenticated portal
@@ -156,7 +147,7 @@ impl SceneGraph {
                 continue;
             }
             let life = self.holding_lifetime(
-                tile.expires_at,
+                None,
                 Some(tile.lease_id),
                 None,
                 if tile.present_at.is_some_and(|at| at > now) {

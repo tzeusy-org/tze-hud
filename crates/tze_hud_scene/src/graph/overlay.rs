@@ -20,6 +20,8 @@ pub struct NotificationGeometry {
     pub bounds: Rect,
     pub actions: Vec<Rect>,
     pub close: Rect,
+    pub goto: Option<Rect>,
+    pub has_window_caption: bool,
     pub focus: Option<NotificationControl>,
     pub chosen: Option<usize>,
     pub state: &'static str,
@@ -29,6 +31,24 @@ pub struct NotificationGeometry {
 pub enum NotificationControl {
     Action(usize),
     Close,
+    GoTo,
+}
+
+/// Window availability is computed once per presented publication. Mutable
+/// attempt feedback is local and expires on a runtime deadline.
+#[derive(Clone, Debug, Default)]
+pub struct NotificationGoTo {
+    pub available: bool,
+    pub attempted_at_mono_us: Option<u64>,
+    pub cue: Option<GoToCue>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GoToCue {
+    Switching,
+    NotFound,
+    Ambiguous(usize),
+    Blocked,
 }
 
 /// A widget quad that actually reached the frame's draw list, after pixel
@@ -98,9 +118,19 @@ pub struct RuntimeOverlayState {
     /// The chosen interaction keeps its pressed fill; it has no hit region.
     #[serde(skip, default)]
     pub notification_choices: HashMap<SceneId, String>,
+    /// The newest pressed link's local feedback (one at a time); the runtime
+    /// sets and clears it, the compositor draws it.
+    #[serde(skip, default)]
+    pub link_feedback: Option<(crate::LinkFeedbackTarget, crate::LinkFeedbackState)>,
+    /// Chooses the display of each newly presented question card; `None`
+    /// keeps every card on the notification display.
+    #[serde(skip, default)]
+    pub question_placer: Option<std::sync::Arc<dyn crate::QuestionPlacer>>,
     /// Last accepted local link attempt per exact publication/button. No timer.
     #[serde(skip, default)]
     pub notification_link_attempts: HashMap<(SceneId, usize), u64>,
+    #[serde(skip, default)]
+    pub notification_go_to: HashMap<SceneId, NotificationGoTo>,
     /// Owner-directed notification focus, independent of agent/editor focus.
     #[serde(skip, default)]
     pub notification_focus: Option<String>,
@@ -110,6 +140,22 @@ pub struct RuntimeOverlayState {
     /// focus never enables digit shortcuts or their visual hints.
     #[serde(skip, default)]
     pub notification_answer: Option<SceneId>,
+    /// The destructive action being held, if any ([`NotificationHold`]).
+    /// Local only: the agent sees nothing until the hold completes.
+    #[serde(skip, default)]
+    pub notification_hold: Option<NotificationHold>,
+    /// A hold released early, draining its fill over `motion.state.ms`.
+    #[serde(skip, default)]
+    pub notification_hold_drain: Option<NotificationHoldDrain>,
+    /// The card whose controls ignore pointer presses because an agent put
+    /// it under a resting pointer (`notification.press_guard.ms`). The
+    /// runtime owns the guard; this mirrors it for drawing and status.
+    #[serde(skip, default)]
+    pub notification_press_guard: Option<SceneId>,
+    /// The card the owner last answered or dismissed: the re-layout its
+    /// leaving causes is the owner's own and starts no press guard.
+    #[serde(skip, default)]
+    pub notification_owner_activated: Option<SceneId>,
     /// Set of element_ids that are currently being actively dragged.
     ///
     /// Written by the input processor on DragActivated and cleared on
@@ -270,9 +316,9 @@ pub struct RuntimeOverlayState {
     /// Ephemeral: skipped during serialization.
     #[serde(skip, default)]
     pub recently_removed_tile_ids: Vec<SceneId>,
-    /// Accepted MutationBatch ids applied since the last present drain.
+    /// Committed publication IDs since the last present drain.
     ///
-    /// Populated by [`SceneGraph::apply_batch`] on every accepted (applied) batch,
+    /// Populated by [`SceneGraph::publish`] on every accepted publication,
     /// in application order. Drained by the render loop at frame present via
     /// [`SceneGraph::drain_present_ack_batch_ids`], which stamps them with the
     /// presented frame number + present wall-clock and emits a `FramePresented`
@@ -288,7 +334,7 @@ pub struct RuntimeOverlayState {
     /// move or resize gesture.
     ///
     /// While a tile is in this set the runtime holds geometry authority over it:
-    /// the owning adapter's [`SceneMutation::UpdateTileBounds`] republishes become
+    /// the owning adapter's [`SceneGraph::update_tile_bounds`] republishes become
     /// a bounds no-op (see [`SceneGraph::update_tile_bounds`]), so an adapter that
     /// re-emits its stale client-side layout on the next content publish or drag
     /// can no longer stomp individual members and fracture the portal. Content
@@ -302,8 +348,6 @@ pub struct RuntimeOverlayState {
     /// bypass the lock; only adapter-originated `update_tile_bounds` calls are
     /// gated. Cleared per tile by the reset-geometry affordance and on tile
     /// removal.
-    ///
-    /// [`SceneMutation::UpdateTileBounds`]: crate::mutation::SceneMutation::UpdateTileBounds
     ///
     /// Ephemeral: skipped during serialization.
     #[serde(skip, default)]
@@ -333,6 +377,27 @@ pub struct RuntimeOverlayState {
 }
 
 use super::SceneGraph;
+
+/// A press on a destructive notification action that has not yet been held
+/// for `notification.action.hold.ms`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NotificationHold {
+    /// The exact control pressed; completion activates only this one.
+    pub region: ZoneHitRegion,
+    /// The held key's identity, or `None` for a pointer press.
+    pub key: Option<String>,
+    /// Scene monotonic time of the press.
+    pub started_mono_us: u64,
+}
+
+/// An early-released hold whose fill drains back to rest.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NotificationHoldDrain {
+    pub interaction_id: String,
+    /// Fill fraction (0..=1) when the hold ended.
+    pub progress: f32,
+    pub released_mono_us: u64,
+}
 
 impl SceneGraph {
     /// Queue a runtime-registered widget SVG asset for compositor registration.
@@ -364,9 +429,9 @@ impl SceneGraph {
         self.overlay.recently_removed_tile_ids.drain(..).collect()
     }
 
-    /// Record an accepted MutationBatch id as pending on-screen present.
+    /// Record an accepted publication ID as pending on-screen present.
     ///
-    /// Called by [`SceneGraph::apply_batch`] for every batch that applied. The id
+    /// Called by [`SceneGraph::publish`] for each committed publication. The id
     /// is drained at the next frame present by [`Self::drain_present_ack_batch_ids`]
     /// and paired with the presented frame number + present wall-clock to form a
     /// `FramePresented` acknowledgment.
@@ -473,7 +538,7 @@ impl SceneGraph {
     /// content mutation co-travels in the batch. A redundant re-publish of the
     /// same accent leaves the version untouched, keeping a steady-state portal
     /// idle.
-    pub fn set_tile_lifecycle_accent(
+    fn set_tile_lifecycle_accent(
         &mut self,
         tile_id: SceneId,
         accent: LifecycleAccent,
@@ -494,17 +559,13 @@ impl SceneGraph {
     /// ([`set_tile_root_checked`](Self::set_tile_root_checked),
     /// [`update_tile_input_mode`](Self::update_tile_input_mode),
     /// [`set_portal_surface`](Self::set_portal_surface)): namespace isolation, a
-    /// live `require_active_lease`, and `ModifyOwnTiles`. The unchecked
-    /// [`set_tile_lifecycle_accent`](Self::set_tile_lifecycle_accent) only checks
-    /// tile existence, so the in-process portal scene-apply path
-    /// (`portal::apply_render`) — which bypasses the `apply_batch`
-    /// Stage-1 lease check — could otherwise mutate the accent overlay and bump
-    /// `scene.version` under a safe-mode-suspended (or orphaned/expired) lease,
-    /// escaping lease suspension. `require_active_lease` accepts only
+    /// live `require_active_lease`, and `ModifyOwnTiles`. The internal accent
+    /// setter checks only tile existence, so the in-process portal scene-apply path
+    /// (`portal::apply_render`) uses the checked method before changing the accent or
+    /// `scene.version`. `require_active_lease` accepts only
     /// the `Active` state, so the lease-grace degraded repaint — which reconnects
     /// the driver lease to `Active` before rendering — still applies,
-    /// exactly matching the sibling `set_tile_root_checked` content paint in the
-    /// same batch.
+    /// as does the accompanying `set_tile_root_checked` content update.
     pub fn set_tile_lifecycle_accent_checked(
         &mut self,
         tile_id: SceneId,
@@ -522,7 +583,7 @@ impl SceneGraph {
     /// Bumps `scene.version` only when an accent was actually present, so a
     /// redaction-CLEAR transition re-arms the present-gate and the stale accent
     /// is removed on screen; a clear with nothing stored stays idle.
-    pub fn clear_tile_lifecycle_accent(&mut self, tile_id: SceneId) {
+    fn clear_tile_lifecycle_accent(&mut self, tile_id: SceneId) {
         if self
             .overlay
             .tile_lifecycle_accents
@@ -571,9 +632,9 @@ impl SceneGraph {
     /// Transactional, / ).
     ///
     /// Bumps `scene.version` only when the stored spec actually changes, so a
-    /// redundant re-publish of the same composer keeps a steady-state portal idle
-    /// (mirroring [`set_tile_lifecycle_accent`](Self::set_tile_lifecycle_accent)).
-    pub fn set_tile_composer_interaction(
+    /// redundant re-publish of the same composer keeps a steady-state portal idle,
+    /// just as an unchanged lifecycle accent does.
+    fn set_tile_composer_interaction(
         &mut self,
         tile_id: SceneId,
         region: HitRegionNode,
@@ -613,12 +674,9 @@ impl SceneGraph {
     /// Mirrors the checked tile-content mutations
     /// ([`set_tile_root_checked`](Self::set_tile_root_checked),
     /// [`set_tile_lifecycle_accent_checked`](Self::set_tile_lifecycle_accent_checked)):
-    /// namespace isolation, a live `require_active_lease`, and `ModifyOwnTiles`. The
-    /// unchecked [`set_tile_composer_interaction`](Self::set_tile_composer_interaction)
-    /// only checks tile existence, so the in-process portal scene-apply path — which
-    /// bypasses the `apply_batch` Stage-1 lease check — could otherwise attach the
-    /// composer node and bump `scene.version` under a suspended/orphaned/expired
-    /// lease, escaping lease suspension.
+    /// namespace isolation, a live `require_active_lease`, and `ModifyOwnTiles`.
+    /// The internal composer setter checks only tile existence. The portal render
+    /// path uses the checked method before changing composer state.
     pub fn set_tile_composer_interaction_checked(
         &mut self,
         tile_id: SceneId,
@@ -636,9 +694,8 @@ impl SceneGraph {
     ///
     /// Bumps `scene.version` only when a spec was actually present, so a
     /// disable-transition removes the region on screen while a clear with nothing
-    /// stored stays idle (mirroring
-    /// [`clear_tile_lifecycle_accent`](Self::clear_tile_lifecycle_accent)).
-    pub fn clear_tile_composer_interaction(&mut self, tile_id: SceneId) {
+    /// stored stays idle, as with clearing a lifecycle accent.
+    fn clear_tile_composer_interaction(&mut self, tile_id: SceneId) {
         if self
             .overlay
             .tile_composer_interactions
@@ -993,9 +1050,8 @@ impl SceneGraph {
     ///
     /// Bumps `scene.version` only when the stored count actually changes, so a
     /// count-only update (no co-travelling content mutation) still re-arms the
-    /// #943 idle present-gate and the badge repaints — mirroring
-    /// [`set_tile_lifecycle_accent`](Self::set_tile_lifecycle_accent). A redundant
-    /// re-write of the same count leaves the version untouched, keeping a
+    /// #943 idle present-gate and the badge repaints, as with a lifecycle accent
+    /// change. Re-writing the same count leaves the version untouched, keeping a
     /// steady-state portal idle.
     ///
     /// No-op if the tile does not exist.
@@ -1015,12 +1071,8 @@ impl SceneGraph {
     /// namespace isolation, a live `require_active_lease`, and `ModifyOwnTiles`.
     ///
     /// The unchecked [`set_tile_unread_count`](Self::set_tile_unread_count) only
-    /// checks tile existence, so the wire apply paths that bypass the `apply_batch`
-    /// Stage-1 lease check (`portal::apply_render`, and the
-    /// session-server batch that reaches `apply_single_mutation`) could otherwise
-    /// mutate the badge overlay under a `ModifyOwnTiles`-revoked, safe-mode-
-    /// suspended, orphaned, or expired lease — escaping tile-modification authority
-    /// exactly like the accent overlay did before the change. `require_active_lease`
+    /// checks tile existence. The portal render path uses the checked method to
+    /// require an active lease before changing the badge. `require_active_lease`
     /// accepts only `Active`, so the lease-grace degraded repaint (which reconnects
     /// the driver lease to `Active` before rendering) still applies.
     pub fn set_tile_unread_count_checked(

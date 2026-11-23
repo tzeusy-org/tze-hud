@@ -13,19 +13,18 @@
 //!    invariants; verifies that assert_layer0_invariants() always returns empty.
 //!
 //! 2. `arb_valid_then_valid_mutations` — random valid scenes followed by valid
-//!    MutationBatches; verifies post-mutation scenes still pass assert_layer0_invariants().
+//!    tile operations; verifies post-mutation scenes still pass assert_layer0_invariants().
 //!
 //! 3. `arb_valid_then_invalid_mutation` — random valid scenes followed by an
-//!    invalid mutation; verifies (a) batch is rejected and (b) scene is unchanged.
+//!    invalid mutation; verifies (a) tile operation is rejected and (b) scene is unchanged.
 //!
 //! Each strategy runs at 500 iterations (higher than typical 100 but well within
 //! the <2 s budget; total suite runtime confirmed <1 s on CI hardware).
 
 use proptest::prelude::*;
 use tze_hud_scene::{
-    MAX_BATCH_SIZE, assert_layer0_invariants,
+    ValidationError, assert_layer0_invariants,
     graph::SceneGraph,
-    mutation::{MutationBatch, SceneMutation},
     types::{Rect, SceneId},
 };
 
@@ -165,7 +164,7 @@ proptest! {
 
     // ── Strategy 2: Random valid scene + valid mutations → still valid ───────
 
-    /// FOR ALL valid scenes + valid mutations applied atomically:
+    /// FOR ALL valid scenes + valid mutations:
     /// THEN post-mutation scene still passes assert_layer0_invariants().
     ///
     /// Verifies that the graph stays valid through incremental construction.
@@ -188,21 +187,7 @@ proptest! {
             let x = (i as f32 * (tile_w + 5.0)).min(1720.0);
             let bounds = Rect::new(x, 0.0, tile_w, tile_h);
             let z_order = (i as u32) + 1;
-            let batch = MutationBatch {
-                batch_id: SceneId::new(),
-                agent_namespace: namespace.clone(),
-                mutations: vec![SceneMutation::CreateTile {
-                    tab_id,
-                    namespace: namespace.clone(),
-                    lease_id,
-                    bounds,
-                    z_order,
-                }],
-                timing_hints: None,
-                lease_id: Some(lease_id),
-            };
-            let result = graph.apply_batch(&batch);
-            prop_assume!(result.applied, "batch failed — skip this input");
+            graph.create_tile_checked(tab_id, &namespace, lease_id, bounds, z_order).unwrap();
         }
 
         let violations = assert_layer0_invariants(&graph);
@@ -216,9 +201,9 @@ proptest! {
     // ── Strategy 3: Valid scene + invalid mutation → scene unchanged ─────────
 
     /// FOR ALL valid scenes + an invalid mutation (zero-area bounds):
-    /// THEN the batch is rejected AND the scene is unchanged.
+    /// THEN the tile operation is rejected AND the scene is unchanged.
     ///
-    /// Verifies atomic rollback: no partial mutations applied on failure.
+    /// Verifies that an invalid operation leaves the graph unchanged.
     #[test]
     fn prop_invalid_mutation_rejected_and_scene_unchanged(
         tab_name in arb_tab_name(),
@@ -232,57 +217,28 @@ proptest! {
         // Build pre-state: pre_tiles valid tiles
         for i in 0..pre_tiles {
             let bounds = Rect::new(i as f32 * 50.0, 0.0, 40.0, 40.0);
-            let batch = MutationBatch {
-                batch_id: SceneId::new(),
-                agent_namespace: namespace.clone(),
-                mutations: vec![SceneMutation::CreateTile {
-                    tab_id,
-                    namespace: namespace.clone(),
-                    lease_id,
-                    bounds,
-                    z_order: (i as u32) + 1,
-                }],
-                timing_hints: None,
-                lease_id: Some(lease_id),
-            };
-            graph.apply_batch(&batch);
+            graph.create_tile_checked(tab_id, &namespace, lease_id, bounds, (i as u32) + 1).unwrap();
         }
 
         // Record pre-mutation state
         let pre_tile_count = graph.tile_count();
         let pre_version = graph.version;
 
-        // Submit a batch with an INVALID mutation (zero-area bounds = spec violation)
-        let invalid_batch = MutationBatch {
-            batch_id: SceneId::new(),
-            agent_namespace: namespace.clone(),
-            mutations: vec![SceneMutation::CreateTile {
-                tab_id,
-                namespace: namespace.clone(),
-                lease_id,
-                bounds: Rect::new(0.0, 0.0, 0.0, 0.0), // zero area — invalid
-                z_order: 9999,
-            }],
-            timing_hints: None,
-            lease_id: Some(lease_id),
-        };
-
-        let result = graph.apply_batch(&invalid_batch);
-
-        // Property 1: batch must be rejected
-        prop_assert!(!result.applied, "invalid mutation must be rejected");
-        prop_assert!(result.rejection.is_some(), "rejection detail must be present");
+        let result = graph.create_tile_checked(
+            tab_id, &namespace, lease_id, Rect::new(0.0, 0.0, 0.0, 0.0), 9999,
+        );
+        prop_assert!(matches!(result, Err(ValidationError::BoundsOutOfRange { .. })), "invalid bounds must be rejected");
 
         // Property 2: scene must be unchanged
         prop_assert_eq!(
             graph.tile_count(),
             pre_tile_count,
-            "tile count must not change after rejected batch"
+            "tile count must not change after rejection"
         );
         prop_assert_eq!(
             graph.version,
             pre_version,
-            "version must not increment after rejected batch"
+            "version must not increment after rejection"
         );
 
         // Property 3: scene must still pass assert_layer0_invariants
@@ -390,6 +346,9 @@ proptest! {
                     publication_id: SceneId::new(),
                     lease_id: None,
                     publication_origin: None,
+                    caption: None,
+                    window_token: None,
+                    display: None,
                     zone_name: zone_name.clone(),
                     publisher_namespace: "agent.alpha".into(),
                     content: ZoneContent::StreamText("hello world".into()),
@@ -410,72 +369,6 @@ proptest! {
         );
     }
 
-    // ── Batch size boundary ───────────────────────────────────────────────────
-
-    /// FOR ALL batches of 1..=MAX_BATCH_SIZE mutations:
-    /// THEN the batch must NOT be rejected with `BatchSizeExceeded`.
-    ///
-    /// Note: batches with n > lease.resource_budget.max_tiles may be rejected for
-    /// TILE_BUDGET_EXCEEDED (budget enforcement), which is correct and expected.
-    /// This test only verifies the batch-size gate: n ≤ MAX_BATCH_SIZE must never
-    /// trigger a BATCH_TOO_LARGE rejection code.
-    #[test]
-    fn prop_batch_not_rejected_as_batch_too_large(n in 1usize..=MAX_BATCH_SIZE) {
-        let mut graph = SceneGraph::new(10000.0, 10000.0); // large display for many tiles
-        let tab_id = graph.create_tab("Stress", 0).unwrap();
-        // Budget cap of 255: batches of n > 255 may fail for TILE_BUDGET_EXCEEDED,
-        // but must never fail for BatchSizeExceeded (n ≤ MAX_BATCH_SIZE = 1000).
-        let lease_id = graph.grant_lease("stress.agent", 300_000);
-        {
-            let lease = graph.leases.get_mut(&lease_id).unwrap();
-            lease.resource_budget.max_tiles = 255; // tile budget cap (< MAX_BATCH_SIZE)
-        }
-
-        let tile_w = 50.0f32;
-        let tile_h = 50.0f32;
-        let cols = 100u32; // enough columns for up to 1000 tiles
-
-        let mutations: Vec<SceneMutation> = (0..n)
-            .map(|i| {
-                let col = (i as u32) % cols;
-                let row = (i as u32) / cols;
-                SceneMutation::CreateTile {
-                    tab_id,
-                    namespace: "stress.agent".into(),
-                    lease_id,
-                    bounds: Rect::new(
-                        col as f32 * (tile_w + 1.0),
-                        row as f32 * (tile_h + 1.0),
-                        tile_w,
-                        tile_h,
-                    ),
-                    z_order: (i as u32) + 1,
-                }
-            })
-            .collect();
-
-        let batch = MutationBatch {
-            batch_id: SceneId::new(),
-            agent_namespace: "stress.agent".into(),
-            mutations,
-            timing_hints: None,
-            lease_id: Some(lease_id),
-        };
-
-        let result = graph.apply_batch(&batch);
-
-        // Batches of 1..=MAX_BATCH_SIZE must not be rejected for BATCH_TOO_LARGE
-        if let Some(rej) = &result.rejection {
-            for err in &rej.errors {
-                prop_assert!(
-                    err.code != tze_hud_scene::ValidationErrorCode::BatchSizeExceeded,
-                    "batch of n={} should not be rejected as BATCH_TOO_LARGE (MAX_BATCH_SIZE={})",
-                    n,
-                    MAX_BATCH_SIZE
-                );
-            }
-        }
-    }
 }
 
 // ─── Negative check ───────────────────────────────────────────────────────────

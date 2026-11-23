@@ -1,4 +1,4 @@
-"""Unit tests for the tier-L gesture harness guards and target resolution."""
+"""Unit tests for the gesture harness guards and target resolution."""
 
 from __future__ import annotations
 
@@ -174,6 +174,76 @@ class WindowsGuardTests(unittest.TestCase):
                 native.gdi32.DeleteDC.assert_called_with(memory)
                 native.gdi32.DeleteObject.assert_called_with(bitmap)
                 native.user32.ReleaseDC.assert_called_with(0, screen)
+
+    def test_link_click_checks_the_owned_window_at_the_physical_cursor(self) -> None:
+        native = native_input_boundary()
+        run = g.Run(exe=Path("tze_hud.exe"), out=Path("."), injector="sendinput", owned_pids=[4242])
+        hud, browser = 0x123456780, 0x123456781
+        target = (891, 106)
+        events = []
+        run.inj = native.SendInput(lambda: events.append("ownership guard"))
+        native.user32.SendInput.side_effect = lambda *args: events.append("SendInput") or args[0]
+
+        def cursor(point):
+            events.append("cursor observation")
+            if actual is None:
+                return 0
+            point._obj.x, point._obj.y = actual
+            return 1
+
+        def window_at(point):
+            self.assertEqual((point.x, point.y), actual)
+            return point_hwnd
+
+        def owner(hwnd, pid):
+            if hwnd not in (hud, browser):
+                return 0
+            pid._obj.value = 4242 if hwnd == hud else 9900
+            return 1
+
+        native.user32.GetCursorPos.side_effect = cursor
+        native.user32.WindowFromPoint.side_effect = window_at
+        native.user32.GetWindowThreadProcessId.side_effect = owner
+        cases = (
+            ("owned", target, hud, hud),
+            ("foreign point", target, browser, hud),
+            ("late foreign foreground", target, hud, browser),
+            ("unknown pointer window", target, None, hud),
+            ("unknown cursor", None, None, hud),
+            ("wrong point", (10, 20), hud, hud),
+        )
+        for case, actual, point_hwnd, foreground in cases:
+            with self.subTest(case=case), mock.patch.object(g, "WIN", native, create=True), \
+                    mock.patch.object(native.ctypes, "get_last_error", return_value=0, create=True):
+                events.clear()
+                run.timeline.clear()
+                run.inj.calls.clear()
+                native.user32.GetForegroundWindow.return_value = foreground
+                if case == "owned":
+                    run.click_link(target, repeat=2)
+                    self.assertEqual(events, ["ownership guard", "cursor observation", "SendInput"])
+                    self.assertEqual(run.inj.calls[-1]["sent"], 4)
+                else:
+                    with self.assertRaises(g.ScenarioFailed):
+                        run.click_link(target, repeat=2)
+                    self.assertEqual(events, ["ownership guard", "cursor observation"])
+                    self.assertEqual(run.inj.calls, [])
+                observation = run.timeline[-1]["click_target_before_send"]
+                self.assertEqual(observation["foreground"]["hwnd"], foreground)
+                self.assertEqual(observation["cursor"], list(actual) if actual else None)
+                window = observation["at_cursor"]
+                if point_hwnd is None:
+                    self.assertIsNone(window)
+                else:
+                    self.assertEqual(window, {"hwnd": point_hwnd, "pid": 4242 if point_hwnd == hud else 9900})
+
+        events.clear()
+        run.timeline.clear()
+        with mock.patch.object(run.inj, "guard", side_effect=g.Refused("foreign foreground")), \
+                self.assertRaises(g.Refused):
+            run.click_link(target)
+        self.assertEqual(events, [])
+        self.assertEqual(run.timeline, [])
 
     def test_a_refused_guard_keeps_earlier_outcomes(self) -> None:
         run = mock.Mock(out=Path("unused"))
@@ -371,8 +441,11 @@ class WindowsGuardTests(unittest.TestCase):
                     selected = scenarios.call_args.args[1]
                     self.assertEqual("overlay-pointer" in selected, mode == "overlay")
                     self.assertEqual("tray" in selected, mode == "overlay")
-                    # 25: hud-ljhku.5 added "stack-trim"; hud-ljhku.2 added "portal-reading".
-                    self.assertEqual(len(selected), 2 if mode == "overlay" else 27)
+                    self.assertEqual("tray-answer" in selected, mode == "overlay")
+                    self.assertEqual("go-to-session" in selected, mode == "overlay")
+                    # 25: hud-ljhku.5 added "stack-trim"; hud-ljhku.2 added "portal-reading";
+                    # 29: the fresh-card "press-guard"; 30: the per-session "sessions".
+                    self.assertEqual(len(selected), 4 if mode == "overlay" else 30)
                     # Real link handoffs can foreground a browser late, so they run
                     # after every other injecting scenario; MCP-only restart stays last.
                     self.assertEqual(selected[-3:] == ["portal-reading", "card-link", "restart"],
@@ -468,7 +541,7 @@ class RequiredGateTests(unittest.TestCase):
             self.assertEqual(overlay.main(["--exe", "x.exe", "--out", directory, "--required", "tray"]), 0)
             argv = scenarios.call_args.args[0]
             self.assertEqual(argv[argv.index("--required") + 1], "tray")
-            self.assertEqual(argv[-2:], ["overlay-pointer", "tray"])
+            self.assertEqual(argv[-4:], ["go-to-session", "overlay-pointer", "tray", "tray-answer"])
 
 
 class OverlayInstallerTests(unittest.TestCase):
@@ -550,6 +623,14 @@ class TargetTests(unittest.TestCase):
         self.assertEqual(g.resolve_target(STATUS, "zone:notification-area/card/close"), (688, 22))
         self.assertEqual(g.resolve_target(STATUS, "widget:main-status"), (170, 550))
         self.assertEqual(g.resolve_target(STATUS, "widget:main-status/hover"), (310, 516))
+
+    def test_go_to_resolves_only_the_admin_rect_for_that_card(self) -> None:
+        entry = STATUS["notifications"][0]
+        rect = {"x": 600, "y": 15, "w": 46, "h": 20}
+        status = {**STATUS, "notifications": [{**entry, "goto": rect}]}
+        self.assertEqual(g.resolve_target(status, "zone:notification-area/card/goto"), (623, 25))
+        with self.assertRaisesRegex(LookupError, "not shown"):
+            g.resolve_target(STATUS, "zone:notification-area/card/goto")
 
     def test_hidden_or_missing_targets_raise(self) -> None:
         with self.assertRaisesRegex(LookupError, "not shown"):
@@ -655,7 +736,13 @@ class CardHelperTests(unittest.TestCase):
                     elif chord == "Return":
                         self.assertEqual(status["notifications"][0]["focus"], 1)
                         answer(lambda key: key + "-second")
+                def move(x, y):  # the HUD shows the hand over card controls only
+                    rects = [r for c in status["notifications"]
+                             for r in [c["close"], *(a["rect"] for a in c["actions"])]]
+                    hand = any(r["x"] <= x < r["x"] + r["w"] and r["y"] <= y < r["y"] + r["h"] for r in rects)
+                    status["cursor"] = "hand" if hand else "arrow"
                 run.inj.click.side_effect, run.inj.key.side_effect = click, key
+                run.inj.move_abs.side_effect = move
                 with mock.patch.object(g, "open_portal"):
                     scenario(run)
                 publish = run.smoke.call.call_args_list[0]
@@ -748,6 +835,16 @@ class SafeModeWitnessTests(unittest.TestCase):
         self.assertEqual(failure.exception.args[0], "publishing while paused returns SAFE_MODE_ACTIVE")
         self.assertFalse(safe_mode["on"])
         run.observe_for.assert_not_called()
+
+
+class SmokeErrorTests(unittest.TestCase):
+    def test_a_refused_tool_names_its_code_and_hint(self) -> None:
+        smoke = g.Smoke("http://127.0.0.1:5555/mcp", "psk")
+        refusal = {"code": "INTERNAL", "hint": "input state busy; retry hud_input"}
+        with mock.patch.object(smoke, "call", return_value=(True, refusal)), \
+                self.assertRaisesRegex(AssertionError, "hud_input: tool error response "
+                                       "INTERNAL: input state busy; retry hud_input"):
+            smoke.ok("hud_input", {"ack": ["a1"]})
 
 
 if __name__ == "__main__":

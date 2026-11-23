@@ -1,10 +1,4 @@
 //! Text-collection methods for the compositor.
-//!
-//! Moved from `renderer/mod.rs` text-collection cluster (formerly ~L3546–4287
-//! pre-split), plus `collect_ellipsis_text_items_from_node` from the
-//! module-level helpers section, by Step R-4 of the renderer module split.
-//! No logic was changed; only visibility modifiers were added
-//! where Rust's module-privacy rules require them (listed in the PR body).
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -186,7 +180,9 @@ impl super::Compositor {
     ) -> Vec<TextItem> {
         let mut items: Vec<TextItem> = Vec::new();
 
-        for (zone_name, publishes) in scene.shown_zone_publishes() {
+        for stack in self.zone_stacks(scene) {
+            let _tokens = self.tokens_for_stack(&stack);
+            let (zone_name, publishes) = (stack.name, &*stack.publishes);
             if publishes.is_empty() {
                 continue;
             }
@@ -198,7 +194,7 @@ impl super::Compositor {
             let scale = tze_hud_config::tokens::px_scale(zone_tokens);
             let policy = &zone_def.rendering_policy;
             let (zx, zy, zw, zh) =
-                self.zone_geometry(zone_name, &scene.effective_zone_geometry(zone_def), sw, sh);
+                self.stack_geometry(&stack, &scene.effective_zone_geometry(zone_def), sw, sh);
 
             // Status-bar rows are always ellipsized, whatever the policy says,
             // so prime exactly the rows the frame path draws.
@@ -293,7 +289,9 @@ impl super::Compositor {
     ) {
         let now = std::time::Instant::now();
         // ── Zone StreamText, Notification, and StatusBar content ─────────────
-        for (zone_name, publishes) in scene.shown_zone_publishes() {
+        for stack in self.zone_stacks(scene) {
+            let _tokens = self.tokens_for_stack(&stack);
+            let (zone_name, publishes) = (stack.name, &*stack.publishes);
             if publishes.is_empty() {
                 continue;
             }
@@ -311,7 +309,7 @@ impl super::Compositor {
 
             // Resolve zone geometry to pixel bounds.
             let (zx, zy, zw, zh) =
-                self.zone_geometry(zone_name, &scene.effective_zone_geometry(zone_def), sw, sh);
+                self.stack_geometry(&stack, &scene.effective_zone_geometry(zone_def), sw, sh);
 
             let policy = &zone_def.rendering_policy;
 
@@ -414,6 +412,7 @@ impl super::Compositor {
                                         zone_tokens,
                                         policy,
                                         payload,
+                                        record.caption.as_deref(),
                                         card.width,
                                         agent_icon,
                                     );
@@ -440,18 +439,30 @@ impl super::Compositor {
                                         effective_opacity,
                                     )
                                 };
+                                let goto = super::notification_style::go_to_control(
+                                    scene, record, &style, card,
+                                );
                                 for band in &text_layout.bands {
-                                    let band_color =
-                                        if band.field == "body" && !payload.title.is_empty() {
-                                            tone_color(tone.body)
-                                        } else {
-                                            tone_color(tone.title)
-                                        };
+                                    // A caption is secondary, like a body under a title.
+                                    let band_color = if band.field == "caption"
+                                        || (band.field == "body" && !payload.title.is_empty())
+                                    {
+                                        tone_color(tone.body)
+                                    } else {
+                                        tone_color(tone.title)
+                                    };
+                                    let width = match (band.field, goto) {
+                                        ("caption", Some((bounds, _))) => text_layout.width.min(
+                                            (bounds.x - card.x - text_layout.x - style.dismiss_gap)
+                                                .max(1.0),
+                                        ),
+                                        _ => text_layout.width,
+                                    };
                                     let mut item = Self::make_zone_text_item(
                                         Arc::from(band.text),
                                         card.x + text_layout.x,
                                         card.y + band.y,
-                                        text_layout.width,
+                                        width,
                                         band.height,
                                         band.font_size_px,
                                         font_family,
@@ -469,6 +480,38 @@ impl super::Compositor {
                                     items.push(item);
                                 }
 
+                                if let Some((bounds, cue)) = goto {
+                                    use tze_hud_scene::graph::overlay::GoToCue;
+                                    let label: Arc<str> = match cue {
+                                        None => "Go to".into(),
+                                        Some(GoToCue::Switching) => "Switching…".into(),
+                                        Some(GoToCue::NotFound) => "Window not found".into(),
+                                        Some(GoToCue::Ambiguous(count)) => {
+                                            format!("{count} windows match").into()
+                                        }
+                                        Some(GoToCue::Blocked) => {
+                                            "Windows blocked the switch".into()
+                                        }
+                                    };
+                                    let mut item = Self::make_zone_text_item(
+                                        label,
+                                        bounds.x,
+                                        bounds.y,
+                                        bounds.width,
+                                        bounds.height,
+                                        style.body.size,
+                                        font_family,
+                                        style.body.weight,
+                                        tone_color(tone.body),
+                                        tze_hud_scene::types::TextAlign::End,
+                                        tze_hud_scene::types::TextOverflow::Ellipsis,
+                                        oc,
+                                        ow,
+                                        effective_opacity,
+                                    );
+                                    item.line_height_multiplier = style.body.multiplier();
+                                    items.push(item);
+                                }
                                 if self.text_rasterizer.is_none() {
                                     continue;
                                 }
@@ -479,6 +522,7 @@ impl super::Compositor {
                                         card.x,
                                         card.y,
                                         !payload.title.is_empty(),
+                                        record.caption.as_deref(),
                                     );
                                     let glyph = style.title;
                                     let mut item = Self::make_zone_text_item(
@@ -517,9 +561,46 @@ impl super::Compositor {
                                     ))
                                     .enumerate()
                                 {
-                                    let label_color = tone_color(
-                                        style.action_label_color(index, payload.urgency),
-                                    );
+                                    // The label splits at the sweep edge: the swept
+                                    // part takes the held label (readable on the
+                                    // sweep), the rest keeps its resting colour
+                                    // (readable on the card). An inverting tone's
+                                    // held label matches its card fill.
+                                    let sweep_edge = self
+                                        .notification_hold_fill(
+                                            scene,
+                                            &super::hit_regions::notification_action_interaction_id(
+                                                zone_name, record, index,
+                                            ),
+                                        )
+                                        .map(|fill| b.x + b.width * fill);
+                                    let label_color =
+                                        tone_color(style.action_label_color(payload, index, false));
+                                    let held_color =
+                                        tone_color(style.action_label_color(payload, index, true));
+                                    let mut push_label = |item: crate::text::TextItem| {
+                                        let Some(edge) = sweep_edge else {
+                                            items.push(item);
+                                            return;
+                                        };
+                                        let (left, right) = (
+                                            item.clip_pixel_x,
+                                            item.clip_pixel_x + item.clip_bounds_width,
+                                        );
+                                        let edge = edge.clamp(left, right);
+                                        if edge > left {
+                                            let mut swept = item.clone();
+                                            swept.color = held_color;
+                                            swept.clip_bounds_width = edge - left;
+                                            items.push(swept);
+                                        }
+                                        if edge < right {
+                                            let mut rest = item;
+                                            rest.clip_pixel_x = edge;
+                                            rest.clip_bounds_width = right - edge;
+                                            items.push(rest);
+                                        }
+                                    };
                                     let available =
                                         (b.width - action_layout.padding * 2.0).max(1.0);
                                     let hint_width = action_layout.hint_width.min(available);
@@ -532,6 +613,27 @@ impl super::Compositor {
                                     });
                                     let label_y = b.y + action_layout.label_y;
                                     let label_h = action_layout.label_height.max(1.0);
+                                    // A pressed url action's feedback replaces its
+                                    // label in the same bounds; failure is the error color.
+                                    let feedback = match &scene.overlay.link_feedback {
+                                        Some((
+                                            tze_hud_scene::LinkFeedbackTarget::CardAction {
+                                                publication_id,
+                                                index: pressed,
+                                            },
+                                            state,
+                                        )) if *publication_id == record.publication_id
+                                            && *pressed == index =>
+                                        {
+                                            Some(*state)
+                                        }
+                                        _ => None,
+                                    };
+                                    let error_color = feedback
+                                        .filter(|s| *s == tze_hud_scene::LinkFeedbackState::Failed)
+                                        .and_then(|_| self.token_map.get("color.error"))
+                                        .and_then(|hex| super::token_colors::parse_hex_color(hex))
+                                        .map(tone_color);
                                     let label = |text: Arc<str>, x: f32, width: f32, align| {
                                         let mut item = Self::make_zone_text_item(
                                             text,
@@ -557,21 +659,31 @@ impl super::Compositor {
                                     if scene.overlay.notification_answer
                                         == Some(record.publication_id)
                                     {
-                                        items.push(label(
+                                        push_label(label(
                                             Arc::from((index + 1).to_string()),
                                             b.x + action_layout.padding,
                                             hint_width,
                                             tze_hud_scene::types::TextAlign::Start,
                                         ));
                                     }
-                                    items.push(label(
-                                        Arc::from(action.label.as_str()),
+                                    let mut text = label(
+                                        Arc::from(match feedback {
+                                            Some(state) => state.label(),
+                                            None => action.label.as_str(),
+                                        }),
                                         b.x + action_layout.padding + hint_width,
                                         action_layout.label_width(&b, index),
                                         tze_hud_scene::types::TextAlign::Center,
-                                    ));
+                                    );
+                                    if let Some(color) = error_color {
+                                        text.color = color;
+                                    }
+                                    // Only callback actions can be destructive (held),
+                                    // only url actions show link feedback; the split
+                                    // composes either way.
+                                    push_label(text);
                                     if let Some((mark, _)) = mark {
-                                        items.push(label(
+                                        push_label(label(
                                             Arc::from(mark.as_str()),
                                             b.x + b.width - action_layout.padding - mark_width,
                                             mark_width,
@@ -580,7 +692,13 @@ impl super::Compositor {
                                     }
                                 }
 
-                                let dismiss = dismiss_bounds(zone_name, zone_tokens, policy, card);
+                                let dismiss = dismiss_bounds(
+                                    zone_name,
+                                    zone_tokens,
+                                    policy,
+                                    card,
+                                    record.caption.as_deref(),
+                                );
                                 let glyph = style.dismiss_glyph;
                                 static DISMISS_LABEL: std::sync::OnceLock<Arc<str>> =
                                     std::sync::OnceLock::new();
@@ -988,11 +1106,13 @@ impl super::Compositor {
         // Inject a TextItem for the local composer draft + caret glyph on top of
         // the composer-active tile.  The background geometry is handled in
         // render_composer_overlay / render_frame tile loop.
-        if self.local_composer.is_some() {
-            let composer_tokens = resolve_composer_overlay_tokens(&self.token_map);
-            for tile in &Self::sort_tiles_with_drag_boost(self.policy_visible_tiles(scene), scene) {
+        // Kept drafts of unfocused composers draw the same way, without caret.
+        let composer_tokens = resolve_composer_overlay_tokens(&self.token_map);
+        let tiles = Self::sort_tiles_with_drag_boost(self.policy_visible_tiles(scene), scene);
+        for composer in self.drawn_composers() {
+            for tile in &tiles {
                 if let Some(mut text_item) =
-                    self.collect_composer_text_item(tile, scene, sw, sh, &composer_tokens)
+                    self.collect_composer_text_item(composer, tile, scene, sw, sh, &composer_tokens)
                 {
                     // Fold the whole-tile opacity into the composer draft so it
                     // fades with (and vanishes alongside) the tile backdrop
@@ -1388,7 +1508,7 @@ impl super::Compositor {
                         node_id = ?node_id,
                         content_len = tm.content.len(),
                         "markdown cache miss on render path — expected commit-time prime \
-                         (hud-xcp9b); parsing inline to preserve styling [hud-380dl]"
+                        ; parsing inline to preserve styling"
                     );
                     // Self-healing fallback cache (defense-in-depth):
                     // check the small side cache before paying a fresh parse.
@@ -1987,7 +2107,7 @@ pub(super) fn collect_ellipsis_text_items_from_node(
                         node_id = ?node_id,
                         content_len = tm.content.len(),
                         "markdown cache miss on ellipsis render path — expected commit-time prime \
-                         (hud-xcp9b); parsing inline to preserve styling [hud-380dl]"
+                        ; parsing inline to preserve styling"
                     );
                     let parsed =
                         crate::markdown::parse_markdown_subset(&tm.content, markdown_tokens);
@@ -2076,18 +2196,6 @@ mod portal_reveal_render_tests {
     }
     use tze_hud_scene::types::{FontFamily, Rect, Rgba, TextAlign, TextMarkdownNode, TextOverflow};
 
-    fn plain_attr() -> StyleAttr {
-        StyleAttr {
-            weight: None,
-            italic: false,
-            monospace: false,
-            color: None,
-            background_color: None,
-            size_scale: None,
-            href: None,
-        }
-    }
-
     /// Build a cached markdown `TextItem` whose laid-out text == `plain`, with a
     /// single bold span over the leading `bold_prefix` bytes.
     fn markdown_item(plain: &str, bold_prefix: usize) -> TextItem {
@@ -2098,7 +2206,7 @@ mod portal_reveal_render_tests {
                 end_byte: bold_prefix,
                 attr: StyleAttr {
                     weight: Some(700),
-                    ..plain_attr()
+                    ..StyleAttr::plain()
                 },
             }],
             code_panels: vec![],
@@ -2108,8 +2216,12 @@ mod portal_reveal_render_tests {
             code_blocks: vec![],
             line_height_multiplier: 1.4,
         };
-        let node = TextMarkdownNode {
-            content: plain.to_owned(),
+        TextItem::from_text_markdown_cached(&markdown_node(plain), 0.0, 0.0, &parsed)
+    }
+
+    fn markdown_node(content: &str) -> TextMarkdownNode {
+        TextMarkdownNode {
+            content: content.into(),
             bounds: Rect::new(0.0, 0.0, 400.0, 300.0),
             font_size_px: 16.0,
             font_family: FontFamily::SystemSansSerif,
@@ -2118,18 +2230,12 @@ mod portal_reveal_render_tests {
             alignment: TextAlign::Start,
             overflow: TextOverflow::Clip,
             color_runs: Box::default(),
-        };
-        TextItem::from_text_markdown_cached(&node, 0.0, 0.0, &parsed)
+        }
     }
 
     /// Alpha (0..=255) of the styled run covering `byte`, or `None` if uncovered.
     fn alpha_at(item: &TextItem, byte: usize) -> Option<u8> {
-        item.styled_runs
-            .iter()
-            .rev()
-            .find(|r| r.start_byte <= byte && byte < r.end_byte)
-            .and_then(|r| r.color)
-            .map(|c| c[3])
+        color_at(item, byte).map(|color| color[3])
     }
 
     #[test]
@@ -2243,38 +2349,22 @@ mod portal_reveal_render_tests {
     #[test]
     fn tail_cursor_color_reads_content_end_marker_only() {
         use tze_hud_scene::types::TextColorRun;
-        let content = "some transcript ▍".to_string();
-        let end = content.len() as u32;
-        let accent = Rgba {
-            r: 0.2,
-            g: 0.4,
-            b: 0.8,
-            a: 1.0,
-        };
-        let mut node = TextMarkdownNode {
-            content: content.clone(),
-            bounds: Rect::new(0.0, 0.0, 400.0, 300.0),
-            font_size_px: 16.0,
-            font_family: FontFamily::SystemSansSerif,
-            color: Rgba::WHITE,
-            background: None,
-            alignment: TextAlign::Start,
-            overflow: TextOverflow::Clip,
-            // A byte-0 sentinel (e.g. stale/lifecycle) plus the content-end cursor
-            // marker — only the latter must be picked up.
-            color_runs: Box::from([
-                TextColorRun {
-                    start_byte: 0,
-                    end_byte: 0,
-                    color: Rgba::WHITE,
-                },
-                TextColorRun {
-                    start_byte: end,
-                    end_byte: end,
-                    color: accent,
-                },
-            ]),
-        };
+        let mut node = markdown_node("some transcript ▍");
+        let end = node.content.len() as u32;
+        let accent = Rgba::new(0.2, 0.4, 0.8, 1.0);
+        // Only the content-end marker should be picked up.
+        node.color_runs = Box::from([
+            TextColorRun {
+                start_byte: 0,
+                end_byte: 0,
+                color: Rgba::WHITE,
+            },
+            TextColorRun {
+                start_byte: end,
+                end_byte: end,
+                color: accent,
+            },
+        ]);
         assert_eq!(
             markdown_node_tail_cursor_color(&node),
             Some(crate::text::rgba_to_srgb_u8(accent)),
@@ -2338,60 +2428,36 @@ mod transcript_measure_tests {
     use crate::renderer::token_colors::resolve_transcript_max_measure_px;
     use std::collections::HashMap;
 
-    // ── clamp_transcript_measure: pure logic (no GPU) ──────────────
-
     #[test]
-    fn clamp_unbounded_returns_full_width() {
-        // 0 = unbounded: the measure is left at the full node width so the
-        // default profile (default token value "0") is unchanged.
-        assert!((clamp_transcript_measure(400.0, 0.0) - 400.0).abs() < 1e-4);
+    fn transcript_measure_clamp_only_narrows_a_bounded_width() {
+        for (width, cap, expected) in [
+            (400.0, 0.0, 400.0),
+            (400.0, 120.0, 120.0),
+            (200.0, 640.0, 200.0),
+            (300.0, 300.0, 300.0),
+        ] {
+            let actual = clamp_transcript_measure(width, cap);
+            assert!((actual - expected).abs() < 1e-4, "width={width}, cap={cap}");
+        }
     }
 
     #[test]
-    fn clamp_narrows_when_cap_below_width() {
-        // Cap < node width: the effective measure shrinks to the cap.
-        assert!((clamp_transcript_measure(400.0, 120.0) - 120.0).abs() < 1e-4);
-    }
-
-    #[test]
-    fn clamp_never_widens_when_cap_above_width() {
-        // Cap >= node width: a node already narrower than the cap is left
-        // untouched (the clamp only ever narrows, never widens).
-        assert!((clamp_transcript_measure(200.0, 640.0) - 200.0).abs() < 1e-4);
-        // Exactly equal is a no-op.
-        assert!((clamp_transcript_measure(300.0, 300.0) - 300.0).abs() < 1e-4);
-    }
-
-    // ── resolve_transcript_max_measure_px: token resolution ───────
-
-    #[test]
-    fn resolve_defaults_to_unbounded_when_absent() {
-        let map = HashMap::new();
-        assert_eq!(resolve_transcript_max_measure_px(&map), 0.0);
-    }
-
-    #[test]
-    fn resolve_parses_positive_measure() {
-        let mut map = HashMap::new();
-        map.insert(
-            "portal.transcript.max_measure_px".to_string(),
-            "640".to_string(),
-        );
-        assert!((resolve_transcript_max_measure_px(&map) - 640.0).abs() < 1e-4);
-    }
-
-    #[test]
-    fn resolve_rejects_negative_and_nonfinite() {
-        for bad in ["-1", "nan", "inf", "not-a-number", ""] {
-            let mut map = HashMap::new();
-            map.insert(
-                "portal.transcript.max_measure_px".to_string(),
-                bad.to_string(),
-            );
+    fn resolve_transcript_measure_defaults_to_unbounded_without_a_valid_token() {
+        const KEY: &str = "portal.transcript.max_measure_px";
+        assert_eq!(resolve_transcript_max_measure_px(&HashMap::new()), 0.0);
+        for (value, expected) in [
+            ("640", 640.0),
+            ("-1", 0.0),
+            ("nan", 0.0),
+            ("inf", 0.0),
+            ("not-a-number", 0.0),
+            ("", 0.0),
+        ] {
+            let map = HashMap::from([(KEY.into(), value.into())]);
             assert_eq!(
                 resolve_transcript_max_measure_px(&map),
-                0.0,
-                "value {bad:?} must fall back to unbounded (0.0)"
+                expected,
+                "{value:?}"
             );
         }
     }
@@ -2411,42 +2477,15 @@ mod transcript_measure_tests {
         let line = "The quick brown fox jumps over the lazy dog near the \
                     riverbank at dawn every single morning without fail.";
 
-        let full_measure = clamp_transcript_measure(node_width, 0.0);
-        let capped_measure = clamp_transcript_measure(node_width, cap);
-        assert!((full_measure - node_width).abs() < 1e-4);
-        assert!((capped_measure - cap).abs() < 1e-4);
-
-        let full_lines =
-            crate::text::composer_wrap_line_widths(&mut fs, line, full_measure, font_size_px, lhm)
-                .len();
-        let capped_lines = crate::text::composer_wrap_line_widths(
-            &mut fs,
-            line,
-            capped_measure,
-            font_size_px,
-            lhm,
-        )
-        .len();
-
+        let mut lines_at = |measure: f32| {
+            crate::text::composer_wrap_line_widths(&mut fs, line, measure, font_size_px, lhm).len()
+        };
+        let full = lines_at(node_width);
+        let capped = lines_at(clamp_transcript_measure(node_width, cap));
         assert!(
-            capped_lines > full_lines,
-            "clamped measure ({cap}px) must wrap into more lines than full width \
-             ({node_width}px); got capped={capped_lines} full={full_lines}"
+            capped > full,
+            "{cap}px cap should wrap into more lines than {node_width}px: {capped} vs {full}"
         );
-
-        // Unbounded (0) must reproduce the full-width wrap exactly — no regression.
-        let unbounded_measure = clamp_transcript_measure(node_width, 0.0);
-        let unbounded_lines = crate::text::composer_wrap_line_widths(
-            &mut fs,
-            line,
-            unbounded_measure,
-            font_size_px,
-            lhm,
-        )
-        .len();
-        assert_eq!(
-            unbounded_lines, full_lines,
-            "unbounded (0) measure must match full-width wrapping exactly"
-        );
+        assert_eq!(lines_at(clamp_transcript_measure(node_width, 0.0)), full);
     }
 }

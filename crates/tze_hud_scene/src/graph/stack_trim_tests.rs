@@ -4,12 +4,11 @@
 
 use super::*;
 use crate::clock::TestClock;
-use crate::mutation::{MutationBatch, SceneMutation};
 use crate::types::{
     ContentionPolicy, GeometryPolicy, LayerAttachment, NotificationAction, NotificationPayload,
-    RenderingPolicy, ZoneContent, ZoneDefinition, ZoneMediaType, ZonePublishToken,
+    RenderingPolicy, ZoneContent, ZoneDefinition, ZoneMediaType,
 };
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 const ZONE: &str = "notification-area";
 
@@ -60,6 +59,7 @@ fn question(text: &str) -> ZoneContent {
             label: "Yes".into(),
             callback_id: Some(format!("{text}-yes")),
             url: None,
+            role: None,
         }],
     )
 }
@@ -71,6 +71,7 @@ fn link(text: &str) -> ZoneContent {
             label: "Open".into(),
             callback_id: None,
             url: Some("https://example.com/report".into()),
+            role: None,
         }],
     )
 }
@@ -98,23 +99,21 @@ fn publish_keyed(
             .publish_to_zone(ZONE, content, agent, key, None, None)
             .unwrap(),
         Plane::Grpc => {
-            let batch = MutationBatch {
-                batch_id: SceneId::new(),
-                agent_namespace: agent.into(),
-                mutations: vec![SceneMutation::PublishToZone {
-                    zone_name: ZONE.into(),
-                    content,
-                    publish_token: ZonePublishToken { token: Vec::new() },
-                    merge_key: key,
-                    expires_at_wall_us: None,
-                    content_classification: None,
-                    breakpoints: Vec::new(),
-                    held: true,
-                }],
-                timing_hints: None,
+            let publisher = crate::Publisher {
+                namespace: agent.into(),
                 lease_id: None,
+                origin: None,
             };
-            assert!(scene.apply_batch(&batch).applied);
+            let publication = crate::Publication::Zone {
+                zone_name: ZONE.into(),
+                content,
+                merge_key: key,
+                expires_at_wall_us: None,
+                content_classification: None,
+                breakpoints: Vec::new(),
+                held: true,
+            };
+            scene.publish(&publisher, &publication).unwrap();
         }
     }
 }
@@ -302,7 +301,7 @@ fn a_finished_wait_does_not_swallow_the_receipt() {
         .publish_notification_until_with_id(ZONE, question("q1"), "asker", lease, None, None, id)
         .unwrap();
     // The call returned at its deadline; the card stays on screen.
-    active.store(false, std::sync::atomic::Ordering::Release);
+    active.store(false, Ordering::Release);
     for text in ["q2", "q3", "q4", "q5", "q6"] {
         publish(&mut scene, Plane::Mcp, "other", question(text));
     }
@@ -424,4 +423,94 @@ fn a_newer_receipt_for_the_same_key_replaces_the_older_one() {
         receipts(&mut scene, "builder"),
         [(Some("build:1".into()), PendingActionKind::Displaced)]
     );
+}
+
+/// Hands out a queued display per placement and counts every call.
+#[derive(Debug, Default)]
+struct Placer {
+    next: std::sync::Mutex<Vec<Option<String>>>,
+    calls: std::sync::atomic::AtomicUsize,
+}
+
+impl crate::QuestionPlacer for Placer {
+    fn place(&self) -> Option<String> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        self.next.lock().unwrap().pop().flatten()
+    }
+}
+
+fn placed(scene: &SceneGraph) -> Vec<(String, Option<String>)> {
+    scene
+        .zone_registry
+        .active_for_zone(ZONE)
+        .iter()
+        .map(|r| {
+            let ZoneContent::Notification(n) = &r.content else {
+                unreachable!()
+            };
+            (n.text.clone(), r.display.clone())
+        })
+        .collect()
+}
+
+/// R12.1: a question is placed once when presented, on either plane and at
+/// a delay's due time; a non-question (url-only included) never asks; a
+/// same-key replacement keeps its display; and the stack still trims once
+/// across displays (S8).
+#[test]
+fn questions_are_placed_once_when_presented() {
+    let (mut scene, clock) = scene();
+    let placer = Arc::new(Placer::default());
+    scene.overlay.question_placer = Some(placer.clone());
+    let calls = || placer.calls.load(Ordering::SeqCst);
+    let queue = |d: &str| placer.next.lock().unwrap().push(Some(d.into()));
+
+    queue("DISPLAY2");
+    publish_keyed(&mut scene, Plane::Mcp, "a", question("q1"), Some("k"));
+    queue("DISPLAY3");
+    publish(&mut scene, Plane::Grpc, "a", question("q2"));
+    publish(&mut scene, Plane::Mcp, "a", status("s"));
+    publish(&mut scene, Plane::Mcp, "a", link("url"));
+    assert_eq!(calls(), 2, "only questions sample");
+    // S4: a same-key replacement keeps DISPLAY2 without sampling again,
+    // whatever it now asks.
+    publish_keyed(&mut scene, Plane::Mcp, "a", status("q1 again"), Some("k"));
+    assert_eq!(calls(), 2);
+    assert_eq!(
+        placed(&scene),
+        [
+            ("q1 again".into(), Some("DISPLAY2".into())),
+            ("q2".into(), Some("DISPLAY3".into())),
+            ("s".into(), None),
+            ("url".into(), None),
+        ]
+    );
+    // S6: a delayed question samples when it comes due, not at the call.
+    let publisher = crate::Publisher {
+        namespace: "a".into(),
+        lease_id: None,
+        origin: None,
+    };
+    let publication = crate::Publication::Zone {
+        zone_name: ZONE.into(),
+        content: question("later"),
+        merge_key: None,
+        expires_at_wall_us: None,
+        content_classification: None,
+        breakpoints: Vec::new(),
+        held: true,
+    };
+    scene.schedule_publication(clock.now_us() + 5_000, publisher, publication);
+    scene.apply_due_publications();
+    assert_eq!(calls(), 2, "not due yet");
+    clock.advance(5);
+    queue("DISPLAY2");
+    scene.apply_due_publications();
+    assert_eq!(calls(), 3);
+    // S8: five cards over three displays; a sixth trims the oldest
+    // non-question (the replaced card on DISPLAY2) once, as one stack.
+    assert_eq!(placed(&scene).len(), 5);
+    publish(&mut scene, Plane::Mcp, "a", status("sixth"));
+    let texts: Vec<_> = placed(&scene).into_iter().map(|(t, _)| t).collect();
+    assert_eq!(texts, ["q2", "s", "url", "later", "sixth"]);
 }

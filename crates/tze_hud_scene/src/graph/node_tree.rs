@@ -27,8 +27,7 @@ impl SceneGraph {
     /// `node` is inserted, its side effects registered, and each SceneId in
     /// `node.children` is looked up in `descendants` and materialized
     /// recursively (depth-first). `descendants` is the flat id→node map of every
-    /// node BELOW some root (produced from the wire's inline `NodeProto.children`
-    /// by `convert::proto_node_tree_to_scene`).
+    /// node BELOW some root.
     ///
     /// A child id absent from `descendants` is left as a dangling ref rather than
     /// aborting — this preserves the legacy re-attach case where `node.children`

@@ -1,7 +1,0 @@
-[
-  {
-    "zone": "subtitle",
-    "content": "This subtitle expires in 3 seconds",
-    "ttl_ms": 3000
-  }
-]

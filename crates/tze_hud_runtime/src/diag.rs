@@ -11,7 +11,7 @@
 //! diagnose a freeze after the fact.
 //!
 //! Path resolution: `TZE_HUD_DIAG_LOG` env var if set, else
-//! `hud-diag.log` in the log directory (see [`crate::operator::logs::log_dir`]).
+//! `hud-diag.log` in the process log directory.
 //! It rotates to `.1` at [`crate::operator::logs::MAX_LOG_BYTES`], like the
 //! main log, so a panic loop cannot fill the disk.
 

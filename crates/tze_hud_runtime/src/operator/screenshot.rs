@@ -16,7 +16,7 @@ use tze_hud_compositor::{CaptureError, CapturedFrame};
 use crate::http::{OperatorCode, OperatorError, Response};
 
 /// How long the compositor has to answer before the request fails.
-pub const CAPTURE_TIMEOUT: Duration = Duration::from_secs(3);
+const CAPTURE_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// Largest PNG the endpoint will return.
 pub const MAX_PNG_BYTES: usize = 32 * 1024 * 1024;
@@ -37,8 +37,9 @@ pub struct CaptureRequest {
 pub struct CaptureInbox(Arc<std::sync::Mutex<mpsc::UnboundedReceiver<CaptureRequest>>>);
 
 impl CaptureInbox {
-    /// An inbox no endpoint feeds (runtimes without an admin screenshot).
-    pub fn detached() -> Self {
+    /// An inbox for test harnesses without an admin screenshot endpoint.
+    #[cfg(any(test, feature = "test-harness"))]
+    pub(crate) fn detached() -> Self {
         capture_channel(|| {}).1
     }
 

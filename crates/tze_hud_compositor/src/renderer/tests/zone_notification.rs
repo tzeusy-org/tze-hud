@@ -507,6 +507,7 @@ async fn notification_actions_layout_matches_hit_regions() {
                                 label: (*label).into(),
                                 callback_id: (i % 2 == 0).then(|| i.to_string()),
                                 url: (i % 2 == 1).then(|| format!("https://example.com/{i}")),
+                                role: None,
                             })
                             .collect(),
                         ..Default::default()
@@ -525,6 +526,9 @@ async fn notification_actions_layout_matches_hit_regions() {
         let descriptor =
             compositor.notification_action_layout("notification-area", record, policy, 552.0);
         let publication_id = record.publication_id;
+        let ZoneContent::Notification(payload) = record.content.clone() else {
+            unreachable!()
+        };
         assert_eq!(descriptor.stacked, stacked);
         let shapes = compositor.notification_layouts.borrow().shapes;
         let regions = scene.overlay.zone_hit_regions.clone();
@@ -565,7 +569,7 @@ async fn notification_actions_layout_matches_hit_regions() {
                 .get(&region.interaction_id)
                 .copied()
                 .unwrap_or_default();
-            let fill = style.control_fill(state, style.action_fill(index));
+            let fill = style.control_fill(state, style.action_fill(&payload, index));
             let drawn: Vec<_> = commands
                 .iter()
                 .filter(|c| {
@@ -694,6 +698,57 @@ async fn notification_actions_layout_matches_hit_regions() {
                 .iter()
                 .any(|item| ["1", "2", "3", "4"].contains(&item.text.as_ref()))
         );
+        // A pressed url action says what happened in its label's exact box;
+        // failure takes `color.error`. Nothing else moves.
+        scene.overlay.notification_answer = None;
+        let geometry = |item: &crate::text::TextItem| {
+            (
+                item.pixel_x,
+                item.pixel_y,
+                item.bounds_width,
+                item.bounds_height,
+            )
+        };
+        let idle = after.iter().find(|item| &*item.text == labels[1]).unwrap();
+        let error =
+            super::super::token_colors::parse_hex_color(&compositor.token_map["color.error"])
+                .unwrap();
+        for state in [
+            tze_hud_scene::LinkFeedbackState::Opening,
+            tze_hud_scene::LinkFeedbackState::Opened,
+            tze_hud_scene::LinkFeedbackState::Failed,
+        ] {
+            scene.set_link_feedback(Some((
+                tze_hud_scene::LinkFeedbackTarget::CardAction {
+                    publication_id,
+                    index: 1,
+                },
+                state,
+            )));
+            let shown = compositor.collect_text_items(&scene, 1280.0, 1080.0);
+            let item = shown
+                .iter()
+                .find(|item| &*item.text == state.label())
+                .unwrap();
+            assert_eq!(
+                geometry(item),
+                geometry(idle),
+                "{state:?} keeps the label's box"
+            );
+            if state == tze_hud_scene::LinkFeedbackState::Failed {
+                assert_eq!(item.color[..3], crate::text::rgba_to_srgb_u8(error)[..3]);
+            } else {
+                assert_eq!(item.color, idle.color);
+            }
+            assert_eq!(
+                shown.iter().filter(|item| &*item.text == labels[1]).count(),
+                1,
+                "the other card's label is untouched"
+            );
+            compositor.populate_zone_hit_regions(&mut scene, 1280.0, 1080.0);
+            assert_eq!(scene.overlay.zone_hit_regions, regions);
+        }
+        scene.set_link_feedback(None);
     }
 }
 
@@ -736,6 +791,7 @@ async fn check_notification_action_row(margin: Option<f32>) {
         label: label.to_owned(),
         callback_id: Some(label.to_lowercase()),
         url: None,
+        role: None,
     };
     let payload = |title: &str, text: &str, labels: &[&str]| NotificationPayload {
         text: text.to_owned(),
@@ -995,6 +1051,7 @@ async fn notification_action_button_is_visible_and_hover_brightens_it() {
                     label: "Approve".to_owned(),
                     callback_id: Some("approve".to_owned()),
                     url: None,
+                    role: None,
                 }],
             }),
             "test",
@@ -1490,7 +1547,7 @@ fn bordered_notification_scene(radius: Option<f32>) -> SceneGraph {
 /// takes the state layer at the shared dismiss bounds.
 #[tokio::test]
 async fn test_notification_card_border_is_an_sdf_border() {
-    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
+    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
 
     let flat = bordered_notification_scene(None);
     let mut vertices: Vec<crate::pipeline::RectVertex> = Vec::new();
@@ -1560,6 +1617,217 @@ async fn test_notification_card_border_is_an_sdf_border() {
     assert_eq!(cmds[0].radius, 12.0);
     assert!(cmds[0].color[3] > 0.7, "card carries its fill");
     assert_eq!(cmds[0].border.map(|b| b.width), Some(1.0));
+
+    // Overlapping same-layer zones share one stable paint order, independent
+    // of registration and randomized map buckets. Keep the actual SDF/pixel
+    // path and generated controls in this existing border parent.
+    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+    compositor.set_token_map(HashMap::from([
+        ("color.notification.outline".into(), "#FF0000".into()),
+        (
+            "color.notification.caution.outline".into(),
+            "#00FF00".into(),
+        ),
+        ("color.notification.container.low".into(), "#0000FF".into()),
+        ("opacity.notification".into(), "1".into()),
+    ]));
+    let mut failures = Vec::new();
+    for reverse in [false, true] {
+        let mut overlap = SceneGraph::new(1280.0, 720.0);
+        let mut names = vec!["alert-banner".to_string()];
+        names.extend((0..8).map(|i| format!("notification-area-{i:02}")));
+        let expected_names = names[1..].to_vec();
+        if reverse {
+            names.reverse();
+        }
+        for name in names {
+            let banner = name == "alert-banner";
+            let index = name.rsplit('-').next().unwrap().parse::<u32>().unwrap_or(0);
+            let mut zone =
+                bordered_notification_scene(Some(8.0)).zone_registry.zones["notification-area"]
+                    .clone();
+            zone.name = name.clone();
+            zone.geometry_policy = GeometryPolicy::Relative {
+                x_pct: if banner {
+                    0.70
+                } else {
+                    0.75 + index as f32 * 0.001
+                },
+                y_pct: if banner { 0.0 } else { 40.0 / 720.0 },
+                width_pct: 0.30,
+                height_pct: 0.20,
+            };
+            zone.accepted_media_types.push(ZoneMediaType::SolidColor);
+            if banner {
+                // A whole-zone rounded solid fill, not a notification Stack slot.
+                zone.contention_policy = ContentionPolicy::LatestWins;
+                zone.rendering_policy.backdrop_opacity = Some(1.0);
+            }
+            overlap.register_zone(zone);
+            let content = if banner {
+                ZoneContent::SolidColor(Rgba::new(1.0, 0.0, 0.0, 1.0))
+            } else {
+                ZoneContent::Notification(NotificationPayload {
+                    text: name.clone(),
+                    urgency: if index == 7 { 2 } else { 0 },
+                    actions: vec![NotificationAction {
+                        label: "Act".into(),
+                        callback_id: Some("act".into()),
+                        url: None,
+                        role: None,
+                    }],
+                    ..Default::default()
+                })
+            };
+            overlap
+                .publish_to_zone(&name, content, "test", None, None, None)
+                .unwrap();
+        }
+        let commands = compositor
+            .collect_all_rounded_rect_cmds(&overlap, 1280.0, 720.0)
+            .chrome;
+        assert!(
+            commands.iter().any(|c| c.x == 896.0
+                && c.y == 0.0
+                && c.width == 384.0
+                && c.height == 144.0
+                && c.color == [1.0, 0.0, 0.0, 1.0]),
+            "the actual rounded banner fill must cover the sampled notification border"
+        );
+        let xs: Vec<_> = commands
+            .iter()
+            // Backdrops span the full 384px zone; action controls are inset.
+            .filter(|c| (c.width - 384.0).abs() < 0.01)
+            .map(|c| c.x)
+            .collect();
+        let expected_xs: Vec<_> = std::iter::once(0.70 * 1280.0)
+            .chain((0..8).map(|i| (0.75 + i as f32 * 0.001) * 1280.0))
+            .collect();
+        if xs != expected_xs {
+            failures.push(format!("SDF order reverse={reverse}: {xs:?}"));
+        }
+        let texts = compositor.collect_text_items(&overlap, 1280.0, 720.0);
+        let bodies: Vec<_> = texts
+            .iter()
+            .filter(|t| t.text.starts_with("notification-area-"))
+            .map(|t| t.text.to_string())
+            .collect();
+        if bodies != expected_names {
+            failures.push(format!("text order reverse={reverse}: {bodies:?}"));
+        }
+        compositor.prime_markdown_cache(&overlap);
+        compositor.prime_truncation_cache(&overlap);
+        compositor.render_frame_headless(&mut overlap, &surface);
+        let pixels = surface.read_pixels(&compositor.device);
+        let offset = (40 * 1280 + 1144) * 4;
+        let border = &pixels[offset..offset + 4];
+        eprintln!(
+            "[ZONE-ORDER-PIXEL] reverse={reverse} x1144row40={border:?} SDFbackdrop_xs={xs:?}"
+        );
+        if !border
+            .iter()
+            .zip([0u8, 255, 0, 255])
+            .all(|(a, b)| a.abs_diff(b) <= 3)
+        {
+            failures.push(format!("overlap border reverse={reverse}: {border:?}"));
+        }
+        compositor.populate_zone_hit_regions(&mut overlap, 1280.0, 720.0);
+        let mut keyboard: Vec<_> = overlap.overlay.zone_hit_regions.iter().collect();
+        keyboard.sort_by_key(|r| r.tab_order);
+        let keyboard_names: Vec<_> = keyboard
+            .iter()
+            .filter(|r| matches!(r.kind, ZoneInteractionKind::Action { .. }))
+            .map(|r| r.zone_name.clone())
+            .collect();
+        assert_eq!(
+            keyboard_names, expected_names,
+            "keyboard order stays ascending"
+        );
+        let top_action = overlap
+            .overlay
+            .zone_hit_regions
+            .iter()
+            .find(|r| {
+                r.zone_name == "notification-area-07"
+                    && matches!(r.kind, ZoneInteractionKind::Action { .. })
+            })
+            .unwrap()
+            .clone();
+        let (x, y) = (
+            top_action.bounds.x + top_action.bounds.width / 2.0,
+            top_action.bounds.y + top_action.bounds.height / 2.0,
+        );
+        if !matches!(overlap.hit_test(x,y), HitResult::ZoneInteraction { zone_name, kind: ZoneInteractionKind::Action { index: 0 }, .. } if zone_name == "notification-area-07")
+        {
+            failures.push(format!(
+                "pointer must pick later-painted zone reverse={reverse}: {:?}",
+                overlap.hit_test(x, y)
+            ));
+        }
+        // Preserve first-control precedence inside the winning zone, and the
+        // existing runtime controls that are inserted before/after this block.
+        let close = overlap
+            .overlay
+            .zone_hit_regions
+            .iter_mut()
+            .find(|r| {
+                r.zone_name == "notification-area-07"
+                    && matches!(r.kind, ZoneInteractionKind::Dismiss)
+            })
+            .unwrap();
+        close.bounds = top_action.bounds;
+        if !matches!(overlap.hit_test(x,y), HitResult::ZoneInteraction { zone_name, kind: ZoneInteractionKind::Dismiss, .. } if zone_name == "notification-area-07")
+        {
+            failures.push(format!("within-card priority reverse={reverse}"));
+        }
+        let mut runtime = top_action.clone();
+        runtime.zone_name = "__chrome_jump_to_latest__".into();
+        runtime.kind = ZoneInteractionKind::JumpToLatest {
+            tile_id: SceneId::null(),
+        };
+        overlap.overlay.zone_hit_regions.push(runtime.clone());
+        if !matches!(
+            overlap.hit_test(x, y),
+            HitResult::ZoneInteraction {
+                kind: ZoneInteractionKind::Dismiss,
+                ..
+            }
+        ) {
+            failures.push("appended runtime control changed priority".into());
+        }
+        runtime.kind = ZoneInteractionKind::DismissTile {
+            tile_id: SceneId::null(),
+        };
+        overlap.overlay.zone_hit_regions.insert(0, runtime);
+        assert!(matches!(
+            overlap.hit_test(x, y),
+            HitResult::ZoneInteraction {
+                kind: ZoneInteractionKind::DismissTile { .. },
+                ..
+            }
+        ));
+        overlap.set_owner_hidden(tze_hud_scene::graph::SurfaceClasses {
+            zones: true,
+            ..Default::default()
+        });
+        assert!(
+            compositor
+                .collect_all_rounded_rect_cmds(&overlap, 1280.0, 720.0)
+                .chrome
+                .is_empty()
+        );
+        assert!(
+            compositor
+                .collect_text_items(&overlap, 1280.0, 720.0)
+                .is_empty()
+        );
+        compositor.populate_zone_hit_regions(&mut overlap, 1280.0, 720.0);
+        assert!(overlap.overlay.zone_hit_regions.is_empty());
+    }
+    assert!(
+        failures.is_empty(),
+        "same-layer order failures: {failures:?}"
+    );
 }
 
 /// Pixel check of the SDF border on a rounded card (fullscreen, opaque border

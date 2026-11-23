@@ -40,8 +40,8 @@ impl SceneId {
     /// When encoded as a protobuf `bytes` field, this value serializes to 16
     /// zero bytes. Note that in proto3 an unset `bytes` field defaults to an
     /// empty vector (length 0), not 16 zero bytes; callers must explicitly
-    /// handle the empty-bytes case (e.g., `proto_to_scene_id` returns `None`
-    /// for empty input) and decide whether to treat it as this sentinel.
+    /// handle the empty-bytes case (`from_bytes_le` returns `None` for empty
+    /// input) and decide whether to treat it as this sentinel.
     pub fn null() -> Self {
         SceneId(Uuid::nil())
     }
@@ -482,7 +482,7 @@ pub struct PortalPart {
 pub struct PortalIdentity {
     /// Stable adapter-assigned session id (max [`PORTAL_SESSION_ID_MAX_BYTES`]).
     pub session_id: String,
-    /// Human-readable display name (max [`PORTAL_DISPLAY_NAME_MAX_BYTES`]).
+    /// Human-readable display name, limited to 128 UTF-8 bytes.
     pub display_name: String,
     /// Optional peer class of the far side of the stream.
     pub peer_class: PortalPeerClass,
@@ -518,7 +518,7 @@ pub const PORTAL_MAX_PARTS: usize = 8;
 /// Maximum UTF-8 byte length of [`PortalIdentity::session_id`].
 pub const PORTAL_SESSION_ID_MAX_BYTES: usize = 256;
 /// Maximum UTF-8 byte length of [`PortalIdentity::display_name`].
-pub const PORTAL_DISPLAY_NAME_MAX_BYTES: usize = 128;
+const PORTAL_DISPLAY_NAME_MAX_BYTES: usize = 128;
 
 impl PortalSurface {
     /// Validate the structural invariants of a portal surface descriptor:
@@ -724,35 +724,6 @@ pub struct TileSpatialBudget {
     pub max_tile_height_px: f32,
 }
 
-/// A dimension in which an agent has violated its resource budget.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub enum BudgetViolation {
-    /// Agent holds more tiles than `max_tiles`.
-    TileCountExceeded { current: u32, limit: u32 },
-    /// Texture memory across all tiles exceeds `max_texture_bytes`.
-    TextureMemoryExceeded {
-        current_bytes: u64,
-        limit_bytes: u64,
-    },
-    /// Scene mutation rate exceeds `max_update_rate_hz`.
-    UpdateRateExceeded { current_hz: f32, limit_hz: f32 },
-    /// A single tile contains more nodes than `max_nodes_per_tile`.
-    NodeCountPerTileExceeded {
-        tile_id_hint: String,
-        current: u32,
-        limit: u32,
-    },
-    /// Mutation would push texture memory past the absolute hard maximum.
-    /// This is a critical violation — session is revoked immediately.
-    CriticalTextureOomAttempt {
-        requested_bytes: u64,
-        hard_max_bytes: u64,
-    },
-    /// Session has accumulated too many protocol invariant violations.
-    /// This is a critical violation — session is revoked immediately.
-    RepeatedInvariantViolations { count: u32 },
-}
-
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Tile {
     pub id: SceneId,
@@ -764,7 +735,6 @@ pub struct Tile {
     pub opacity: f32,
     pub input_mode: InputMode,
     pub present_at: Option<u64>,
-    pub expires_at: Option<u64>,
     pub resource_budget: ResourceBudget,
     pub root_node: Option<SceneId>,
     /// Visual overlay hint for the compositor.
@@ -1257,7 +1227,7 @@ impl LeaseState {
 /// Lease caps violation error.
 #[derive(Clone, Debug, PartialEq)]
 pub enum CapsError {
-    /// Runtime-wide lease limit (64) exceeded — Requirement: Lease Caps.
+    /// Runtime-wide lease limit (64) exceeded.
     MaxRuntimeLeasesExceeded { current: usize, limit: usize },
 }
 
@@ -1381,7 +1351,7 @@ impl Lease {
     ///
     /// Accounts for suspension: time spent in Suspended state does not count
     /// toward TTL consumption.
-    pub fn is_expired(&self, now_ms: u64) -> bool {
+    pub(crate) fn is_expired(&self, now_ms: u64) -> bool {
         match self.state {
             // Terminal states are already past expiry semantics.
             LeaseState::Denied
@@ -1516,12 +1486,12 @@ impl Lease {
     }
 
     /// Whether mutations are allowed. Only Active state permits mutations.
-    pub fn is_mutations_allowed(&self) -> bool {
+    pub(crate) fn is_mutations_allowed(&self) -> bool {
         self.state == LeaseState::Active
     }
 
     /// Check if the grace period has expired for an orphaned lease.
-    pub fn check_grace_expired(&self, now_ms: u64) -> bool {
+    pub(crate) fn check_grace_expired(&self, now_ms: u64) -> bool {
         match (self.state, self.disconnected_at_ms) {
             (LeaseState::Orphaned, Some(disc_at)) => now_ms >= disc_at + self.grace_period_ms,
             _ => false,
@@ -1529,7 +1499,7 @@ impl Lease {
     }
 
     /// Check if a suspended lease has exceeded the maximum suspension time.
-    pub fn check_suspension_expired(&self, now_ms: u64, max_suspend_ms: u64) -> bool {
+    pub(crate) fn check_suspension_expired(&self, now_ms: u64, max_suspend_ms: u64) -> bool {
         match (self.state, self.suspended_at_ms) {
             (LeaseState::Suspended, Some(susp_at)) => now_ms >= susp_at + max_suspend_ms,
             _ => false,
@@ -1956,30 +1926,33 @@ pub struct ZoneDefinition {
     pub layer_attachment: LayerAttachment,
 }
 
-// ─── Zone publish token ──────────────────────────────────────────────────────
-
-/// Opaque capability token that authorizes publishing to a specific zone.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ZonePublishToken {
-    /// Opaque bytes issued at session auth.
-    pub token: Vec<u8>,
-}
-
 // ─── Zone content ────────────────────────────────────────────────────────────
+
+/// What an action means; the theme decides how it looks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ActionRole {
+    /// Irreversible: drawn in the error tone and taken only by a press held
+    /// for `notification.action.hold.ms`. Callback actions only.
+    Destructive,
+}
 
 /// One notification button: a publisher callback or an owner-opened HTTPS link.
 /// The runtime resolves its target by live publication and zero-based index.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NotificationAction {
     pub label: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub callback_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<ActionRole>,
 }
 
 pub const ACTION_TARGET_HINT: &str = "action needs callback_id or url, not both";
 pub const ACTION_URL_HINT: &str = "action url must be https";
+pub const ACTION_ROLE_HINT: &str = "action role needs a callback action";
 
 impl NotificationAction {
     /// Preserve transport presence for exclusivity; only the parser's serialized
@@ -1987,9 +1960,15 @@ impl NotificationAction {
     pub fn validate(&self) -> Result<(), String> {
         match (&self.callback_id, &self.url) {
             (Some(callback), None) if !callback.is_empty() => Ok(()),
+            (None, Some(_)) if self.role.is_some() => Err(ACTION_ROLE_HINT.into()),
             (None, Some(_)) => self.encoded_url().map(|_| ()),
             _ => Err(ACTION_TARGET_HINT.into()),
         }
+    }
+
+    /// Taken only by a completed hold.
+    pub fn is_destructive(&self) -> bool {
+        self.role == Some(ActionRole::Destructive)
     }
 
     pub fn encoded_url(&self) -> Result<String, String> {
@@ -2044,8 +2023,15 @@ pub struct NotificationPayload {
 impl NotificationPayload {
     /// No title and no body: it would render as an empty card. Both publish
     /// planes reject it with `INVALID_ARGUMENT`.
-    pub fn is_blank(&self) -> bool {
+    fn is_blank(&self) -> bool {
         self.title.trim().is_empty() && self.text.trim().is_empty()
+    }
+
+    /// The primary action: the first that is not destructive. It is the
+    /// filled button and the answer chord's initial focus; it is never taken
+    /// automatically. `None` when every action is destructive (or none).
+    pub fn primary_action(&self) -> Option<usize> {
+        self.actions.iter().position(|a| !a.is_destructive())
     }
 
     /// Validate notification content before either publish plane admits or
@@ -2067,7 +2053,7 @@ impl NotificationPayload {
 }
 
 /// Hint for a rejected blank notification, shared by both planes.
-pub const BLANK_NOTIFICATION_HINT: &str = "notification needs a title or body";
+const BLANK_NOTIFICATION_HINT: &str = "notification needs a title or body";
 
 /// Maximum number of action buttons accepted and rendered per notification slot.
 pub const MAX_NOTIFICATION_ACTIONS: usize = 4;
@@ -2085,6 +2071,8 @@ pub enum ZoneInteractionKind {
     Dismiss,
     /// Zero-based action index, scoped by the region's exact publication.
     Action { index: usize },
+    /// The owner-only Go to control in a notification card's caption row.
+    GoTo,
     /// Runtime chrome drag handle for a movable element.
     DragHandle {
         /// Element identity in scene-id wire format.
@@ -2344,14 +2332,25 @@ pub struct ZonePublishRecord {
     /// Not part of snapshots or the wire; leased and MCP publications use None.
     #[serde(skip)]
     pub publication_origin: Option<SceneId>,
+    /// The publishing MCP session's label, fixed when the publication is
+    /// admitted; a card draws it as a caption. `None` (unscoped) draws none.
+    /// Runtime-only, like the session itself: not part of snapshots.
+    #[serde(skip)]
+    pub caption: Option<String>,
+    /// Runtime-only, unsuffixed and untruncated caption token for Go to.
+    #[serde(skip)]
+    pub window_token: Option<String>,
+    /// The display a question card was placed on when it was presented
+    /// (normalized OS name, e.g. `DISPLAY2`). `None` draws it on the zone's
+    /// own display. Set once; a same-key replacement keeps it.
+    #[serde(skip)]
+    pub display: Option<String>,
 }
 
 /// A zone instance — zone type bound to a specific tab.
 ///
 /// In v1, zone instances are static (loaded from config; one instance per tab
 /// per zone type). Agents MUST NOT create zone instances.
-///
-/// Zone Registry (line 185).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ZoneInstance {
     /// The zone type (definition) this instance belongs to.
@@ -2390,8 +2389,7 @@ pub struct ZoneRegistrySnapshot {
 // ─── Widget types ────────────────────────────────────────────────────────────
 
 /// Minimum z-order for widget tiles. Widget tiles appear above zone tiles when
-/// they overlap spatially. Per widget-system Requirement: Widget Contention
-/// and Governance.
+/// they overlap spatially.
 pub const WIDGET_TILE_Z_MIN: u32 = 0x9000_0000;
 
 /// Parameter types supported by the widget system in v1.
@@ -2399,7 +2397,8 @@ pub const WIDGET_TILE_Z_MIN: u32 = 0x9000_0000;
 pub enum WidgetParamType {
     /// Integer relative milliseconds, snapshotted to wall time on presentation.
     Deadline,
-    /// IEEE 754 32-bit float, range-clamped to [min, max].
+    /// IEEE 754 32-bit float. Admission rejects values outside [min, max]
+    /// (and fractions of a whole-number count); nothing is clamped.
     F32,
     /// UTF-8 string, max 1024 bytes by default.
     String,
@@ -2435,6 +2434,14 @@ pub struct WidgetParamConstraints {
     /// Maximum value (f32 parameters only). None = unconstrained.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub f32_max: Option<f32>,
+    /// Whole numbers only (f32 parameters): a value with a fractional part is
+    /// refused, never floored. Bounds and default must be whole too.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub f32_integer: bool,
+    /// Deadline parameters only: the value counts up ("started this long
+    /// ago", an elapsed timer) instead of down.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub deadline_counts_up: bool,
     /// Maximum UTF-8 byte length for string parameters. 0 / None = default 1024.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub string_max_bytes: Option<u32>,
@@ -2466,14 +2473,34 @@ pub struct WidgetParameterDeclaration {
 }
 
 impl WidgetParameterDeclaration {
+    /// A deadline that counts up (an elapsed timer).
+    pub fn deadline_counts_up(&self) -> bool {
+        self.param_type == WidgetParamType::Deadline
+            && self
+                .constraints
+                .as_ref()
+                .is_some_and(|c| c.deadline_counts_up)
+    }
+
     /// Expected value for actionable transport errors; discovery uses its compact notation.
     pub fn value_hint(&self) -> std::string::String {
         let constraints = self.constraints.as_ref();
         match self.param_type {
+            WidgetParamType::Deadline if self.deadline_counts_up() => {
+                "elapsed<=24h (integer milliseconds 0..86400000)".into()
+            }
             WidgetParamType::Deadline => "deadline<=24h (integer milliseconds 0..86400000)".into(),
             WidgetParamType::F32 => {
                 let min = constraints.and_then(|c| c.f32_min);
                 let max = constraints.and_then(|c| c.f32_max);
+                if constraints.is_some_and(|c| c.f32_integer) {
+                    return match (min, max) {
+                        (Some(lo), Some(hi)) => format!("an integer in {lo}..{hi}"),
+                        (Some(lo), None) => format!("an integer >= {lo}"),
+                        (None, Some(hi)) => format!("an integer <= {hi}"),
+                        (None, None) => "an integer".into(),
+                    };
+                }
                 match (min, max) {
                     (Some(lo), Some(hi)) => format!("a finite f32 in {lo}..{hi} inclusive"),
                     (Some(lo), None) => format!("a finite f32 >= {lo}"),
@@ -2973,7 +3000,7 @@ pub struct SceneGraphZoneRegistry {
     /// Zone instances sorted by zone_type_name then tab_id for determinism.
     pub zone_instances: Vec<ZoneInstance>,
     /// Active publications sorted by zone name then publisher_namespace for determinism.
-    /// Includes zone publications but MUST NOT include effective_geometry (post-v1).
+    /// Includes zone publications but MUST NOT include effective_geometry.
     pub active_publications: std::collections::BTreeMap<String, Vec<ZonePublishRecord>>,
 }
 
@@ -2992,8 +3019,8 @@ pub struct SceneGraphZoneRegistry {
 /// # v1 Scope Constraints
 /// - Resources are ephemeral: snapshot references ResourceIds but MUST NOT
 ///   embed blob data
-/// - effective_geometry is NOT included (post-v1)
-/// - Incremental diff is NOT available (post-v1)
+/// - effective_geometry is NOT included
+/// - Incremental diff is NOT available
 ///
 /// # Reconnection
 /// When an agent reconnects, the runtime MUST send a full SceneGraphSnapshot.
@@ -3047,7 +3074,7 @@ pub struct SceneGraphSnapshot {
     pub portal_surfaces: std::collections::BTreeMap<SceneId, PortalSurface>,
 
     /// Zone registry snapshot: types, instances, active publications.
-    /// Does NOT include effective_geometry (post-v1).
+    /// Does NOT include effective_geometry.
     pub zone_registry: SceneGraphZoneRegistry,
 
     /// Widget registry snapshot: types, instances, active publications.
@@ -3317,7 +3344,7 @@ impl ZoneRegistry {
     ///
     /// In v1, zone defaults are represented by `ZoneDefinition.geometry_policy`.
     /// When `config_override` is `None`, the zone default remains the fallback.
-    pub fn resolve_geometry_policy_for_zone(
+    pub(crate) fn resolve_geometry_policy_for_zone(
         &self,
         zone_name: &str,
         user_override: Option<&GeometryPolicy>,
@@ -3359,7 +3386,7 @@ impl ZoneRegistry {
     ///
     /// In v1, active publishes are global (not tab-scoped); `tab_id` is echoed
     /// through to the returned `ZoneOccupancy` but is NOT used as a filter.
-    /// Tab-scoped zone instances are a post-v1 feature. In v1, `effective_geometry`
+    /// Tab-scoped zone instances are not supported; `effective_geometry`
     /// is also not exposed.
     ///
     /// Returns `None` if the zone is not found.
@@ -3404,6 +3431,41 @@ impl Default for ZoneRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn primary_action_is_the_first_that_is_not_destructive() {
+        let action = |destructive: bool| NotificationAction {
+            label: "x".into(),
+            callback_id: Some("x".into()),
+            role: destructive.then_some(ActionRole::Destructive),
+            ..Default::default()
+        };
+        let card = |roles: &[bool]| NotificationPayload {
+            text: "t".into(),
+            actions: roles.iter().map(|d| action(*d)).collect(),
+            ..Default::default()
+        };
+        assert_eq!(card(&[false, false]).primary_action(), Some(0));
+        assert_eq!(card(&[true, false]).primary_action(), Some(1));
+        assert_eq!(card(&[true, true]).primary_action(), None);
+        assert_eq!(card(&[]).primary_action(), None);
+        // A role on a link is refused; a role-less action serializes as before.
+        let link = NotificationAction {
+            label: "Docs".into(),
+            url: Some("https://example.com/".into()),
+            role: Some(ActionRole::Destructive),
+            ..Default::default()
+        };
+        assert_eq!(link.validate(), Err(ACTION_ROLE_HINT.into()));
+        assert_eq!(
+            serde_json::to_string(&action(false)).unwrap(),
+            r#"{"label":"x","callback_id":"x"}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&action(true)).unwrap(),
+            r#"{"label":"x","callback_id":"x","role":"destructive"}"#
+        );
+    }
     use std::mem::size_of;
 
     // ── Portal surface structural validation ──────────────────────────
@@ -3736,7 +3798,7 @@ mod tests {
     /// Validates the core Layer 0 identity invariants for `SceneId` and `ResourceId`.
     /// This function mirrors what `assert_layer0_invariants` checks at the graph level
     /// but focuses on the type-level contracts.
-    pub fn assert_identity_invariants() -> Vec<String> {
+    pub(super) fn assert_identity_invariants() -> Vec<String> {
         let mut violations = Vec::new();
 
         if size_of::<SceneId>() != 16 {

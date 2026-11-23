@@ -69,10 +69,10 @@ class WindowsPerfBudgetCheckerTests(unittest.TestCase):
         if paced_contention_summary_overrides:
             paced_summary.update(paced_contention_summary_overrides)
         return {
-            "calibration": {"factors": {"cpu": 0.854, "gpu": 0.338, "upload": 0.215}},
+            "calibration": {"factors": dict(check_windows_perf_budgets.REFERENCE_FACTORS)},
             "sessions": [
                 {"name": name, "summary": dict(base_summary)}
-                for name in check_windows_perf_budgets.REQUIRED_SESSIONS
+                for name in check_windows_perf_budgets.PUBLISH_SESSIONS
             ]
             + [{"name": "scene_lock_paced_contention", "summary": paced_summary}],
         }
@@ -97,6 +97,31 @@ class WindowsPerfBudgetCheckerTests(unittest.TestCase):
         artifact = self._artifact_with_summary({})
         _results, failures = check_windows_perf_budgets.validate_benchmark(artifact)
         self.assertEqual(failures, [])
+
+    def test_a_fixed_publish_delay_fails_the_gate(self) -> None:
+        # A 5 ms delay in admission moves every call; the absolute publish-call
+        # budgets catch it on any host, whatever its calibration factors.
+        delayed = {"samples": [5_000 + sample for sample in range(1, 101)]}
+        artifact = self._artifact_with_summary({"input_to_scene_commit": delayed})
+        artifact["calibration"]["factors"]["cpu"] = 8.0
+        _results, failures = check_windows_perf_budgets.validate_benchmark(artifact)
+        for session in check_windows_perf_budgets.PUBLISH_SESSIONS:
+            self.assertTrue(
+                any(f.startswith(f"{session}.publish_call_p50") for f in failures),
+                f"expected {session}.publish_call_p50 to fail, got {failures!r}",
+            )
+
+    def test_an_unknown_budget_factor_is_rejected(self) -> None:
+        with self.assertRaises(ValueError) as raised:
+            check_windows_perf_budgets.Budget("x_p99", "frame_time", 99.0, 1, "cpu ")
+        self.assertIn("unknown budget factor", str(raised.exception))
+
+    def test_only_the_notification_session_has_a_pointer_budget(self) -> None:
+        budgets = check_windows_perf_budgets.SESSION_BUDGETS
+        self.assertEqual(set(budgets), set(check_windows_perf_budgets.PUBLISH_SESSIONS))
+        for session, session_budgets in budgets.items():
+            has_ack = any(b.bucket == "input_to_local_ack" for b in session_budgets)
+            self.assertEqual(session == "notification_publish", has_ack, session)
 
     def test_nonzero_scene_lock_misses_fails(self) -> None:
         artifact = self._artifact_with_summary({"scene_lock_misses": 3})

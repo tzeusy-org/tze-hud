@@ -214,8 +214,26 @@ async fn start_mcp_http_server_inner(
         Some(pairing) => pairing.binds(&local_addrs),
         None => Arc::new(std::sync::Mutex::new(local_addrs.clone())),
     };
+    let admin_scene = Arc::clone(&scene);
+    let mut server_builder = McpServer::with_shared_scene(scene)
+        .with_config(McpConfig {
+            agents: config.agents.clone(),
+            widget_transition_ms: config.widget_transition_ms,
+            publication_defaults: config.publication_defaults.clone(),
+        })
+        .with_render_wake_notifier(render_wake)
+        .with_portal_ingress_wake_notifier(portal_ingress_wake)
+        .with_safe_mode(Arc::clone(&safe_mode));
+    if let Some(tx) = portals.clone() {
+        server_builder = server_builder.with_portals(tx);
+    }
+    if let Some(fit) = config.text_fit.clone() {
+        server_builder = server_builder.with_text_fit(fit);
+    }
+    let server = Arc::new(server_builder);
     let admin = Arc::new(StatusSource {
-        scene: Some(Arc::clone(&scene)),
+        scene: Some(Arc::clone(&admin_scene)),
+        sessions: Some(Arc::clone(server.scopes())),
         portals: portals.clone(),
         startup: config.startup.clone(),
         agents: config.agents.clone(),
@@ -237,23 +255,6 @@ async fn start_mcp_http_server_inner(
         binds,
         log_path: crate::operator::logs::log_path(),
     });
-
-    let mut server_builder = McpServer::with_shared_scene(scene)
-        .with_config(McpConfig {
-            agents: config.agents.clone(),
-            widget_transition_ms: config.widget_transition_ms,
-            publication_defaults: config.publication_defaults.clone(),
-        })
-        .with_render_wake_notifier(render_wake)
-        .with_portal_ingress_wake_notifier(portal_ingress_wake)
-        .with_safe_mode(safe_mode);
-    if let Some(tx) = portals {
-        server_builder = server_builder.with_portals(tx);
-    }
-    if let Some(fit) = config.text_fit.clone() {
-        server_builder = server_builder.with_text_fit(fit);
-    }
-    let server = Arc::new(server_builder);
 
     let mut loops = Vec::with_capacity(listeners.len() + 1);
     if let Some(gate) = config.bind_gate.clone() {
@@ -555,7 +556,8 @@ async fn handle_connection(
             Route::Mcp => {
                 // Config-gated resident-principal grant; the PSK
                 // check still happens independently inside `dispatch`.
-                let ctx = server.caller_context(req.bearer);
+                let mut ctx = server.caller_context(req.bearer);
+                ctx.session_id = req.session_id;
                 let body = std::str::from_utf8(&req.body).unwrap_or("");
                 if let Some(started) = &phase_started {
                     tracing::debug!(
@@ -564,7 +566,7 @@ async fn handle_connection(
                         elapsed_us = started.elapsed().as_micros()
                     );
                 }
-                let result = server.dispatch(body, &ctx).await;
+                let result = server.dispatch_session(body, &ctx).await;
                 if let Some(started) = &phase_started {
                     tracing::debug!(
                         target: "tze_hud_mcp_phases",
@@ -572,7 +574,24 @@ async fn handle_connection(
                         elapsed_us = started.elapsed().as_micros()
                     );
                 }
-                Response::json(result)
+                match result {
+                    // MCP: an unknown session is 404, and nothing ran.
+                    tze_hud_mcp::server::SessionReply::UnknownSession => Response::not_found(),
+                    tze_hud_mcp::server::SessionReply::Body { body, opened } => {
+                        let mut response = Response::json(body);
+                        response.session_id = opened;
+                        response
+                    }
+                }
+            }
+            Route::McpEnd => {
+                let mut ctx = server.caller_context(req.bearer);
+                ctx.session_id = req.session_id;
+                match server.end_session(&ctx).await {
+                    tze_hud_mcp::server::SessionEnd::Released => Response::accepted(),
+                    tze_hud_mcp::server::SessionEnd::Unknown => Response::not_found(),
+                    tze_hud_mcp::server::SessionEnd::Unauthenticated => Response::unauthorized(),
+                }
             }
             Route::Pair => match &admin.pairing {
                 Some(pairing) => pairing.pair(&req.body),
@@ -838,13 +857,104 @@ mod tests {
         }
         let r = http_raw(addr, "GET / HTTP/1.1\r\n\r\n").await;
         assert!(
-            r.starts_with("HTTP/1.1 405 ") && r.contains("Allow: POST"),
+            r.starts_with("HTTP/1.1 405 ") && r.contains("Allow: POST, DELETE"),
             "{r}"
         );
         assert!(!r.contains("jsonrpc"));
         let r = http_raw(addr, &post("/nope")).await;
         assert!(r.starts_with("HTTP/1.1 404 "), "{r}");
         assert!(!r.contains("jsonrpc"));
+        shutdown.trigger(crate::threads::ShutdownReason::Clean);
+        handle.await.expect("task");
+    }
+
+    /// MCP sessions over HTTP: `initialize` hands back `Mcp-Session-Id`
+    /// (body unchanged), calls carry it, `DELETE` releases it, and an
+    /// unknown id is a bare 404 before anything runs.
+    #[tokio::test]
+    async fn mcp_sessions_are_issued_ended_and_refused_over_http() {
+        let shutdown = ShutdownToken::new();
+        let scene = make_scene();
+        let (handle, addrs) = start_mcp_http_server(
+            Arc::clone(&scene),
+            make_config(0, "k"),
+            shutdown.clone(),
+            None,
+        )
+        .await
+        .expect("start");
+        let addr = addrs[0];
+        let request = |method: &str, session: Option<&str>, body: &str| {
+            let session = session
+                .map(|id| format!("Mcp-Session-Id: {id}\r\n"))
+                .unwrap_or_default();
+            format!(
+                "{method} /mcp HTTP/1.1\r\nAuthorization: Bearer k\r\n{session}Content-Length: {}\r\n\r\n{body}",
+                body.len()
+            )
+        };
+        let body_of = |r: &str| r.split_once("\r\n\r\n").unwrap().1.to_owned();
+        let init = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"_meta":{"tze-hud/label":"tze-hud\u0007"}}}"#;
+        let opened = http_raw(addr, &request("POST", None, init)).await;
+        let id = opened
+            .lines()
+            .find_map(|l| l.strip_prefix("Mcp-Session-Id: "))
+            .expect("session header")
+            .to_owned();
+        let plain = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"result":{}}}"#,
+            tze_hud_mcp::schema::initialize_result()
+        );
+        let plain: serde_json::Value = serde_json::from_str(&plain).unwrap();
+        let opened_body: serde_json::Value = serde_json::from_str(&body_of(&opened)).unwrap();
+        assert_eq!(opened_body, plain, "the initialize body is unchanged");
+        let state = r#"{"jsonrpc":"2.0","method":"notifications/tze/session_state","params":{"state":"working"}}"#;
+        for session in [None, Some(id.as_str())] {
+            let response = http_raw(addr, &request("POST", session, state)).await;
+            assert!(response.starts_with("HTTP/1.1 200 "), "{response}");
+            assert!(body_of(&response).is_empty());
+        }
+
+        let card = r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"hud_publish","arguments":{"surface":"zone:notification-area","content":{"type":"notification","title":"hi"}}}}"#;
+        {
+            let mut scene = scene.lock().await;
+            scene.zone_registry = tze_hud_scene::types::ZoneRegistry::with_defaults();
+        }
+        let r = http_raw(addr, &request("POST", Some(&id), card)).await;
+        assert!(
+            r.starts_with("HTTP/1.1 200 ") && !r.contains("isError"),
+            "{r}"
+        );
+        assert!(
+            !r.contains("Mcp-Session-Id"),
+            "only initialize hands one out"
+        );
+        let shown = || async {
+            scene
+                .lock()
+                .await
+                .zone_registry
+                .active_for_zone("notification-area")
+                .len()
+        };
+        assert_eq!(shown().await, 1);
+
+        let r = http_raw(addr, &request("DELETE", Some(&id), "")).await;
+        assert!(r.starts_with("HTTP/1.1 202 "), "{r}");
+        assert_eq!(shown().await, 0, "ending the session released its card");
+        for method in ["POST", "DELETE"] {
+            let r = http_raw(addr, &request(method, Some(&id), card)).await;
+            assert!(r.starts_with("HTTP/1.1 404 "), "{method}: {r}");
+            assert!(!r.contains("jsonrpc"));
+        }
+        assert_eq!(shown().await, 0, "a 404 had no effect");
+        assert!(
+            http_raw(addr, &request("POST", Some(&id), state))
+                .await
+                .starts_with("HTTP/1.1 404 ")
+        );
+        let r = http_raw(addr, "DELETE /mcp HTTP/1.1\r\nMcp-Session-Id: x\r\n\r\n").await;
+        assert!(r.starts_with("HTTP/1.1 401 "), "{r}");
         shutdown.trigger(crate::threads::ShutdownReason::Clean);
         handle.await.expect("task");
     }
@@ -863,6 +973,7 @@ mod tests {
             perms(&["*"]),
         );
         StatusSource {
+            sessions: None,
             scene: None,
             portals: None,
             startup: None,
@@ -897,6 +1008,7 @@ mod tests {
             path: path.into(),
             query: query.into(),
             bearer: bearer.map(str::to_owned),
+            session_id: None,
             body: Vec::new(),
         }
     }
@@ -966,6 +1078,28 @@ mod tests {
                     }
                 }
             }
+        }
+    }
+
+    #[tokio::test]
+    async fn admin_status_names_the_open_panel_display() {
+        let mut src = admin_source(std::env::temp_dir().join("tze_hud_no_such.log"));
+        let ui = crate::operator::surface_status::UiHandle::default();
+        src.surfaces = Some(crate::operator::surface_status::probe(
+            Arc::new(Mutex::new(SceneGraph::new(1280.0, 720.0))),
+            Arc::clone(&ui),
+            Default::default(),
+        ));
+        let request = admin_get("/admin/status", Some("root-psk"));
+        for display in [None, Some("DISPLAY3"), None] {
+            ui.lock().unwrap().panel_display = display.map(str::to_owned);
+            let response = handle_admin(crate::http::AdminRoute::Status, &request, &src).await;
+            assert_eq!(response.status, 200);
+            let status: serde_json::Value = serde_json::from_slice(&response.body).unwrap();
+            assert_eq!(
+                status.get("panel_display"),
+                Some(&serde_json::json!(display))
+            );
         }
     }
 
@@ -1153,6 +1287,51 @@ mod tests {
         assert!(body_of(&outside).contains("NOT_INSTALLED"));
     }
 
+    /// `/admin/status` lists each live MCP session with its label and how
+    /// much it holds, so a leaked session is visible.
+    #[tokio::test]
+    async fn admin_status_lists_live_sessions() {
+        let mut src = admin_source(std::env::temp_dir().join("tze_hud_no_such.log"));
+        let scopes = Arc::new(tze_hud_mcp::scopes::Scopes::default());
+        let (busy, _) = scopes.open("claude", Some("tze-hud"), |_| true);
+        scopes.open("claude", Some("tze-hud"), |_| true);
+        let mut scene = SceneGraph::new(1920.0, 1080.0);
+        scene.zone_registry = tze_hud_scene::types::ZoneRegistry::with_defaults();
+        scene
+            .publish_to_zone(
+                "subtitle",
+                tze_hud_scene::types::ZoneContent::StreamText("hi".into()),
+                &busy.namespace,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        src.scene = Some(Arc::new(Mutex::new(scene)));
+        src.sessions = Some(scopes);
+        let r = handle_admin(
+            crate::http::AdminRoute::Status,
+            &admin_get("/admin/status?cpu=0", Some("root-psk")),
+            &src,
+        )
+        .await;
+        let v: serde_json::Value = serde_json::from_slice(&r.body).unwrap();
+        let sessions = v["sessions"].as_array().unwrap();
+        assert_eq!(sessions.len(), 2);
+        for (session, label, holdings) in [
+            (&sessions[0], "tze-hud", 1),
+            (&sessions[1], "tze-hud (2)", 0),
+        ] {
+            assert_eq!(session["agent"], "claude");
+            assert_eq!(session["label"], label);
+            assert_eq!(session["holdings"], holdings);
+            assert!(session["last_call_ms"].as_u64().unwrap() > 0);
+            assert!(session["state"].is_null());
+            assert!(session["reason"].is_null());
+            assert!(session["since_ms"].is_null());
+        }
+    }
+
     /// `?cpu=0` answers without the CPU sample window, for polling harnesses.
     #[tokio::test(start_paused = true)]
     async fn admin_status_cpu_0_skips_the_sample() {
@@ -1226,6 +1405,7 @@ mod tests {
             "last_update",
             "last_restart",
             "config_reload",
+            "os_prefs",
         ] {
             assert!(v.get(key).is_some(), "missing {key}: {text}");
         }
@@ -1258,8 +1438,7 @@ mod tests {
         use crate::operator::diagnostics::{self, StartupDiagnostics};
         use tze_hud_portal::{PortalHub, PortalKey, PortalLimits, Publish};
         use tze_hud_scene::clock::{Clock, TestClock};
-        use tze_hud_scene::mutation::{MutationBatch, SceneMutation};
-        use tze_hud_scene::{Rect, SceneId, ZoneContent};
+        use tze_hud_scene::{Publication, Publisher, Rect, SceneId, ZoneContent};
         let clock = Arc::new(TestClock::new(1_000));
         let mut graph = SceneGraph::new_with_clock(1920.0, 1080.0, clock.clone());
         let raw = toml::from_str(
@@ -1272,7 +1451,12 @@ mod tests {
         "#,
         )
         .unwrap();
-        let boot = crate::scene_startup::run_scene_startup(&raw, None, &mut graph, true);
+        let boot = crate::scene_startup::run_scene_startup(
+            &raw,
+            None,
+            &mut graph,
+            tze_hud_config::tokens::OsPreferences::default(),
+        );
         let startup = StartupDiagnostics::new(boot.startup_warnings);
         let pending = diagnostics::render(None, None, Some(&startup));
         assert_eq!(pending.0["state"], "unavailable");
@@ -1449,21 +1633,16 @@ mod tests {
         {
             let mut s = scene.lock().await;
             s.set_widget_auto_clear("diagnostic-gauge", Some(1_000));
-            s.schedule_batch(
+            s.schedule_publication(
                 clock.now_us() + 1_000,
-                MutationBatch {
-                    batch_id: SceneId::new(),
-                    agent_namespace: "scheduled-owner".into(),
-                    mutations: vec![SceneMutation::PublishToWidget {
-                        widget_name: "diagnostic-gauge".into(),
-                        params: Default::default(),
-                        merge_key: None,
-                        transition_ms: 0,
-                        ttl_us: Some(5_000_000),
-                        expires_at_wall_us: Some(clock.now_us() + 3_600_000_000),
-                    }],
-                    timing_hints: None,
-                    lease_id: None,
+                Publisher::namespace("scheduled-owner"),
+                Publication::Widget {
+                    widget_name: "diagnostic-gauge".into(),
+                    params: Default::default(),
+                    merge_key: None,
+                    transition_ms: 0,
+                    ttl_us: Some(5_000_000),
+                    expires_at_wall_us: Some(clock.now_us() + 3_600_000_000),
                 },
             );
         }
@@ -1472,8 +1651,8 @@ mod tests {
         assert_eq!(pending["expiry_kind"], "unknown");
         assert!(pending["expires_in_ms"].is_null());
         clock.advance(10_000);
-        let applied = scene.lock().await.apply_due_batches();
-        assert!(applied[0].applied, "{:?}", applied[0]);
+        let applied = scene.lock().await.apply_due_publications();
+        assert!(applied[0].result.is_ok(), "{:?}", applied[0]);
         assert_eq!(
             find(&snapshot().0, "widget:diagnostic-gauge")["expires_in_ms"],
             1_000
@@ -1555,28 +1734,24 @@ mod tests {
             s.expire_leases();
             assert!(s.zone_registry.active_publishes.values().all(Vec::is_empty));
             let origin = SceneId::new();
-            s.schedule_batch_for_origin(
+            s.schedule_publication(
                 clock.now_us(),
-                MutationBatch {
-                    batch_id: SceneId::new(),
-                    agent_namespace: "preclaim".into(),
-                    lease_id: None,
-                    timing_hints: None,
-                    mutations: vec![SceneMutation::PublishToZone {
-                        zone_name: "notification-area".into(),
-                        content: ZoneContent::Notification(tze_hud_scene::NotificationPayload {
-                            text: private.into(),
-                            ..Default::default()
-                        }),
-                        publish_token: tze_hud_scene::ZonePublishToken { token: vec![] },
-                        merge_key: None,
-                        expires_at_wall_us: None,
-                        content_classification: None,
-                        breakpoints: vec![],
-                        held: false,
-                    }],
+                Publisher {
+                    origin: Some(origin),
+                    ..Publisher::namespace("preclaim")
                 },
-                Some(origin),
+                Publication::Zone {
+                    zone_name: "notification-area".into(),
+                    content: ZoneContent::Notification(tze_hud_scene::NotificationPayload {
+                        text: private.into(),
+                        ..Default::default()
+                    }),
+                    merge_key: None,
+                    expires_at_wall_us: None,
+                    content_classification: None,
+                    breakpoints: vec![],
+                    held: false,
+                },
             );
             let mut pending = Vec::new();
             s.visit_holdings(|row| {
@@ -1587,7 +1762,7 @@ mod tests {
                 ))
             });
             assert_eq!(pending, vec![("scheduled".into(), "unknown".into(), None)]);
-            assert!(s.apply_due_batches()[0].applied);
+            assert!(s.apply_due_publications()[0].result.is_ok());
             assert!(s.orphan_publications(origin, clock.now_millis(), 1));
             let shared = Arc::new(Mutex::new(s));
             let observed = diagnostics::render(Some(&shared), None, None).0;
@@ -2347,8 +2522,8 @@ mod tests {
         let response = http_post(addr, delayed, Some("test-key")).await;
         assert!(response.contains(r#"{\"expires_in_ms\":23000,\"ok\":true}"#));
         let scene_guard = scene.lock().await;
-        let batch = &scene_guard.scheduled_batches[0];
-        let (hi, lo) = batch.batch.batch_id.as_uuid().as_u64_pair();
+        let batch = &scene_guard.scheduled_publications[0];
+        let (hi, lo) = batch.id.as_uuid().as_u64_pair();
         let records: Vec<serde_json::Value> =
             String::from_utf8(crate::pairing::tests::captured_logs())
                 .unwrap()

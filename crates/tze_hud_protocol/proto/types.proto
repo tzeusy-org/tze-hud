@@ -4,13 +4,6 @@ package tze_hud.protocol.v1;
 
 // ─── Identity Types ───────────────────────────────────────────────────────────
 
-// A scene-object identifier: 16-byte little-endian UUIDv7.
-// All-zero bytes represent the null/absent sentinel.
-// Wire format: raw 16 bytes (little-endian UUID byte order).
-message SceneIdProto {
-  bytes bytes = 1;  // exactly 16 bytes
-}
-
 // A content-addressed resource identifier: raw 32-byte BLAKE3 hash.
 // Wire format: raw 32 bytes — never hex-encoded.
 message ResourceIdProto {
@@ -19,262 +12,11 @@ message ResourceIdProto {
 
 // ─── Geometry Primitives ─────────────────────────────────────────────────────
 
-message Rect {
-  float x      = 1;
-  float y      = 2;
-  float width  = 3;
-  float height = 4;
-}
-
 message Rgba {
   float r = 1;
   float g = 2;
   float b = 3;
   float a = 4;
-}
-
-// ─── Node Types ───────────────────────────────────────────────────────────────
-
-message NodeProto {
-  bytes id = 1;  // 16-byte UUIDv7 SceneId (little-endian); empty (0 bytes) = unset, server assigns; 16 zero bytes = explicit null sentinel
-  oneof data {
-    SolidColorNodeProto solid_color = 10;
-    TextMarkdownNodeProto text_markdown = 11;
-    HitRegionNodeProto hit_region = 12;
-    StaticImageNodeProto static_image = 13;
-  }
-  // Inline child subtree. Recursive: each child MAY carry its own
-  // `children`. Empty (the default) = a flat single-node root — BYTE-COMPATIBLE
-  // with the pre-children wire, so existing publishers are unaffected. When a
-  // tile root arrives with inline children, the runtime materializes the whole
-  // subtree atomically as ONE mutation (`SetTileRoot`), so a multi-part portal
-  // body (transcript + head-anchored composer + INPUT band as separate nodes)
-  // rides a single coalescible StateStream update instead of a per-node `AddNode`
-  // fan-out that would flip the batch Transactional and break latest-wins
-  // coalescing on the hot transcript-republish path. Field 2 is
-  // stable and MUST NOT be renumbered.
-  repeated NodeProto children = 2;
-  // How this node positions its direct children. UNSPECIFIED (the
-  // default, 0) = Absolute — each child drawn at its own explicit `bounds.y`,
-  // BYTE-COMPATIBLE with the pre-layout wire so existing publishers are
-  // unaffected. VERTICAL_FLOW asks the runtime to stack the children (measure
-  // each child's wrapped height and position the next below it plus a
-  // token-driven gap; see the vertical-flow layout engine). Field 3 is stable
-  // and MUST NOT be renumbered.
-  NodeLayoutProto layout = 3;
-}
-
-// How a NodeProto lays out its direct children. Additive and
-// default-off: UNSPECIFIED maps to Absolute (historical behavior).
-enum NodeLayoutProto {
-  NODE_LAYOUT_PROTO_UNSPECIFIED   = 0;  // absent = Absolute (byte-compatible default)
-  NODE_LAYOUT_PROTO_ABSOLUTE      = 1;  // children positioned by their own bounds
-  NODE_LAYOUT_PROTO_VERTICAL_FLOW = 2;  // children stacked by the runtime flow resolver
-}
-
-message SolidColorNodeProto {
-  Rgba color = 1;
-  Rect bounds = 2;
-  float radius = 3;  // -1.0 = not set sentinel; valid >= 0.0
-}
-
-// A single inline color run for TextMarkdownNodeProto.
-//
-// Byte offsets are into the raw `content` string (pre-markdown-strip).
-// start_byte MUST be < end_byte, both MUST be valid UTF-8 boundary positions
-// within `content`.  Ranges not covered by any run inherit the node's base
-// `color`.  When runs overlap, the last run in the repeated list wins.
-message TextColorRunProto {
-  uint32 start_byte = 1;  // Inclusive UTF-8 byte offset into content
-  uint32 end_byte   = 2;  // Exclusive UTF-8 byte offset into content
-  Rgba   color      = 3;
-}
-
-message TextMarkdownNodeProto {
-  string content = 1;
-  Rect bounds = 2;
-  float font_size_px = 3;
-  Rgba color = 4;
-  Rgba background = 5;
-  // Optional inline color runs.  Empty = use base `color` everywhere
-  // (backward-compatible default).  Offsets reference the raw `content`
-  // bytes before any Markdown stripping.  Field 6 is stable and must not
-  // be renumbered.
-  repeated TextColorRunProto color_runs = 6;
-  // Overflow behaviour for text that overflows the node bounds.
-  // UNSPECIFIED = compositor default (Ellipsis).  Field 7 is stable and
-  // must not be renumbered.  Callers that want explicit clip must set
-  // TEXT_OVERFLOW_PROTO_CLIP.  Live portal transcript panes set
-  // TEXT_OVERFLOW_PROTO_ELLIPSIS to engage the TruncationCache contract.
-  TextOverflowProto overflow = 7;
-}
-
-message HitRegionNodeProto {
-  Rect bounds = 1;
-  string interaction_id = 2;
-  bool accepts_focus = 3;
-  bool accepts_pointer = 4;
-  // When true, PointerDown on this region acquires runtime pointer capture so
-  // subsequent move/up events continue routing to the same node even after the
-  // pointer leaves the original bounds.
-  bool auto_capture = 5;
-  // When true, runtime pointer capture acquired by this region is released on
-  // the matching PointerUp.
-  bool release_on_up = 6;
-  // Composer input is authored only by the native portal renderer.
-  reserved 7;
-  reserved "accepts_composer_input";
-}
-
-// How image content is fitted within the node bounds.
-enum ImageFitModeProto {
-  IMAGE_FIT_MODE_UNSPECIFIED = 0;
-  IMAGE_FIT_MODE_CONTAIN     = 1;  // Scale uniformly so entire image is visible (may letterbox)
-  IMAGE_FIT_MODE_COVER       = 2;  // Scale uniformly to cover full bounds (may crop)
-  IMAGE_FIT_MODE_FILL        = 3;  // Stretch non-uniformly to fill bounds exactly
-  IMAGE_FIT_MODE_SCALE_DOWN  = 4;  // Like Contain but never scale up
-}
-
-// A static image node referencing a resource by content-addressed identity.
-//
-// Per RS-4 (rig-6l03) ephemerality contract: scene messages carry only the
-// ResourceId reference (32 raw bytes).  Raw pixel data is NOT embedded.
-// Agents upload resources via ResourceUploadStart before creating image nodes.
-message StaticImageNodeProto {
-  // BLAKE3 hash of the raw resource bytes (32 bytes).
-  // Wire format: raw bytes (NOT hex-encoded).
-  bytes  resource_id   = 1;
-  uint32 width         = 2;
-  uint32 height        = 3;
-  // Decoded in-memory size in bytes (for budget accounting).
-  // Set by the runtime when confirming the mutation; clients may send 0.
-  uint64 decoded_bytes = 4;
-  ImageFitModeProto fit_mode = 5;
-  Rect   bounds        = 6;
-}
-
-// ─── Mutation Types ───────────────────────────────────────────────────────────
-
-message CreateTileMutation {
-  bytes tab_id = 1;  // 16-byte UUIDv7 SceneId of the target tab; empty = server-infers active tab
-  Rect bounds = 2;
-  uint32 z_order = 3;
-}
-
-message SetTileRootMutation {
-  bytes tile_id = 1;  // 16-byte UUIDv7 SceneId of the tile
-  NodeProto node = 2;
-}
-
-// Publish content to an existing tile addressed by persistent element ID.
-//
-// The runtime resolves `element_id` through the element store (must be a Tile),
-// applies the geometry override chain (user > agent-requested bounds), then
-// sets content and updates `last_published_at`.
-message PublishToTileMutation {
-  bytes element_id = 1;  // 16-byte SceneId from element store
-  Rect bounds = 2;       // Optional agent-requested bounds
-  NodeProto node = 3;    // Optional replacement root node content
-}
-
-// Atomically replace the data of an existing node.
-// The node must already exist, belong to tile_id, and the data variant must
-// match the existing node's variant.  Children and node id are preserved.
-message UpdateNodeContentMutation {
-  bytes tile_id = 1;  // 16-byte UUIDv7 SceneId of the owning tile
-  bytes node_id = 2;  // 16-byte UUIDv7 SceneId of the node to update
-  // Replacement data — exactly one variant must be set; it must match the
-  // existing node's variant (type-change is rejected).
-  oneof data {
-    SolidColorNodeProto  solid_color   = 10;
-    TextMarkdownNodeProto text_markdown = 11;
-    HitRegionNodeProto   hit_region    = 12;
-    StaticImageNodeProto static_image  = 13;
-  }
-}
-
-// Add a child node to an existing tile.
-//
-// parent_id semantics:
-//   - Empty (0 bytes): the runtime attaches the node to the tile root if the
-//     tile has no root yet; if a root already exists, parent_id MUST be set to
-//     an explicit parent to ensure the node is reachable.
-//   - Non-empty (16 bytes): the node is inserted as a child of that parent.
-//     Use MutationResult.created_ids or the tile root node ID from a snapshot.
-//
-// Byte order: parent_id uses the same big-endian wire encoding as
-// tile_id and all other SceneId bytes fields in MutationProto (i.e. the raw
-// uuid::Uuid::as_bytes() encoding, NOT the little-endian NodeProto.id encoding).
-// Use MutationResult.created_ids to obtain parent node IDs in the correct order.
-message AddNodeMutation {
-  bytes tile_id   = 1;  // 16-byte UUIDv7 SceneId of the target tile (big-endian)
-  bytes parent_id = 2;  // 16-byte UUIDv7 SceneId of the parent node (big-endian); empty = see comment
-  NodeProto node  = 3;
-}
-
-// Update a tile's opacity in [0.0, 1.0].
-message UpdateTileOpacityMutation {
-  bytes tile_id = 1;  // 16-byte UUIDv7 SceneId of the tile
-  float opacity = 2;  // Must be in [0.0, 1.0]
-}
-
-// Input handling mode for a tile.
-enum TileInputModeProto {
-  TILE_INPUT_MODE_UNSPECIFIED = 0;
-  TILE_INPUT_MODE_PASSTHROUGH = 1;  // Input events pass through to layers below
-  TILE_INPUT_MODE_CAPTURE     = 2;  // Tile captures and consumes input events
-  TILE_INPUT_MODE_LOCAL_ONLY  = 3;  // Input handled locally, not forwarded to agent
-}
-
-// Update a tile's input handling mode.
-message UpdateTileInputModeMutation {
-  bytes tile_id              = 1;  // 16-byte UUIDv7 SceneId of the tile
-  TileInputModeProto input_mode = 2;
-}
-
-// Register or replace local-first scroll config for a tile. Enables
-// adapter-driven scroll via SetScrollOffsetMutation. Renderer/coalescer
-// plumbing shipped in (PR #489); this is the session-protocol
-// exposure of that surface.
-message RegisterTileScrollMutation {
-  bytes tile_id        = 1;
-  bool  scrollable_x   = 2;
-  bool  scrollable_y   = 3;
-  // -1.0 = unset sentinel (no x-clamp); >= 0.0 = content width pixels.
-  float content_width  = 4;
-  // -1.0 = unset sentinel (no y-clamp); >= 0.0 = content height pixels.
-  float content_height = 5;
-}
-
-// Set the tile-local scroll offset. Clamped by the tile's scroll config.
-// Requires a prior RegisterTileScrollMutation on the same tile.
-message SetScrollOffsetMutation {
-  bytes tile_id  = 1;
-  float offset_x = 2;
-  float offset_y = 3;
-}
-
-message MutationProto {
-  oneof mutation {
-    CreateTileMutation          create_tile            = 1;
-    SetTileRootMutation         set_tile_root          = 2;
-    UpdateNodeContentMutation   update_node_content    = 6;
-    AddNodeMutation             add_node               = 7;
-    UpdateTileOpacityMutation   update_tile_opacity    = 8;
-    UpdateTileInputModeMutation update_tile_input_mode = 9;
-    PublishToTileMutation       publish_to_tile        = 10;
-    RegisterTileScrollMutation  register_tile_scroll   = 11;
-    SetScrollOffsetMutation     set_scroll_offset      = 12;
-  }
-  // Internal scene conversion contract only; no public Session envelope
-  // dispatches MutationProto. Native portal rendering uses direct scene methods.
-  reserved 13 to 17;
-  reserved "set_tile_lifecycle_accent", "set_portal_surface",
-           "update_portal_surface_state", "set_tile_unread_count",
-           "set_tile_composer_interaction";
-  // Removed in T5 S4b: zone/widget publishing is the Publish/Clear verbs.
-  reserved 3, 4, 5;
-  reserved "publish_to_zone", "clear_zone", "clear_widget";
 }
 
 // ─── Zone Types ───────────────────────────────────────────────────────────────
@@ -347,13 +89,6 @@ message GeometryPolicyProto {
   }
 }
 
-// Text overflow mode for zone text rendering.
-enum TextOverflowProto {
-  TEXT_OVERFLOW_PROTO_UNSPECIFIED = 0;  // absent = compositor default (Clip)
-  TEXT_OVERFLOW_PROTO_CLIP        = 1;
-  TEXT_OVERFLOW_PROTO_ELLIPSIS    = 2;
-}
-
 // ─── Widget Types ─────────────────────────────────────────────────────────────
 
 // A typed parameter value (oneof carries exactly one variant).
@@ -365,6 +100,7 @@ message WidgetParameterValueProto {
     Rgba   color_value  = 4;
     string enum_value   = 5;
     // Relative integer milliseconds, 0..86400000; snapshotted at presentation.
+    // For a count-up parameter: milliseconds since the start.
     int64 deadline_ms   = 6;
   }
 }

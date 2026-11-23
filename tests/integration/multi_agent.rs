@@ -444,29 +444,13 @@ async fn test_grpc_and_mcp_share_single_scene_graph() {
         );
     }
 
-    // ── Step 5: Mutate via gRPC-side path and verify MCP-side sees it ──
-    //
-    // The gRPC session server would call `apply_batch` on `st.scene`.
-    // We simulate that here by locking state then scene, exactly as the
-    // session server does.
-
-    let batch = tze_hud_scene::mutation::MutationBatch {
-        batch_id: tze_hud_scene::types::SceneId::new(),
-        agent_namespace: "coherence-agent".to_string(),
-        mutations: vec![tze_hud_scene::mutation::SceneMutation::DeleteTile { tile_id }],
-        timing_hints: None,
-        lease_id: None,
-    };
-
+    // Use the session's scene handle for an internal tile removal.
     {
         let state = shared_state_arc.lock().await;
         let mut scene = state.scene.lock().await;
-        let result = scene.apply_batch(&batch);
-        assert!(
-            result.applied,
-            "DeleteTile via internal scene path must succeed: {:?}",
-            result.error
-        );
+        scene
+            .delete_tile(tile_id, "coherence-agent")
+            .expect("delete internal tile");
     }
 
     // ── Step 6: Verify MCP-side no longer sees the deleted tile ──
@@ -476,7 +460,7 @@ async fn test_grpc_and_mcp_share_single_scene_graph() {
         let scene = state.scene.lock().await;
         assert!(
             !scene.tiles.contains_key(&tile_id),
-            "tile deleted via internal apply_batch must not be visible via MCP-side read \
+            "tile deleted through the session scene handle must not be visible via MCP-side read \
              (mutations are immediately visible across protocol boundary)"
         );
         eprintln!("[coherence] PASS: cross-protocol scene coherence verified (one shared Arc)");
@@ -498,44 +482,25 @@ async fn test_grpc_and_mcp_share_single_scene_graph() {
 #[test]
 fn test_latest_wins_two_distinct_publishers() {
     use tze_hud_scene::graph::SceneGraph;
-    use tze_hud_scene::mutation::{MutationBatch, SceneMutation};
-    use tze_hud_scene::types::{SceneId, ZoneContent, ZonePublishToken, ZoneRegistry};
+    use tze_hud_scene::{Publication, Publisher, ZoneContent, ZoneRegistry};
 
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     scene.zone_registry = ZoneRegistry::with_defaults();
 
     let _tab = scene.create_tab("main", 0).unwrap();
-    // Note: PublishToZone at the apply_batch level does not check lease capabilities
-    // (token validation happens at the gRPC layer).  No leases needed here.
-
-    // Dummy token: publish_token is validated by the gRPC layer (not apply_batch).
-    let dummy_token = ZonePublishToken {
-        token: vec![0xDE, 0xAD, 0xBE, 0xEF],
-    };
-
     // Agent-alpha publishes to subtitle zone (LatestWins policy).
-    let batch_a = MutationBatch {
-        batch_id: SceneId::new(),
-        agent_namespace: "agent-alpha".to_string(),
-        mutations: vec![SceneMutation::PublishToZone {
-            zone_name: "subtitle".to_string(),
-            content: ZoneContent::StreamText("Alpha subtitle content".to_string()),
-            publish_token: dummy_token.clone(),
-            merge_key: None,
-            expires_at_wall_us: None,
-            content_classification: None,
-            breakpoints: Vec::new(),
-            held: false,
-        }],
-        timing_hints: None,
-        lease_id: None,
+    let publication = Publication::Zone {
+        zone_name: "subtitle".to_string(),
+        content: ZoneContent::StreamText("Alpha subtitle content".to_string()),
+        merge_key: None,
+        expires_at_wall_us: None,
+        content_classification: None,
+        breakpoints: Vec::new(),
+        held: false,
     };
-    let result_a = scene.apply_batch(&batch_a);
-    assert!(
-        result_a.applied,
-        "agent-alpha zone publish must succeed: {:?}",
-        result_a.error
-    );
+    scene
+        .publish(&Publisher::namespace("agent-alpha"), &publication)
+        .unwrap();
 
     // Verify alpha's content is the sole active entry.
     let after_alpha = scene.zone_registry.active_for_zone("subtitle");
@@ -551,28 +516,18 @@ fn test_latest_wins_two_distinct_publishers() {
 
     // Agent-beta publishes to the same zone — must evict agent-alpha (LatestWins).
     // This is the key assertion: a DIFFERENT namespace takes over the slot.
-    let batch_b = MutationBatch {
-        batch_id: SceneId::new(),
-        agent_namespace: "agent-beta".to_string(),
-        mutations: vec![SceneMutation::PublishToZone {
-            zone_name: "subtitle".to_string(),
-            content: ZoneContent::StreamText("Beta subtitle content (wins)".to_string()),
-            publish_token: dummy_token,
-            merge_key: None,
-            expires_at_wall_us: None,
-            content_classification: None,
-            breakpoints: Vec::new(),
-            held: false,
-        }],
-        timing_hints: None,
-        lease_id: None,
+    let publication = Publication::Zone {
+        zone_name: "subtitle".to_string(),
+        content: ZoneContent::StreamText("Beta subtitle content (wins)".to_string()),
+        merge_key: None,
+        expires_at_wall_us: None,
+        content_classification: None,
+        breakpoints: Vec::new(),
+        held: false,
     };
-    let result_b = scene.apply_batch(&batch_b);
-    assert!(
-        result_b.applied,
-        "agent-beta zone publish must succeed: {:?}",
-        result_b.error
-    );
+    scene
+        .publish(&Publisher::namespace("agent-beta"), &publication)
+        .unwrap();
 
     // After beta publishes, only beta's content must remain (LatestWins evicts alpha).
     let after_beta = scene.zone_registry.active_for_zone("subtitle");

@@ -12,7 +12,7 @@
 //!
 //! ## Built-in bundles
 //!
-//! The shipped gauge, progress-bar, status-indicator, countdown, KPI and stepper bundles are
+//! The shipped gauge, progress-bar, status-indicator, countdown, elapsed, KPI and stepper bundles are
 //! embedded in the binary and always registered. `[widget_bundles].paths` is
 //! optional; an on-disk bundle with the same type name overrides the built-in.
 //!
@@ -58,6 +58,7 @@ const BUILTIN_BUNDLES: &[(&str, BundleFiles)] = &[
     builtin_bundle!("progress-bar", ["track.svg", "fill.svg"]),
     builtin_bundle!("status-indicator", ["indicator.svg"]),
     builtin_bundle!("countdown", ["card.svg"]),
+    builtin_bundle!("elapsed", ["card.svg"]),
     builtin_bundle!("kpi", ["card.svg"]),
     builtin_bundle!("stepper", ["card.svg"]),
 ];
@@ -93,11 +94,14 @@ const BUILTIN_BUNDLES: &[(&str, BundleFiles)] = &[
 ///   bundles resolve against the global token map.
 ///
 /// SVG asset from a loaded widget bundle: `(widget_type_id, svg_filename, svg_bytes)`.
-pub type WidgetSvgAsset = (String, String, Vec<u8>);
+pub(crate) type WidgetSvgAsset = (String, String, Vec<u8>);
 
 /// The on-disk bundle roots `[widget_bundles].paths` names, relative to
 /// `config_parent` (the working directory when `None`).
-pub fn bundle_roots(raw: &RawConfig, config_parent: Option<&Path>) -> Vec<std::path::PathBuf> {
+pub(crate) fn bundle_roots(
+    raw: &RawConfig,
+    config_parent: Option<&Path>,
+) -> Vec<std::path::PathBuf> {
     let base = config_parent.unwrap_or_else(|| Path::new("."));
     raw.widget_bundles
         .iter()
@@ -148,7 +152,7 @@ fn scan_all_bundles_with_diagnostics(
 /// The SVGs of every loadable bundle with placeholders resolved against
 /// `token_map`, first bundle of a name winning as at startup: what a live
 /// token change re-registers so widgets restyle.
-pub fn widget_svg_assets(
+pub(crate) fn widget_svg_assets(
     roots: &[std::path::PathBuf],
     token_map: &HashMap<String, String>,
 ) -> Vec<WidgetSvgAsset> {
@@ -379,12 +383,13 @@ mod tests {
         v
     }
 
-    /// WHEN no [widget_bundles] section exists THEN all six built-in bundles
+    /// WHEN no [widget_bundles] section exists THEN all seven built-in bundles
     /// are still registered, and a missing on-disk root does not break startup.
     #[test]
     fn builtin_bundles_register_without_any_paths() {
         let expected = [
             "countdown",
+            "elapsed",
             "gauge",
             "kpi",
             "progress-bar",
@@ -515,6 +520,7 @@ mod tests {
             registered_types(&scene),
             [
                 "countdown",
+                "elapsed",
                 "gauge",
                 "kpi",
                 "progress-bar",

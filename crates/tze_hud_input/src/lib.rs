@@ -17,16 +17,15 @@
 //!   portal composer regions with local echo, caret/selection/word-delete/capped
 //!   paste, coalescible state-stream notifications, and transactional submit
 //!
-//! - [`pointer`] — rich pointer event types (PointerDownEvent, ClickEvent, etc.)
-//! - [`events`] — HitTestResult, RouteTarget, SceneLocalPatch, InputEnvelope, EventBatch
-//! - [`hit_test`] — headless-testable hit-test pipeline
-//! - `local_feedback` — `LocalFeedbackStyle`, `ResolvedFeedbackStyle`, rollback tracker
+//! - [`mod@pointer`] — rich pointer event types (PointerDownEvent, ClickEvent, etc.)
+//! - [`events`] — RouteTarget, SceneLocalPatch, InputEnvelope, EventBatch
+//! - `local_feedback` — rollback tracker
 //! - `scroll` — `ScrollConfig`, `ScrollState`, scroll-local-first processing
 //! - `capture` — pointer capture manager
 //!
 //! ## Pointer Capture
 //!
-//! The [`capture`] module implements pointer capture semantics:
+//! The input processor manages pointer capture:
 //! - Only one node holds capture globally at a time, per device.
 //! - Capture can be explicit (CaptureRequest) or automatic (auto_capture=true).
 //! - While captured, all events from the captured device route to the owning
@@ -35,22 +34,14 @@
 //!   (when release_on_up=true), or runtime theft (Alt+Tab, lease revocation,
 //!   tab switch).
 
-pub mod capture;
+mod capture;
 pub mod events;
-pub mod hit_test;
 pub mod local_feedback;
 pub mod pointer;
 pub mod scroll;
 
-pub use events::{
-    HitTestResult, LocalStateUpdate, RouteTarget, SceneLocalPatch, ScrollOffsetUpdate,
-};
-pub use hit_test::hit_test;
-pub use local_feedback::{
-    DEFAULT_FOCUS_RING_COLOR, DEFAULT_FOCUS_RING_WIDTH_PX, DEFAULT_HOVER_TINT,
-    DEFAULT_PRESS_DARKEN, LocalFeedbackStyle, ROLLBACK_ANIMATION_MS, ResolvedFeedbackStyle,
-    RollbackTracker,
-};
+pub use events::{LocalStateUpdate, RouteTarget, SceneLocalPatch, ScrollOffsetUpdate};
+pub use local_feedback::{ROLLBACK_ANIMATION_MS, RollbackTracker};
 pub use pointer::{
     CancelReason, ClickEvent, ContextMenuEvent, DoubleClickEvent, Modifiers, PointerButton,
     PointerCancelEvent, PointerDownEvent, PointerEnterEvent, PointerFields, PointerLeaveEvent,
@@ -78,17 +69,16 @@ pub use command::{
 };
 pub use composer_draft::{
     ComposerDraft, ComposerDraftManager, ComposerInputBoxGeometry, ComposerOutcome,
-    ComposerVisualLayout, ComposerVisualLine, DEFAULT_DRAFT_CAP, EditOutcome, MAX_DRAFT_BYTES,
-    Selection,
+    ComposerVisualLayout, ComposerVisualLine, EditOutcome, MAX_DRAFT_BYTES, Selection,
 };
 pub use focus::{
     FocusGainedEvent, FocusLostEvent, FocusLostReason, FocusManager, FocusRequest, FocusResult,
     FocusRingBounds, FocusRingUpdate, FocusSource, FocusTransition,
 };
-pub use focus_tree::{FocusOwner, FocusTree};
+pub use focus_tree::FocusOwner;
 pub use jump_to_latest::{
     JumpToLatestGeometry, JumpToLatestTokens, compute_jump_to_latest_pill,
-    jump_to_latest_badge_label,
+    jump_to_latest_badge_label, srgb_to_linear,
 };
 pub use keyboard::{
     KeyboardDispatch, KeyboardDispatchKind, KeyboardModifiers, KeyboardProcessor,
@@ -112,9 +102,8 @@ use tze_hud_scene::graph::SceneGraph;
 use tze_hud_scene::{ElementStore, ElementType, HitResult, NodeData, SceneId, ZoneInteractionKind};
 
 pub use drag::{
-    DEFAULT_SNAP_GRID_PCT, DRAG_OPACITY_BOOST, DRAG_Z_ORDER_BOOST, DeviceDragState, DragConfig,
-    DragEventOutcome, DragPhase, LONG_PRESS_MOVEMENT_TOLERANCE_DP, LONG_PRESS_POINTER_THRESHOLD_MS,
-    LONG_PRESS_TOUCH_THRESHOLD_MS,
+    DRAG_OPACITY_BOOST, DRAG_Z_ORDER_BOOST, DeviceDragState, DragConfig, DragEventOutcome,
+    DragPhase,
 };
 pub use tze_hud_scene::DragHandleElementKind;
 
@@ -303,6 +292,9 @@ pub struct InputProcessor {
     /// A runtime terminal pointer event must clear chrome before the next
     /// scene turn or pointer event. Retained while the scene lock is busy.
     pub chrome_feedback_cancel_pending: bool,
+    /// Runtime authorization for notification hover/press feedback. Drag
+    /// handles remain interactive while notification actions are unavailable.
+    pub notification_actions_enabled: bool,
     /// Per-device long-press drag state.
     ///
     /// Keyed by `device_id`.  Each entry is independent so multi-touch devices
@@ -313,7 +305,7 @@ pub struct InputProcessor {
     /// Rollback animation tracker (agent-rejection-triggered).
     rollback_tracker: RollbackTracker,
     /// Pointer capture manager.
-    pub capture: capture::PointerCaptureManager,
+    capture: capture::PointerCaptureManager,
     /// Local-first tile scroll state.
     scroll_state: ScrollState,
     portal_input_scroll_state: ScrollState,
@@ -341,6 +333,7 @@ impl InputProcessor {
             current_chrome_hover: None,
             current_chrome_press: None,
             chrome_feedback_cancel_pending: false,
+            notification_actions_enabled: true,
             drag_states: HashMap::new(),
             drag_config: DragConfig::default(),
             rollback_tracker: RollbackTracker::new(),
@@ -370,14 +363,9 @@ impl InputProcessor {
             .map(|k| k.0)
     }
 
-    /// Whether `tile`'s OUTPUT follows its tail.
-    pub fn output_at_tail(&self, tile: SceneId) -> bool {
-        self.scroll_state.follow_tail_anchor(tile) == crate::scroll::FollowTailAnchor::AtTail
-    }
-
     /// While an OUTPUT selection exists the view stops following the tail
     /// (new output counts as unread); returns whether it was following.
-    pub fn hold_output_for_selection(&mut self, tile: SceneId, scene: &mut SceneGraph) -> bool {
+    fn hold_output_for_selection(&mut self, tile: SceneId, scene: &mut SceneGraph) -> bool {
         let was = self.scroll_state.hold_reading(tile);
         if was {
             scene.set_tile_follow_tail_at_tail(tile, false);
@@ -386,7 +374,7 @@ impl InputProcessor {
     }
 
     /// A cleared selection resumes following only if it began at the tail.
-    pub fn release_output_selection(
+    fn release_output_selection(
         &mut self,
         selection: portal_reading::Selection,
         scene: &mut SceneGraph,
@@ -540,13 +528,32 @@ impl InputProcessor {
                 Some(layout) => {
                     let scroll = scene.tile_scroll_offset_local(tile).1;
                     self.output_reading.rehover(tile, layout, scroll);
-                    self.output_reading.decor(tile, layout, scroll)
+                    self.output_reading.decor(
+                        tile,
+                        layout,
+                        scroll,
+                        scene.overlay.link_feedback.as_ref(),
+                    )
                 }
                 None => Default::default(),
             };
             scene.set_portal_reading(tile, decor);
         }
         scene.geometry_epoch != before
+    }
+
+    /// Hover chrome control `id` (or none) without a pointer event: a control
+    /// that becomes pressable under a still pointer shows its hover at once.
+    pub fn hover_chrome(&mut self, scene: &mut SceneGraph, id: Option<String>) {
+        if self.current_chrome_hover != id
+            && let Some(old) = self.current_chrome_hover.take()
+        {
+            scene.set_chrome_hovered(&old, false);
+        }
+        if let Some(id) = &id {
+            scene.set_chrome_hovered(id, true);
+        }
+        self.current_chrome_hover = id;
     }
 
     /// Clear runtime chrome feedback without synthesizing input or changing
@@ -809,7 +816,7 @@ impl InputProcessor {
     /// Process a keyboard-originated scroll event through the runtime-owned scroll path.
     ///
     /// This is the command-input path for PgUp/PgDn on portal tiles. It applies
-    /// the same local offset update as [`process_scroll_event`] but targets the
+    /// the same local offset update as [`Self::process_scroll_event`] to the
     /// tile resolved by keyboard focus, independent of pointer position.
     ///
     /// Returns the changed tile and absolute offset when the event updates a
@@ -831,9 +838,8 @@ impl InputProcessor {
     /// Notify the input processor that a scrollable tile's content has grown.
     ///
     /// This is the primary wiring point for portal/stream-text append events.
-    /// It delegates to [`ScrollState::notify_content_appended`] to advance
-    /// the scroll offset when the tile is at-tail, or leave it
-    /// unchanged when the user has scrolled back.
+    /// It advances the scroll offset when the tile is at the tail and leaves
+    /// it unchanged when the user has scrolled back.
     ///
     /// After updating the scroll offset, the method syncs the tile's
     /// follow-tail anchor state into the scene so `prime_truncation_cache`
@@ -896,9 +902,8 @@ impl InputProcessor {
         changed
     }
 
-    /// Return a tile's current total content height in physical pixels (see
-    /// [`ScrollState::total_content_height_px`]), or `0.0` if the tile has no
-    /// tracked scroll state yet.
+    /// Return a tile's current total content height in physical pixels, or
+    /// `0.0` if the tile has no tracked scroll state yet.
     ///
     /// Lets a caller that appends content incrementally (e.g. one runtime
     /// -authored history entry at a time) read back the running total and add
@@ -927,14 +932,19 @@ impl InputProcessor {
         changed
     }
 
+    /// Scroll a tile's viewport to its first line (Home on OUTPUT), leaving
+    /// the tail. Returns whether the offset moved.
+    pub fn scroll_tile_to_top(&mut self, tile_id: SceneId, scene: &mut SceneGraph) -> bool {
+        self.process_keyboard_scroll(tile_id, -f32::MAX, scene)
+            .is_some()
+    }
+
     /// Notify a tile that leading (head) content has been removed.
     ///
     /// Called when the transcript head is trimmed — either by the 64 KiB
     /// `PortalHub` payload cap or the 16 KiB `visible_transcript_window`
     /// cap — so that a scrolled-back viewport stays visually stable rather than
     /// jumping into the gap left by the removed content.
-    ///
-    /// Delegates to [`ScrollState::notify_head_content_removed`].
     ///
     /// # Parameters
     ///
@@ -1113,13 +1123,9 @@ impl InputProcessor {
     /// (`reverse = true`) focusable affordance and synchronize composer +
     /// hit-region-focus side effects.
     ///
-    /// This is the no-pointer analogue of [`Self::process_with_focus`]: it drives
-    /// the already-implemented focus cycling
-    /// ([`FocusManager::navigate_next`] / [`FocusManager::navigate_prev`],
-    /// ) and then applies the same composer-activation /
-    /// hit-region-focus bookkeeping the pointer click path applies, so the
-    /// composer (and any focusable region) is reachable and editable without a
-    /// pointer — e.g. on smart glasses / a Mobile Presence Node.
+    /// Like [`Self::process_with_focus`], this updates composer activation and
+    /// hit-region focus when focus moves. Keyboard traversal can reach focusable
+    /// regions and activate composer editing without a pointer.
     ///
     /// Returns the resulting [`FocusTransition`]; the caller broadcasts its
     /// `FocusGained`/`FocusLost` events over the focus-events channel exactly as
@@ -1221,7 +1227,7 @@ impl InputProcessor {
     /// region is focused.
     ///
     /// The consumed flag prevents editing keys from reaching the agent.
-    /// Terminal outcomes return exact submitted text or local cancellation.
+    /// A submit returns the exact text; Escape is left to the runtime.
     pub fn route_key_down_to_composer(
         &mut self,
         key_code: &str,
@@ -1351,8 +1357,8 @@ impl InputProcessor {
     /// back to its own default hint); `Some("")` — explicit opt-out; `Some(text)`
     /// — this composer's own hint copy.
     ///
-    /// Used by the windowed runtime to push a [`LocalComposerState`]-equivalent
-    /// snapshot to the compositor thread after every composer mutation.
+    /// The windowed runtime sends this draft state to the compositor thread
+    /// after every composer mutation.
     ///
     /// local feedback first — the snapshot is pushed WITHOUT an
     /// adapter round-trip so the compositor can render the echo on the next
@@ -1379,10 +1385,10 @@ impl InputProcessor {
         ))
     }
 
-    /// Characters in the focused composer's draft, without copying it.
-    pub fn composer_draft_chars(&self) -> Option<usize> {
-        self.composer_draft_manager.focused_node()?;
-        Some(self.composer_draft_manager.draft()?.text().chars().count())
+    /// Every unsent draft by composer node, focused or kept unfocused. One
+    /// reading serves the admin `draft_chars` and the drawn kept drafts.
+    pub fn composer_drafts(&self) -> impl Iterator<Item = (SceneId, &ComposerDraft)> {
+        self.composer_draft_manager.drafts()
     }
 
     /// Process a pointer event against the scene graph.
@@ -1611,14 +1617,35 @@ impl InputProcessor {
         let hit_chrome_id: Option<String> = match &hit {
             HitResult::ZoneInteraction {
                 interaction_id: iid,
-                kind:
-                    ZoneInteractionKind::DragHandle { .. }
-                    | ZoneInteractionKind::Dismiss
-                    | ZoneInteractionKind::Action { .. },
+                kind: ZoneInteractionKind::DragHandle { .. },
                 ..
             } => Some(iid.clone()),
+            HitResult::ZoneInteraction {
+                interaction_id: iid,
+                kind:
+                    ZoneInteractionKind::Dismiss
+                    | ZoneInteractionKind::GoTo
+                    | ZoneInteractionKind::Action { .. },
+                ..
+            } if self.notification_actions_enabled => Some(iid.clone()),
             _ => None,
         };
+        if !self.notification_actions_enabled
+            && self.current_chrome_press.as_ref().is_some_and(|id| {
+                scene.overlay.zone_hit_regions.iter().any(|region| {
+                    &region.interaction_id == id
+                        && matches!(
+                            region.kind,
+                            ZoneInteractionKind::Dismiss
+                                | ZoneInteractionKind::GoTo
+                                | ZoneInteractionKind::Action { .. }
+                        )
+                })
+            })
+            && let Some(id) = self.current_chrome_press.take()
+        {
+            scene.set_chrome_pressed(&id, false);
+        }
 
         // ── Stage 2: Update hover state ───────────────────────────────────
         let prev_hover_node = self.current_hover.map(|(_, n)| n);
@@ -2313,7 +2340,7 @@ fn node_composer_placeholder(scene: &SceneGraph, node_id: SceneId) -> Option<Str
 ///
 /// Used by [`InputProcessor::classify_portal_focus`] to find a control's sibling
 /// composer as the typing-recovery target (hud-2v8br).
-fn find_composer_node(
+pub fn find_composer_node(
     root: Option<SceneId>,
     nodes: &std::collections::HashMap<SceneId, tze_hud_scene::types::Node>,
 ) -> Option<SceneId> {
@@ -4968,7 +4995,7 @@ mod tests {
         assert_eq!((text.as_str(), cursor, anchor), ("", 0, 0));
     }
 
-    /// Blur preserves one keyed unsent local draft for matching refocus.
+    /// Blur keeps the unsent draft for that composer's refocus.
     #[test]
     fn composer_focus_lost_on_blur_preserves_keyed_draft() {
         let (mut scene, tab_id, tile_id, composer_id, plain_id) = setup_composer_scene();
@@ -5025,7 +5052,7 @@ mod tests {
             "manager must be deactivated after blurring the composer region"
         );
 
-        // The blur keeps one keyed local draft, including caret/anchor.
+        // The blur keeps this composer's draft, including caret/anchor.
         scene.tiles.get_mut(&tile_id).unwrap().root_node = Some(composer_id);
         processor.process_with_focus(&down_composer, &mut scene, &mut fm, tab_id);
         let (text, cursor, anchor, _, _, _) = processor.composer_draft_snapshot().unwrap();

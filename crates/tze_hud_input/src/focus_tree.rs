@@ -21,7 +21,7 @@ use std::collections::VecDeque;
 use tze_hud_scene::SceneId;
 
 /// Maximum depth of per-tab focus history for fallback-on-destruction.
-pub const HISTORY_DEPTH: usize = 8;
+const HISTORY_DEPTH: usize = 8;
 
 /// The current owner of focus in a tab.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -56,7 +56,7 @@ impl FocusOwner {
     }
 
     /// Returns true if the focus owner is for the given tile or a node in it.
-    pub fn is_on_tile(&self, tile_id: SceneId) -> bool {
+    pub(crate) fn is_on_tile(&self, tile_id: SceneId) -> bool {
         self.tile_id() == Some(tile_id)
     }
 }
@@ -66,9 +66,9 @@ impl FocusOwner {
 /// Maintained entirely in memory. Not persisted; survives tab switches by
 /// virtue of each tab having its own `FocusTree` in `FocusManager`.
 #[derive(Clone, Debug)]
-pub struct FocusTree {
+pub(crate) struct FocusTree {
     /// The current focus owner on this tab.
-    pub current: FocusOwner,
+    pub(crate) current: FocusOwner,
     /// Bounded history of prior focus owners (newest at back).
     ///
     /// Used for fallback when the focused tile/node is destroyed.
@@ -78,7 +78,7 @@ pub struct FocusTree {
 
 impl FocusTree {
     /// Create a new focus tree for a tab, with no initial focus.
-    pub fn new() -> Self {
+    fn new() -> Self {
         Self {
             current: FocusOwner::None,
             history: VecDeque::with_capacity(HISTORY_DEPTH),
@@ -86,7 +86,7 @@ impl FocusTree {
     }
 
     /// Returns the current focus owner (read-only reference).
-    pub fn current(&self) -> &FocusOwner {
+    pub(crate) fn current(&self) -> &FocusOwner {
         &self.current
     }
 
@@ -94,7 +94,7 @@ impl FocusTree {
     ///
     /// - Records the previous owner in history (bounded by `HISTORY_DEPTH`).
     /// - Does NOT emit events — callers handle event dispatch.
-    pub fn set_focus(&mut self, next: FocusOwner) {
+    pub(crate) fn set_focus(&mut self, next: FocusOwner) {
         let prev = std::mem::replace(&mut self.current, next);
         if prev != FocusOwner::None {
             if self.history.len() == HISTORY_DEPTH {
@@ -108,13 +108,14 @@ impl FocusTree {
     ///
     /// Used when the current focus owner is destroyed to fall back to the
     /// previous element.
-    pub fn previous(&self) -> Option<&FocusOwner> {
+    #[cfg(test)]
+    fn previous(&self) -> Option<&FocusOwner> {
         self.history.back()
     }
 
     /// Remove `owner` from history (called when a tile/node is destroyed so
     /// we don't fall back to a dead element).
-    pub fn remove_from_history(&mut self, tile_id: SceneId) {
+    pub(crate) fn remove_from_history(&mut self, tile_id: SceneId) {
         self.history.retain(|owner| match owner {
             FocusOwner::Tile(id) => *id != tile_id,
             FocusOwner::Node { tile_id: t, .. } => *t != tile_id,
@@ -126,7 +127,7 @@ impl FocusTree {
     /// owner (excluding any entries for `destroyed_tile_id`).
     ///
     /// Returns `FocusOwner::None` if no valid history entry exists.
-    pub fn pop_fallback(&mut self, destroyed_tile_id: SceneId) -> FocusOwner {
+    pub(crate) fn pop_fallback(&mut self, destroyed_tile_id: SceneId) -> FocusOwner {
         // Walk history from newest to oldest, skipping the destroyed tile.
         while let Some(prev) = self.history.pop_back() {
             match &prev {

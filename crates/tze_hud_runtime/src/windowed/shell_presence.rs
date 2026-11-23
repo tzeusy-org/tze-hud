@@ -6,6 +6,9 @@ use tze_hud_config::tokens::DesignTokenMap;
 use tze_hud_scene::SceneGraph;
 use tze_hud_scene::graph::SurfaceClasses;
 
+#[cfg(any(target_os = "windows", test))]
+use crate::shell::control_panel::TrayFocusOrigin;
+
 #[cfg(target_os = "windows")]
 pub(super) mod native;
 
@@ -51,11 +54,22 @@ fn question_count(scene: &SceneGraph) -> usize {
         .count()
 }
 
+/// What a left click on the icon does now (`/admin/status` `tray.click`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum TrayClick {
+    /// Focus the newest question, as the answer chord does.
+    Answer,
+    /// Open or close the control panel.
+    Panel,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub(crate) struct Presentation {
     pub glyph: GlyphState,
     pub tooltip: String,
     pub all_hidden: bool,
+    pub click: TrayClick,
 }
 
 impl From<&Inputs> for Presentation {
@@ -72,15 +86,26 @@ impl From<&Inputs> for Presentation {
         } else {
             GlyphState::Normal
         };
+        // A shown question card with agents running: the chord's target.
+        // A question that goes before the click lands opens the panel.
+        let click = if !input.paused && !input.hidden.zones && input.visible_questions > 0 {
+            TrayClick::Answer
+        } else {
+            TrayClick::Panel
+        };
         let state = if input.paused {
             "Paused".to_owned()
         } else if all_hidden {
             "Everything hidden".to_owned()
         } else {
-            match waiting {
+            let count = match waiting {
                 0 => "No questions".to_owned(),
                 1 => "1 question waiting".to_owned(),
                 n => format!("{n} questions waiting"),
+            };
+            match click {
+                TrayClick::Answer => format!("{count} · click to answer"),
+                TrayClick::Panel => count,
             }
         };
         let agents = if input.agents.is_empty() {
@@ -94,6 +119,7 @@ impl From<&Inputs> for Presentation {
             glyph,
             tooltip: format!("{state}\n{}", ellipsize(&agents, remaining)),
             all_hidden,
+            click,
         }
     }
 }
@@ -119,8 +145,119 @@ fn ellipsize(text: &str, units: usize) -> String {
     result
 }
 
-#[cfg(test)]
+#[cfg(any(target_os = "windows", test))]
 use crate::shell::control_panel::TrayCommand;
+
+/// The tray menu in order, each label followed by a tab and its chord when
+/// that chord is registered, so Windows shows it in the shortcut column
+/// Read at each menu open; nothing runs while it is closed.
+#[cfg(any(target_os = "windows", test))]
+pub(crate) fn menu_items(
+    view: &Presentation,
+    hotkey: impl Fn(tze_hud_scene::config::ChordRole) -> crate::operator::status::HotkeyStatus,
+) -> Vec<(TrayCommand, String)> {
+    use tze_hud_scene::config::ChordRole;
+    let paused = view.glyph == GlyphState::Paused;
+    let items = [
+        (view.click == TrayClick::Answer).then_some((
+            TrayCommand::AnswerNext,
+            "&Answer next question",
+            Some(ChordRole::Answer),
+        )),
+        Some((
+            TrayCommand::OpenPanel,
+            "&Open panel",
+            Some(ChordRole::Panel),
+        )),
+        Some(if paused {
+            (
+                TrayCommand::Resume,
+                "&Resume agents",
+                Some(ChordRole::Pause),
+            )
+        } else {
+            (TrayCommand::Pause, "&Pause agents", Some(ChordRole::Pause))
+        }),
+        Some(if view.all_hidden {
+            (TrayCommand::ShowAll, "&Show all", Some(ChordRole::Hide))
+        } else {
+            (TrayCommand::HideAll, "&Hide all", Some(ChordRole::Hide))
+        }),
+        Some((TrayCommand::Quit, "&Quit", None)),
+    ];
+    items
+        .into_iter()
+        .flatten()
+        .map(|(command, text, role)| {
+            let label = match role.map(&hotkey) {
+                Some(crate::operator::status::HotkeyStatus::Registered { chord }) => {
+                    format!("{text}\t{chord}")
+                }
+                _ => text.to_owned(),
+            };
+            (command, label)
+        })
+        .collect()
+}
+
+/// One top-level window as the tray click saw it.
+#[cfg(any(target_os = "windows", test))]
+#[derive(Clone, Debug, Default)]
+pub(crate) struct WindowFacts {
+    pub hwnd: isize,
+    pub visible: bool,
+    pub minimized: bool,
+    pub cloaked: bool,
+    pub topmost: bool,
+    pub tool: bool,
+    pub owned: bool,
+    pub hud: bool,
+    pub class: String,
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn is_tray_shell_window(class: &str) -> bool {
+    matches!(
+        class,
+        "Shell_TrayWnd"
+            | "Shell_SecondaryTrayWnd"
+            | "NotifyIconOverflowWindow"
+            | "TopLevelWindowForOverflowXamlIsland"
+            | "Progman"
+            | "WorkerW"
+    )
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn tray_focus_origin(
+    foreground: Option<WindowFacts>,
+    fallback: impl FnOnce() -> Option<isize>,
+) -> TrayFocusOrigin {
+    match foreground {
+        Some(window) if window.hud => TrayFocusOrigin::Preserve,
+        Some(window) if is_tray_shell_window(&window.class) => TrayFocusOrigin::Replace(fallback()),
+        Some(window) => TrayFocusOrigin::Replace(Some(window.hwnd)),
+        None => TrayFocusOrigin::Replace(None),
+    }
+}
+
+/// When the shell has already taken focus, look behind it once in z-order.
+#[cfg(any(target_os = "windows", test))]
+pub(crate) fn return_window(windows: impl IntoIterator<Item = WindowFacts>) -> Option<isize> {
+    windows
+        .into_iter()
+        .find(|w| {
+            w.visible
+                && !w.minimized
+                && !w.cloaked
+                && !w.topmost
+                && !w.tool
+                && !w.owned
+                && !w.hud
+                && !is_tray_shell_window(&w.class)
+        })
+        .map(|w| w.hwnd)
+}
 
 /// The four shell operations form the native I/O seam. Keeping registration
 /// transitions here lets failure/restart/teardown run against the same logic
@@ -275,6 +412,7 @@ fn rasterize(svg: &str, size: u32) -> Result<resvg::tiny_skia::Pixmap, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::operator::status::HotkeyStatus;
     use tze_hud_scene::ZoneContent;
 
     #[test]
@@ -290,6 +428,7 @@ mod tests {
             label: "Answer".into(),
             callback_id: Some("answer".into()),
             url: None,
+            role: None,
         };
         for actions in [
             vec![callback.clone(), callback.clone()],
@@ -298,6 +437,7 @@ mod tests {
                 label: "Open link".into(),
                 callback_id: None,
                 url: Some("https://example.com".into()),
+                role: None,
             }],
         ] {
             scene
@@ -344,7 +484,10 @@ mod tests {
         input.agents = vec!["connected".into(), "showing".into()];
         let view = Presentation::from(&input);
         assert_eq!(view.glyph, GlyphState::Waiting);
-        assert_eq!(view.tooltip, "2 questions waiting\nconnected, showing");
+        assert_eq!(
+            view.tooltip,
+            "2 questions waiting · click to answer\nconnected, showing"
+        );
         input.hidden = SurfaceClasses::ALL;
         assert_eq!(Presentation::from(&input).glyph, GlyphState::Hidden);
         assert!(Presentation::from(&input).all_hidden);
@@ -419,21 +562,273 @@ mod tests {
             assert_eq!(session.held(), held, "WTS code {code}");
         }
         assert!(!session.event(99));
+        // Ids name commands, so the answer item cannot shift the others.
+        for (command, _) in menu_items(&view, |_| HotkeyStatus::NotApplicable) {
+            let id = u32::try_from(command.menu_id()).unwrap();
+            assert_ne!(id, 0, "0 is a dismissed menu");
+            assert_eq!(TrayCommand::from_menu_id(id), Some(command));
+        }
+        assert_eq!(TrayCommand::from_menu_id(0), None);
+        assert_eq!(TrayCommand::from_menu_id(8), None);
+        assert_eq!(TrayCommand::TogglePanel.menu_id(), 0, "never a menu item");
+    }
+
+    /// A click answers only a shown question with agents
+    /// running; the tooltip says so within the shell's limit.
+    #[test]
+    fn tray_click_answers_only_a_shown_question_with_agents_running() {
+        let question = Inputs {
+            visible_questions: 2,
+            agents: vec!["ops".into()],
+            ..Default::default()
+        };
+        let view = Presentation::from(&question);
+        assert_eq!(view.click, TrayClick::Answer);
+        assert_eq!(view.tooltip, "2 questions waiting · click to answer\nops");
         assert_eq!(
-            TrayCommand::from_menu_id(1, &view),
-            Some(TrayCommand::OpenPanel)
+            serde_json::to_value(view.click).unwrap(),
+            serde_json::json!("answer")
+        );
+        let cases = [
+            ("no question", Inputs::default()),
+            (
+                "paused",
+                Inputs {
+                    paused: true,
+                    ..question.clone()
+                },
+            ),
+            (
+                "zones hidden, question still counted",
+                Inputs {
+                    hidden: SurfaceClasses {
+                        zones: true,
+                        ..Default::default()
+                    },
+                    ..question.clone()
+                },
+            ),
+            (
+                "only a lock-held question",
+                Inputs {
+                    visible_questions: 0,
+                    held_questions: 1,
+                    ..question.clone()
+                },
+            ),
+        ];
+        for (case, input) in cases {
+            let view = Presentation::from(&input);
+            assert_eq!(view.click, TrayClick::Panel, "{case}");
+            assert!(!view.tooltip.contains("click to answer"), "{case}");
+            assert_eq!(
+                serde_json::to_value(view.click).unwrap(),
+                serde_json::json!("panel")
+            );
+        }
+        // Portals or widgets hidden alone leave the cards drawn.
+        let portals_hidden = Inputs {
+            hidden: SurfaceClasses {
+                portals: true,
+                widgets: true,
+                ..Default::default()
+            },
+            ..question.clone()
+        };
+        assert_eq!(Presentation::from(&portals_hidden).click, TrayClick::Answer);
+
+        // The suffix counts toward the 127-unit limit; names give way.
+        let long = Inputs {
+            visible_questions: 12,
+            agents: vec!["🦀".repeat(100)],
+            ..Default::default()
+        };
+        let view = Presentation::from(&long);
+        let units: Vec<_> = view.tooltip.encode_utf16().collect();
+        assert!(units.len() <= 127, "{} units", units.len());
+        assert!(String::from_utf16(&units).is_ok());
+        assert!(
+            view.tooltip
+                .starts_with("12 questions waiting · click to answer\n")
+        );
+        assert!(view.tooltip.ends_with('…'));
+        // Nothing changes, nothing differs: the bridge posts no refresh.
+        assert_eq!(Presentation::from(&long), view);
+    }
+
+    /// Each item shows its registered chord after a tab.
+    #[test]
+    fn tray_menu_labels_show_registered_chords() {
+        use tze_hud_scene::config::ChordRole;
+        let defaults = |role: ChordRole| HotkeyStatus::Registered {
+            chord: match role {
+                ChordRole::Pause => "Ctrl+Shift+F12",
+                ChordRole::Panel => "Ctrl+Shift+F11",
+                ChordRole::Pairing => "Ctrl+Shift+F10",
+                ChordRole::Answer => "Ctrl+Shift+F9",
+                ChordRole::Hide => "Ctrl+Shift+F8",
+            }
+            .into(),
+        };
+        let labels = |input: &Inputs, hotkey: &dyn Fn(ChordRole) -> HotkeyStatus| {
+            menu_items(&Presentation::from(input), hotkey)
+        };
+        let idle = Inputs::default();
+        assert_eq!(
+            labels(&idle, &defaults),
+            [
+                (TrayCommand::OpenPanel, "&Open panel\tCtrl+Shift+F11".into()),
+                (TrayCommand::Pause, "&Pause agents\tCtrl+Shift+F12".into()),
+                (TrayCommand::HideAll, "&Hide all\tCtrl+Shift+F8".into()),
+                (TrayCommand::Quit, "&Quit".to_owned()),
+            ]
+        );
+        let question = Inputs {
+            visible_questions: 1,
+            ..Default::default()
+        };
+        let items = labels(&question, &defaults);
+        assert_eq!(
+            items[0],
+            (
+                TrayCommand::AnswerNext,
+                "&Answer next question\tCtrl+Shift+F9".into()
+            ),
+            "first, and so the default item"
+        );
+        assert_eq!(items.len(), 5);
+        // Flipped labels keep the same chords.
+        let flipped = Inputs {
+            paused: true,
+            hidden: SurfaceClasses::ALL,
+            ..Default::default()
+        };
+        assert_eq!(
+            labels(&flipped, &defaults)[1..3],
+            [
+                (TrayCommand::Resume, "&Resume agents\tCtrl+Shift+F12".into()),
+                (TrayCommand::ShowAll, "&Show all\tCtrl+Shift+F8".into()),
+            ]
+        );
+        // A rebound chord shows its new keys at the next open.
+        let rebound = |role| match role {
+            ChordRole::Answer => HotkeyStatus::Registered {
+                chord: "Ctrl+Alt+F7".into(),
+            },
+            role => defaults(role),
+        };
+        assert_eq!(items[0].1, "&Answer next question\tCtrl+Shift+F9");
+        assert_eq!(
+            labels(&question, &rebound)[0].1,
+            "&Answer next question\tCtrl+Alt+F7"
+        );
+        // Pending, refused and unbound chords show nothing; items remain.
+        let unregistered = |role| match role {
+            ChordRole::Answer => HotkeyStatus::Pending {
+                chord: "Ctrl+Shift+F9".into(),
+            },
+            ChordRole::Pause => HotkeyStatus::Failed {
+                chord: "Ctrl+Shift+F12".into(),
+                reason: "held by another program".into(),
+            },
+            ChordRole::Hide => HotkeyStatus::NotApplicable,
+            role => defaults(role),
+        };
+        let bare = labels(&question, &unregistered);
+        assert_eq!(
+            bare.iter()
+                .map(|(_, label)| label.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "&Answer next question",
+                "&Open panel\tCtrl+Shift+F11",
+                "&Pause agents",
+                "&Hide all",
+                "&Quit",
+            ]
+        );
+        // Mnemonics stay distinct and before the tab.
+        let mnemonics: std::collections::BTreeSet<_> = items
+            .iter()
+            .map(|(_, label)| {
+                let (text, _) = label.split_once('\t').unwrap_or((label, ""));
+                text.split_once('&').unwrap().1.chars().next().unwrap()
+            })
+            .collect();
+        assert_eq!(mnemonics.len(), items.len());
+    }
+
+    /// The window-order pick, one exclusion each.
+    #[test]
+    fn tray_visit_returns_to_the_first_application_window() {
+        let app = |hwnd| WindowFacts {
+            hwnd,
+            visible: true,
+            class: "Notepad".into(),
+            ..Default::default()
+        };
+        assert_eq!(return_window([app(1), app(2)]), Some(1), "top of z-order");
+        type Exclude = fn(&mut WindowFacts);
+        let exclusions: [(&str, Exclude); 13] = [
+            ("hidden", |w| w.visible = false),
+            ("minimised", |w| w.minimized = true),
+            ("cloaked", |w| w.cloaked = true),
+            ("topmost", |w| w.topmost = true),
+            ("tool window", |w| w.tool = true),
+            ("owned", |w| w.owned = true),
+            ("HUD process", |w| w.hud = true),
+            ("taskbar", |w| w.class = "Shell_TrayWnd".into()),
+            ("second taskbar", |w| {
+                w.class = "Shell_SecondaryTrayWnd".into()
+            }),
+            ("classic tray overflow", |w| {
+                w.class = "NotifyIconOverflowWindow".into()
+            }),
+            ("XAML tray overflow", |w| {
+                w.class = "TopLevelWindowForOverflowXamlIsland".into()
+            }),
+            ("desktop", |w| w.class = "Progman".into()),
+            ("wallpaper", |w| w.class = "WorkerW".into()),
+        ];
+        for (case, exclude) in exclusions {
+            let mut first = app(1);
+            exclude(&mut first);
+            assert_eq!(return_window([first.clone(), app(2)]), Some(2), "{case}");
+            assert_eq!(return_window([first]), None, "{case}: nothing raised");
+        }
+        assert_eq!(return_window([]), None);
+
+        let mut modal = app(1);
+        modal.topmost = true;
+        modal.tool = true;
+        modal.owned = true;
+        assert_eq!(
+            tray_focus_origin(Some(modal), || panic!("foreground was available")),
+            TrayFocusOrigin::Replace(Some(1))
+        );
+        for class in [
+            "Shell_SecondaryTrayWnd",
+            "NotifyIconOverflowWindow",
+            "TopLevelWindowForOverflowXamlIsland",
+        ] {
+            let mut shell = app(1);
+            shell.class = class.into();
+            assert_eq!(
+                tray_focus_origin(Some(shell), || return_window([app(2)])),
+                TrayFocusOrigin::Replace(Some(2)),
+                "{class}"
+            );
+        }
+        let mut hud = app(3);
+        hud.hud = true;
+        assert_eq!(
+            tray_focus_origin(Some(hud), || panic!("preserve the existing HUD origin")),
+            TrayFocusOrigin::Preserve
         );
         assert_eq!(
-            TrayCommand::from_menu_id(2, &view),
-            Some(TrayCommand::Resume)
+            tray_focus_origin(None, || panic!("no known shell foreground")),
+            TrayFocusOrigin::Replace(None)
         );
-        assert_eq!(
-            TrayCommand::from_menu_id(3, &view),
-            Some(TrayCommand::ShowAll)
-        );
-        assert_eq!(TrayCommand::from_menu_id(4, &view), Some(TrayCommand::Quit));
-        assert_eq!(TrayCommand::from_menu_id(0, &view), None);
-        assert_ne!(TrayCommand::TogglePanel, TrayCommand::OpenPanel);
     }
 
     #[test]

@@ -21,7 +21,6 @@ pub mod codes {
     pub const INVALID_REQUEST: i64 = -32600;
     pub const METHOD_NOT_FOUND: i64 = -32601;
     pub const INVALID_PARAMS: i64 = -32602;
-    pub const INTERNAL_ERROR: i64 = -32603;
     /// Missing or unknown PSK.
     pub const UNAUTHENTICATED: i64 = -32004;
 }
@@ -96,16 +95,19 @@ impl McpError {
 }
 
 /// Map a portal refusal to a shared code and a hint naming the next call.
-pub const fn map_portal(error: PortalError) -> (&'static str, &'static str) {
-    match error {
+pub fn map_portal(error: PortalError) -> (&'static str, String) {
+    let (code, hint) = match error {
         PortalError::NotHeld => ("NOT_HELD", "hud_publish to the portal first"),
-        PortalError::TooLarge { .. } => (
-            "CONTENT_REJECTED",
-            "split the output into smaller publishes",
-        ),
+        PortalError::TooLarge { limit } => {
+            return (
+                "CONTENT_REJECTED",
+                format!("portal publish is at most {limit} bytes; split it"),
+            );
+        }
         PortalError::InvalidArgument => ("INVALID_ARGUMENT", "fix the arguments and retry"),
         PortalError::QueueFull => ("BUDGET_EXCEEDED", "hud_input with ack to drain input"),
-    }
+    };
+    (code, hint.to_owned())
 }
 
 #[cfg(test)]

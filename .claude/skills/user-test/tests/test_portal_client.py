@@ -18,6 +18,8 @@ import time
 import uuid
 from unittest import mock
 
+import inspect
+
 import pytest
 
 ROOT = Path(__file__).resolve().parents[4]
@@ -87,17 +89,17 @@ def test_publish_attaches_through_hud_publish(capsys):
         client.rpc("tools/call", {}, timeout=0.35)
         assert http.call_args.kwargs["timeout"] == 0.35
 
-    import publish_widget_batch as widgets
+    import hud_mcp
     response.__enter__.return_value.read.return_value = json.dumps(tool_response({"ok": True})).encode()
-    with mock.patch.object(widgets.urllib.request, "urlopen", return_value=response) as http:
-        assert widgets.rpc_call("http://127.0.0.1/mcp", "synthetic", "hud_clear", {}, 1) == {"result": {"ok": True}}
-        assert http.call_args.kwargs["timeout"] == 20
+    with mock.patch.object(hud_mcp.urllib.request, "urlopen", return_value=response) as http:
+        assert hud_mcp.call_tool("http://127.0.0.1/mcp", "synthetic", "hud_clear", {}, 1) == {"result": {"ok": True}}
+        assert http.call_args.kwargs["timeout"] == 65
         response.__enter__.return_value.read.assert_called_with()
-        widgets.rpc_call("http://127.0.0.1/mcp", "synthetic", "hud_clear", {}, 1, timeout=0.2, response_limit=4096)
+        hud_mcp.call_tool("http://127.0.0.1/mcp", "synthetic", "hud_clear", {}, 1, timeout=0.2, response_limit=4096)
         assert http.call_args.kwargs["timeout"] == 0.2
         response.__enter__.return_value.read.assert_called_with(4097)
         with pytest.raises(ValueError):
-            widgets.rpc_call("http://127.0.0.1/mcp", "synthetic", "hud_clear", {}, 1, response_limit=4)
+            hud_mcp.call_tool("http://127.0.0.1/mcp", "synthetic", "hud_clear", {}, 1, response_limit=4)
 
 
 def test_poll_prints_ndjson_and_acks_on_next_call(capsys):
@@ -109,6 +111,15 @@ def test_poll_prints_ndjson_and_acks_on_next_call(capsys):
     assert [c[1]["name"] for c in calls] == ["hud_input", "hud_input"]
     assert calls[1][1]["arguments"] == {"ack": ["i1"]}
     assert json.loads(capsys.readouterr().out.strip()) == item
+
+
+def test_poll_accepts_the_55_second_wait_within_its_http_timeout():
+    server = FakeServer([tool_response({"items": [], "remaining": 0})])
+    with mock.patch.object(client, "rpc", server), pytest.raises(SystemExit):
+        client.main(["poll", "--wait-ms", "55000"])
+    assert server.calls[0][1]["arguments"]["wait_ms"] == 55000
+    timeout = inspect.signature(client.rpc).parameters["timeout"].default
+    assert timeout > 55  # A full wait plus its reply fits one HTTP request.
 
 
 def test_poll_with_ack_stops_at_first_reply(capsys):
@@ -156,11 +167,11 @@ def test_hold_calls_hud_hold_with_portal_surface():
     ]
 
 
-HOOK = ROOT / ".claude/skills/hud-projection/scripts/portal_hook.py"
+USAGE = ROOT / ".claude/skills/hud-projection/scripts/hud_usage.py"
 
 
-class HookHarness:
-    """Docs-derived synthetic payloads, real processes and loopback MCP only."""
+class LoopbackToolHarness:
+    """Fake tool endpoint and lifecycle helpers for the usage subprocess tests."""
 
     def __init__(self, home):
         self.home = home
@@ -242,7 +253,6 @@ class HookHarness:
         psk = paired / "127.0.0.1.psk"
         psk.write_text("synthetic-hook-pair-not-a-real-secret")
         psk.chmod(0o600)
-        self.prompt = str(uuid.uuid4())
 
     def __enter__(self):
         return self
@@ -255,30 +265,6 @@ class HookHarness:
         self.thread.join(2)
         assert not self.thread.is_alive()
 
-    def payload(self, kind, **fields):
-        value = {"hook_event_name": kind, "session_id": "synthetic-session", "prompt_id": self.prompt}
-        value.update(fields)
-        return value
-
-    def launch(self, event):
-        raw = event if isinstance(event, bytes) else json.dumps(event).encode()
-        process = subprocess.Popen([sys.executable, str(HOOK)], cwd=self.home, env=self.env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        process.stdin.write(raw)
-        process.stdin.close()
-        process.stdin = None
-        return process
-
-    def finish(self, process):
-        stdout, stderr = process.communicate(timeout=3)
-        assert process.returncode == 0
-        assert stdout == stderr == b""
-        assert not Path(f"/proc/{process.pid}").exists()
-
-    def event(self, kind, wait=True, **fields):
-        self.finish(self.launch(self.payload(kind, **fields)))
-        if wait:
-            self.wait_idle()
-
     def workers(self):
         # Restrict observation to this fixture's private cwd; never inspect
         # another session's environment, credentials or process arguments.
@@ -289,7 +275,7 @@ class HookHarness:
             try:
                 if os.readlink(entry / "cwd") == self.private_cwd:
                     args = (entry / "cmdline").read_bytes().split(b"\0")
-                    if str(getattr(self, "worker_script", HOOK)).encode() in args:
+                    if str(self.worker_script).encode() in args:
                         found.append(int(entry.name))
             except (OSError, RuntimeError):
                 continue
@@ -301,575 +287,11 @@ class HookHarness:
             time.sleep(0.01)
         assert not self.workers(), "owned hook supervisor/HTTP child did not terminate"
 
-    def boot(self):
-        self.event("SessionStart", source="startup")
-        self.event("UserPromptSubmit")
-
     def publications(self):
         return [r["params"]["arguments"] for r in self.records if r["params"]["name"] == "hud_publish"]
 
-    def marker(self):
-        paths = list((self.home / ".cache/tze-hud/claude-hooks").glob("*/marker.json"))
-        assert len(paths) == 1
-        return paths[0]
 
-
-def test_hook_lifecycle_over_real_mcp_surface(tmp_path):
-    with HookHarness(tmp_path / "lifecycle") as h:
-        h.boot()
-        canary = "tool-input-and-response-private-canary"
-        for kind, tool_id in [("PreToolUse", "read-1"), ("PostToolUse", "read-1"), ("PreToolUse", "failure-2"), ("PostToolUseFailure", "failure-2")]:
-            h.event(kind, tool_use_id=tool_id, tool_name="Read", tool_input={"secret": canary}, tool_response=canary, error=canary)
-        h.event("PreToolUse", tool_use_id="unknown", tool_name="mcp__private_server__private_name")
-        h.event("Stop", last_assistant_message="\x1b[31mFinal reply\x1b[0m\x00", stop_hook_active=True)
-        publishes = h.publications()
-        content = [p for p in publishes if "content" in p]
-        assert [p["content"] for p in content] == ["Read: running", "Read: completed", "Read: running", "Read: failed", "MCP tool: running", "Final reply"]
-        assert content[0]["key"] == content[1]["key"]
-        assert content[2]["key"] == content[3]["key"] != content[0]["key"]
-        assert "status" not in content[-1]
-        assert all(p["surface"] == "portal:synthetic-session" and "ttl_ms" not in p for p in publishes)
-        assert all(len(p["key"].encode()) < 128 for p in content)
-        assert all(r["method"] == "tools/call" for r in h.records)
-        holds = [r["params"]["arguments"] for r in h.records if r["params"]["name"] == "hud_hold"]
-        assert len(holds) == len(publishes)
-        assert all(p == {"surface": "portal:synthetic-session", "ttl_ms": 600000} for p in holds)
-        h.event("SessionEnd")
-        assert h.records[-1]["params"] == {"name": "hud_clear", "arguments": {"surface": "portal:synthetic-session"}}
-        state_files = list((h.home / ".cache/tze-hud/claude-hooks").glob("*/*"))
-        metadata = b"".join(p.read_bytes() for p in state_files)
-        assert canary not in json.dumps(h.records)
-        assert b"Final reply" not in metadata and canary.encode() not in metadata
-        assert b"synthetic-hook-pair" not in metadata
-        assert all(p.stat().st_mode & 0o077 == 0 for p in state_files)
-        assert json.loads(h.marker().read_text())["ended"]
-        tombstone = h.marker()
-        h.event("SessionStart", session_id="another-session", source="startup")
-        assert tombstone.exists()  # a recent closed generation is retained
-        expired = json.loads(tombstone.read_text())
-        expired["updated"] = time.time() - 86401
-        tombstone.write_text(json.dumps(expired))
-        h.event("SessionStart", session_id="another-session", source="resume")
-        assert not tombstone.exists()
-        assert (tombstone.parent / "marker.lock").exists()  # lock identity survives expiry
-
-
-def test_hook_parallel_tool_updates_queue_instead_of_dropping(tmp_path):
-    # Parallel tools fire their Post hooks together; the second must wait for
-    # the in-flight delivery rather than lose its update .
-    with HookHarness(tmp_path / "parallel") as h:
-        h.boot()
-        h.event("PreToolUse", tool_use_id="ok", tool_name="Bash")
-        h.event("PreToolUse", tool_use_id="bad", tool_name="Bash")
-        h.block_text = "Bash: completed"
-        first = h.launch(h.payload("PostToolUse", tool_use_id="ok", tool_name="Bash"))
-        assert h.received.wait(2)
-        second = h.launch(h.payload("PostToolUseFailure", tool_use_id="bad", tool_name="Bash"))
-        time.sleep(0.2)  # well past the old 50 ms admission window
-        h.release.set()
-        h.finish(first)
-        h.finish(second)
-        h.wait_idle()
-        contents = [p.get("content") for p in h.publications()]
-        assert contents.count("Bash: completed") == 1
-        assert contents.count("Bash: failed") == 1
-
-
-def test_hook_subprocess_replay_prompt_races_and_reaping(tmp_path):
-    import fcntl
-    with HookHarness(tmp_path / "ordering") as h:
-        h.boot()
-        h.event("PostToolUse", tool_use_id="late", tool_name="Bash")
-        h.event("PreToolUse", tool_use_id="late", tool_name="Bash")
-        assert [p.get("content") for p in h.publications()].count("Bash: completed") == 1
-        assert not any(p.get("content") == "Bash: running" for p in h.publications())
-        h.fail_text = "retry final"
-        h.fail_remaining = 1
-        h.event("Stop", last_assistant_message="retry final")
-        h.event("PreToolUse", tool_use_id="after-stop", tool_name="Read")
-        h.event("Stop", last_assistant_message="retry final", stop_hook_active=True)
-        delivered = len(h.records)
-        h.event("Stop", last_assistant_message="retry final")
-        assert len(h.records) == delivered
-        assert [p.get("content") for p in h.publications()].count("retry final") == 2
-        old_prompt = h.prompt
-        h.prompt = str(uuid.uuid4())
-        h.event("UserPromptSubmit")
-        before = len(h.records)
-        h.event("Stop", prompt_id=old_prompt, last_assistant_message="stale before send")
-        assert len(h.records) == before
-
-        # Control an already-SENT final. The synchronous marker returns while
-        # its network request is still held; release the ACK only afterwards.
-        h.block_text = "inflight old final"
-        stopping = h.launch(h.payload("Stop", last_assistant_message=h.block_text))
-        assert h.received.wait(2)
-        h.prompt = str(uuid.uuid4())
-        h.event("UserPromptSubmit", wait=False)
-        marker = json.loads(h.marker().read_text())
-        assert marker["prompt"] == h.prompt and not h.release.is_set()
-        h.release.set()
-        h.finish(stopping)
-        h.wait_idle()
-        after_final = h.publications()
-        index = next(i for i, p in enumerate(after_final) if p.get("content") == "inflight old final")
-        assert "status" not in after_final[index]
-        assert after_final[index + 1:]
-        assert after_final[-1]["status"] == "active"
-        assert all("content" not in p and p["status"] == "active" for p in after_final[index + 1:])
-        assert len(after_final[index + 1:]) <= 2  # one catch-up and the new prompt's own status
-
-        # End and reopen while an old acknowledged request is pending. Both
-        # old cleanup paths must leave the newly opened generation untouched.
-        h.release.clear()
-        h.received.clear()
-        h.block_text = "old generation final"
-        stopping = h.launch(h.payload("Stop", last_assistant_message=h.block_text))
-        assert h.received.wait(2)
-        ending = h.launch(h.payload("SessionEnd"))
-        deadline = time.monotonic() + 0.2
-        # Marker replacement precedes marker.lock release. Reopen only after
-        # metadata admission is ready, while the old delivery is still held.
-        marker_lock_path = h.marker().parent / "marker.lock"
-        marker_ready = False
-        with marker_lock_path.open("r+") as marker_lock:
-            lock_identity = os.fstat(marker_lock.fileno())
-            while time.monotonic() < deadline:
-                try:
-                    fcntl.flock(marker_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                except BlockingIOError:
-                    pass
-                else:
-                    try:
-                        current_lock = marker_lock_path.stat()
-                        assert (current_lock.st_dev, current_lock.st_ino) == (
-                            lock_identity.st_dev, lock_identity.st_ino
-                        )
-                        marker_ready = (
-                            json.loads(h.marker().read_text())["ended"]
-                            and time.monotonic() <= deadline
-                        )
-                    finally:
-                        fcntl.flock(marker_lock, fcntl.LOCK_UN)
-                if marker_ready:
-                    break
-                time.sleep(0.001)
-        assert marker_ready, "ended marker and metadata lock were not ready within 0.2s"
-        assert json.loads(h.marker().read_text())["ended"]
-        assert ending.poll() is None
-        assert stopping.poll() is None and h.received.is_set() and not h.release.is_set()
-        old_generation = json.loads(h.marker().read_text())["generation"]
-        clears = sum(r["params"]["name"] == "hud_clear" for r in h.records)
-        h.event("SessionStart", source="resume", wait=False)
-        assert json.loads(h.marker().read_text())["generation"] != old_generation
-        h.release.set()
-        h.finish(stopping)
-        h.finish(ending)
-        assert sum(r["params"]["name"] == "hud_clear" for r in h.records) == clears
-        h.prompt = str(uuid.uuid4())
-        h.event("UserPromptSubmit")
-        assert h.publications()[-1]["status"] == "active"
-
-        h.event("SessionEnd")
-        h.event("SessionStart", source="compact")
-        h.event("SessionStart", source="fork")
-        assert json.loads(h.marker().read_text())["ended"]
-        h.event("SessionStart", source="resume")
-        h.prompt = str(uuid.uuid4())
-        h.event("UserPromptSubmit")
-        generation = json.loads(h.marker().read_text())["generation"]
-        with open(h.marker().parent / "marker.lock", "r+") as locked:
-            fcntl.flock(locked, fcntl.LOCK_EX)
-            h.event("UserPromptSubmit", prompt_id=str(uuid.uuid4()))
-        assert (h.marker().parent / "disabled.json").exists()
-
-        before = len(h.records)
-        h.event("PreToolUse", tool_use_id="disabled", tool_name="Read")
-        assert len(h.records) == before
-        h.event("SessionStart", source="clear")
-        assert not (h.marker().parent / "disabled.json").exists()
-        assert json.loads(h.marker().read_text())["generation"] != generation
-
-    with HookHarness(tmp_path / "watchdog") as h:
-        h.boot()
-        h.trickle = True  # each byte beats socket timeout; total read never completes
-        started = time.monotonic()
-        h.event("PreToolUse", tool_use_id="stall", tool_name="Read")
-        assert h.received.is_set()
-        assert time.monotonic() - started < 2.5
-        assert not h.workers()  # watchdog kills/reaps its actual HTTP process
-        h.release.set()
-
-    # Terminate only the known fixture supervisor after its HTTP child has
-    # actually been admitted. This does not model Claude's cancellation policy
-    # or imply that stopping a client rolls back an already-sent request.
-    import signal
-
-    observations = []
-    observation_path = tmp_path / "cancellation-observations.json"
-
-    def record_observations():
-        observation_path.write_text(json.dumps(observations, indent=2))
-
-    def process_identity(pid):
-        try:
-            stat = Path(f"/proc/{pid}/stat").read_text()
-            fields = stat[stat.rfind(")") + 2:].split()
-            return {"pid": pid, "state": fields[0], "ppid": int(fields[1]),
-                    "pgid": int(fields[2]), "start_ticks": int(fields[19])}
-        except (OSError, ValueError, IndexError):
-            return None
-
-    def child_running(identity):
-        current = process_identity(identity["pid"])
-        return (current is not None and current["start_ticks"] == identity["start_ticks"]
-                and current["state"] not in ("Z", "X"))
-
-    for kind, termination, budget in [
-        ("PreToolUse", signal.SIGKILL, 1.0),
-        ("PreToolUse", signal.SIGTERM, 1.0),
-        ("SessionEnd", signal.SIGKILL, 1.2),
-        ("SessionEnd", signal.SIGTERM, 1.2),
-    ]:
-        with HookHarness(tmp_path / f"cancel-{kind}-{termination.value}") as h:
-            h.boot()
-            h.trickle = True
-            parent = None
-            child = None
-            observe_next = False
-            admission_overlaps = []
-            original_POST = h.server.RequestHandlerClass.do_POST
-
-            def observe_POST(handler):
-                if observe_next and child is not None and child_running(child):
-                    admission_overlaps.append(process_identity(child["pid"]))
-                original_POST(handler)
-
-            h.server.RequestHandlerClass.do_POST = observe_POST
-            row = {"event": kind, "signal": termination.name, "production_budget": budget,
-                   "startup_scheduler_slack": 1.5, "remote_rollback_claimed": False}
-            observations.append(row)
-            started = time.monotonic()
-            try:
-                parent = h.launch(h.payload(kind, tool_use_id="cancelled", tool_name="Read"))
-                row["supervisor"] = process_identity(parent.pid)
-                assert h.received.wait(2), "owned HTTP child was not admitted"
-                row["received_seconds"] = time.monotonic() - started
-                # Read only this known parent's direct children, then verify
-                # cwd, command, start time and the child's separate group.
-                children = Path(f"/proc/{parent.pid}/task/{parent.pid}/children").read_text().split()
-                candidates = []
-                for value in children:
-                    pid = int(value)
-                    identity = process_identity(pid)
-                    if identity is None:
-                        continue
-                    args = Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
-                    if (Path(f"/proc/{pid}/cwd").resolve() == h.home
-                            and str(HOOK).encode() in args and b"--deliver" in args):
-                        candidates.append(identity)
-                assert len(candidates) == 1
-                child = candidates[0]
-                assert child["ppid"] == parent.pid and child["pgid"] == child["pid"]
-                assert child_running(child)
-                row["admitted_child"] = child.copy()
-                record_observations()
-
-                # Never killpg(parent.pid): the public fixture process may
-                # share pytest's group. SIGKILL cannot execute parent finally.
-                parent.send_signal(termination)
-                stdout, stderr = parent.communicate(timeout=2)
-                assert stdout == stderr == b""
-                row["supervisor_returncode"] = parent.returncode
-                row["supervisor_terminal_seconds"] = time.monotonic() - started
-                row["child_live_after_supervisor"] = child_running(child)
-                if row["child_live_after_supervisor"]:
-                    with (h.marker().parent / "delivery.lock").open("r+") as delivery_lock:
-                        try:
-                            fcntl.flock(delivery_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                            lock_retained = False
-                        except BlockingIOError:
-                            lock_retained = True
-                    row["delivery_lock_retained_while_child_live"] = lock_retained
-                    record_observations()
-                    assert lock_retained, "supervisor death released delivery ownership while its HTTP child was live"
-
-                    observe_next = True
-                    if kind == "SessionEnd":
-                        h.event("SessionStart", source="resume", wait=False)
-                    else:
-                        h.event("PreToolUse", tool_use_id="after-cancel", tool_name="Bash", wait=False)
-                    assert not admission_overlaps, "next delivery overlapped the surviving old HTTP client"
-
-                # An explicit 1.5s interpreter/scheduler allowance is separate
-                # from the unchanged absolute production network deadline.
-                limit = started + budget + 1.5
-                while child_running(child) and time.monotonic() < limit:
-                    time.sleep(0.01)
-                row["client_terminal_seconds"] = time.monotonic() - started
-                row["client_terminal_identity"] = process_identity(child["pid"])
-                row["overlapping_next_admissions"] = admission_overlaps
-                record_observations()
-                assert not child_running(child), "HTTP child outlived independent cancellation deadline"
-                assert row["client_terminal_seconds"] < budget + 1.5
-                if termination == signal.SIGKILL:
-                    assert parent.returncode == -signal.SIGKILL
-                    row["reaped_by_dead_supervisor_claimed"] = False
-                else:
-                    assert parent.returncode == 0  # explicit catchable cleanup
-                    assert process_identity(child["pid"]) is None  # living parent reaped
-                with (h.marker().parent / "delivery.lock").open("r+") as delivery_lock:
-                    fcntl.flock(delivery_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-
-                h.trickle = False
-                h.release.set()
-                if kind == "SessionEnd":
-                    h.event("SessionStart", source="resume")
-                    h.prompt = str(uuid.uuid4())
-                    h.event("UserPromptSubmit")
-                before = len(h.records)
-                h.event("PreToolUse", tool_use_id="genuine-recovery", tool_name="Read")
-                assert len(h.records) > before
-                assert h.publications()[-1]["content"] == "Read: running"
-                row["next_genuine_event_recovered"] = True
-                record_observations()
-            finally:
-                # RED can stop at the first ownership assertion. Release the
-                # fake server and clean only exact fixture-owned identities.
-                h.release.set()
-                if parent is not None and parent.poll() is None:
-                    parent.kill()
-                    parent.communicate(timeout=2)
-                if child is not None and child_running(child):
-                    try:
-                        os.killpg(child["pgid"], signal.SIGKILL)
-                    except ProcessLookupError:
-                        pass
-                    cleanup_limit = time.monotonic() + 2
-                    while child_running(child) and time.monotonic() < cleanup_limit:
-                        time.sleep(0.01)
-                    assert not child_running(child), "owned RED/GREEN child cleanup did not terminate"
-                row["teardown_child_identity"] = None if child is None else process_identity(child["pid"])
-                row["teardown_child_live"] = child is not None and child_running(child)
-                record_observations()
-
-
-def test_hook_unavailable_malformed_privacy_and_state_failures(tmp_path):
-    with HookHarness(tmp_path / "failures") as h:
-        h.boot()
-        before = len(h.records)
-        invalid = [b"{", b"[]", b"x" * 65537,
-                   h.payload("PreToolUse", prompt_id=None, tool_name="Read", tool_use_id="x"),
-                   h.payload("PreToolUse", session_id="../escape", tool_name="Read", tool_use_id="x"),
-                   h.payload("PreToolUse", agent_id="subagent", tool_name="Read", tool_use_id="x"),
-                   h.payload("Unknown"), h.payload("SessionStart", source="compact")]
-        for value in invalid:
-            h.finish(h.launch(value))
-        assert len(h.records) == before
-        for final in ["sk-ant-" + "s" * 32, "sk-ant-\x1b[31m" + "s" * 32 + "\x1b[0m", "-----BEGIN PRIVATE KEY-----\nsynthetic", "password=synthetic-canary-12345"]:
-            h.prompt = str(uuid.uuid4())
-            h.event("UserPromptSubmit")
-            h.event("Stop", last_assistant_message=final)
-            assert h.publications()[-1] == {"surface": "portal:synthetic-session"}
-            assert final not in json.dumps(h.records)
-        h.prompt = str(uuid.uuid4())
-        h.event("UserPromptSubmit")
-        h.event("Stop", last_assistant_message=None)
-        assert "content" not in h.publications()[-1]
-        h.event("Stop", last_assistant_message="status-only")
-        assert h.publications()[-1].get("content") == "status-only"
-        h.prompt = str(uuid.uuid4())
-        h.event("UserPromptSubmit")
-        h.event("Stop", last_assistant_message="界" * 4000)
-        truncated = h.publications()[-1]["content"]
-        assert len(truncated.encode()) <= 8192 and truncated.endswith("[truncated]")
-        assert "�" not in truncated
-        h.event("SessionStart", source="resume")
-        h.prompt = str(uuid.uuid4())
-        h.event("UserPromptSubmit")
-        h.event("PreToolUse", tool_use_id="retained", tool_name="Read")
-        retained_key = h.publications()[-1]["key"]
-        delivery_path = h.marker().parent / "delivery.json"
-        saturated = json.loads(delivery_path.read_text())
-        saturated["tools"] = {f"cc-tool-{i:064x}": 1 for i in range(255)}
-        saturated["tools"][retained_key] = 1
-        delivery_path.write_text(json.dumps(saturated))
-        before = len(h.records)
-        h.event("PreToolUse", tool_use_id="over-cap", tool_name="Read")
-        assert len(h.records) == before
-        h.event("PostToolUse", tool_use_id="retained", tool_name="Read")
-        assert h.publications()[-1]["content"] == "Read: completed"
-        assert len(json.loads(delivery_path.read_text())["tools"]) == 256
-        h.marker().write_text("invalid JSON")
-        before = len(h.records)
-        h.event("PreToolUse", tool_use_id="broken-state", tool_name="Read")
-        assert len(h.records) == before
-        assert (h.marker().parent / "disabled.json").exists()
-
-    with HookHarness(tmp_path / "unsafe-cache") as h:
-        outside = h.home / "untouched"
-        outside.mkdir()
-        cache = h.home / ".cache/tze-hud"
-        cache.mkdir(parents=True)
-        (cache / "claude-hooks").symlink_to(outside, target_is_directory=True)
-        h.event("SessionStart", source="startup")
-        h.event("UserPromptSubmit")
-        assert not h.records and not list(outside.iterdir())
-
-    with HookHarness(tmp_path / "unavailable") as h:
-        h.boot()
-        h.server.shutdown()
-        h.server.server_close()
-        started = time.monotonic()
-        h.event("PreToolUse", tool_use_id="down", tool_name="Read")
-        assert time.monotonic() - started < 2.5
-        assert not h.workers()
-        (h.home / ".config/tze-hud/127.0.0.1.psk").unlink()
-        h.event("Stop", last_assistant_message="unpaired")
-        assert not h.workers()
-
-    # An existing unsafe entry is not absent metadata. Refuse it before any
-    # MCP request, even when the session's marker is otherwise valid/current.
-    for filename in ("delivery.json", "disabled.json"):
-        with HookHarness(tmp_path / ("dangling-" + filename)) as h:
-            h.boot()
-            marker = json.loads(h.marker().read_text())
-            assert marker["prompt"] == h.prompt and not marker["ended"]
-            path = h.marker().parent / filename
-            path.unlink(missing_ok=True)
-            missing = h.home / "missing-state-target"
-            path.symlink_to(missing)
-            assert path.is_symlink() and not path.exists()
-            before = len(h.records)
-            started = time.monotonic()
-            h.event("PreToolUse", tool_use_id="unsafe-state", tool_name="Read")
-            assert len(h.records) == before
-            assert time.monotonic() - started < 2.5
-            assert not h.workers()
-            assert not missing.exists() and path.is_symlink()
-
-            # Only explicit recovery starts a fresh generation; genuinely
-            # absent delivery metadata still permits ordinary first delivery.
-            path.unlink()
-            h.event("SessionStart", source="resume")
-            assert not (h.marker().parent / "disabled.json").exists()
-            h.prompt = str(uuid.uuid4())
-            h.event("UserPromptSubmit")
-            h.event("PreToolUse", tool_use_id="recovered-state", tool_name="Read")
-            assert h.publications()[-1]["content"] == "Read: running"
-            assert not h.workers()
-
-    # Existing empty metadata is corruption, not an absent first-delivery file.
-    # Preserve an acknowledged terminal stage before exercising its delayed Pre.
-    with HookHarness(tmp_path / "existing-empty-delivery") as h:
-        h.boot()
-        h.event("PostToolUse", tool_use_id="completed-before-corruption", tool_name="Read")
-        key = h.publications()[-1]["key"]
-        delivery_path = h.marker().parent / "delivery.json"
-        assert json.loads(delivery_path.read_text())["tools"][key] == 2
-        delivery_path.write_text("{}")
-        before = len(h.records)
-        started = time.monotonic()
-        h.event("PreToolUse", tool_use_id="completed-before-corruption", tool_name="Read")
-        assert len(h.records) == before
-        assert time.monotonic() - started < 2.5 and not h.workers()
-        assert delivery_path.read_text() == "{}"
-        assert (h.marker().parent / "disabled.json").exists()
-        h.event("PreToolUse", tool_use_id="disabled-after-corruption", tool_name="Read")
-        assert len(h.records) == before
-
-        # Repair the corrupt entry, then explicitly recover. Genuine absence
-        # initializes normally; it must not be rejected along with existing {}.
-        delivery_path.unlink()
-        h.event("SessionStart", source="resume")
-        assert not (h.marker().parent / "disabled.json").exists()
-        h.prompt = str(uuid.uuid4())
-        h.event("UserPromptSubmit")
-        h.event("PreToolUse", tool_use_id="first-after-recovery", tool_name="Read")
-        assert h.publications()[-1]["content"] == "Read: running"
-        assert json.loads(delivery_path.read_text())["generation"] == json.loads(h.marker().read_text())["generation"]
-        assert not h.workers()
-
-    for previous_generation in (False, True):
-        with HookHarness(tmp_path / ("valid-delivery-" + str(previous_generation))) as h:
-            h.boot()
-            delivery_path = h.marker().parent / "delivery.json"
-            marker = json.loads(h.marker().read_text())
-            state = json.loads(delivery_path.read_text())
-            assert state == {"generation": marker["generation"], "tools": {}, "finals": {}}
-            if previous_generation:
-                h.event("PostToolUse", tool_use_id="valid-empty-or-old", tool_name="Read")
-                state = json.loads(delivery_path.read_text())
-                state["generation"] = "0" * 32
-                assert state["generation"] != marker["generation"]
-                state["finals"] = {h.prompt: "a" * 64}
-            delivery_path.write_text(json.dumps(state))
-            before = len(h.records)
-            h.event("PreToolUse", tool_use_id="valid-empty-or-old", tool_name="Read")
-            assert len(h.records) == before + 2
-            assert h.publications()[-1]["content"] == "Read: running"
-            saved = json.loads(delivery_path.read_text())
-            assert saved["generation"] == marker["generation"] and saved["finals"] == {}
-            assert saved["tools"] == {h.publications()[-1]["key"]: 1}
-            h.event("PostToolUse", tool_use_id="valid-empty-or-old", tool_name="Read")
-            assert h.publications()[-1]["content"] == "Read: completed"
-            before = len(h.records)
-            h.event("PreToolUse", tool_use_id="valid-empty-or-old", tool_name="Read")
-            assert len(h.records) == before and not (h.marker().parent / "disabled.json").exists()
-
-    # Every malformed existing object is validated before a generation reset,
-    # including truthy objects and invalid required members. Use the same real
-    # subprocess/MCP seam, rather than a second validator-only test species.
-    valid = {"generation": "0" * 32, "tools": {}, "finals": {}}
-    malformed = [
-        ("missing-generation", {k: v for k, v in valid.items() if k != "generation"}),
-        ("missing-tools", {k: v for k, v in valid.items() if k != "tools"}),
-        ("missing-finals", {k: v for k, v in valid.items() if k != "finals"}),
-        ("bad-generation", dict(valid, generation="not-a-generation")),
-        ("bad-prompt", dict(valid, prompt="not-a-prompt")),
-        ("nonobject-tools", dict(valid, tools=[])),
-        ("nonobject-finals", dict(valid, finals=[])),
-        ("invalid-stage", dict(valid, tools={"cc-tool-" + "a" * 64: 3})),
-        ("invalid-tool-key", dict(valid, tools={"raw-tool-id": 2})),
-        ("invalid-final-key", dict(valid, finals={"not-a-prompt": "a" * 64})),
-        ("invalid-final-hash", dict(valid, finals={str(uuid.UUID(int=1)): "bad-hash"})),
-        ("tool-map-over-cap", dict(valid, tools={f"cc-tool-{i:064x}": 2 for i in range(257)})),
-        ("final-map-over-cap", dict(valid, finals={str(uuid.UUID(int=i)): "a" * 64 for i in range(17)})),
-        ("unexpected-member", dict(valid, unexpected="synthetic-private-field")),
-        ("non-dictionary", []),
-    ]
-    for name, raw in [(name, json.dumps(value)) for name, value in malformed] + [
-        ("invalid-json", "{"), ("oversize-state", " " * 32769), ("unsafe-mode", json.dumps(valid)),
-    ]:
-        with HookHarness(tmp_path / ("malformed-delivery-" + name)) as h:
-            h.boot()
-            delivery_path = h.marker().parent / "delivery.json"
-            delivery_path.write_text(raw)
-            if name == "unsafe-mode":
-                delivery_path.chmod(0o644)
-            before = len(h.records)
-            h.event("PreToolUse", tool_use_id="malformed-existing-state", tool_name="Read")
-            assert len(h.records) == before, name
-            assert (h.marker().parent / "disabled.json").exists(), name
-            assert not h.workers()
-
-    # A falsy existing marker still admits no ordinary event; an explicit
-    # start validates it instead of treating it as a missing marker.
-    with HookHarness(tmp_path / "existing-empty-marker") as h:
-        h.boot()
-        h.marker().write_text("{}")
-        before = len(h.records)
-        h.event("PreToolUse", tool_use_id="empty-marker", tool_name="Read")
-        assert len(h.records) == before
-        h.event("SessionStart", source="resume")
-        assert len(h.records) == before and (h.marker().parent / "disabled.json").exists()
-        assert not h.workers()
-
-
-USAGE = HOOK.with_name("hud_usage.py")
-
-
-class UsageHarness(HookHarness):
+class UsageHarness(LoopbackToolHarness):
     """Official-docs-derived SYNTHETIC statusline JSON, not owner recordings."""
 
     def __init__(self, home):
@@ -894,6 +316,7 @@ class UsageHarness(HookHarness):
         self.registration_thread = None
         self.worker_script = USAGE
         self.hold_timeout = 5
+        self.prewarmed = []
 
     def track_wrapper_children(self):
         # Pin each detached helper and foreground sleep before real exec. The
@@ -948,6 +371,17 @@ class UsageHarness(HookHarness):
         self.env["PATH"] = str(commands) + os.pathsep + self.env["PATH"]
 
     def __exit__(self, *args):
+        # An unused prepared child has not entered main or touched usage state.
+        # Closing its private gate releases it; kill only this owned child if
+        # startup itself stalls, so a failed assertion cannot leave it behind.
+        for process, channel in self.prewarmed:
+            channel.close()
+            try:
+                process.communicate(timeout=2)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.communicate(timeout=2)
+        self.prewarmed.clear()
         try:
             super().__exit__(*args)
         finally:
@@ -1030,14 +464,55 @@ class UsageHarness(HookHarness):
         return {"rate_limits": {"five_hour": {"used_percentage": pct, "resets_at": reset or self.reset}},
                 "context_window": {"used_percentage": 99}, "private_unknown": "discard-this-synthetic-text"}
 
+    def _spawn(self, argv, **kwargs):
+        return subprocess.Popen(argv, cwd=self.home, env=self.env, stdin=subprocess.PIPE,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, **kwargs)
+
+    def prewarm(self, count):
+        # Prepare imports before the held-owner interleaving, rather than
+        # spending its lease on seven more interpreters. Each release enters
+        # the unchanged main with cached imports and the real one-second timer;
+        # stdin, state locks, HTTP and ACK persistence remain inside that budget.
+        # Cold-start and cancellation parents continue to use normal launches.
+        # The gate is closed before main and cannot extend the delivery lease.
+        prepare = ("import runpy,socket,sys\nfrom pathlib import Path\n"
+                   "sys.path.insert(0, str(Path(sys.argv[1]).resolve().parents[2] / 'user-test' / 'scripts'))\n"
+                   "import hud_env,hud_mcp\n"
+                   "entry = runpy.run_path(sys.argv[1])['main']\n"
+                   "with socket.socket(fileno=int(sys.argv[2])) as gate:\n"
+                   "    gate.sendall(b'+')\n"
+                   "    start = gate.recv(1) == b'+'\n"
+                   "sys.argv = [sys.argv[1]]\n"
+                   "if start: entry()\n")
+        for _ in range(count):
+            channel, child_channel = socket.socketpair()
+            try:
+                process = self._spawn([sys.executable, "-c", prepare, str(USAGE),
+                                       str(child_channel.fileno())],
+                                      pass_fds=(child_channel.fileno(),))
+            except BaseException:
+                channel.close()
+                raise
+            finally:
+                child_channel.close()
+            self.prewarmed.append((process, channel))
+            channel.settimeout(2)
+            assert channel.recv(1) == b"+", "owned usage child did not prepare"
+
     def launch(self, payload):
         raw = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
-        p = subprocess.Popen([sys.executable, str(USAGE)], cwd=self.home, env=self.env,
-                             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if self.prewarmed:
+            p, channel = self.prewarmed[0]
+        else:
+            p, channel = self._spawn([sys.executable, str(USAGE)]), None
         p.started = time.monotonic()
         p.stdin.write(raw)
         p.stdin.close()
         p.stdin = None
+        if channel is not None:
+            with channel:
+                channel.sendall(b"+")
+            self.prewarmed.pop(0)
         return p
 
     def finish(self, process, expected=0):
@@ -1110,6 +585,10 @@ def test_usage_metric_steps_new_window_and_unavailable(tmp_path):
 def test_usage_concurrent_claim_and_obsolete_ack_preserve_desire(tmp_path):
     import fcntl
     with UsageHarness(tmp_path / "concurrent") as h:
+        # Scheduling seven more cold interpreters after the first send could
+        # exhaust its real deadline before this test reached ACK persistence.
+        # Keep that deadline real, but prepare this first burst before starting it.
+        h.prewarm(8)
         h.block_text = f'41% · resets {time.strftime("%H:%M", time.gmtime(h.reset))}'
         first = h.launch(h.payload())
         assert h.received.wait(1)
@@ -1444,7 +923,7 @@ def test_usage_failures_are_silent_private_bounded_and_event_driven(tmp_path):
         imports.mkdir()
         marker = imports / "entered"
         original_pythonpath = h.env.get("PYTHONPATH")
-        for index, module in enumerate(("hud_env", "publish_widget_batch")):
+        for index, module in enumerate(("hud_env", "hud_mcp")):
             marker.unlink(missing_ok=True)
             (imports / "sitecustomize.py").write_text(
                 "import sys, time\n"

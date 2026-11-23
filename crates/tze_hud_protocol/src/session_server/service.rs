@@ -168,7 +168,7 @@ impl HudSessionImpl {
             resource_store: ResourceStore::new(ResourceStoreConfig::default()),
             runtime_widget_store: None,
             element_store: tze_hud_scene::element_store::ElementStore::default(),
-            element_store_path: None,
+            element_store_file: None,
             safe_mode_atomic: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             active_tab_mirror: Arc::new(std::sync::Mutex::new(None)),
             token_store: crate::token::TokenStore::new(),
@@ -269,11 +269,11 @@ impl HudSessionImpl {
                 .unwrap_or(tze_hud_scene::ZERO_GEOMETRY_POLICY);
             drop(scene);
             let persist_req =
-                st.element_store_path
+                st.element_store_file
                     .clone()
-                    .map(|path| super::ElementStorePersistRequest {
+                    .map(|file| super::ElementStorePersistRequest {
                         store: st.element_store.clone(),
-                        path,
+                        file,
                     });
             (
                 previous.expect(

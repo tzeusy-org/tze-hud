@@ -222,6 +222,16 @@ fn shipped_bundles_load_and_bind() {
             ],
         ),
         (
+            "elapsed",
+            &["label", "started_ms_ago", "severity", "tooltip_visible"],
+            &["card.svg"],
+            &[
+                ("started_ms_ago", "value", "text-content"),
+                ("severity", "value", "fill"),
+                ("tooltip_visible", "tooltip", "opacity"),
+            ],
+        ),
+        (
             "kpi",
             &["label", "value", "trend", "severity", "tooltip_visible"],
             &["card.svg"],
@@ -284,6 +294,7 @@ fn shipped_bundles_need_their_tokens() {
         "progress-bar",
         "status-indicator",
         "countdown",
+        "elapsed",
         "kpi",
         "stepper",
     ] {
@@ -300,6 +311,7 @@ fn shipped_hover_tooltips_share_the_gauge_delay() {
         "progress-bar",
         "status-indicator",
         "countdown",
+        "elapsed",
         "kpi",
         "stepper",
     ] {
@@ -493,6 +505,7 @@ fn shipped_bundles_have_no_hardcoded_colors_or_restyled_opacity() {
         ),
         ("status-indicator", &["indicator.svg", "widget.toml"][..]),
         ("countdown", &["card.svg", "widget.toml"][..]),
+        ("elapsed", &["card.svg", "widget.toml"][..]),
         ("kpi", &["card.svg", "widget.toml"][..]),
         ("stepper", &["card.svg", "widget.toml"][..]),
     ] {
@@ -668,6 +681,17 @@ fn status_indicator_latest_publisher_wins_and_partial_updates_keep_other_params(
         "unpublished params are retained"
     );
     assert_eq!(scene.widget_registry.active_for_widget(w).len(), 1);
+
+    let record = &scene.widget_registry.active_for_widget(w)[0];
+    assert_eq!(
+        record.params["label"],
+        str_val("B"),
+        "shipped bundle retains omitted model fields in its record"
+    );
+    let tab = scene.widget_registry.instances[w].tab_id;
+    let occupancy = scene.widget_registry.get_occupancy(w, tab).unwrap();
+    assert_eq!(occupancy.effective_params["label"], str_val("B"));
+    assert_eq!(occupancy.effective_params["status"], enum_val("away"));
 }
 
 // ─── BundleError wire codes (one test per code) ───────────────────────────────
@@ -970,5 +994,140 @@ fn deadline_defaults_and_threshold_bindings_admit_only_their_typed_contract() {
             accepted,
             "{source}: {result:?}"
         );
+    }
+}
+
+/// Stepper counts are whole numbers: `2` and `2.0` are the same count, a
+/// fraction is refused (never floored), and every refusal names the integer
+/// bound. A step above total is still accepted (it fills every dot).
+#[test]
+fn stepper_counts_are_whole_numbers() {
+    use tze_hud_scene::validation::ValidationError;
+    for (param, value, accepted) in [
+        ("step", 2.0, true),
+        ("step", 0.0, true),
+        ("step", 12.0, true),
+        ("total", 1.0, true),
+        ("step", 2.5, false),
+        ("step", 2.000_001, false),
+        ("step", -1.0, false),
+        ("step", 13.0, false),
+        ("total", 0.0, false),
+        ("total", 4.5, false),
+    ] {
+        let mut scene = scene_with("stepper");
+        let result = publish(
+            &mut scene,
+            "stepper",
+            &[(param, WidgetParameterValue::F32(value))],
+        );
+        if accepted {
+            assert!(result.is_ok(), "{param}={value}: {result:?}");
+            continue;
+        }
+        let range = if param == "step" { "0..12" } else { "1..12" };
+        match result {
+            Err(ValidationError::WidgetParameterTypeMismatch { expected, .. }) => {
+                assert_eq!(
+                    expected,
+                    format!("an integer in {range}"),
+                    "{param}={value}"
+                )
+            }
+            other => panic!("{param}={value}: {other:?}"),
+        }
+        assert!(
+            scene
+                .widget_registry
+                .active_for_widget("stepper")
+                .is_empty()
+        );
+    }
+    let mut scene = scene_with("stepper");
+    publish(
+        &mut scene,
+        "stepper",
+        &[
+            ("step", WidgetParameterValue::F32(7.0)),
+            ("total", WidgetParameterValue::F32(5.0)),
+        ],
+    )
+    .unwrap();
+}
+
+/// `f32_integer` needs an f32 with whole bounds and default; the load error
+/// names the parameter.
+#[test]
+fn integer_constraint_needs_whole_bounds_and_default() {
+    for (kind, default, bounds, accepted) in [
+        ("f32", "2.0", "f32_min = 0.0\nf32_max = 12.0\n", true),
+        ("f32", "2", "f32_min = 0\nf32_max = 12\n", true),
+        ("f32", "2.5", "f32_min = 0.0\nf32_max = 12.0\n", false),
+        ("f32", "2.0", "f32_min = 0.5\nf32_max = 12.0\n", false),
+        ("f32", "2.0", "f32_min = 0.0\nf32_max = 11.5\n", false),
+        ("string", "\"a\"", "", false),
+    ] {
+        let source = manifest(
+            "counts",
+            &format!(
+                "[[parameter_schema]]\nname = \"count\"\ntype = \"{kind}\"\ndefault = {default}\n[parameter_schema.constraints]\n{bounds}f32_integer = true\n"
+            ),
+        );
+        match load_files(&[("widget.toml", &source)], &HashMap::new()) {
+            BundleScanResult::Ok(bundle) if accepted => {
+                let c = bundle.definition.parameter_schema[0]
+                    .constraints
+                    .clone()
+                    .unwrap();
+                assert!(c.f32_integer);
+            }
+            BundleScanResult::Err(error) if !accepted => {
+                let text = error.to_string();
+                assert!(
+                    text.contains("'count'") && text.contains("f32_integer"),
+                    "{text}"
+                );
+            }
+            other => panic!("{kind} {default} {bounds}: {other:?}"),
+        }
+    }
+}
+
+/// The elapsed bundle's start counts up; `deadline_counts` accepts only
+/// "up" or "down", and only on a deadline.
+#[test]
+fn elapsed_counts_up_and_deadline_counts_is_checked() {
+    use tze_hud_scene::WidgetParamType;
+    let bundle = load_shipped("elapsed");
+    let started = bundle
+        .definition
+        .parameter_schema
+        .iter()
+        .find(|p| p.name == "started_ms_ago")
+        .unwrap();
+    assert_eq!(started.param_type, WidgetParamType::Deadline);
+    assert!(started.deadline_counts_up());
+    assert!(started.value_hint().starts_with("elapsed<=24h"));
+    for (kind, default, counts, accepted) in [
+        ("deadline", "0", "up", true),
+        ("deadline", "0", "down", true),
+        ("deadline", "0", "sideways", false),
+        ("f32", "0.0", "up", false),
+    ] {
+        let source = manifest(
+            "timer",
+            &format!(
+                "[[parameter_schema]]\nname = \"since\"\ntype = \"{kind}\"\ndefault = {default}\n[parameter_schema.constraints]\ndeadline_counts = \"{counts}\"\n"
+            ),
+        );
+        let result = load_files(&[("widget.toml", &source)], &HashMap::new());
+        assert_eq!(
+            matches!(result, BundleScanResult::Ok(_)),
+            accepted,
+            "{source}: {result:?}"
+        );
+        if let BundleScanResult::Err(error) = result {
+            assert!(error.to_string().contains("'since'"), "{error}");
+        }
     }
 }

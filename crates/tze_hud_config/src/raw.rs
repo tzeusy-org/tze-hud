@@ -50,6 +50,12 @@ pub struct RawRuntime {
     pub fps: Option<u32>,
     /// Default lifetime for action notifications, 1-300000 ms (default 60000).
     pub answer_window_ms: Option<u32>,
+    /// Where new questions appear: `focused` (default; the focused window's
+    /// monitor), `pointer`, or `fixed` (the notification display).
+    pub question_placement: Option<String>,
+    /// Executable basenames eligible for notification-card window activation.
+    /// An empty list disables it. The Windows runtime supplies the default.
+    pub go_to_apps: Option<Vec<String>>,
     /// Log file level: `error`, `warn`, `info` (default), `debug` or
     /// `trace`. `TZE_HUD_FILE_LOG` wins.
     pub log_level: Option<String>,
@@ -195,7 +201,7 @@ pub struct RawConfig {
     #[serde(default)]
     pub schema_version: Option<u32>,
 
-    /// `includes` is v1-reserved.  Presence must produce a hard error.
+    /// `includes` is unsupported.  Presence must produce a hard error.
     /// Accepts any value — detection of presence triggers the error in validation.
     pub includes: Option<AnyValue>,
 

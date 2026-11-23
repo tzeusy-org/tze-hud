@@ -21,12 +21,10 @@ assert WINDOWS_SPEC.loader is not None
 sys.modules[WINDOWS_SPEC.name] = windows_budgets
 WINDOWS_SPEC.loader.exec_module(windows_budgets)
 
-CALIBRATION_VECTOR_VERSION = "tze_hud.cpu-gpu-upload.v1"
+CALIBRATION_VECTOR_VERSION = "tze_hud.cpu-gpu-upload.v2"
 CANONICAL_VIEWPORT = (1920, 1080)
 EXPECTED_BENCHMARK_FRAMES = 180
-EXPECTED_SCENARIOS = windows_budgets.REQUIRED_COUNTER_SESSIONS + (
-    "scene_lock_contention",
-)
+EXPECTED_SCENARIOS = windows_budgets.REQUIRED_COUNTER_SESSIONS
 
 
 def _is_text(value: Any) -> bool:

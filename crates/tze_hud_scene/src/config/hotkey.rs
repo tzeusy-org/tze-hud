@@ -27,7 +27,7 @@ pub struct Hotkey {
 impl Hotkey {
     /// Default human safe-mode chord (Ctrl+Shift+F12). Ctrl+Shift+Esc is not
     /// usable: Windows reserves it for Task Manager.
-    pub const DEFAULT_SAFE_MODE: Hotkey = Hotkey {
+    const DEFAULT_SAFE_MODE: Hotkey = Hotkey {
         ctrl: true,
         shift: true,
         alt: false,
@@ -36,7 +36,7 @@ impl Hotkey {
     };
 
     /// Default chord that opens the control panel without pausing agents.
-    pub const DEFAULT_PANEL: Hotkey = Hotkey {
+    const DEFAULT_PANEL: Hotkey = Hotkey {
         ctrl: true,
         shift: true,
         alt: false,
@@ -47,7 +47,7 @@ impl Hotkey {
     /// Default chord that opens pairing. An F-key like its siblings: a
     /// global letter chord (Ctrl+Shift+P) would take the command palette
     /// away from every editor and terminal while the HUD runs.
-    pub const DEFAULT_PAIRING: Hotkey = Hotkey {
+    const DEFAULT_PAIRING: Hotkey = Hotkey {
         ctrl: true,
         shift: true,
         alt: false,
@@ -57,7 +57,7 @@ impl Hotkey {
 
     /// Default chord that focuses the newest question without interrupting
     /// the owner until they explicitly choose to answer.
-    pub const DEFAULT_ANSWER: Hotkey = Hotkey {
+    const DEFAULT_ANSWER: Hotkey = Hotkey {
         ctrl: true,
         shift: true,
         alt: false,

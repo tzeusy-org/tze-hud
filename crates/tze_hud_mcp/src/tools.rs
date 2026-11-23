@@ -19,16 +19,17 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use tokio::sync::Mutex;
-use tze_hud_portal::hub::{PortalError, PortalHub, PortalKey, PortalStatus, Publish};
+use tze_hud_portal::hub::{
+    MAX_NAME_BYTES, PortalError, PortalHub, PortalKey, PortalStatus, Publish,
+};
 use tze_hud_scene::{
-    SceneId, ValidationError,
+    Publication, Publisher, SceneId, ValidationError,
     config::AgentIdentity,
     graph::{NotificationOutcome, PendingActionKind, SceneGraph},
-    mutation::{MutationBatch, SceneMutation},
     render_wake::RenderWakeNotifier,
     types::{
-        LeaseState, NotificationAction, NotificationPayload, Rgba, StatusBarPayload,
-        WidgetParamType, WidgetParameterValue, ZoneContent, ZoneMediaType, ZonePublishToken,
+        ActionRole, LeaseState, NotificationAction, NotificationPayload, Rgba, StatusBarPayload,
+        WidgetParamType, WidgetParameterValue, ZoneContent, ZoneMediaType,
     },
 };
 
@@ -41,7 +42,7 @@ pub const MAX_DELAY_MS: u64 = 300_000;
 /// lifetime is the per-publication expiry.
 pub const MCP_LEASE_TTL_MS: u64 = 24 * 60 * 60 * 1000;
 /// Longest `wait_ms` long-poll for `hud_input`.
-pub const MAX_WAIT_MS: u64 = 30_000;
+pub const MAX_WAIT_MS: u64 = 55_000;
 
 /// Build a tool error: a stable code plus a hint for the model.
 pub fn tool_err(code: &'static str, hint: impl Into<String>) -> McpError {
@@ -77,7 +78,8 @@ struct AgentState {
     delivered: Vec<ActionItem>,
 }
 
-/// Server-side MCP state, keyed by agent id.
+/// Server-side MCP state, keyed by owner (agent id, or a session scope's
+/// namespace).
 #[derive(Default, Debug)]
 pub struct McpState {
     agents: std::sync::Mutex<HashMap<String, AgentState>>,
@@ -102,6 +104,18 @@ impl McpState {
         let mut agents = self.agents.lock().unwrap_or_else(|p| p.into_inner());
         f(agents.entry(agent.to_string()).or_default())
     }
+
+    /// Drop a released session's lease record and un-ACKed actions.
+    pub(crate) fn forget(&self, owner: &str) {
+        let mut agents = self.agents.lock().unwrap_or_else(|p| p.into_inner());
+        agents.remove(owner);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn knows(&self, owner: &str) -> bool {
+        let agents = self.agents.lock().unwrap_or_else(|p| p.into_inner());
+        agents.contains_key(owner)
+    }
 }
 
 /// Everything a verb needs for one call.
@@ -118,6 +132,13 @@ pub struct ToolCtx<'a> {
     /// mutating verb is refused.
     pub safe_mode: &'a AtomicBool,
     pub agent: &'a AgentIdentity,
+    /// Who owns what this call touches: the agent id, or its session
+    /// scope's namespace. Permissions still come from `agent`.
+    pub owner: &'a str,
+    /// The caller's session scope, if it named one.
+    pub scope: Option<&'a crate::scopes::Scope>,
+    /// Every live session, for naming another session's portal.
+    pub scopes: &'a crate::scopes::Scopes,
     /// Server-owned implicit widget motion; never a model-visible parameter.
     pub widget_transition_ms: u32,
     pub publication_defaults: &'a tze_hud_scene::PublicationDefaults,
@@ -129,8 +150,18 @@ pub struct ToolCtx<'a> {
 fn safe_mode_active() -> McpError {
     tool_err(
         "SAFE_MODE_ACTIVE",
-        "the human paused agents; retry after safe mode ends",
+        "the human paused agents; carry on in chat and retry at your next milestone",
     )
+}
+
+/// Refuse a call whose session ended while it was in flight. Checked under
+/// the scene or hub lock, after release marked the scope, so released
+/// content can never be re-added.
+fn check_scope_live(ctx: &ToolCtx<'_>) -> McpResult<()> {
+    if ctx.scope.is_some_and(crate::scopes::Scope::is_released) {
+        return Err(invalid("this MCP session ended; reconnect"));
+    }
+    Ok(())
 }
 
 /// Refuse a mutating verb during safe mode (all surfaces, including portals).
@@ -289,8 +320,12 @@ fn widget_params(scene: &SceneGraph, instance: &str) -> Value {
         }
         let c = d.constraints.as_ref();
         let ty = match d.param_type {
+            WidgetParamType::Deadline if d.deadline_counts_up() => "elapsed<=24h".into(),
             WidgetParamType::Deadline => "deadline<=24h".into(),
             WidgetParamType::F32 => match (c.and_then(|c| c.f32_min), c.and_then(|c| c.f32_max)) {
+                (Some(lo), Some(hi)) if c.is_some_and(|c| c.f32_integer) => {
+                    format!("integer {lo}..{hi}")
+                }
                 (Some(lo), Some(hi)) => format!("number {lo}..{hi}"),
                 _ => "number".into(),
             },
@@ -317,7 +352,7 @@ fn widget_params(scene: &SceneGraph, instance: &str) -> Value {
 
 /// List the surfaces this agent may use and what it holds now.
 pub async fn hud_surfaces(ctx: &ToolCtx<'_>) -> McpResult<Value> {
-    let ns = ctx.agent.agent_id.as_str();
+    let ns = ctx.owner;
     let mut surfaces = Vec::new();
     {
         let lock_started = tracing::enabled!(target: "tze_hud_mcp_phases", tracing::Level::DEBUG)
@@ -431,6 +466,9 @@ pub async fn hud_surfaces(ctx: &ToolCtx<'_>) -> McpResult<Value> {
             if p.pending_input > 0 {
                 o.insert("pending_input".into(), json!(p.pending_input));
             }
+            if p.unread > 0 {
+                o.insert("unread".into(), json!(p.unread));
+            }
             surfaces.push(Value::Object(o));
         }
     }
@@ -474,7 +512,7 @@ pub(crate) async fn hud_publish<'a>(ctx: &ToolCtx<'a>, args: Value) -> McpResult
     let surface = Surface::parse(&p.surface)?;
     check_allowed(ctx, &surface)?;
     check_not_safe_mode(ctx)?;
-    check_fields(&surface, &p)?;
+    check_fields(&surface, &p, ctx.scope.is_some())?;
     match surface {
         Surface::Zone(zone) => publish_zone(ctx, &zone, p, started).await,
         Surface::Widget(widget) => publish_widget(ctx, &widget, p)
@@ -486,13 +524,14 @@ pub(crate) async fn hud_publish<'a>(ctx: &ToolCtx<'a>, args: Value) -> McpResult
 
 /// Reject fields that don't apply to the surface kind, so a mistaken call
 /// fails loudly instead of silently dropping intent.
-fn check_fields(surface: &Surface, p: &PublishParams) -> McpResult<()> {
+/// A session (`scoped`) may name its zone cards with `display_name`.
+fn check_fields(surface: &Surface, p: &PublishParams, scoped: bool) -> McpResult<()> {
     let misplaced = match surface {
         Surface::Zone(_) => [
             ("params", p.params.is_some()),
             ("status", p.status.is_some()),
             ("expects_reply", p.expects_reply.is_some()),
-            ("display_name", p.display_name.is_some()),
+            ("display_name", p.display_name.is_some() && !scoped),
         ]
         .into_iter()
         .find(|(_, set)| *set),
@@ -519,14 +558,26 @@ fn check_fields(surface: &Surface, p: &PublishParams) -> McpResult<()> {
     }
 }
 
+/// Check the current lease without renewing or granting one. Hold must refuse
+/// a suspended lease before changing content, even if the pause atomic is stale.
+fn existing_lease(ctx: &ToolCtx<'_>, scene: &SceneGraph) -> McpResult<Option<SceneId>> {
+    let existing = ctx.state.with(ctx.owner, |s| s.lease);
+    if existing
+        .and_then(|id| scene.leases.get(&id))
+        .is_some_and(|lease| lease.state == LeaseState::Suspended)
+    {
+        return Err(safe_mode_active());
+    }
+    Ok(existing)
+}
+
 /// The agent's MCP lease: reuse (and renew) it while active, else grant one.
 /// A Suspended lease means safe mode: never grant around it.
 fn ensure_lease(ctx: &ToolCtx<'_>, scene: &mut SceneGraph) -> McpResult<SceneId> {
-    let ns = ctx.agent.agent_id.as_str();
-    let existing = ctx.state.with(ns, |s| s.lease);
+    let ns = ctx.owner;
+    let existing = existing_lease(ctx, scene)?;
     if let Some(id) = existing {
         match scene.leases.get(&id).map(|l| l.state) {
-            Some(LeaseState::Suspended) => return Err(safe_mode_active()),
             Some(LeaseState::Active) if scene.renew_lease(id, MCP_LEASE_TTL_MS).is_ok() => {
                 return Ok(id);
             }
@@ -538,13 +589,38 @@ fn ensure_lease(ctx: &ToolCtx<'_>, scene: &mut SceneGraph) -> McpResult<SceneId>
     Ok(id)
 }
 
-/// Name the cut fields in a publish reply; absent (identical bytes) when
-/// everything fits.
-fn with_clipped<T: serde::Serialize>(mut reply: Value, clipped: &[T]) -> Value {
+/// Report the cut fields in a publish reply as `{name: characters drawn}`;
+/// absent (identical bytes) when everything fits.
+fn with_clipped<K: AsRef<str>>(mut reply: Value, clipped: &[(K, usize)]) -> Value {
     if !clipped.is_empty() {
-        reply["clipped"] = json!(clipped);
+        reply["clipped"] = clipped
+            .iter()
+            .map(|(name, drawn)| (name.as_ref().to_owned(), json!(drawn)))
+            .collect::<serde_json::Map<_, _>>()
+            .into();
     }
     reply
+}
+
+/// A label-only action's defaulted callback id must not repeat another
+/// action's callback id on the same card; two explicit ids may match.
+fn label_only_ids_are_unique(
+    actions: Vec<(NotificationAction, bool)>,
+) -> Result<Vec<NotificationAction>, McpError> {
+    for (i, (action, defaulted)) in actions.iter().enumerate() {
+        for (j, (earlier, earlier_defaulted)) in actions[..i].iter().enumerate() {
+            if (*defaulted || *earlier_defaulted)
+                && earlier.callback_id.is_some()
+                && earlier.callback_id == action.callback_id
+            {
+                let (repeat, first) = if *defaulted { (i, j) } else { (j, i) };
+                return Err(invalid(format!(
+                    "notification.actions[{repeat}] label repeats actions[{first}]; add a callback_id"
+                )));
+            }
+        }
+    }
+    Ok(actions.into_iter().map(|(action, _)| action).collect())
 }
 
 fn ok_with_expiry(expires_in_ms: Option<u64>) -> Value {
@@ -576,10 +652,7 @@ pub fn scene_error(e: &ValidationError) -> McpError {
             "CONTENT_REJECTED",
             format!("zone {zone} is full; hud_clear your older publication or reuse its key"),
         ),
-        V::ZonePublishSafeModeActive { .. } => tool_err(
-            "SAFE_MODE_ACTIVE",
-            "the human paused agents; retry after safe mode ends",
-        ),
+        V::ZonePublishSafeModeActive { .. } => safe_mode_active(),
         V::ZonePublishLeaseOrphaned { .. }
         | V::ZonePublishLeaseNotActive { .. }
         | V::ZonePublishLeaseNotFound { .. } => tool_err("LEASE_NOT_ACTIVE", "retry hud_publish"),
@@ -611,10 +684,35 @@ pub fn scene_error(e: &ValidationError) -> McpError {
             "CONTENT_REJECTED",
             format!("widget {widget} is full; retry later"),
         ),
-        other => tool_err(
-            tze_hud_scene::error_codes::validation_error_code(other),
-            other.to_string(),
-        ),
+        // The two MCP-reachable `key` reasons are complete hints already.
+        V::InvalidField { field, reason }
+            if field == "key" && KEY_REASONS.contains(&reason.as_str()) =>
+        {
+            tool_err("INVALID_ARGUMENT", reason.clone())
+        }
+        // Other scene text can carry ids or internal nouns: one fixed hint
+        // per code.
+        other => {
+            let code = tze_hud_scene::error_codes::validation_error_code(other);
+            tool_err(code, fallback_hint(code))
+        }
+    }
+}
+
+/// `InvalidField` reasons on `key` that are returned as the hint verbatim.
+const KEY_REASONS: [&str; 2] = [
+    "notification key must be at most 256 UTF-8 bytes",
+    "keyed clear requires a notification zone",
+];
+
+/// The hint for a scene refusal whose own text is not model-facing.
+fn fallback_hint(code: &str) -> &'static str {
+    match code {
+        "LEASE_NOT_ACTIVE" => "retry hud_publish",
+        "NOT_HELD" => "you hold nothing there; hud_publish first",
+        "BUDGET_EXCEEDED" => "too much content; hud_clear older content, then retry",
+        "CONTENT_REJECTED" => "zone refused this publish; call hud_surfaces",
+        _ => "request not accepted; call hud_surfaces and resend",
     }
 }
 
@@ -642,7 +740,7 @@ async fn publish_zone<'a>(
     p: PublishParams,
     started: tokio::time::Instant,
 ) -> McpResult<PublishReply<'a>> {
-    let ns = ctx.agent.agent_id.clone();
+    let ns = ctx.owner.to_owned();
     let raw = p
         .content
         .filter(|c| !c.is_null() && c.as_str() != Some(""))
@@ -656,6 +754,16 @@ async fn publish_zone<'a>(
             format!("delay_ms is at most {MAX_DELAY_MS}"),
         ));
     }
+    // Only a session gets here with a name: once this publish is accepted it
+    // labels this and later cards.
+    let relabel = match (p.display_name.as_deref(), ctx.scope) {
+        (Some(name), Some(scope)) => Some((
+            scope,
+            crate::scopes::sanitize_label(name)
+                .ok_or_else(|| invalid("display_name needs a visible character"))?,
+        )),
+        _ => None,
+    };
     let lock_started = tracing::enabled!(target: "tze_hud_mcp_phases", tracing::Level::DEBUG)
         .then(std::time::Instant::now);
     if lock_started.is_some() {
@@ -674,6 +782,7 @@ async fn publish_zone<'a>(
             elapsed_us = started.elapsed().as_micros()
         );
     }
+    check_scope_live(ctx)?;
     let Some(def) = scene.zone_registry.zones.get(zone) else {
         return Err(tool_err(
             "ZONE_NOT_FOUND",
@@ -692,11 +801,26 @@ async fn publish_zone<'a>(
         SceneGraph::validate_notification_key(p.key.as_deref()).map_err(|e| scene_error(&e))?;
     }
     // Measured at admission with the renderer's shaper and current tokens.
-    // Stream text scrolls and tail-anchors by design, so only cards report.
-    let clipped = match (&content, ctx.text_fit) {
-        (ZoneContent::Notification(payload), Some(fit)) => fit.notification(&scene, zone, payload),
-        _ => Vec::new(),
-    };
+    // Stream text scrolls and tail-anchors by design, so only cards and
+    // status entries report.
+    let mut clipped = Vec::new();
+    let mut measure =
+        |scene: &SceneGraph, content: &ZoneContent, key: Option<&str>, display: Option<&str>| {
+            clipped = match (content, ctx.text_fit) {
+                (ZoneContent::Notification(payload), Some(fit)) => fit
+                    .notification(scene, zone, payload, display)
+                    .into_iter()
+                    .map(|(name, drawn)| (name.to_owned(), drawn))
+                    .collect(),
+                (ZoneContent::StatusBar(payload), Some(fit)) => {
+                    fit.status_bar(scene, zone, payload, key)
+                }
+                _ => Vec::new(),
+            };
+        };
+    if delay_ms > 0 {
+        measure(&scene, &content, p.key.as_deref(), None);
+    }
     // Read the owner default exactly once, after resolving the content. Explicit
     // zero remains held; ordinary zone content keeps its historical default.
     let ttl_ms = p.ttl_ms.unwrap_or_else(|| {
@@ -738,32 +862,41 @@ async fn publish_zone<'a>(
     } else {
         None
     };
-    let now = now_us(&scene);
-    let present_at = now.saturating_add(delay_ms.saturating_mul(1_000));
-    let expires_at = (ttl_ms > 0).then(|| present_at.saturating_add(ttl_ms.saturating_mul(1_000)));
-    if delay_ms > 0 {
-        let batch = MutationBatch {
-            batch_id: SceneId::new(),
-            agent_namespace: ns.clone(),
-            mutations: vec![SceneMutation::PublishToZone {
-                zone_name: zone.to_string(),
-                content,
-                publish_token: ZonePublishToken { token: Vec::new() },
-                merge_key: p.key,
-                expires_at_wall_us: expires_at,
-                content_classification: None,
-                breakpoints: Vec::new(),
-                held: expires_at.is_none(),
-            }],
-            timing_hints: None,
-            lease_id: Some(lease_id),
-        };
-        let batch_id = batch.batch_id;
-        if let Some(claim) = &claim {
-            scene.schedule_notification_batch(present_at, batch, claim.id);
-        } else {
-            scene.schedule_batch(present_at, batch);
+    // The new label captions this card too; a refused publish restores it.
+    let previous_label = relabel.as_ref().map(|(scope, label)| {
+        scene.set_scoped_session_label(&ns, Some(label.clone()));
+        scope.session_label()
+    });
+    let refused = |scene: &mut SceneGraph, error: &ValidationError| {
+        if let Some(previous) = previous_label.clone() {
+            scene.set_scoped_session_label(&ns, previous);
         }
+        scene_error(error)
+    };
+    let ttl_us = (ttl_ms > 0).then(|| ttl_ms.saturating_mul(1_000));
+    let (now, expires_at) = if delay_ms > 0 {
+        let now = now_us(&scene);
+        let present_at = now.saturating_add(delay_ms.saturating_mul(1_000));
+        let expires_at = ttl_us.map(|ttl| present_at.saturating_add(ttl));
+        let publisher = Publisher {
+            namespace: ns.clone(),
+            lease_id: Some(lease_id),
+            origin: None,
+        };
+        let publication = Publication::Zone {
+            zone_name: zone.to_string(),
+            content,
+            merge_key: p.key,
+            expires_at_wall_us: expires_at,
+            content_classification: None,
+            breakpoints: Vec::new(),
+            held: expires_at.is_none(),
+        };
+        let batch_id = if let Some(claim) = &claim {
+            scene.schedule_notification(present_at, publisher, publication, claim.id)
+        } else {
+            scene.schedule_publication(present_at, publisher, publication)
+        };
         if zone == "subtitle"
             && tracing::enabled!(target: "tze_hud_delay_diagnostic", tracing::Level::DEBUG)
         {
@@ -780,16 +913,23 @@ async fn publish_zone<'a>(
                     expires_at_wall_us = expires_at, is_subtitle = true);
             }
         }
-    } else if let Some(claim) = &claim {
-        scene
-            .publish_notification_until_with_id(
-                zone, content, &ns, lease_id, p.key, expires_at, claim.id,
-            )
-            .map_err(|error| scene_error(&error))?;
+        (now, expires_at)
     } else {
         scene
-            .publish_to_zone_until_with_lease(zone, content, &ns, lease_id, p.key, expires_at)
-            .map_err(|error| scene_error(&error))?;
+            .publish_to_zone_with_measurement(
+                zone,
+                content,
+                &ns,
+                lease_id,
+                p.key,
+                ttl_us,
+                claim.as_ref().map(|claim| claim.id),
+                &mut measure,
+            )
+            .map_err(|error| refused(&mut scene, &error))?
+    };
+    if let Some((scope, label)) = relabel {
+        scope.set_label(label);
     }
     let wakes = scene.take_notification_wait_notifiers();
     drop(scene);
@@ -809,12 +949,7 @@ async fn publish_zone<'a>(
     loop {
         let mut notified = std::pin::pin!(ready.notified());
         notified.as_mut().enable();
-        let mut scene = match ctx.scene.try_lock() {
-            Ok(scene) => scene,
-            Err(_) => tokio::time::timeout_at(deadline, ctx.scene.lock())
-                .await
-                .map_err(|_| tool_err("INTERNAL", "input state busy; retry hud_input"))?,
-        };
+        let mut scene = lock_scene(ctx, deadline).await?;
         match scene.notification_wait_outcome(claim.id) {
             Some(NotificationOutcome::Answered) => {
                 let action = scene
@@ -858,15 +993,14 @@ async fn publish_zone<'a>(
                 .map(|r| r.expires_at_wall_us)
                 .or_else(|| {
                     scene
-                        .scheduled_batches
+                        .scheduled_publications
                         .iter()
-                        .find(|b| b.notification_publication == Some(claim.id))
-                        .and_then(|b| b.batch.mutations.first())
-                        .and_then(|m| match m {
-                            SceneMutation::PublishToZone {
+                        .find(|s| s.notification_publication == Some(claim.id))
+                        .and_then(|s| match &s.publication {
+                            Publication::Zone {
                                 expires_at_wall_us, ..
                             } => Some(*expires_at_wall_us),
-                            _ => None,
+                            Publication::Widget { .. } => None,
                         })
                 })
                 .unwrap_or(expires_at);
@@ -900,7 +1034,7 @@ fn widget_transition_ms(scene: &SceneGraph, ctx: &ToolCtx<'_>) -> u32 {
 }
 
 async fn publish_widget(ctx: &ToolCtx<'_>, widget: &str, p: PublishParams) -> McpResult<Value> {
-    let ns = ctx.agent.agent_id.clone();
+    let ns = ctx.owner.to_owned();
     let delay_ms = p.delay_ms.unwrap_or(0);
     if delay_ms > MAX_DELAY_MS {
         return Err(tool_err(
@@ -912,6 +1046,7 @@ async fn publish_widget(ctx: &ToolCtx<'_>, widget: &str, p: PublishParams) -> Mc
         .params
         .ok_or_else(|| invalid("widget publish needs params; see params in hud_surfaces"))?;
     let mut scene = ctx.scene.lock().await;
+    check_scope_live(ctx)?;
     if !scene.widget_registry.instances.contains_key(widget) {
         return Err(tool_err(
             "WIDGET_NOT_FOUND",
@@ -930,7 +1065,7 @@ async fn publish_widget(ctx: &ToolCtx<'_>, widget: &str, p: PublishParams) -> Mc
         .map_err(|e| scene_error(&e))?;
     // Measure the widget as it will draw (current params under this call's),
     // but report only params this call set.
-    let clipped: Vec<String> = ctx
+    let clipped: Vec<(String, usize)> = ctx
         .text_fit
         .map(|fit| {
             let mut drawn = scene
@@ -942,7 +1077,7 @@ async fn publish_widget(ctx: &ToolCtx<'_>, widget: &str, p: PublishParams) -> Mc
             drawn.extend(typed.clone());
             fit.widget(&scene, widget, &drawn)
                 .into_iter()
-                .filter(|param| typed.contains_key(param))
+                .filter(|(param, _)| typed.contains_key(param))
                 .collect()
         })
         .unwrap_or_default();
@@ -964,21 +1099,20 @@ async fn publish_widget(ctx: &ToolCtx<'_>, widget: &str, p: PublishParams) -> Mc
         }
         .map(|ttl| present_at.saturating_add(ttl));
         let transition_ms = widget_transition_ms(&scene, ctx);
-        scene.schedule_batch(
+        scene.schedule_publication(
             present_at,
-            MutationBatch {
-                batch_id: SceneId::new(),
-                agent_namespace: ns,
-                mutations: vec![SceneMutation::PublishToWidget {
-                    widget_name: widget.into(),
-                    params: typed,
-                    merge_key: p.key,
-                    transition_ms,
-                    ttl_us,
-                    expires_at_wall_us: None,
-                }],
-                timing_hints: None,
+            Publisher {
+                namespace: ns,
                 lease_id: Some(lease_id),
+                origin: None,
+            },
+            Publication::Widget {
+                widget_name: widget.into(),
+                params: typed,
+                merge_key: p.key,
+                transition_ms,
+                ttl_us,
+                expires_at_wall_us: None,
             },
         );
         return Ok(with_clipped(
@@ -1093,6 +1227,21 @@ fn portal_err(e: PortalError, surface: &str) -> McpError {
 }
 
 async fn publish_portal(ctx: &ToolCtx<'_>, pid: &str, p: PublishParams) -> McpResult<Value> {
+    // The hub refuses these without saying which field; name it here.
+    let name_ok = |s: &str| !s.is_empty() && s.len() <= MAX_NAME_BYTES;
+    if !name_ok(pid) {
+        return Err(invalid(format!("portal id is 1..{MAX_NAME_BYTES} bytes")));
+    }
+    if !p.display_name.as_deref().is_none_or(name_ok) {
+        return Err(invalid(format!(
+            "display_name is 1..{MAX_NAME_BYTES} bytes"
+        )));
+    }
+    if !p.key.as_deref().is_none_or(name_ok) {
+        return Err(invalid(format!(
+            "portal key is 1..{MAX_NAME_BYTES} bytes; omit key to append"
+        )));
+    }
     let text = match p.content {
         None | Some(Value::Null) => None,
         Some(Value::String(s)) if s.is_empty() => None,
@@ -1106,14 +1255,25 @@ async fn publish_portal(ctx: &ToolCtx<'_>, pid: &str, p: PublishParams) -> McpRe
         .transpose()
         .map_err(|_| invalid("portal status must be active or degraded; hud_clear detaches"))?;
     let outcome = with_portals(ctx, |hub, now| {
-        if let Err(error) = check_not_safe_mode(ctx) {
+        if let Err(error) = check_not_safe_mode(ctx).and_then(|()| check_scope_live(ctx)) {
             return (Err(error), false);
         }
+        if let Some(error) = another_sessions_portal(ctx, hub, pid) {
+            return (Err(error), false);
+        }
+        let key = PortalKey::new(ctx.owner, pid);
+        // A session's portal is titled with its label until it names one.
+        let display_name = p.display_name.or_else(|| {
+            hub.get(&key)
+                .is_none()
+                .then(|| ctx.scope.and_then(crate::scopes::Scope::label))
+                .flatten()
+        });
         (
             hub.publish_with_hold(
-                &PortalKey::new(ctx.agent.agent_id.clone(), pid),
+                &key,
                 Publish {
-                    display_name: p.display_name,
+                    display_name,
                     text,
                     key: p.key,
                     expects_reply: p.expects_reply.unwrap_or(false),
@@ -1129,7 +1289,33 @@ async fn publish_portal(ctx: &ToolCtx<'_>, pid: &str, p: PublishParams) -> McpRe
     let mut result = ok_with_expiry(p.ttl_ms.filter(|ms| *ms > 0));
     result["reattached"] = json!(outcome.reattached);
     result["pending_input"] = json!(outcome.pending_input);
+    if outcome.unread > 0 {
+        result["unread"] = json!(outcome.unread);
+    }
     Ok(result)
+}
+
+/// A portal id belongs to the session that attached it until it detaches
+/// or the runtime reclaims it; another session of the agent is refused.
+fn another_sessions_portal(ctx: &ToolCtx<'_>, hub: &PortalHub, pid: &str) -> Option<McpError> {
+    let mut owner = None;
+    hub.visit_holdings(|key, _, _| {
+        if key.id == pid
+            && key.agent != ctx.owner
+            && tze_hud_scene::scope::owner_agent(&key.agent) == ctx.agent.agent_id
+        {
+            owner = Some(key.agent.clone());
+        }
+    });
+    let label = ctx.scopes.by_namespace(&owner?).and_then(|s| s.label());
+    let who = label.map_or_else(
+        || "another session".to_owned(),
+        |l| format!("session \"{l}\""),
+    );
+    Some(tool_err(
+        "NOT_ALLOWED",
+        format!("portal:{pid} belongs to your {who}; publish to another portal id"),
+    ))
 }
 
 // ─── hud_hold ────────────────────────────────────────────────────────────────
@@ -1154,12 +1340,16 @@ pub async fn hud_hold(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
     let surface = Surface::parse(&p.surface)?;
     check_allowed(ctx, &surface)?;
     check_not_safe_mode(ctx)?;
-    let ns = ctx.agent.agent_id.clone();
-    let expiry = |now: u64| (p.ttl_ms > 0).then(|| now.saturating_add(p.ttl_ms * 1_000));
+    let ns = ctx.owner.to_owned();
+    let expiry =
+        |now: u64| (p.ttl_ms > 0).then(|| now.saturating_add(p.ttl_ms.saturating_mul(1_000)));
     let mut result = ok_with_expiry((p.ttl_ms > 0).then_some(p.ttl_ms));
     match surface {
         Surface::Zone(zone) => {
             let mut scene = ctx.scene.lock().await;
+            check_not_safe_mode(ctx)?;
+            check_scope_live(ctx)?;
+            existing_lease(ctx, &scene)?;
             let ttl_us = (p.ttl_ms > 0).then(|| p.ttl_ms.saturating_mul(1_000));
             if !scene.hold_zone_publications(&zone, &ns, ttl_us) {
                 return Err(not_held(&p.surface));
@@ -1168,6 +1358,9 @@ pub async fn hud_hold(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
         }
         Surface::Widget(widget) => {
             let mut scene = ctx.scene.lock().await;
+            check_not_safe_mode(ctx)?;
+            check_scope_live(ctx)?;
+            existing_lease(ctx, &scene)?;
             let expires = expiry(now_us(&scene));
             if !scene.hold_widget_publications(&widget, &ns, expires) {
                 return Err(not_held(&p.surface));
@@ -1181,7 +1374,7 @@ pub async fn hud_hold(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
             // The runtime keeps a held portal (and its transcript) past the
             // idle reclaim until the hold lapses or hud_clear.
             with_portals(ctx, |hub, now| {
-                if let Err(error) = check_not_safe_mode(ctx) {
+                if let Err(error) = check_not_safe_mode(ctx).and_then(|()| check_scope_live(ctx)) {
                     return (Err(error), false);
                 }
                 (
@@ -1214,7 +1407,7 @@ pub async fn hud_clear(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
     if key.is_some() && !matches!(&surface, Surface::Zone(_)) {
         return Err(invalid("keyed clear requires a notification zone"));
     }
-    let ns = ctx.agent.agent_id.clone();
+    let ns = ctx.owner.to_owned();
     match surface {
         Surface::Zone(zone) => {
             let mut scene = ctx.scene.lock().await;
@@ -1258,6 +1451,33 @@ pub struct InputParams {
 
 static NEXT_ACTION_ID: AtomicU64 = AtomicU64::new(1);
 
+/// How long one wait for the shared scene or portal Hub may outlast the
+/// call's input deadline. Their holders (a frame turn, the runtime's
+/// scene-availability waiter, another call) keep them for milliseconds, more
+/// when preempted under load; a poll with no `wait_ms` has no deadline to
+/// spend, so without this a single overlapping holder failed the call. Only
+/// a lock held past it fails.
+const LOCK_GRACE: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// The latest a lock wait may end: the input deadline, or the grace from now
+/// when that is later.
+fn lock_deadline(deadline: tokio::time::Instant) -> tokio::time::Instant {
+    deadline.max(tokio::time::Instant::now() + LOCK_GRACE)
+}
+
+/// The scene, waited for until [`lock_deadline`].
+async fn lock_scene<'a>(
+    ctx: &ToolCtx<'a>,
+    deadline: tokio::time::Instant,
+) -> McpResult<tokio::sync::MutexGuard<'a, SceneGraph>> {
+    match ctx.scene.try_lock() {
+        Ok(scene) => Ok(scene),
+        Err(_) => tokio::time::timeout_at(lock_deadline(deadline), ctx.scene.lock())
+            .await
+            .map_err(|_| tool_err("INTERNAL", "input state busy; retry hud_input")),
+    }
+}
+
 /// The runtime shares a synchronous Hub mutex. Cooperatively wait only while
 /// it is contended, without blocking an executor or leaving a detached owner
 /// after cancellation. Ordinary empty input waits still use readiness below.
@@ -1266,6 +1486,7 @@ async fn with_input_hub<T>(
     deadline: tokio::time::Instant,
     apply: impl FnOnce(&mut PortalHub) -> McpResult<T>,
 ) -> McpResult<T> {
+    let deadline = lock_deadline(deadline);
     loop {
         match portals.hub.try_lock() {
             Ok(mut hub) => return apply(&mut hub),
@@ -1366,7 +1587,7 @@ impl Drop for InputPollLease {
 /// first. Unacked items are redelivered.
 pub async fn hud_input(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
     let p: InputParams = parse_args(args)?;
-    let ns = ctx.agent.agent_id.clone();
+    let ns = ctx.owner.to_owned();
 
     // Acks first, so a poll+ack is one round trip.
     ctx.state
@@ -1380,15 +1601,7 @@ pub async fn hud_input(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
     let _active_poll = InputPollLease::start(ctx, &ns, deadline).await?;
     let action_ready = Arc::clone(&input_ready);
     {
-        let mut scene = match ctx.scene.try_lock() {
-            Ok(scene) => scene,
-            Err(_) => tokio::time::timeout_at(deadline, ctx.scene.lock())
-                .await
-                .map_err(|_| McpError::Tool {
-                    code: "INTERNAL",
-                    hint: "input state busy; retry hud_input".to_string(),
-                })?,
-        };
+        let mut scene = lock_scene(ctx, deadline).await?;
         scene.register_action_notifier(
             &ns,
             RenderWakeNotifier::new(move || action_ready.notify_waiters()),
@@ -1400,12 +1613,7 @@ pub async fn hud_input(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
         let mut notified = std::pin::pin!(input_ready.notified());
         notified.as_mut().enable();
         let (mut items, mut backlog) = {
-            let mut scene = match ctx.scene.try_lock() {
-                Ok(scene) => scene,
-                Err(_) => tokio::time::timeout_at(deadline, ctx.scene.lock())
-                    .await
-                    .map_err(|_| tool_err("INTERNAL", "input state busy; retry hud_input"))?,
-            };
+            let mut scene = lock_scene(ctx, deadline).await?;
             ctx.state.try_with(&ns, |s| {
                 // Both guards exist before removal. No await occurs between
                 // destructive take and retained-until-ack state commit.
@@ -1460,7 +1668,9 @@ pub async fn hud_input(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
             ));
         }
         let now = tokio::time::Instant::now();
-        if !items.is_empty() || backlog > 0 || now >= deadline {
+        // A released session's wait ends at once with its deadline reply.
+        let released = ctx.scope.is_some_and(crate::scopes::Scope::is_released);
+        if !items.is_empty() || backlog > 0 || now >= deadline || released {
             return Ok(json!({ "items": items, "remaining": backlog }));
         }
         {
@@ -1606,10 +1816,31 @@ fn parse_zone_content(content: &Value) -> Result<ZoneContent, McpError> {
                                             "notification.actions[{index}].{name} must be a string"))))
                                         .transpose()
                                 };
+                                let (callback_id, url) = (target("callback_id")?, target("url")?);
+                                // An action with no target is a callback named by
+                                // its label, byte for byte; its answer is the label.
+                                let defaulted = callback_id.is_none() && url.is_none();
+                                if defaulted && label == "dismiss" {
+                                    return Err(invalid(format!(
+                                        "notification.actions[{index}] label dismiss needs a callback_id")));
+                                }
+                                let role = match o.get("role") {
+                                    None => None,
+                                    Some(value) if value.as_str() == Some("destructive") => {
+                                        if url.is_some() {
+                                            return Err(invalid(format!(
+                                                "notification.actions[{index}].role needs a callback action")));
+                                        }
+                                        Some(ActionRole::Destructive)
+                                    }
+                                    Some(_) => return Err(invalid(format!(
+                                        "notification.actions[{index}].role must be destructive"))),
+                                };
                                 let action = NotificationAction {
+                                    callback_id: if defaulted { Some(label.clone()) } else { callback_id },
                                     label,
-                                    callback_id: target("callback_id")?,
-                                    url: target("url")?,
+                                    url,
+                                    role,
                                 };
                                 // Preserve the existing MCP non-empty callback rule,
                                 // after exclusivity so both supplied members never alias.
@@ -1617,9 +1848,10 @@ fn parse_zone_content(content: &Value) -> Result<ZoneContent, McpError> {
                                     return Err(invalid(format!(
                                         "notification.actions[{index}].callback_id must be a non-empty string")));
                                 }
-                                Ok(action)
+                                Ok((action, defaulted))
                             })
-                            .collect::<Result<Vec<_>, McpError>>()?,
+                            .collect::<Result<Vec<_>, McpError>>()
+                            .and_then(label_only_ids_are_unique)?,
                         Some(_) => {
                             return Err(invalid(
                                 "notification.actions must be an array".to_string(),

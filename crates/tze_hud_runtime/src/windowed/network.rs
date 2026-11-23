@@ -619,7 +619,7 @@ mod tests {
         );
         assert!(
             present_tx.is_none(),
-            "grpc_port=0 has no session, so no present-ack sender (hud-4va6q)"
+            "grpc_port=0 has no session, so no present-ack sender"
         );
         assert!(
             grpc_addrs.is_empty(),
@@ -662,7 +662,7 @@ mod tests {
         assert!(
             present_tx.is_some(),
             "non-zero grpc_port must expose the session present-ack sender so the \
-             compositor thread can broadcast FramePresented (hud-4va6q)"
+             compositor thread can broadcast FramePresented"
         );
         assert_eq!(
             grpc_addrs.first().map(|a| a.port()),

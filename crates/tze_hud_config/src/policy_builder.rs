@@ -64,7 +64,7 @@ fn token_font_family(tokens: &DesignTokenMap, key: &str) -> Option<FontFamily> {
 /// Caption typography and text padding for the subtitle pill. Explicit owner
 /// policy values win. The optional whole-zone contrast backdrop is separate
 /// from the compositor's content-hugging themed pill.
-pub fn apply_subtitle_token_defaults(policy: &mut RenderingPolicy, tokens: &DesignTokenMap) {
+fn apply_subtitle_token_defaults(policy: &mut RenderingPolicy, tokens: &DesignTokenMap) {
     if policy.text_color.is_none() {
         policy.text_color = token_color(tokens, "color.on_surface");
     }
@@ -138,10 +138,7 @@ pub fn apply_subtitle_token_defaults(policy: &mut RenderingPolicy, tokens: &Desi
 /// - `margin_horizontal`, `margin_vertical` ← `space.notification`
 /// - `backdrop_radius` ← `shape.notification`
 /// - `text_align` ← `Start`; transitions ← `motion.enter.ms` / `motion.exit.ms`
-pub fn apply_notification_area_token_defaults(
-    policy: &mut RenderingPolicy,
-    tokens: &DesignTokenMap,
-) {
+fn apply_notification_area_token_defaults(policy: &mut RenderingPolicy, tokens: &DesignTokenMap) {
     if policy.text_color.is_none() {
         policy.text_color = token_color(tokens, "color.on_surface");
     }
@@ -197,7 +194,7 @@ pub fn apply_notification_area_token_defaults(
 /// - `backdrop_radius` ← `shape.full`
 /// - `margin_horizontal` ← `space.status.horizontal`
 /// - `text_align` ← `Start`; `overflow` ← `Ellipsis` (one horizontal entry)
-pub fn apply_status_bar_token_defaults(policy: &mut RenderingPolicy, tokens: &DesignTokenMap) {
+fn apply_status_bar_token_defaults(policy: &mut RenderingPolicy, tokens: &DesignTokenMap) {
     if policy.text_color.is_none() {
         policy.text_color = token_color(tokens, "color.on_surface");
     }

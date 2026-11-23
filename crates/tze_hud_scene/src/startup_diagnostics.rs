@@ -3,7 +3,7 @@
 
 use serde::Serialize;
 
-pub const MAX_STARTUP_WARNINGS: usize = 64;
+const MAX_STARTUP_WARNINGS: usize = 64;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]

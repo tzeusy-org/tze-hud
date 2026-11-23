@@ -18,15 +18,23 @@ use tze_hud_scene::{
 pub struct SurfaceProbe(Arc<dyn Fn() -> SurfaceSnapshot + Send + Sync>);
 
 #[derive(Default)]
-pub struct SurfaceSnapshot {
-    pub portals: Value,
-    pub notifications: Value,
-    pub widgets: Value,
-    pub link_launches: u64,
+pub(crate) struct SurfaceSnapshot {
+    pub(crate) portals: Value,
+    pub(crate) notifications: Value,
+    pub(crate) widgets: Value,
+    pub(crate) link_launches: u64,
+    /// The overlaid display showing the open control panel.
+    pub(crate) panel_display: Option<String>,
+    pub(crate) window_activations: u64,
+    /// The pointer shape the runtime last applied, or `None` while the app
+    /// beneath the overlay owns the pointer.
+    pub(crate) cursor: Option<&'static str>,
+    /// The pressed link's local feedback: `opening`, `opened` or `failed`.
+    pub(crate) link_feedback: Option<&'static str>,
 }
 
 impl SurfaceProbe {
-    pub fn read(&self) -> SurfaceSnapshot {
+    pub(crate) fn read(&self) -> SurfaceSnapshot {
         (self.0)()
     }
 }
@@ -39,35 +47,67 @@ impl std::fmt::Debug for SurfaceProbe {
 
 /// Keyboard focus and draft length as the main thread last saw them.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct UiMirror {
+pub(crate) struct UiMirror {
     /// Focused `(tile, node)`; `node` is `None` for a tile-level stop.
-    pub focus: Option<(SceneId, Option<SceneId>)>,
-    /// Characters in the focused composer's draft (0 when none is focused).
-    pub draft_chars: usize,
+    pub(crate) focus: Option<(SceneId, Option<SceneId>)>,
+    /// Characters in each unsent draft by composer node, focused or kept.
+    pub(crate) drafts: HashMap<SceneId, usize>,
     /// Actual runtime hover targets, including their configured trigger inset.
-    pub hover_targets: HashMap<String, Rect>,
+    pub(crate) hover_targets: HashMap<String, Rect>,
     /// OUTPUT reading observations per portal tile (hud-ljhku.2); absent
     /// tiles report `arrow`, no hint and no selection.
-    pub reading: HashMap<SceneId, ReadingUi>,
+    pub(crate) reading: HashMap<SceneId, ReadingUi>,
+    /// [`SurfaceSnapshot::panel_display`].
+    pub(crate) panel_display: Option<String>,
+    /// [`SurfaceSnapshot::cursor`].
+    pub(crate) cursor: Option<&'static str>,
+    /// The pressed link's local feedback: `opening`, `opened` or `failed`.
+    pub(crate) link_feedback: Option<&'static str>,
+    pub(crate) window_activations: u64,
 }
 
 /// Admin-only OUTPUT reading state of one portal: no text crosses here.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct ReadingUi {
+pub(crate) struct ReadingUi {
     /// `ibeam`, `hand` or `arrow`: the cursor the runtime last resolved.
-    pub cursor: &'static str,
+    pub(crate) cursor: &'static str,
     /// The host the link hover hint shows.
-    pub link_hint: Option<String>,
+    pub(crate) link_hint: Option<String>,
     /// Characters in the OUTPUT selection.
-    pub selection_chars: usize,
+    pub(crate) selection_chars: usize,
 }
 
 /// The main thread's [`UiMirror`], written each settle.
-pub type UiHandle = Arc<StdMutex<UiMirror>>;
+pub(crate) type UiHandle = Arc<StdMutex<UiMirror>>;
+
+/// The admin name of a link feedback state (never the URL).
+pub(crate) fn link_feedback_name(state: tze_hud_scene::LinkFeedbackState) -> &'static str {
+    match state {
+        tze_hud_scene::LinkFeedbackState::Opening => "opening",
+        tze_hud_scene::LinkFeedbackState::Opened => "opened",
+        tze_hud_scene::LinkFeedbackState::Failed => "failed",
+    }
+}
+
+/// The admin name of a cursor shape.
+pub(crate) fn cursor_name(cursor: tze_hud_input::PortalCursor) -> &'static str {
+    use tze_hud_input::PortalCursor as C;
+    match cursor {
+        C::Default => "arrow",
+        C::Pointer => "hand",
+        C::Text => "ibeam",
+        C::Grab => "grab",
+        C::Grabbing => "grabbing",
+        C::EwResize => "ew-resize",
+        C::NsResize => "ns-resize",
+        C::NeswResize => "nesw-resize",
+        C::NwseResize => "nwse-resize",
+    }
+}
 
 /// The status probe for one runtime: reads `scene` (only the scene lock, as
 /// the compositor does, waiting up to 100 ms) and the main thread's `ui`.
-pub fn probe(
+pub(crate) fn probe(
     scene: Arc<tokio::sync::Mutex<SceneGraph>>,
     ui: UiHandle,
     link_launches: Arc<AtomicU64>,
@@ -82,12 +122,21 @@ pub fn probe(
                     portals: portals_json(&scene, &ui, &displays),
                     notifications: notifications_json(&scene, &displays),
                     widgets: widgets_json(&scene, &ui, &displays),
+                    panel_display: ui.panel_display,
                     link_launches: link_launches.load(Ordering::Relaxed),
+                    window_activations: ui.window_activations,
+                    cursor: ui.cursor,
+                    link_feedback: ui.link_feedback,
                 };
             }
             if std::time::Instant::now() >= deadline {
+                let ui = ui.lock().unwrap_or_else(|e| e.into_inner()).clone();
                 return SurfaceSnapshot {
                     link_launches: link_launches.load(Ordering::Relaxed),
+                    panel_display: ui.panel_display,
+                    window_activations: ui.window_activations,
+                    cursor: ui.cursor,
+                    link_feedback: ui.link_feedback,
                     ..Default::default()
                 };
             }
@@ -124,6 +173,7 @@ fn notifications_json(scene: &SceneGraph, displays: &[Rect]) -> Value {
         let focus = match card.focus {
             Some(NotificationControl::Action(index)) => json!(index),
             Some(NotificationControl::Close) => json!("close"),
+            Some(NotificationControl::GoTo) => json!("goto"),
             None => Value::Null,
         };
         Some(json!({
@@ -133,9 +183,11 @@ fn notifications_json(scene: &SceneGraph, displays: &[Rect]) -> Value {
             "display": display_index(card.bounds, displays),
             "actions": actions,
             "close": rect_json(card.close),
+            "goto": card.goto.map(rect_json),
             "focus": focus,
             "chosen": card.chosen,
             "state": card.state,
+            "guarded": scene.overlay.notification_press_guard == Some(card.publication_id),
         }))
     }).collect();
     json!(entries)
@@ -246,7 +298,7 @@ fn part_text(scene: &SceneGraph, tile: SceneId, kind: PortalPartKind) -> Option<
 ///
 /// `displays` are the overlaid display rects in scene pixels, in
 /// `/admin/status` order.
-pub fn portals_json(scene: &SceneGraph, ui: &UiMirror, displays: &[Rect]) -> Value {
+pub(crate) fn portals_json(scene: &SceneGraph, ui: &UiMirror, displays: &[Rect]) -> Value {
     let mut entries: Vec<(String, Value)> = Vec::new();
     for (&tile_id, tile) in &scene.tiles {
         let Some(surface) = scene.portal_surface(tile_id) else {
@@ -325,7 +377,7 @@ pub fn portals_json(scene: &SceneGraph, ui: &UiMirror, displays: &[Rect]) -> Val
                 },
                 "input": {
                     "at_tail": at_tail(current_layout(scene, tile_id, PortalPartKind::Composer), input_y),
-                    "draft_chars": if focus == "composer" { ui.draft_chars } else { 0 },
+                    "draft_chars": composer_node.and_then(|n| ui.drafts.get(&n)).copied().unwrap_or(0),
                 },
             }),
         ));
@@ -475,11 +527,13 @@ mod tests {
                             label: "Reply".into(),
                             callback_id: Some("answer".into()),
                             url: None,
+                            role: None,
                         },
                         NotificationAction {
                             label: "Read".into(),
                             callback_id: None,
                             url: Some("https://example.invalid/?secret=value".into()),
+                            role: None,
                         },
                     ],
                 }),
@@ -504,6 +558,11 @@ mod tests {
         assert_eq!(card["actions"].as_array().unwrap().len(), 2);
         assert!(card["focus"].is_null());
         assert!(card["chosen"].is_null());
+        assert_eq!(card["guarded"], false);
+        scene.overlay.notification_press_guard =
+            Some(scene.overlay.notification_geometry[0].publication_id);
+        assert_eq!(notifications_json(&scene, &displays)[0]["guarded"], true);
+        scene.overlay.notification_press_guard = None;
         assert!(!card.to_string().contains("private body"));
         assert!(!card.to_string().contains("secret=value"));
         for rect in [
@@ -639,6 +698,67 @@ mod tests {
         );
     }
 
+    /// R11.1: every applied shape has its admin name; the probe reports the
+    /// main thread's value even under scene contention, and `null` before the
+    /// windowed runtime writes one.
+    #[test]
+    fn reports_the_applied_cursor_by_name() {
+        use tze_hud_input::PortalCursor as C;
+        let names: Vec<_> = [
+            C::Default,
+            C::Pointer,
+            C::Text,
+            C::Grab,
+            C::Grabbing,
+            C::EwResize,
+            C::NsResize,
+            C::NeswResize,
+            C::NwseResize,
+        ]
+        .into_iter()
+        .map(cursor_name)
+        .collect();
+        assert_eq!(
+            names,
+            [
+                "arrow",
+                "hand",
+                "ibeam",
+                "grab",
+                "grabbing",
+                "ew-resize",
+                "ns-resize",
+                "nesw-resize",
+                "nwse-resize"
+            ]
+        );
+        assert_eq!(SurfaceSnapshot::default().cursor, None, "before start");
+        let scene = Arc::new(tokio::sync::Mutex::new(SceneGraph::new(800.0, 600.0)));
+        let ui = Arc::new(StdMutex::new(UiMirror::default()));
+        let observation = probe(scene.clone(), ui.clone(), Arc::new(AtomicU64::new(0)));
+        assert_eq!(observation.read().cursor, None);
+        ui.lock().unwrap().cursor = Some("hand");
+        assert_eq!(observation.read().cursor, Some("hand"));
+        let _held = scene.try_lock().unwrap();
+        assert_eq!(observation.read().cursor, Some("hand"), "scene contention");
+    }
+
+    /// R3.2: link feedback is reported by state name only, never the URL.
+    #[test]
+    fn reports_link_feedback_by_state_name() {
+        use tze_hud_scene::LinkFeedbackState as S;
+        assert_eq!(
+            [S::Opening, S::Opened, S::Failed].map(link_feedback_name),
+            ["opening", "opened", "failed"]
+        );
+        let scene = Arc::new(tokio::sync::Mutex::new(SceneGraph::new(800.0, 600.0)));
+        let ui = Arc::new(StdMutex::new(UiMirror::default()));
+        let observation = probe(scene, ui.clone(), Arc::new(AtomicU64::new(0)));
+        assert_eq!(observation.read().link_feedback, None);
+        ui.lock().unwrap().link_feedback = Some("opened");
+        assert_eq!(observation.read().link_feedback, Some("opened"));
+    }
+
     #[test]
     fn reports_portal_panes_focus_and_draft_length() {
         let (mut scene, tile_id, mut driver, clock) = portal_scene();
@@ -647,7 +767,7 @@ mod tests {
         let displays = [Rect::new(0.0, 0.0, 1920.0, 1080.0)];
         let focused = UiMirror {
             focus: Some((tile_id, Some(composer))),
-            draft_chars: 5,
+            drafts: HashMap::from([(composer, 5)]),
             ..Default::default()
         };
         let v = portals_json(&scene, &focused, &displays);
@@ -664,17 +784,19 @@ mod tests {
         assert_eq!(p["input"]["draft_chars"], 5);
         assert_eq!(p["input"]["at_tail"], Value::Null, "INPUT not measured yet");
 
-        // A tile-level stop is not composer focus, and hides the draft length.
+        // A kept draft reports its length unfocused (a tile stop or no focus);
+        // another composer's draft is not this portal's.
         let tile_stop = UiMirror {
             focus: Some((tile_id, None)),
-            draft_chars: 5,
+            drafts: HashMap::from([(composer, 5), (SceneId::new(), 7)]),
             ..Default::default()
         };
         let v = portals_json(&scene, &tile_stop, &displays);
         assert_eq!(v[0]["focus"], "tile");
-        assert_eq!(v[0]["input"]["draft_chars"], 0);
+        assert_eq!(v[0]["input"]["draft_chars"], 5);
         let v = portals_json(&scene, &UiMirror::default(), &displays);
         assert_eq!(v[0]["focus"], "none");
+        assert_eq!(v[0]["input"]["draft_chars"], 0, "no draft reports 0");
 
         // Observe the actual driver clearing both rendered cues, without a
         // replacement publish or reconstructed Hub deadline in the probe.

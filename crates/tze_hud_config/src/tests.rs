@@ -3,7 +3,7 @@
 //! Each test checks parsing, resolution, or validation through the config loader.
 
 use crate::loader::TzeHudConfig;
-use tze_hud_scene::config::{ChordRole, ConfigErrorCode, ConfigLoader, Hotkey, ParseError};
+use tze_hud_scene::config::{ChordRole, ConfigErrorCode, Hotkey, ParseError};
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -38,21 +38,6 @@ fn parse_error_includes_line_column() {
             assert!(column >= 1, "column should be >= 1, got {column}");
         }
         Ok(_) => panic!("invalid TOML should have failed to parse"),
-    }
-}
-
-// ── Configuration File Resolution Order ─────────────────────────────────
-
-/// WHEN no config file found at any location THEN Err lists searched paths.
-#[test]
-fn no_config_found_lists_searched_paths() {
-    let result =
-        TzeHudConfig::resolve_config_path(Some("/tmp/tze_hud_no_such_file_j90m_test.toml"));
-    match result {
-        Err(paths) => {
-            assert!(!paths.is_empty(), "searched paths must be listed");
-        }
-        Ok(_) => panic!("should not have found a non-existent file"),
     }
 }
 
@@ -93,9 +78,9 @@ profile = "full-display"
     assert!(has_no_tabs, "no [[tabs]] should produce CONFIG_NO_TABS");
 }
 
-// ── Layered Config Composition (v1-reserved) ────────────────────────────
+// ── Layered Config Composition (unsupported) ────────────────────────────
 
-/// WHEN config has `includes` field THEN startup error (post-v1 reserved).
+/// A config with an `includes` field is a startup error.
 #[test]
 fn includes_field_rejected() {
     let toml = r#"

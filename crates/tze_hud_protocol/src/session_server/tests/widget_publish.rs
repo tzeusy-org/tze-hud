@@ -39,6 +39,32 @@ async fn test_durable_widget_publish_receives_result() {
                 ),
                 constraints: None,
             });
+        def.parameter_schema
+            .push(tze_hud_scene::WidgetParameterDeclaration {
+                name: "started_ms_ago".into(),
+                audience: Default::default(),
+                param_type: tze_hud_scene::WidgetParamType::Deadline,
+                default_value: tze_hud_scene::WidgetParameterValue::Deadline(
+                    tze_hud_scene::WidgetDeadline::relative(0),
+                ),
+                constraints: Some(tze_hud_scene::WidgetParamConstraints {
+                    deadline_counts_up: true,
+                    ..Default::default()
+                }),
+            });
+        def.parameter_schema
+            .push(tze_hud_scene::WidgetParameterDeclaration {
+                name: "count".into(),
+                audience: Default::default(),
+                param_type: tze_hud_scene::WidgetParamType::F32,
+                default_value: tze_hud_scene::WidgetParameterValue::F32(0.0),
+                constraints: Some(tze_hud_scene::WidgetParamConstraints {
+                    f32_min: Some(0.0),
+                    f32_max: Some(12.0),
+                    f32_integer: true,
+                    ..Default::default()
+                }),
+            });
         for (name, audience) in [
             ("fill_color", tze_hud_scene::WidgetParamAudience::Owner),
             ("theme", tze_hud_scene::WidgetParamAudience::Owner),
@@ -121,6 +147,19 @@ async fn test_durable_widget_publish_receives_result() {
             "ends_in_ms",
             Param::StringValue("300000".into()),
             "deadline<=24h",
+        ),
+        ("count", Param::F32Value(2.5), "must be an integer in 0..12"),
+        ("started_ms_ago", Param::DeadlineMs(-1), "elapsed<=24h"),
+        (
+            "started_ms_ago",
+            Param::DeadlineMs(86400001),
+            "elapsed<=24h",
+        ),
+        ("started_ms_ago", Param::F32Value(1.5), "elapsed<=24h"),
+        (
+            "count",
+            Param::F32Value(13.0),
+            "must be an integer in 0..12",
         ),
         ("level", Param::F32Value(f32::NAN), "finite"),
         ("level", Param::F32Value(f32::INFINITY), "finite"),
@@ -355,13 +394,13 @@ async fn test_durable_widget_publish_receives_result() {
     );
     {
         let scene = scene_ref.lock().await;
-        assert_eq!(scene.scheduled_batches.len(), 1);
+        assert_eq!(scene.scheduled_publications.len(), 1);
         assert_eq!(scene.agent_holdings("widget-agent").widgets, 1);
         assert!(scene.widget_registry.active_for_widget("gauge").is_empty());
     }
     {
         let mut scene = scene_ref.lock().await;
-        assert_eq!(scene.scheduled_batches[0].batch.lease_id, None);
+        assert_eq!(scene.scheduled_publications[0].publisher.lease_id, None);
         scene.pause_widget_ttls();
         scene.suspend_all_leases(clock.now_millis());
     }
@@ -369,10 +408,10 @@ async fn test_durable_widget_publish_receives_result() {
     {
         let mut scene = scene_ref.lock().await;
         assert!(
-            scene.apply_due_batches().is_empty(),
+            scene.apply_due_publications().is_empty(),
             "unleased gRPC widget cannot snapshot during pause"
         );
-        assert_eq!(scene.scheduled_batches.len(), 1);
+        assert_eq!(scene.scheduled_publications.len(), 1);
         assert_eq!(scene.next_timed_content_wall_us(), None);
         assert!(scene.widget_registry.active_for_widget("gauge").is_empty());
     }
@@ -381,7 +420,7 @@ async fn test_durable_widget_publish_receives_result() {
         let mut scene = scene_ref.lock().await;
         scene.resume_all_leases(clock.now_millis());
         scene.resume_widget_ttls();
-        assert!(scene.apply_due_batches()[0].applied);
+        assert!(scene.apply_due_publications()[0].result.is_ok());
         let record = &scene.widget_registry.active_for_widget("gauge")[0];
         let tze_hud_scene::WidgetParameterValue::Deadline(deadline) = &record.params["ends_in_ms"]
         else {
@@ -391,7 +430,7 @@ async fn test_durable_widget_publish_receives_result() {
         assert_eq!(record.expires_at_wall_us, Some(clock.now_us() + 20_000_000));
         assert_eq!(record.publication_origin, Some(origin));
         assert_eq!(record.ttl_paused_us, 0);
-        assert!(scene.scheduled_batches.is_empty());
+        assert!(scene.scheduled_publications.is_empty());
     }
     assert!(
         request(
@@ -419,7 +458,81 @@ async fn test_durable_widget_publish_receives_result() {
         .await
         .ok
     );
-    assert!(scene_ref.lock().await.scheduled_batches.is_empty());
+    assert!(scene_ref.lock().await.scheduled_publications.is_empty());
+    for (index, ttl_ms) in [18_446_744_073_709_552, u64::MAX].into_iter().enumerate() {
+        for (delayed_index, delayed) in [false, true].into_iter().enumerate() {
+            let sequence = 100 + index as u64 * 10 + delayed_index as u64 * 3;
+            assert!(
+                request(
+                    &tx,
+                    &mut stream,
+                    sequence,
+                    ClientPayload::Publish(Publish {
+                        surface: "widget:gauge".into(),
+                        present_at_us: if delayed {
+                            clock.now_us() + 1_000_000
+                        } else {
+                            0
+                        },
+                        params: vec![crate::proto::WidgetParameterValueProto {
+                            param_name: "level".into(),
+                            value: Some(Param::F32Value(0.75)),
+                        }],
+                        ..Default::default()
+                    })
+                )
+                .await
+                .ok
+            );
+            let hold_now = clock.now_us();
+            let payload = ClientPayload::Hold(Hold {
+                surface: "widget:gauge".into(),
+                ttl_ms,
+            });
+            let result = request(&tx, &mut stream, sequence + 1, payload.clone()).await;
+            assert!(result.ok, "large widget Hold: {result:?}");
+            assert_eq!(result.ttl_ms, ttl_ms);
+            assert_eq!(
+                request(&tx, &mut stream, sequence + 1, payload).await,
+                result
+            );
+            {
+                let mut scene = scene_ref.lock().await;
+                if delayed {
+                    let tze_hud_scene::Publication::Widget {
+                        ttl_us,
+                        expires_at_wall_us,
+                        ..
+                    } = &scene.scheduled_publications[0].publication
+                    else {
+                        panic!("pending widget")
+                    };
+                    assert_eq!(*ttl_us, Some(u64::MAX - hold_now));
+                    assert_eq!(*expires_at_wall_us, None);
+                    clock.advance(2_000);
+                    assert!(scene.apply_due_publications()[0].result.is_ok());
+                }
+                let record = &scene.widget_registry.active_for_widget("gauge")[0];
+                assert_eq!(record.expires_at_wall_us, Some(u64::MAX));
+                assert_eq!(record.publication_origin, Some(origin));
+                clock.advance(1);
+                assert_eq!(scene.drain_expired_widget_publications(), 0);
+            }
+            assert!(
+                request(
+                    &tx,
+                    &mut stream,
+                    sequence + 2,
+                    ClientPayload::Clear(Clear {
+                        surface: "widget:gauge".into(),
+                        ..Default::default()
+                    })
+                )
+                .await
+                .ok
+            );
+        }
+    }
     drop(tx);
 }
 

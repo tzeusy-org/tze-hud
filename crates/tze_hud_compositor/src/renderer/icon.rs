@@ -1,7 +1,4 @@
 //! Notification icon parsing helper.
-//!
-//! Moved from `renderer.rs` banner 4 (`// ─── Notification icon helpers ───`)
-//! by Step R-1 of the renderer module split. No logic was changed.
 
 use tze_hud_scene::types::*;
 

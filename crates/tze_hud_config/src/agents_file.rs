@@ -21,7 +21,7 @@ use crate::allow::{Grant, allow_to_permissions, validate_allow_entry, with_grant
 use crate::config_write::{FileMode, keep_line_endings, write_atomic};
 
 /// File name of the agent store.
-pub const AGENTS_FILE_NAME: &str = "agents.toml";
+const AGENTS_FILE_NAME: &str = "agents.toml";
 
 /// The parsed agent store.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
@@ -124,7 +124,7 @@ impl AgentsFile {
     /// Add every agent to `dir`, expanding `allow` lists into permissions.
     /// Returns every invalid hash and allow entry, and every hash already
     /// used by an earlier agent (in id order): one PSK must identify one agent.
-    pub fn add_to(&self, dir: &mut AgentDirectory) -> Result<(), Vec<ConfigError>> {
+    fn add_to(&self, dir: &mut AgentDirectory) -> Result<(), Vec<ConfigError>> {
         let mut errors = Vec::new();
         let mut owners: BTreeMap<PskDigest, &str> = BTreeMap::new();
         for (agent_id, record) in &self.agents {
@@ -197,7 +197,7 @@ pub enum AgentChange {
     /// file does not have changes nothing.
     Unpair(String),
     /// Grant or withdraw one surface class in an agent's allow list, as it
-    /// stands in the file (see [`with_grant`]).
+    /// stands in the file.
     Grant {
         agent: String,
         grant: Grant,

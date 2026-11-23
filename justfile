@@ -79,9 +79,14 @@ untracked-evidence:
 host-identifiers:
     python3 scripts/ci/check_host_identifiers.py
 
-# Reject retired design citations while preserving historical measurement data.
+# Reject retired design citations, unresolved doc links to repository paths and
+# pinned source snapshots, while preserving historical measurement data.
 current-references:
     python3 scripts/ci/check_current_references.py
+
+# Report lines per surface (Rust production/test, Python, Markdown); enforces nothing.
+size-report:
+    python3 scripts/ci/size_report.py --output-dir test_results/size-report
 
 # cargo check: fast compilation gate (no codegen)
 check:
@@ -299,4 +304,4 @@ dev-run dev_dir host="":
 # Excluded by design: the Windows-only jobs (windows.yml) and weekly perf lanes.
 # Boot and pixel-readback tests run in the CI test job; focused recipes remain local.
 # Runs in CI job order: static, clippy (which subsumes `check`), then tests.
-ci: untracked-evidence host-identifiers current-references fmt dev-mode-guard deps-unused cargo-deny test-python clippy clippy-windows-gnu test test-integration token-footprint production-boot canonical-app-boot
+ci: untracked-evidence host-identifiers current-references size-report fmt dev-mode-guard deps-unused cargo-deny test-python clippy clippy-windows-gnu test test-integration token-footprint production-boot canonical-app-boot

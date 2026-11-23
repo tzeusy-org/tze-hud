@@ -15,7 +15,6 @@ use tze_hud_runtime::{ChromeState, collect_diagnostic};
 use tze_hud_scene::{
     Clock, SceneGraph, SceneId, TestClock, ZONE_TILE_Z_MIN,
     lease::{LeaseState, ORPHAN_GRACE_PERIOD_MS},
-    mutation::{MutationBatch, SceneMutation},
     types::{
         FontFamily, Node, NodeData, PortalDisplayState, PortalIdentity, PortalLifecycleState,
         PortalPart, PortalPartKind, PortalPeerClass, PortalSurface, Rect, Rgba, SolidColorNode,
@@ -32,16 +31,6 @@ const PORTAL_BOUNDS: Rect = Rect {
     width: 720.0,
     height: 320.0,
 };
-
-fn make_batch(namespace: &str, lease_id: SceneId, mutations: Vec<SceneMutation>) -> MutationBatch {
-    MutationBatch {
-        batch_id: SceneId::new(),
-        agent_namespace: namespace.to_string(),
-        mutations,
-        timing_hints: None,
-        lease_id: Some(lease_id),
-    }
-}
 
 fn portal_root(transcript: &str) -> (Node, Vec<Node>) {
     let root = Node {
@@ -78,19 +67,15 @@ fn portal_root(transcript: &str) -> (Node, Vec<Node>) {
     (root, vec![transcript_node])
 }
 
-fn root_batch_for_tile(tile_id: SceneId, root: Node, children: Vec<Node>) -> Vec<SceneMutation> {
-    let root_id = root.id;
-    let mut mutations = vec![SceneMutation::SetTileRoot {
-        tile_id,
-        node: root,
-        descendants: vec![],
-    }];
-    mutations.extend(children.into_iter().map(|node| SceneMutation::AddNode {
-        tile_id,
-        parent_id: Some(root_id),
-        node,
-    }));
-    mutations
+fn set_portal_root(
+    scene: &mut SceneGraph,
+    tile_id: SceneId,
+    mut root: Node,
+    children: Vec<Node>,
+    namespace: &str,
+) -> Result<(), tze_hud_scene::ValidationError> {
+    root.children = children.iter().map(|child| child.id).collect();
+    scene.set_tile_root_tree_checked(tile_id, root, children, namespace)
 }
 
 fn create_portal_scene(ttl_ms: u64) -> (SceneGraph, TestClock, SceneId, SceneId, SceneId) {
@@ -101,27 +86,13 @@ fn create_portal_scene(ttl_ms: u64) -> (SceneGraph, TestClock, SceneId, SceneId,
     scene.active_tab = Some(tab_id);
     let lease_id = scene.grant_lease(namespace, ttl_ms);
 
-    let create = scene.apply_batch(&make_batch(
-        namespace,
-        lease_id,
-        vec![SceneMutation::CreateTile {
-            tab_id,
-            namespace: namespace.to_string(),
-            lease_id,
-            bounds: PORTAL_BOUNDS,
-            z_order: 180,
-        }],
-    ));
-    assert!(create.applied, "portal tile create must apply");
-    let tile_id = create.created_ids[0];
+    let tile_id = scene
+        .create_tile(tab_id, namespace, lease_id, PORTAL_BOUNDS, 180)
+        .expect("create portal tile");
 
     let (root, children) = portal_root("line 0");
-    let set_root = scene.apply_batch(&make_batch(
-        namespace,
-        lease_id,
-        root_batch_for_tile(tile_id, root, children),
-    ));
-    assert!(set_root.applied, "initial portal transcript must apply");
+    let set_root = set_portal_root(&mut scene, tile_id, root, children, namespace);
+    assert!(set_root.is_ok(), "initial portal transcript must apply");
 
     (scene, clock, tab_id, lease_id, tile_id)
 }
@@ -195,13 +166,9 @@ fn orphaned_portal_freezes_and_grace_expiry_removes_tile() {
     );
 
     let (root, children) = portal_root("line after disconnect");
-    let rejected = scene.apply_batch(&make_batch(
-        "portal-gov",
-        lease_id,
-        root_batch_for_tile(tile_id, root, children),
-    ));
+    let rejected = set_portal_root(&mut scene, tile_id, root, children, "portal-gov");
     assert!(
-        !rejected.applied,
+        rejected.is_err(),
         "orphaned lease must reject further portal updates"
     );
     assert_eq!(
@@ -234,13 +201,9 @@ fn safe_mode_suspend_blocks_portal_updates_until_resume() {
     assert_eq!(scene.leases[&lease_id].state, LeaseState::Suspended);
 
     let (root, children) = portal_root("line while safe mode active");
-    let rejected = scene.apply_batch(&make_batch(
-        "portal-gov",
-        lease_id,
-        root_batch_for_tile(tile_id, root, children),
-    ));
+    let rejected = set_portal_root(&mut scene, tile_id, root, children, "portal-gov");
     assert!(
-        !rejected.applied,
+        rejected.is_err(),
         "suspended lease must reject updates while safe mode is active"
     );
     assert_eq!(portal_text(&scene, tile_id), baseline);
@@ -249,13 +212,9 @@ fn safe_mode_suspend_blocks_portal_updates_until_resume() {
         .resume_lease(&lease_id, clock.now_millis() + 1)
         .expect("resume lease");
     let (root, children) = portal_root("line after safe mode exit");
-    let accepted = scene.apply_batch(&make_batch(
-        "portal-gov",
-        lease_id,
-        root_batch_for_tile(tile_id, root, children),
-    ));
+    let accepted = set_portal_root(&mut scene, tile_id, root, children, "portal-gov");
     assert!(
-        accepted.applied,
+        accepted.is_ok(),
         "portal updates should resume after safe mode exit"
     );
     assert_eq!(portal_text(&scene, tile_id), "line after safe mode exit");

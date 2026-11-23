@@ -114,7 +114,7 @@ pub fn builtin_theme_names() -> impl Iterator<Item = &'static str> {
 /// Other keys are checked against [`crate::tokens::CANONICAL_TOKENS`] rather than
 /// the `[design_tokens]` key pattern, so a theme can also set the runtime-only
 /// `system_card.*` / `safe_mode.*` tokens that config cannot spell.
-pub fn parse_theme(src: &str) -> Result<DesignTokenMap, Vec<String>> {
+pub(crate) fn parse_theme(src: &str) -> Result<DesignTokenMap, Vec<String>> {
     let map: DesignTokenMap = toml::from_str(src).map_err(|e| vec![e.to_string()])?;
     let mut errors: Vec<String> = map
         .iter()
@@ -162,7 +162,7 @@ pub fn selected_theme_name(config_tokens: &DesignTokenMap) -> &str {
 /// not in the result.
 ///
 /// Pure, so a later live theme swap can re-run it. An unknown theme name is
-/// rejected by config validation ([`validate_theme`]), which fails strict
+/// rejected by config validation, which fails strict
 /// startup. Only the dev insecure-startup override
 /// (`TZE_HUD_DEV_ALLOW_INSECURE_STARTUP`) runs with invalid config; there it
 /// falls back to [`DEFAULT_THEME`] with a warning, like that mode's other
@@ -193,7 +193,7 @@ pub fn check_design_tokens(config_tokens: &DesignTokenMap) -> Result<(), String>
 }
 
 /// Validate `[design_tokens] theme`: it must name a built-in theme.
-pub fn validate_theme(raw: &RawConfig, errors: &mut Vec<ConfigError>) {
+pub(crate) fn validate_theme(raw: &RawConfig, errors: &mut Vec<ConfigError>) {
     let Some(name) = raw
         .design_tokens
         .as_ref()

@@ -25,7 +25,11 @@ and default-zero ACK; an initially absent or foreign portal does not permit
 choice work. Choice probes/layout stop before the existing readiness pipe releases
 the driver's default-zero choice poll/ACK. This removes fixture overlap, not
 external contention: the runtime's finite busy/error and retention semantics stay
-unchanged. The three calibration test parents run without initializing a GPU;
+unchanged. Each one-call ask (`notification_choice_wait`, then
+`notification_choice_labels`) is re-armed by its own stdout marker after the
+previous flow completes. The calibration freezes the scene clock at startup,
+so a reply's `expires_in_ms` equals its TTL and the label-only flow, whose
+card expires with its wait, measures byte-identically across runs. The three calibration test parents run without initializing a GPU;
 the two measured executions still use the real headless runtime.
 
 Each operation records two measures:

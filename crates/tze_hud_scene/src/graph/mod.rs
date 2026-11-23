@@ -12,7 +12,19 @@ use std::sync::Arc;
 /// An accepted notification outcome, delivered only after unlocking the scene.
 pub enum NotificationActivation {
     Callback(RenderWakeNotifier),
-    OpenUrl(String),
+    /// A real owner input requested a match recheck and window activation.
+    GoTo {
+        publication_id: SceneId,
+        token: String,
+        attempted_at_mono_us: u64,
+        bounds: Rect,
+    },
+    /// Open `url`, the encoded target of action `index` of `publication_id`.
+    OpenUrl {
+        url: String,
+        publication_id: SceneId,
+        index: usize,
+    },
 }
 
 /// Returns a `SystemClock` wrapped in `Arc<dyn Clock>`.
@@ -108,16 +120,16 @@ pub struct SceneGraph {
     /// re-prime the caches.
     #[serde(default)]
     pub geometry_epoch: u64,
-    /// Monotonically increasing sequence number assigned to each committed batch.
+    /// Monotonically increasing sequence number assigned to each committed publication.
     ///
     /// Incremented by `SceneGraph::next_sequence_number` on every successful
-    /// [`crate::mutation::MutationBatch`] commit.
+    /// [`SceneGraph::publish`] commit.
     pub sequence_number: u64,
-    /// Batches held until their `present_at` time (see [`timed`]).
+    /// Publications held until their `present_at` time (see [`timed`]).
     #[serde(skip, default)]
-    pub scheduled_batches: Vec<timed::ScheduledBatch>,
+    pub scheduled_publications: Vec<timed::ScheduledPublication>,
     /// Existing resume-grace deadlines for disconnected, unleased publications.
-    /// Entries exist only while current content or scheduled batches own the origin.
+    /// Entries exist only while current content or scheduled publications own the origin.
     #[serde(skip, default)]
     publication_orphans: HashMap<SceneId, u64>,
     /// Notification action presses and displaced receipts waiting for their
@@ -127,6 +139,9 @@ pub struct SceneGraph {
     /// Input readiness callbacks, invoked by the producer only after scene unlock.
     #[serde(skip, default)]
     pending_action_notifiers: HashMap<String, RenderWakeNotifier>,
+    /// Caption for each labeled MCP session's new publications, by namespace.
+    #[serde(skip, default)]
+    session_labels: HashMap<String, crate::scope::SessionLabel>,
     #[serde(skip, default)]
     notification_waits: HashMap<SceneId, notification_wait::NotificationWait>,
     /// Readiness owed for displaced receipts; drained with the wait debt.
@@ -162,16 +177,16 @@ pub struct SceneGraph {
 }
 
 /// Maximum number of tabs in a scene.
-pub const MAX_TABS: usize = 256;
+const MAX_TABS: usize = 256;
 
 /// Maximum number of tiles per tab.
-pub const MAX_TILES_PER_TAB: usize = 1024;
+const MAX_TILES_PER_TAB: usize = 1024;
 
 /// Maximum number of nodes per tile.
 pub const MAX_NODES_PER_TILE: usize = 64;
 
 /// Maximum name length for tabs, in UTF-8 bytes.
-pub const MAX_TAB_NAME_BYTES: usize = 128;
+const MAX_TAB_NAME_BYTES: usize = 128;
 
 /// Maximum content size for TextMarkdownNode, in UTF-8 bytes.
 pub const MAX_MARKDOWN_BYTES: usize = 65_535;
@@ -185,16 +200,18 @@ pub const ZONE_TILE_Z_MIN: u32 = 0x8000_0000;
 
 pub mod agents;
 pub mod contention;
-pub(crate) use contention::apply_contention;
+pub use contention::apply_contention;
 
 pub mod overlay;
 pub use agents::{AgentHoldings, AgentReclaim};
-pub use overlay::RuntimeOverlayState;
+pub use overlay::{NotificationHold, NotificationHoldDrain, RuntimeOverlayState};
 
 pub mod budget;
 pub mod holdings;
 pub mod leases;
 pub mod node_tree;
+pub mod publish;
+pub use publish::{Publication, Publisher};
 pub mod queries;
 pub mod resources;
 pub mod snapshot;
@@ -232,11 +249,11 @@ pub struct PendingAction {
 impl SceneGraph {
     // ─── Notification auto-dismiss TTL constants ─────────────────────────
     /// Default auto-dismiss TTL (µs) for low/normal notifications (urgency 0, 1).
-    pub const NOTIFICATION_TTL_INFO_US: u64 = 8_000_000; // 8 seconds
+    const NOTIFICATION_TTL_INFO_US: u64 = 8_000_000; // 8 seconds
     /// Default auto-dismiss TTL (µs) for urgent notifications (urgency 2).
-    pub const NOTIFICATION_TTL_WARNING_US: u64 = 15_000_000; // 15 seconds
+    const NOTIFICATION_TTL_WARNING_US: u64 = 15_000_000; // 15 seconds
     /// Default auto-dismiss TTL (µs) for critical notifications (urgency 3+).
-    pub const NOTIFICATION_TTL_CRITICAL_US: u64 = 30_000_000; // 30 seconds
+    const NOTIFICATION_TTL_CRITICAL_US: u64 = 30_000_000; // 30 seconds
 
     /// Create a new empty scene graph using the real system clock.
     pub fn new(width: f32, height: f32) -> Self {
@@ -246,6 +263,13 @@ impl SceneGraph {
     /// Share this scene's injected time source with runtime composition.
     pub fn clock(&self) -> Arc<dyn Clock> {
         Arc::clone(&self.clock)
+    }
+
+    /// Replace the time source of an already-initialized scene, before any
+    /// time-dependent state exists. The token-footprint calibration freezes
+    /// time this way so expiry bytes in its replies are reproducible.
+    pub fn set_clock(&mut self, clock: Arc<dyn Clock>) {
+        self.clock = clock;
     }
 
     /// Create an empty scene with injected time for deterministic lease behavior.
@@ -265,15 +289,40 @@ impl SceneGraph {
             version: 0,
             geometry_epoch: 0,
             sequence_number: 0,
-            scheduled_batches: Vec::new(),
+            scheduled_publications: Vec::new(),
             publication_orphans: HashMap::new(),
             pending_actions: HashMap::new(),
             pending_action_notifiers: HashMap::new(),
+            session_labels: HashMap::new(),
             notification_waits: HashMap::new(),
             pending_input_wakes: Vec::new(),
             registered_resources: HashMap::new(),
             overlay: RuntimeOverlayState::default(),
         }
+    }
+
+    /// Caption `namespace`'s later publications with `label` (`None`: none).
+    /// Publications already shown keep theirs.
+    pub fn set_session_label(&mut self, namespace: &str, label: Option<String>) {
+        self.set_scoped_session_label(
+            namespace,
+            label.map(|caption| crate::scope::SessionLabel {
+                caption,
+                window_token: None,
+            }),
+        );
+    }
+
+    /// Retain the unsuffixed, untruncated window token with the caption.
+    pub fn set_scoped_session_label(
+        &mut self,
+        namespace: &str,
+        label: Option<crate::scope::SessionLabel>,
+    ) {
+        match label {
+            Some(label) => self.session_labels.insert(namespace.to_owned(), label),
+            None => self.session_labels.remove(namespace),
+        };
     }
 
     /// Register input readiness for a publisher before checking its pending queue.
@@ -339,6 +388,17 @@ impl SceneGraph {
         self.geometry_epoch += 1;
     }
 
+    /// Set the pressed link's feedback; repaints only on change.
+    pub fn set_link_feedback(
+        &mut self,
+        feedback: Option<(crate::LinkFeedbackTarget, crate::LinkFeedbackState)>,
+    ) {
+        if self.overlay.link_feedback != feedback {
+            self.overlay.link_feedback = feedback;
+            self.bump_geometry_epoch();
+        }
+    }
+
     /// Set one portal's OUTPUT reading decoration; repaints only on change.
     pub fn set_portal_reading(&mut self, tile: SceneId, decor: crate::PortalReadingDecor) {
         let current = self.overlay.portal_reading.get(&tile);
@@ -384,9 +444,11 @@ mod tests;
 
 // Behavior suites share fixtures only in lib-test builds.
 #[cfg(test)]
+mod behavior_tests;
+#[cfg(test)]
 mod limits_tests;
 #[cfg(test)]
-mod spec_scenarios;
+mod portal_tests;
 #[cfg(test)]
 mod stack_trim_tests;
 #[cfg(test)]

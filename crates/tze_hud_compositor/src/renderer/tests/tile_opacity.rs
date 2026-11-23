@@ -1,133 +1,225 @@
 use super::*;
 
-// ───: portal tile backdrop fades as one unit (no see-through on a ──
-// geometry change that exposes tile-backdrop-only regions) ───────────────────
+use crate::test_pixels::pixel_at;
 
-/// Build a scrollable (portal-like) TextMarkdown tile with an OPAQUE background,
-/// mirroring the resident portal node the projection driver publishes.
+async fn tile_test_gpu() -> Option<(Compositor, HeadlessSurface)> {
+    let gpu = make_compositor_and_surface(256, 256).await;
+    if std::env::var("TZE_HUD_REQUIRE_GPU").is_ok_and(|value| value.trim() == "1") {
+        assert!(
+            gpu.is_some(),
+            "strict tile opacity tests require a GPU adapter"
+        );
+    }
+    gpu
+}
+
+fn prime_text(compositor: &mut Compositor, scene: &SceneGraph) {
+    compositor.prime_markdown_cache(scene);
+    compositor.prime_truncation_cache(scene);
+}
+
 fn w41ef_portal_tile(scene: &mut SceneGraph, bounds: Rect, node_bounds: Rect) -> SceneId {
-    let tab_id = scene.create_tab("t", 0).unwrap();
-    let lease_id = scene.grant_lease("t", 60_000);
-    let tile_id = scene.create_tile(tab_id, "t", lease_id, bounds, 1).unwrap();
-    scene
-        .register_tile_scroll_config(tile_id, TileScrollConfig::vertical())
-        .unwrap();
-    let node = Node {
-        layout: Default::default(),
-        id: SceneId::new(),
-        children: vec![],
-        data: NodeData::TextMarkdown(TextMarkdownNode {
-            // Single short glyph: leaves the rest of the node body textless so a
-            // pixel probe reads the backdrop alone (not a glyph drawn over it).
-            content: "x".to_owned(),
+    let tile = b0x0m_tile_with_root(
+        scene,
+        bounds,
+        SceneId::new(),
+        NodeData::TextMarkdown(TextMarkdownNode {
+            // The single glyph leaves the rest of the backdrop available for sampling.
+            color: Rgba::new(0.9, 0.9, 0.9, 1.0),
+            background: Some(Rgba::new(0.04, 0.05, 0.07, 1.0)),
+            content: "x".into(),
             bounds: node_bounds,
             font_size_px: 14.0,
             font_family: FontFamily::SystemSansSerif,
-            color: Rgba::new(0.9, 0.9, 0.9, 1.0),
-            // Opaque backdrop (#0A0D11-ish), matching portal.transcript.background.
-            background: Some(Rgba::new(0.04, 0.05, 0.07, 1.0)),
             alignment: TextAlign::Start,
             overflow: TextOverflow::Ellipsis,
             color_runs: Box::default(),
         }),
-    };
-    scene.set_tile_root(tile_id, node).unwrap();
-    tile_id
+    );
+    scene
+        .register_tile_scroll_config(tile, TileScrollConfig::vertical())
+        .unwrap();
+    tile
 }
 
-/// When a portal tile's opaque body is faded (portal transition opacity,
-/// or any tile opacity < 1), the whole tile MUST fade
-/// as one unit. Before the fix, the flat tile backdrop (`tile_background_color`)
-/// and the tile text honoured the fade but the content-node background
-/// (`tm.background` painted in `render_node`) did not — so a region covered only
-/// by the flat backdrop (e.g. the newly-exposed area after a resize-grow, while
-/// the content node still lags at its old smaller size) rendered see-through
-/// while the content region stayed fully opaque. This asserts backdrop
-/// uniformity: the tile-backdrop-only region and the content region paint at the
-/// SAME alpha.
-///
-/// Asserted at the draw-list (vertex) level rather than by pixel readback: the
-/// live overlay geometry pass uses the `clear_pipeline` (REPLACE, no blending),
-/// but `render_frame_headless` always uses the blending pipeline, so a readback
-/// composites the two overlapping backdrop quads instead of letting the last
-/// write win — it cannot represent the live REPLACE alpha. The generated
-/// backdrop colors, however, are blend-independent.
+fn pin_fade(compositor: &mut Compositor, tile: SceneId, opacity: f32) {
+    compositor.portal_tile_anim_states.insert(
+        tile,
+        ZoneAnimationState {
+            transition_start: std::time::Instant::now(),
+            duration_ms: 0,
+            easing: super::easing::Easing::Linear,
+            from_opacity: opacity,
+            target_opacity: opacity,
+        },
+    );
+}
+
+fn upload_white_image(compositor: &mut Compositor, scene: &mut SceneGraph) -> ResourceId {
+    let resource = ResourceId::of(b"tile opacity image");
+    compositor.register_image_bytes(resource, std::sync::Arc::from(vec![255u8; 16]), 2, 2);
+    assert!(compositor.ensure_image_texture(resource, 2, 2));
+    scene.register_resource(resource);
+    resource
+}
+
+fn image_data(resource_id: ResourceId, bounds: Rect) -> NodeData {
+    NodeData::StaticImage(StaticImageNode {
+        resource_id,
+        width: 2,
+        height: 2,
+        decoded_bytes: 16,
+        fit_mode: ImageFitMode::Fill,
+        bounds,
+    })
+}
+
+fn tile_pixel(frame: &crate::CapturedFrame, tile: Rect, (x, y): (u32, u32)) -> [u8; 4] {
+    pixel_at(
+        &frame.rgba,
+        frame.width,
+        tile.x as u32 + x,
+        tile.y as u32 + y,
+    )
+}
+
+fn set_composer_tints(
+    scene: &mut SceneGraph,
+    composer: SceneId,
+    hover: Option<Rgba>,
+    pressed: Option<Rgba>,
+) {
+    let NodeData::HitRegion(region) = &mut scene.nodes.get_mut(&composer).unwrap().data else {
+        panic!("the generated composer must be a hit region");
+    };
+    region.local_style.hover_tint = hover;
+    region.local_style.pressed_tint = pressed;
+}
+
+fn assert_tint(pixel: [u8; 4], dominant: usize, phase: &str) {
+    for (channel, value) in pixel[..3].iter().enumerate() {
+        if channel != dominant {
+            assert!(
+                pixel[dominant] > value.saturating_add(8),
+                "{phase}: {pixel:?}"
+            );
+        }
+    }
+}
+
+/// Live-overlay REPLACE and headless blending differ, so compare the
+/// emitted flat and content backdrops directly at fractional opacity.
 #[tokio::test]
 async fn hud_w41ef_portal_content_background_scaled_by_tile_opacity() {
-    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);
-    // No text renderer: `render_node` takes the fallback branch which still emits
-    // the content-node background quad first. overlay_mode stays false so
-    // `gpu_color` is identity and the emitted alpha is directly comparable.
-
+    let (mut compositor, _surface) = require_gpu!(tile_test_gpu().await);
+    assert!(compositor.text_rasterizer.is_none());
     let mut scene = SceneGraph::new(256.0, 256.0);
-    let bg = Rgba::new(0.04, 0.05, 0.07, 1.0); // opaque backdrop
-    let tab_id = scene.create_tab("t", 0).unwrap();
-    let lease_id = scene.grant_lease("t", 60_000);
-    let tile_id = scene
-        .create_tile(tab_id, "t", lease_id, Rect::new(0.0, 0.0, 120.0, 120.0), 1)
-        .unwrap();
+    let bounds = Rect::new(0.0, 0.0, 120.0, 120.0);
+    let tile_id = w41ef_portal_tile(&mut scene, bounds, bounds);
+    scene.tiles.get_mut(&tile_id).unwrap().opacity = 0.5;
+    let tile = &scene.tiles[&tile_id];
+    for (level, alpha) in [
+        (DegradationLevel::Nominal, 0.5),
+        (DegradationLevel::Simplified, 1.0),
+    ] {
+        compositor.set_degradation_policy(CompositorDegradationPolicy {
+            level,
+            ..Default::default()
+        });
+        let flat = compositor.tile_background_color(tile, &scene).unwrap();
+        let mut vertices = Vec::new();
+        compositor.render_node(
+            tile.root_node.unwrap(),
+            tile,
+            &scene,
+            &mut vertices,
+            &mut Vec::new(),
+            120.0,
+            120.0,
+        );
+        assert_eq!(
+            (flat[3], vertices[0].color[3]),
+            (alpha, alpha),
+            "{level:?}: content and whole-tile backdrops must share alpha before text initializes"
+        );
+    }
+}
+
+fn assert_settled_drag_preserves_draw_alpha(
+    compositor: &mut Compositor,
+    scene: &mut SceneGraph,
+    tile: SceneId,
+) {
+    pin_fade(compositor, tile, 1.0);
+    let resource = upload_white_image(compositor, scene);
+    let root = scene.tiles[&tile].root_node.unwrap();
     scene
-        .register_tile_scroll_config(tile_id, TileScrollConfig::vertical())
-        .unwrap();
-    let root_id = SceneId::new();
-    scene
-        .set_tile_root(
-            tile_id,
+        .add_node_to_tile(
+            tile,
+            Some(root),
             Node {
                 layout: Default::default(),
-                id: root_id,
+                id: SceneId::new(),
                 children: vec![],
-                data: NodeData::TextMarkdown(TextMarkdownNode {
-                    content: "x".to_owned(),
-                    bounds: Rect::new(0.0, 0.0, 120.0, 120.0),
-                    font_size_px: 14.0,
-                    font_family: FontFamily::SystemSansSerif,
-                    color: Rgba::new(0.9, 0.9, 0.9, 1.0),
-                    background: Some(bg),
-                    alignment: TextAlign::Start,
-                    overflow: TextOverflow::Ellipsis,
-                    color_runs: Box::default(),
-                }),
+                data: image_data(resource, Rect::new(20.0, 20.0, 10.0, 10.0)),
             },
         )
         .unwrap();
+    prime_text(compositor, scene);
 
-    // Half-fade the whole tile (deterministic stand-in for a portal fade).
-    scene.tiles.get_mut(&tile_id).unwrap().opacity = 0.5;
-    let tile = scene.tiles.get(&tile_id).unwrap().clone();
-
-    // Flat tile backdrop alpha (already opacity-scaled).
-    let flat_bg = compositor
-        .tile_background_color(&tile, &scene)
-        .expect("markdown tile always has a flat backdrop");
-    let flat_alpha = flat_bg[3];
-
-    // Content-node backdrop quad, as emitted by render_node.
-    let mut verts: Vec<crate::pipeline::RectVertex> = Vec::new();
-    let mut cmds: Vec<super::draw_cmds::TexturedDrawCmd> = Vec::new();
-    compositor.render_node(root_id, &tile, &scene, &mut verts, &mut cmds, 120.0, 120.0);
-    let node_bg_alpha = verts
-        .first()
-        .expect("render_node must emit the content background quad first")
-        .color[3];
-
-    // Fix: the content-node background must be scaled by the tile opacity, exactly
-    // like the flat backdrop, so the tile fades as one unit. Before the fix the
-    // node background was painted at full alpha (bg.a = 1.0) while the flat
-    // backdrop was 0.5 — the exact divergence that renders the tile-backdrop-only
-    // region see-through relative to the content region on a resize/fade.
-    assert!(
-        (node_bg_alpha - 0.5 * bg.a).abs() < 1e-4,
-        "content-node background alpha must be tile-opacity-scaled: got {node_bg_alpha}, \
-         expected {} (bg.a {} × tile.opacity 0.5)",
-        0.5 * bg.a,
-        bg.a
-    );
-    assert!(
-        (node_bg_alpha - flat_alpha).abs() < 1e-4,
-        "content-node backdrop ({node_bg_alpha}) and flat tile backdrop ({flat_alpha}) \
-         must paint at the SAME alpha so the tile fades uniformly (hud-w41ef)"
-    );
+    let version = scene.version;
+    let mut baseline = None;
+    for phase in ["settled", "activated", "moved", "released"] {
+        match phase {
+            "activated" => scene.set_drag_active(tile),
+            "moved" => {
+                let bounds = &mut scene.tiles.get_mut(&tile).unwrap().bounds;
+                bounds.x += 5.0;
+                bounds.y += 5.0;
+                scene.bump_geometry_epoch();
+            }
+            "released" => scene.clear_drag_active(tile),
+            _ => {}
+        }
+        let build = compositor.build_windowed_frame(scene, 256, 256);
+        let flat: Vec<_> = build
+            .flat_rect_vertices()
+            .iter()
+            .map(|vertex| vertex.color[3])
+            .collect();
+        let text: Vec<_> = compositor
+            .collect_text_items(scene, 256.0, 256.0)
+            .iter()
+            .map(|item| item.opacity)
+            .collect();
+        assert!(
+            !flat.is_empty() && !text.is_empty(),
+            "{phase}: missing content"
+        );
+        let mut images = Vec::new();
+        compositor.render_node(
+            root,
+            &scene.tiles[&tile],
+            scene,
+            &mut Vec::new(),
+            &mut images,
+            256.0,
+            256.0,
+        );
+        let [image] = images.as_slice() else {
+            panic!("{phase}: expected the uploaded image command");
+        };
+        let alphas = (flat, text, image.tint[3]);
+        if let Some(expected) = &baseline {
+            assert_eq!(&alphas, expected, "{phase}: draw alpha must stay settled");
+        } else {
+            baseline = Some(alphas);
+        }
+        assert_eq!(
+            scene.version, version,
+            "{phase}: drag must be geometry only"
+        );
+    }
 }
 
 /// Complement: at full tile opacity (an established portal, no fade), the grown
@@ -135,7 +227,7 @@ async fn hud_w41ef_portal_content_background_scaled_by_tile_opacity() {
 /// after a resize-grow. This is the steady-state "not see-through" guarantee.
 #[tokio::test]
 async fn hud_w41ef_portal_backdrop_opaque_after_resize_grow_no_fade() {
-    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(256, 256).await);
+    let (mut compositor, surface) = require_gpu!(tile_test_gpu().await);
     compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
     compositor.overlay_mode = true;
 
@@ -145,130 +237,31 @@ async fn hud_w41ef_portal_backdrop_opaque_after_resize_grow_no_fade() {
         Rect::new(10.0, 10.0, 100.0, 100.0),
         Rect::new(0.0, 0.0, 100.0, 100.0),
     );
-    compositor.prime_markdown_cache(&scene);
-    compositor.prime_truncation_cache(&scene);
+    prime_text(&mut compositor, &scene);
     compositor.render_frame_headless(&mut scene, &surface);
     compositor.portal_tile_anim_states.clear();
 
-    if let Some(t) = scene.tiles.get_mut(&tile_id) {
-        t.bounds.width = 200.0;
-        t.bounds.height = 200.0;
-        scene.version += 1;
-    }
-    compositor.prime_markdown_cache(&scene);
-    compositor.prime_truncation_cache(&scene);
+    let bounds = &mut scene.tiles.get_mut(&tile_id).unwrap().bounds;
+    (bounds.width, bounds.height) = (200.0, 200.0);
+    scene.version += 1;
+    prime_text(&mut compositor, &scene);
     compositor.render_frame_headless(&mut scene, &surface);
     let px = surface.read_pixels(&compositor.device);
 
-    let a_grown = crate::test_pixels::pixel_at(&px, 256, 180, 180)[3];
+    let a_grown = pixel_at(&px, 256, 180, 180)[3];
     assert!(
         a_grown > 250,
         "grown portal backdrop must stay opaque at full opacity (got alpha={a_grown})"
     );
 
-    // Inspect the real windowed draw list as well: headless blending does not
-    // establish live overlay REPLACE alpha. Pin only this fixture's settled fade.
-    compositor.portal_tile_anim_states.insert(
-        tile_id,
-        super::draw_cmds::ZoneAnimationState {
-            transition_start: std::time::Instant::now(),
-            duration_ms: 0,
-            easing: super::easing::Easing::Linear,
-            from_opacity: 1.0,
-            target_opacity: 1.0,
-        },
-    );
-    let resource_id = ResourceId::of(b"hud-1wizi settled drag image");
-    compositor.register_image_bytes(resource_id, std::sync::Arc::from(vec![255u8; 16]), 2, 2);
-    assert!(compositor.ensure_image_texture(resource_id, 2, 2));
-    scene.register_resource(resource_id);
-    let root_id = scene.tiles[&tile_id].root_node.unwrap();
-    scene
-        .add_node_to_tile(
-            tile_id,
-            Some(root_id),
-            Node {
-                layout: Default::default(),
-                id: SceneId::new(),
-                children: vec![],
-                data: NodeData::StaticImage(StaticImageNode {
-                    resource_id,
-                    width: 2,
-                    height: 2,
-                    decoded_bytes: 16,
-                    fit_mode: ImageFitMode::Fill,
-                    bounds: Rect::new(20.0, 20.0, 10.0, 10.0),
-                }),
-            },
-        )
-        .unwrap();
-    compositor.prime_markdown_cache(&scene);
-    compositor.prime_truncation_cache(&scene);
-    let version = scene.version;
-    let mut baseline = None;
-    for phase in 0..4 {
-        match phase {
-            1 => scene.set_drag_active(tile_id),
-            2 => {
-                let tile = scene.tiles.get_mut(&tile_id).unwrap();
-                tile.bounds.x += 5.0;
-                tile.bounds.y += 5.0;
-                scene.bump_geometry_epoch();
-            }
-            3 => scene.clear_drag_active(tile_id),
-            _ => {}
-        }
-        let build = compositor.build_windowed_frame(&mut scene, 256, 256);
-        let body_alpha: Vec<_> = build
-            .flat_rect_vertices()
-            .iter()
-            .map(|vertex| vertex.color[3])
-            .collect();
-        let text_alpha: Vec<_> = compositor
-            .collect_text_items(&scene, 256.0, 256.0)
-            .iter()
-            .map(|item| item.opacity)
-            .collect();
-        assert!(!body_alpha.is_empty());
-        assert!(!text_alpha.is_empty());
-        let mut vertices = Vec::new();
-        let mut images = Vec::new();
-        compositor.render_node(
-            root_id,
-            &scene.tiles[&tile_id],
-            &scene,
-            &mut vertices,
-            &mut images,
-            256.0,
-            256.0,
-        );
-        let image_alpha: Vec<_> = images.iter().map(|image| image.tint[3]).collect();
-        assert_eq!(
-            image_alpha.len(),
-            1,
-            "inspect a real uploaded image, not the placeholder"
-        );
-        let alphas = (body_alpha, text_alpha, image_alpha);
-        if let Some(baseline) = baseline.as_ref() {
-            assert_eq!(
-                &alphas, baseline,
-                "settled activation/move/release cannot lower body alpha"
-            );
-        } else {
-            baseline = Some(alphas);
-        }
-        assert_eq!(
-            scene.version, version,
-            "position and feedback leave content unchanged"
-        );
-    }
+    assert_settled_drag_preserves_draw_alpha(&mut compositor, &mut scene, tile_id);
 
     // The production expanded portal has rounded panes behind a transparent
     // transcript. Exercise the actual overlay REPLACE encoder across the
     // degradation transitions seen during native dragging, not headless blending.
     use tze_hud_portal::{
         PortalView, ProjectedPortalPresentation,
-        render::{DEFAULT_PORTAL_SIZE, render},
+        render::{DEFAULT_COMPACT_SIZE, DEFAULT_PORTAL_SIZE, render},
         tokens::PortalVisualTokens,
     };
     let view = empty_portal_view("opacity", "Opacity");
@@ -278,20 +271,18 @@ async fn hud_w41ef_portal_backdrop_opaque_after_resize_grow_no_fade() {
         DEFAULT_PORTAL_SIZE,
         0,
     );
-    let output_pane = rendered
-        .surface
-        .parts
-        .iter()
-        .find(|part| part.kind == PortalPartKind::Transcript)
-        .unwrap()
-        .bounds;
-    let header_bounds = rendered
-        .surface
-        .parts
-        .iter()
-        .find(|part| part.kind == PortalPartKind::Header)
-        .unwrap()
-        .bounds;
+    let pane = |kind| {
+        rendered
+            .surface
+            .parts
+            .iter()
+            .find(|part| part.kind == kind)
+            .unwrap()
+            .bounds
+    };
+    let output_pane = pane(PortalPartKind::Transcript);
+    let header = pane(PortalPartKind::Header);
+    let header_sample = ((header.width - 8.0) as u32, (header.height * 0.5) as u32);
     let transcript_bounds = rendered
         .children
         .iter()
@@ -321,19 +312,15 @@ async fn hud_w41ef_portal_backdrop_opaque_after_resize_grow_no_fade() {
     let mut scene = SceneGraph::new(frame_w as f32, frame_h as f32);
     let tab = scene.create_tab("portal", 0).unwrap();
     let lease = scene.grant_lease("portal", 60_000);
-    let tile_id = scene
-        .create_tile(
-            tab,
-            "portal",
-            lease,
-            Rect::new(
-                10.0,
-                10.0,
-                DEFAULT_PORTAL_SIZE.width,
-                DEFAULT_PORTAL_SIZE.height,
-            ),
-            1,
-        )
+    let bounds = Rect::new(
+        10.0,
+        10.0,
+        DEFAULT_PORTAL_SIZE.width,
+        DEFAULT_PORTAL_SIZE.height,
+    );
+    let tile_id = scene.create_tile(tab, "portal", lease, bounds, 1).unwrap();
+    scene
+        .register_tile_scroll_config(tile_id, TileScrollConfig::vertical())
         .unwrap();
     scene
         .set_tile_root_tree(tile_id, rendered.root, rendered.children)
@@ -344,13 +331,44 @@ async fn hud_w41ef_portal_backdrop_opaque_after_resize_grow_no_fade() {
         .unwrap();
     let composer_hit = scene.hit_test(10.0 + input_sample.0 as f32, 10.0 + input_sample.1 as f32);
     let composer_id = scene.overlay.tile_composer_nodes[&tile_id];
-    scene
-        .register_tile_scroll_config(tile_id, TileScrollConfig::vertical())
-        .unwrap();
-    compositor.prime_markdown_cache(&scene);
-    compositor.prime_truncation_cache(&scene);
+    prime_text(&mut compositor, &scene);
     compositor.build_windowed_frame(&mut scene, frame_w, frame_h);
     compositor.portal_tile_anim_states.clear(); // settled attachment, as above
+    let target = crate::FrameTarget::primary(frame_w, frame_h);
+    let capture = |compositor: &mut Compositor, scene: &mut SceneGraph| {
+        let build = compositor.build_windowed_frame(scene, frame_w, frame_h);
+        compositor
+            .capture_windowed_frame(&build, &target, wgpu::TextureFormat::Rgba8UnormSrgb)
+            .expect("real windowed overlay capture")
+    };
+    let capture_input = |compositor: &mut Compositor, scene: &mut SceneGraph, sample| {
+        let frame = capture(compositor, scene);
+        tile_pixel(&frame, scene.tiles[&tile_id].bounds, sample)
+    };
+    let set_level = |c: &mut Compositor, level| {
+        c.set_degradation_policy(CompositorDegradationPolicy {
+            level,
+            ..Default::default()
+        })
+    };
+    let set_hover = |scene: &mut SceneGraph, composer_id, hovered| {
+        scene
+            .hit_region_states
+            .get_mut(&composer_id)
+            .unwrap()
+            .hovered = hovered;
+    };
+    let feedback = |compositor: &mut Compositor, scene: &mut SceneGraph, id, sample| {
+        let idle = capture_input(compositor, scene, sample);
+        set_hover(scene, id, true);
+        let hovered = capture_input(compositor, scene, sample);
+        scene.update_pressed_state(id, true);
+        let pressed = capture_input(compositor, scene, sample);
+        assert_eq!([hovered[3], pressed[3]], [idle[3]; 2]);
+        set_hover(scene, id, false);
+        scene.update_pressed_state(id, false);
+        [idle, hovered, pressed]
+    };
     let version = scene.version;
     let mut settled_output_alpha = None;
     for (phase, level) in [
@@ -358,6 +376,7 @@ async fn hud_w41ef_portal_backdrop_opaque_after_resize_grow_no_fade() {
         ("activated", DegradationLevel::Nominal),
         ("drag simplified", DegradationLevel::Simplified),
         ("moved simplified", DegradationLevel::Simplified),
+        ("resized simplified", DegradationLevel::Simplified),
         ("drag recovered", DegradationLevel::Nominal),
         ("released", DegradationLevel::Nominal),
         ("released simplified", DegradationLevel::Simplified),
@@ -376,40 +395,26 @@ async fn hud_w41ef_portal_backdrop_opaque_after_resize_grow_no_fade() {
                 tile.bounds.y += 5.0;
                 scene.bump_geometry_epoch();
             }
-            "released" => scene.clear_drag_active(tile_id),
+            "resized simplified" => {
+                let bounds = &mut scene.tiles.get_mut(&tile_id).unwrap().bounds;
+                bounds.width += 16.0;
+                bounds.height += 16.0;
+                scene.bump_geometry_epoch();
+            }
+            "released" => {
+                scene.clear_drag_active(tile_id);
+                let bounds = &mut scene.tiles.get_mut(&tile_id).unwrap().bounds;
+                (bounds.width, bounds.height) =
+                    (DEFAULT_PORTAL_SIZE.width, DEFAULT_PORTAL_SIZE.height);
+                scene.bump_geometry_epoch();
+            }
             _ => {}
         }
-        compositor.set_degradation_policy(CompositorDegradationPolicy {
-            level,
-            ..Default::default()
-        });
-        let build = compositor.build_windowed_frame(&mut scene, frame_w, frame_h);
-        let frame = compositor
-            .capture_windowed_frame(
-                &build,
-                &crate::FrameTarget::primary(frame_w, frame_h),
-                wgpu::TextureFormat::Rgba8UnormSrgb,
-            )
-            .expect("real windowed overlay capture");
+        set_level(&mut compositor, level);
+        let frame = capture(&mut compositor, &mut scene);
         let bounds = scene.tiles[&tile_id].bounds;
-        let output = crate::test_pixels::pixel_at(
-            &frame.rgba,
-            frame.width,
-            bounds.x as u32 + output_sample.0,
-            bounds.y as u32 + output_sample.1,
-        );
-        let header = crate::test_pixels::pixel_at(
-            &frame.rgba,
-            frame.width,
-            bounds.x as u32 + (header_bounds.width - 8.0) as u32,
-            bounds.y as u32 + (header_bounds.height * 0.5) as u32,
-        );
-        let input = crate::test_pixels::pixel_at(
-            &frame.rgba,
-            frame.width,
-            bounds.x as u32 + input_sample.0,
-            bounds.y as u32 + input_sample.1,
-        );
+        let [output, header, input] = [output_sample, header_sample, input_sample]
+            .map(|sample| tile_pixel(&frame, bounds, sample));
         assert!(input[3] > 250, "{phase}: composer backdrop alpha {input:?}");
         assert!(
             input[..3].iter().any(|&channel| channel < 240),
@@ -427,24 +432,6 @@ async fn hud_w41ef_portal_backdrop_opaque_after_resize_grow_no_fade() {
             "drag and degradation leave content unchanged"
         );
     }
-    let capture_input =
-        |compositor: &mut Compositor, scene: &mut SceneGraph, sample: (u32, u32)| {
-            let build = compositor.build_windowed_frame(scene, frame_w, frame_h);
-            let frame = compositor
-                .capture_windowed_frame(
-                    &build,
-                    &crate::FrameTarget::primary(frame_w, frame_h),
-                    wgpu::TextureFormat::Rgba8UnormSrgb,
-                )
-                .expect("composer feedback overlay capture");
-            let bounds = scene.tiles[&tile_id].bounds;
-            crate::test_pixels::pixel_at(
-                &frame.rgba,
-                frame.width,
-                bounds.x as u32 + sample.0,
-                bounds.y as u32 + sample.1,
-            )
-        };
     let brightness = |pixel: [u8; 4]| pixel[..3].iter().map(|&v| u16::from(v)).sum::<u16>();
     let input_backdrop = scene
         .nodes
@@ -458,150 +445,78 @@ async fn hud_w41ef_portal_backdrop_opaque_after_resize_grow_no_fade() {
         unreachable!()
     };
     let default_backdrop_color = default_backdrop.color;
-    for custom_color in [
-        None,
-        Some(Rgba::new(0.03, 0.07, 0.16, 0.0)),
-        Some(Rgba::new(0.03, 0.07, 0.16, 0.35)),
-    ] {
-        let transparent_pane = custom_color.is_some_and(|color| color.a == 0.0);
-        {
-            let NodeData::SolidColor(backdrop) =
-                &mut scene.nodes.get_mut(&input_backdrop).unwrap().data
-            else {
-                unreachable!()
-            };
-            backdrop.color = custom_color.unwrap_or(default_backdrop_color);
-            let NodeData::HitRegion(region) = &mut scene.nodes.get_mut(&composer_id).unwrap().data
-            else {
-                unreachable!()
-            };
-            region.local_style.hover_tint = custom_color.map(|_| Rgba::new(0.0, 1.0, 0.0, 0.8));
-            region.local_style.pressed_tint = custom_color.map(|_| Rgba::new(1.0, 0.0, 0.0, 0.8));
-            scene.version += 1;
-            compositor.prime_markdown_cache(&scene);
-            compositor.prime_truncation_cache(&scene);
-        }
+    use DegradationLevel::{Nominal, Simplified};
+    let translucent_backdrop = Rgba::new(0.03, 0.07, 0.16, 0.35);
+    let transparent = Some(Rgba::new(0.03, 0.07, 0.16, 0.0));
+    let custom_tints = [Rgba::new(0.0, 1.0, 0.0, 0.8), Rgba::new(1.0, 0.0, 0.0, 0.8)];
+    let clear_tints = [Rgba::new(1.0, 0.0, 0.0, 0.0), Rgba::new(0.0, 1.0, 0.0, 0.0)];
+    for (level, pane_color) in [Nominal, Simplified].into_iter().flat_map(|level| {
+        [None, transparent, Some(translucent_backdrop)]
+            .into_iter()
+            .map(move |pane_color| (level, pane_color))
+    }) {
+        let NodeData::SolidColor(fill) = &mut scene.nodes.get_mut(&input_backdrop).unwrap().data
+        else {
+            unreachable!()
+        };
+        fill.color = pane_color.unwrap_or(default_backdrop_color);
+        let [hover, press] = pane_color.map_or([None; 2], |_| custom_tints.map(Some));
+        set_composer_tints(&mut scene, composer_id, hover, press);
+        scene.version += 1;
+        prime_text(&mut compositor, &scene);
+        set_level(&mut compositor, level);
+
         for opacity in [1.0, 0.4, 0.0] {
             scene.tiles.get_mut(&tile_id).unwrap().opacity = opacity;
-            for level in [DegradationLevel::Nominal, DegradationLevel::Simplified] {
-                compositor.set_degradation_policy(CompositorDegradationPolicy {
-                    level,
-                    ..Default::default()
-                });
-                scene
-                    .hit_region_states
-                    .get_mut(&composer_id)
-                    .unwrap()
-                    .hovered = false;
-                let idle = capture_input(&mut compositor, &mut scene, input_sample);
-                scene
-                    .hit_region_states
-                    .get_mut(&composer_id)
-                    .unwrap()
-                    .hovered = true;
-                let hovered = capture_input(&mut compositor, &mut scene, input_sample);
-                assert_eq!(hovered[3], idle[3], "hover preserves pane coverage");
-                if transparent_pane {
-                    assert_eq!(hovered, idle, "transparent pane cannot erase its backdrop");
-                } else if opacity > 0.0 && custom_color.is_some() {
-                    assert!(
-                        hovered[1] > hovered[0].saturating_add(8),
-                        "custom green hover: {hovered:?}, idle {idle:?}, {level:?}, opacity {opacity}"
-                    );
-                    assert!(
-                        hovered[1] > hovered[2].saturating_add(8),
-                        "custom green hover"
-                    );
-                } else if opacity > 0.0 {
-                    assert!(
-                        brightness(hovered) > brightness(idle),
-                        "hover visibly lightens"
-                    );
-                } else {
-                    assert_eq!(hovered, [0; 4], "hover cannot revive a faded-out pane");
-                }
-                scene.update_pressed_state(composer_id, true);
-                let pressed = capture_input(&mut compositor, &mut scene, input_sample);
-                assert_eq!(pressed[3], idle[3], "press preserves pane coverage");
-                if transparent_pane {
-                    assert_eq!(pressed, idle, "transparent press cannot erase its backdrop");
-                } else if opacity > 0.0 && custom_color.is_some() {
-                    assert!(pressed[0] > pressed[1].saturating_add(8));
-                    assert!(
-                        pressed[0] > pressed[2].saturating_add(8),
-                        "custom red press"
-                    );
-                } else if opacity > 0.0 {
-                    assert!(
-                        brightness(pressed) < brightness(hovered),
-                        "press visibly darkens"
-                    );
-                }
-                scene
-                    .hit_region_states
-                    .get_mut(&composer_id)
-                    .unwrap()
-                    .hovered = false;
-                assert_eq!(
-                    capture_input(&mut compositor, &mut scene, input_sample),
-                    pressed,
-                    "press takes precedence over hover"
-                );
-                scene.update_pressed_state(composer_id, false);
-                assert_eq!(
-                    capture_input(&mut compositor, &mut scene, input_sample),
-                    idle,
-                    "pointer leave restores the original pane"
-                );
+            set_hover(&mut scene, composer_id, false);
+            let [idle, hovered, pressed] =
+                feedback(&mut compositor, &mut scene, composer_id, input_sample);
+            if pane_color == transparent {
+                assert_eq!([hovered, pressed], [idle; 2], "transparent pane");
+            } else if opacity == 0.0 {
+                assert_eq!([hovered, pressed], [[0; 4]; 2]);
+            } else if pane_color == Some(translucent_backdrop) {
+                assert_tint(hovered, 1, "custom green hover");
+                assert_tint(pressed, 0, "custom red press");
+            } else {
+                assert!(brightness(hovered) > brightness(idle));
+                assert!(brightness(pressed) < brightness(hovered));
             }
+            scene.update_pressed_state(composer_id, true);
+            assert_eq!(
+                capture_input(&mut compositor, &mut scene, input_sample),
+                pressed,
+                "press overtakes hover at {level:?}, pane {pane_color:?}, opacity {opacity}"
+            );
+            scene.update_pressed_state(composer_id, false);
+            assert_eq!(
+                capture_input(&mut compositor, &mut scene, input_sample),
+                idle,
+                "leave restores the pane at {level:?}, pane {pane_color:?}, opacity {opacity}"
+            );
         }
     }
 
-    // Explicitly transparent overrides disable feedback, even on a visible pane.
+    // Explicit zero-alpha overrides disable feedback on the translucent pane.
+    let NodeData::SolidColor(fill) = &mut scene.nodes.get_mut(&input_backdrop).unwrap().data else {
+        unreachable!()
+    };
+    fill.color = translucent_backdrop;
     scene.tiles.get_mut(&tile_id).unwrap().opacity = 1.0;
-    let NodeData::HitRegion(region) = &mut scene.nodes.get_mut(&composer_id).unwrap().data else {
-        unreachable!()
-    };
-    region.local_style.hover_tint = Some(Rgba::new(1.0, 0.0, 0.0, 0.0));
-    region.local_style.pressed_tint = Some(Rgba::new(0.0, 1.0, 0.0, 0.0));
-    for level in [DegradationLevel::Nominal, DegradationLevel::Simplified] {
-        compositor.set_degradation_policy(CompositorDegradationPolicy {
-            level,
-            ..Default::default()
-        });
-        let idle = capture_input(&mut compositor, &mut scene, input_sample);
-        scene
-            .hit_region_states
-            .get_mut(&composer_id)
-            .unwrap()
-            .hovered = true;
-        assert_eq!(
-            capture_input(&mut compositor, &mut scene, input_sample),
-            idle,
-            "zero-alpha hover override"
-        );
-        scene.update_pressed_state(composer_id, true);
-        assert_eq!(
-            capture_input(&mut compositor, &mut scene, input_sample),
-            idle,
-            "zero-alpha press override"
-        );
-        scene.update_pressed_state(composer_id, false);
-        scene
-            .hit_region_states
-            .get_mut(&composer_id)
-            .unwrap()
-            .hovered = false;
+    scene.version += 1;
+    prime_text(&mut compositor, &scene);
+    let [hover, press] = clear_tints.map(Some);
+    set_composer_tints(&mut scene, composer_id, hover, press);
+    for level in [Nominal, Simplified] {
+        set_level(&mut compositor, level);
+        let [idle, hovered, pressed] =
+            feedback(&mut compositor, &mut scene, composer_id, input_sample);
+        assert_eq!([hovered, pressed], [idle; 2], "zero-alpha overrides");
     }
-    let NodeData::HitRegion(region) = &mut scene.nodes.get_mut(&composer_id).unwrap().data else {
-        unreachable!()
-    };
-    region.local_style.hover_tint = None;
-    region.local_style.pressed_tint = None;
+    set_composer_tints(&mut scene, composer_id, None, None);
 
     // A higher tile must still cover the lower composer's feedback in both
     // rounded and simplified rendering; no new final-chrome tint is involved.
-    scene.tiles.get_mut(&tile_id).unwrap().opacity = 1.0;
     let bounds = scene.tiles[&tile_id].bounds;
     let upper = scene
         .create_tile(
@@ -625,31 +540,19 @@ async fn hud_w41ef_portal_backdrop_opaque_after_resize_grow_no_fade() {
                 id: SceneId::new(),
                 children: vec![],
                 data: NodeData::SolidColor(SolidColorNode {
-                    color: Rgba::new(0.0, 0.6, 0.1, 1.0),
                     bounds: Rect::new(0.0, 0.0, 8.0, 8.0),
+                    color: Rgba::new(0.0, 0.6, 0.1, 1.0),
                     radius: Some(1.0),
                 }),
             },
         )
         .unwrap();
-    compositor.prime_markdown_cache(&scene);
-    compositor.prime_truncation_cache(&scene);
+    prime_text(&mut compositor, &scene);
     for level in [DegradationLevel::Nominal, DegradationLevel::Simplified] {
-        compositor.set_degradation_policy(CompositorDegradationPolicy {
-            level,
-            ..Default::default()
-        });
-        scene
-            .hit_region_states
-            .get_mut(&composer_id)
-            .unwrap()
-            .hovered = false;
+        set_level(&mut compositor, level);
+        set_hover(&mut scene, composer_id, false);
         let covered = capture_input(&mut compositor, &mut scene, input_sample);
-        scene
-            .hit_region_states
-            .get_mut(&composer_id)
-            .unwrap()
-            .hovered = true;
+        set_hover(&mut scene, composer_id, true);
         assert_eq!(
             capture_input(&mut compositor, &mut scene, input_sample),
             covered,
@@ -658,79 +561,75 @@ async fn hud_w41ef_portal_backdrop_opaque_after_resize_grow_no_fade() {
     }
     // The pointer leaves. Hover is pointer state: it survives a re-render of the
     // same composer node, so clear it before the collapsed render.
-    scene
-        .hit_region_states
-        .get_mut(&composer_id)
-        .unwrap()
-        .hovered = false;
+    set_hover(&mut scene, composer_id, false);
 
-    // Collapsed production portals use a TextMarkdown backdrop, not SolidColor.
+    // Exercise the native collapsed TextMarkdown backdrop at two viewport sizes.
     scene.delete_tile(upper, "portal").unwrap();
-    let collapsed = render(
-        &PortalView {
-            presentation: ProjectedPortalPresentation::Collapsed,
-            ..view
-        },
-        &PortalVisualTokens::default(),
-        DEFAULT_PORTAL_SIZE,
-        0,
-    );
-    scene
-        .set_tile_root_tree(tile_id, collapsed.root, collapsed.children)
-        .unwrap();
-    scene
-        .set_tile_composer_interaction_checked(tile_id, collapsed.composer.unwrap(), "portal")
-        .unwrap();
-    let composer_id = scene.overlay.tile_composer_nodes[&tile_id];
-    compositor.prime_markdown_cache(&scene);
-    compositor.prime_truncation_cache(&scene);
-    let sample = (
-        (DEFAULT_PORTAL_SIZE.width * 0.8) as u32,
-        (DEFAULT_PORTAL_SIZE.height * 0.75) as u32,
-    );
-    for level in [
-        DegradationLevel::Nominal,
-        DegradationLevel::Simplified,
-        DegradationLevel::Nominal,
-    ] {
-        compositor.set_degradation_policy(CompositorDegradationPolicy {
-            level,
-            ..Default::default()
-        });
-        let idle = capture_input(&mut compositor, &mut scene, sample);
+    let view = PortalView {
+        presentation: ProjectedPortalPresentation::Collapsed,
+        ..view
+    };
+    for size in [DEFAULT_PORTAL_SIZE, DEFAULT_COMPACT_SIZE] {
+        let bounds = &mut scene.tiles.get_mut(&tile_id).unwrap().bounds;
+        (bounds.width, bounds.height) = (size.width, size.height);
+        scene.bump_geometry_epoch();
+        let collapsed = render(&view, &PortalVisualTokens::default(), size, 0);
+        let composer = collapsed.composer.unwrap();
+        let pane = Rect::new(0.0, 0.0, size.width, size.height);
+        assert_eq!(composer.bounds, pane);
+        let NodeData::TextMarkdown(root) = &collapsed.root.data else {
+            panic!("collapsed backdrop must be the production Markdown pane");
+        };
+        assert_eq!(root.bounds, pane);
         scene
-            .hit_region_states
-            .get_mut(&composer_id)
-            .unwrap()
-            .hovered = true;
-        let hovered = capture_input(&mut compositor, &mut scene, sample);
-        assert_eq!(hovered[3], idle[3]);
-        assert!(
-            brightness(hovered) > brightness(idle),
-            "collapsed hover feedback"
-        );
-        assert!(
-            hovered[..3].iter().any(|&channel| channel < 240),
-            "collapsed hover must not turn white"
-        );
-        scene.update_pressed_state(composer_id, true);
-        let pressed = capture_input(&mut compositor, &mut scene, sample);
-        assert_eq!(pressed[3], idle[3]);
-        assert!(
-            brightness(pressed) < brightness(idle),
-            "collapsed press feedback"
-        );
-        scene.update_pressed_state(composer_id, false);
+            .set_tile_root_tree(tile_id, collapsed.root, collapsed.children)
+            .unwrap();
         scene
-            .hit_region_states
-            .get_mut(&composer_id)
-            .unwrap()
-            .hovered = false;
-        assert_eq!(
-            capture_input(&mut compositor, &mut scene, sample),
-            idle,
-            "collapsed leave restores backdrop"
-        );
+            .set_tile_composer_interaction_checked(tile_id, composer, "portal")
+            .unwrap();
+        let composer_id = scene.overlay.tile_composer_nodes[&tile_id];
+        prime_text(&mut compositor, &scene);
+        let sample = ((size.width * 0.8) as u32, (size.height * 0.75) as u32);
+        let edge = (size.width as u32 - 4, sample.1);
+        let outside = (size.width as u32 + 3, sample.1);
+        for level in [Nominal, Simplified, Nominal] {
+            set_level(&mut compositor, level);
+            let [idle, hovered, pressed] =
+                feedback(&mut compositor, &mut scene, composer_id, sample);
+            assert!(brightness(hovered) > brightness(idle), "collapsed hover");
+            assert!(
+                hovered[..3].iter().any(|&channel| channel < 240),
+                "collapsed hover stays tinted"
+            );
+            assert!(brightness(pressed) < brightness(idle), "collapsed press");
+
+            let base = capture(&mut compositor, &mut scene);
+            let bounds = scene.tiles[&tile_id].bounds;
+            assert_eq!(
+                tile_pixel(&base, bounds, sample),
+                idle,
+                "collapsed leave restores backdrop"
+            );
+            let base_edge = tile_pixel(&base, bounds, edge);
+            let base_outside = tile_pixel(&base, bounds, outside);
+            set_hover(&mut scene, composer_id, true);
+            let hovered = capture(&mut compositor, &mut scene);
+            let edge_hover = tile_pixel(&hovered, bounds, edge);
+            assert!(
+                base_edge[3] > 250 && edge_hover[3] == base_edge[3],
+                "collapsed edge coverage at {level:?}"
+            );
+            assert!(
+                brightness(edge_hover) > brightness(base_edge),
+                "hover reaches the pane edge"
+            );
+            assert_eq!(
+                tile_pixel(&hovered, bounds, outside),
+                base_outside,
+                "hover stays in the pane"
+            );
+            set_hover(&mut scene, composer_id, false);
+        }
     }
 }
 
@@ -765,92 +664,43 @@ fn b0x0m_tile_with_root(
     tile_id
 }
 
-/// `prime_vertical_flow_layout` must resolve flow offsets even when
-/// `init_text_renderer` has never been called (review of ).
-///
-/// swapped this function from unconditionally building a fresh
-/// `bundled_font_system()` to measuring against `self.text_rasterizer`'s own
-/// `FontSystem` — gating the ENTIRE resolve on `self.text_rasterizer.is_some()`.
-/// That silently dropped flow-stacking for every `VerticalFlow` child (not just
-/// text — `SolidColor` / `StaticImage` / `HitRegion` children read
-/// `tile_flow_offsets` too) whenever no rasterizer had been
-/// initialized yet, even though non-text children never needed a `FontSystem` at
-/// all — a real regression versus the previous baseline, which ran
-/// regardless of rasterizer state. `make_compositor_and_surface` deliberately
-/// does NOT call `init_text_renderer` (only production runtime setup and a
-/// handful of text-specific tests do), so this fixture already exercises the
-/// exact `text_rasterizer: None` state the regression required — no
-/// GPU-specific machinery beyond the existing headless adapter is needed.
+/// Non-text vertical-flow children resolve even before text is initialized.
 #[tokio::test]
 async fn hud_tfm3p_flow_offsets_resolve_without_a_text_rasterizer() {
-    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);
-    assert!(
-        compositor.text_rasterizer.is_none(),
-        "fixture precondition: this test only proves what it claims if no \
-         rasterizer has been initialized"
-    );
-
+    let (mut compositor, _surface) = require_gpu!(tile_test_gpu().await);
+    assert!(compositor.text_rasterizer.is_none());
     let mut scene = SceneGraph::new(256.0, 256.0);
-    let tab_id = scene.create_tab("t", 0).unwrap();
-    let lease_id = scene.grant_lease("t", 60_000);
-    let tile_id = scene
-        .create_tile(tab_id, "t", lease_id, Rect::new(0.0, 0.0, 200.0, 200.0), 1)
-        .unwrap();
-
     let parent_id = SceneId::new();
-    scene
-        .set_tile_root(
-            tile_id,
-            Node {
-                layout: NodeLayout::VerticalFlow,
-                id: parent_id,
-                children: vec![],
-                data: NodeData::SolidColor(SolidColorNode {
-                    color: Rgba::new(0.0, 0.0, 0.0, 0.0),
-                    bounds: Rect::new(0.0, 10.0, 200.0, 0.0),
-                    radius: None,
-                }),
-            },
-        )
-        .unwrap();
-
-    // Two non-text (SolidColor) children — flow resolution positions these
-    // without ever needing a `FontSystem`, so they isolate the rasterizer-
-    // presence regression from any font-measurement concern.
-    let child0_id = SceneId::new();
-    scene
-        .add_node_to_tile(
-            tile_id,
-            Some(parent_id),
-            Node {
-                layout: Default::default(),
-                id: child0_id,
-                children: vec![],
-                data: NodeData::SolidColor(SolidColorNode {
-                    color: Rgba::new(1.0, 0.0, 0.0, 1.0),
-                    bounds: Rect::new(0.0, 999.0, 200.0, 40.0),
-                    radius: None,
-                }),
-            },
-        )
-        .unwrap();
-    let child1_id = SceneId::new();
-    scene
-        .add_node_to_tile(
-            tile_id,
-            Some(parent_id),
-            Node {
-                layout: Default::default(),
-                id: child1_id,
-                children: vec![],
-                data: NodeData::SolidColor(SolidColorNode {
-                    color: Rgba::new(0.0, 1.0, 0.0, 1.0),
-                    bounds: Rect::new(0.0, 999.0, 200.0, 20.0),
-                    radius: None,
-                }),
-            },
-        )
-        .unwrap();
+    let solid = |y, height| {
+        NodeData::SolidColor(SolidColorNode {
+            color: Rgba::new(1.0, 0.0, 0.0, 1.0),
+            bounds: Rect::new(0.0, y, 200.0, height),
+            radius: None,
+        })
+    };
+    let tile_id = b0x0m_tile_with_root(
+        &mut scene,
+        Rect::new(0.0, 0.0, 200.0, 200.0),
+        parent_id,
+        solid(10.0, 0.0),
+    );
+    scene.nodes.get_mut(&parent_id).unwrap().layout = NodeLayout::VerticalFlow;
+    let [child0_id, child1_id] = [40.0, 20.0].map(|height| {
+        let id = SceneId::new();
+        scene
+            .add_node_to_tile(
+                tile_id,
+                Some(parent_id),
+                Node {
+                    layout: Default::default(),
+                    id,
+                    children: Vec::new(),
+                    data: solid(999.0, height),
+                },
+            )
+            .unwrap();
+        id
+    });
     scene.nodes.get_mut(&parent_id).unwrap().children = vec![child0_id, child1_id];
 
     compositor.prime_vertical_flow_layout(&scene);
@@ -873,98 +723,47 @@ async fn hud_tfm3p_flow_offsets_resolve_without_a_text_rasterizer() {
     );
 }
 
-/// A non-rounded `SolidColor` node fill must be scaled by the whole-tile fade.
-/// Before the fix it was painted at `sc.color.a` regardless of tile
-/// opacity — the same divergence fixed for portal backgrounds.
 #[tokio::test]
-async fn hud_b0x0m_solid_color_node_fill_scaled_by_tile_opacity() {
-    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);
+async fn tile_opacity_scales_flat_and_rounded_solid_fill() {
+    let (compositor, _surface) = require_gpu!(tile_test_gpu().await);
     let color = Rgba::new(0.2, 0.4, 0.6, 0.8);
-    let root_id = SceneId::new();
-    let mut scene = SceneGraph::new(256.0, 256.0);
-    let tile_id = b0x0m_tile_with_root(
-        &mut scene,
-        Rect::new(0.0, 0.0, 120.0, 120.0),
-        root_id,
-        NodeData::SolidColor(SolidColorNode {
-            color,
-            bounds: Rect::new(0.0, 0.0, 120.0, 120.0),
-            radius: None,
-        }),
-    );
-
-    // Faded tile: fill alpha must track tile.opacity.
-    scene.tiles.get_mut(&tile_id).unwrap().opacity = 0.5;
-    let tile = scene.tiles.get(&tile_id).unwrap().clone();
-    let mut verts: Vec<crate::pipeline::RectVertex> = Vec::new();
-    let mut cmds: Vec<super::draw_cmds::TexturedDrawCmd> = Vec::new();
-    compositor.render_node(root_id, &tile, &scene, &mut verts, &mut cmds, 120.0, 120.0);
-    let faded = verts
-        .first()
-        .expect("SolidColor node must emit a fill quad")
-        .color[3];
-    assert!(
-        (faded - 0.5 * color.a).abs() < 1e-4,
-        "SolidColor fill alpha must be tile-opacity-scaled: got {faded}, expected {}",
-        0.5 * color.a
-    );
-
-    // Full opacity: fill alpha unchanged (= color.a).
-    scene.tiles.get_mut(&tile_id).unwrap().opacity = 1.0;
-    let tile = scene.tiles.get(&tile_id).unwrap().clone();
-    let mut verts: Vec<crate::pipeline::RectVertex> = Vec::new();
-    let mut cmds: Vec<super::draw_cmds::TexturedDrawCmd> = Vec::new();
-    compositor.render_node(root_id, &tile, &scene, &mut verts, &mut cmds, 120.0, 120.0);
-    let full = verts.first().unwrap().color[3];
-    assert!(
-        (full - color.a).abs() < 1e-4,
-        "at full opacity SolidColor fill alpha must be unchanged: got {full}, expected {}",
-        color.a
-    );
-}
-
-/// A rounded `SolidColor` node (painted via the SDF rounded-rect pass, not the
-/// flat vertex pass) must also fade with the tile.
-#[tokio::test]
-async fn hud_b0x0m_rounded_solid_color_scaled_by_tile_opacity() {
-    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);
-    let color = Rgba::new(0.3, 0.3, 0.35, 1.0);
-    let root_id = SceneId::new();
-    let mut scene = SceneGraph::new(256.0, 256.0);
-    let tile_id = b0x0m_tile_with_root(
-        &mut scene,
-        Rect::new(0.0, 0.0, 120.0, 120.0),
-        root_id,
-        NodeData::SolidColor(SolidColorNode {
-            color,
-            bounds: Rect::new(0.0, 0.0, 120.0, 120.0),
-            radius: Some(12.0),
-        }),
-    );
-
-    scene.tiles.get_mut(&tile_id).unwrap().opacity = 0.5;
-    let cmds = compositor.collect_tile_rounded_rect_cmds(&scene);
-    let faded = cmds
-        .first()
-        .expect("rounded SolidColor root must emit a rounded-rect cmd")
-        .color[3];
-    assert!(
-        (faded - 0.5 * color.a).abs() < 1e-4,
-        "rounded SolidColor alpha must be tile-opacity-scaled: got {faded}, expected {}",
-        0.5 * color.a
-    );
-
-    scene.tiles.get_mut(&tile_id).unwrap().opacity = 1.0;
-    let full = compositor
-        .collect_tile_rounded_rect_cmds(&scene)
-        .first()
-        .unwrap()
-        .color[3];
-    assert!(
-        (full - color.a).abs() < 1e-4,
-        "at full opacity rounded SolidColor alpha must be unchanged: got {full}, expected {}",
-        color.a
-    );
+    let bounds = Rect::new(0.0, 0.0, 120.0, 120.0);
+    for radius in [None, Some(12.0)] {
+        let mut scene = SceneGraph::new(256.0, 256.0);
+        let root_id = SceneId::new();
+        let tile_id = b0x0m_tile_with_root(
+            &mut scene,
+            bounds,
+            root_id,
+            NodeData::SolidColor(SolidColorNode {
+                color,
+                bounds,
+                radius,
+            }),
+        );
+        for opacity in [0.5, 1.0] {
+            scene.tiles.get_mut(&tile_id).unwrap().opacity = opacity;
+            let actual = if radius.is_some() {
+                compositor.collect_tile_rounded_rect_cmds(&scene)[0].color[3]
+            } else {
+                let mut vertices = Vec::new();
+                compositor.render_node(
+                    root_id,
+                    &scene.tiles[&tile_id],
+                    &scene,
+                    &mut vertices,
+                    &mut Vec::new(),
+                    120.0,
+                    120.0,
+                );
+                vertices[0].color[3]
+            };
+            assert!(
+                (actual - opacity * color.a).abs() < 1e-4,
+                "{radius:?}, opacity {opacity}: {actual}"
+            );
+        }
+    }
 }
 
 /// A `StaticImage` textured quad's tint alpha must be scaled by the FULL tile
@@ -972,203 +771,79 @@ async fn hud_b0x0m_rounded_solid_color_scaled_by_tile_opacity() {
 /// component — not just `effective_tile_opacity`.
 #[tokio::test]
 async fn hud_b0x0m_static_image_tint_scaled_by_tile_opacity() {
-    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);
+    let (mut compositor, _surface) = require_gpu!(tile_test_gpu().await);
 
-    let resource_id = ResourceId::of(b"hud-b0x0m 2x2 image");
-    // Register real RGBA bytes + upload the GPU texture so render_node takes the
-    // textured (tint) path rather than the fallback placeholder.
-    let rgba: std::sync::Arc<[u8]> = std::sync::Arc::from(vec![255u8; 2 * 2 * 4]);
-    compositor.register_image_bytes(resource_id, rgba, 2, 2);
-    assert!(
-        compositor.ensure_image_texture(resource_id, 2, 2),
-        "image texture must upload for the tint path"
-    );
-
-    let root_id = SceneId::new();
     let mut scene = SceneGraph::new(256.0, 256.0);
-    scene.register_resource(resource_id);
-    let tile_id = b0x0m_tile_with_root(
-        &mut scene,
-        Rect::new(0.0, 0.0, 120.0, 120.0),
-        root_id,
-        NodeData::StaticImage(StaticImageNode {
-            resource_id,
-            width: 2,
-            height: 2,
-            decoded_bytes: 2 * 2 * 4,
-            fit_mode: ImageFitMode::Fill,
-            bounds: Rect::new(0.0, 0.0, 120.0, 120.0),
-        }),
-    );
+    let resource_id = upload_white_image(&mut compositor, &mut scene);
+    let root_id = SceneId::new();
+    let bounds = Rect::new(0.0, 0.0, 120.0, 120.0);
+    let tile_id =
+        b0x0m_tile_with_root(&mut scene, bounds, root_id, image_data(resource_id, bounds));
 
-    // Drive the portal-transition component specifically (NOT tile.opacity):
-    // leave tile.opacity = 1.0 and pin a deterministic portal fade at 0.5. This is
-    // the exact case the old code missed — it used `effective_tile_opacity`
-    // (tile.opacity + drag = 1.0 here) and ignored the portal fade, so the image
-    // stayed fully opaque while the faded tile backdrop/text went to 0.5.
-    // `duration_ms: 0` makes `current_opacity_eased` return `target_opacity`
-    // (time-independent), so the pinned 0.5 is deterministic.
-    compositor.portal_tile_anim_states.insert(
-        tile_id,
-        super::draw_cmds::ZoneAnimationState {
-            transition_start: std::time::Instant::now(),
-            duration_ms: 0,
-            easing: super::easing::Easing::Linear,
-            from_opacity: 0.5,
-            target_opacity: 0.5,
-        },
-    );
+    // Isolate the transient fade with durable tile opacity still at 1.
+    pin_fade(&mut compositor, tile_id, 0.5);
     assert!(
         (compositor.portal_tile_anim_opacity(tile_id) - 0.5).abs() < 1e-4,
         "test setup: portal fade must be pinned at 0.5"
     );
 
-    let tile = scene.tiles.get(&tile_id).unwrap().clone();
-    let mut verts: Vec<crate::pipeline::RectVertex> = Vec::new();
-    let mut cmds: Vec<super::draw_cmds::TexturedDrawCmd> = Vec::new();
-    compositor.render_node(root_id, &tile, &scene, &mut verts, &mut cmds, 120.0, 120.0);
-    let tint_a = cmds
-        .first()
-        .expect("StaticImage with a cached texture must emit a textured draw cmd")
-        .tint[3];
-    assert!(
-        (tint_a - 0.5).abs() < 1e-4,
-        "StaticImage tint alpha must be tile-opacity-scaled: got {tint_a}, expected 0.5"
-    );
+    for (active, opacity, expected) in [
+        (false, 1.0, 0.5),
+        (false, 0.5, 0.25),
+        (true, 1.0, 0.5),
+        (true, 0.5, 0.25),
+    ] {
+        scene.tiles.get_mut(&tile_id).unwrap().opacity = opacity;
+        if active {
+            scene.set_drag_active(tile_id);
+        }
+        let mut images = Vec::new();
+        compositor.render_node(
+            root_id,
+            &scene.tiles[&tile_id],
+            &scene,
+            &mut Vec::new(),
+            &mut images,
+            120.0,
+            120.0,
+        );
+        let [image] = images.as_slice() else {
+            panic!("cached StaticImage needs one textured command");
+        };
+        assert!(
+            (image.tint[3] - expected).abs() < 1e-4,
+            "image alpha with drag active={active} and tile opacity={opacity}"
+        );
+    }
 }
 
-// ───: tile text honours whole-tile opacity ─────────────────────────
-// A tile whose opacity is driven to 0 (the exemplar minimize path calls
-// `update_tile_opacity(0.0)`) hides its solid-color backdrop via the quad path,
-// but text was collected at full opacity — leaving floating glyphs on screen.
-// `collect_text_items` must now fold the same `tile_effective_opacity` the quad
-// path uses into every text item: opacity 0 → ZERO items from that tile (nothing
-// shaped/rasterized), a fractional opacity → items carrying the blended alpha.
-
-/// Build a single scrollable (portal) markdown tile carrying `content` at the
-/// given whole-tile `opacity`, and return `(scene, tile_id)`.
-fn dat3x_markdown_tile_scene(content: &str, opacity: f32) -> (SceneGraph, SceneId) {
+/// Minimized tiles skip text work. A transient portal fade keeps the
+/// text shaped at zero alpha so the first visible frame can reuse it.
+#[tokio::test]
+async fn tile_text_distinguishes_durable_opacity_from_transient_fade() {
+    let (mut compositor, _surface) = require_gpu!(tile_test_gpu().await);
     let mut scene = SceneGraph::new(256.0, 256.0);
-    let tab_id = scene.create_tab("t", 0).unwrap();
-    let lease_id = scene.grant_lease("t", 60_000);
-    let tile_id = scene
-        .create_tile(tab_id, "t", lease_id, Rect::new(0.0, 0.0, 120.0, 120.0), 1)
-        .unwrap();
-    scene
-        .register_tile_scroll_config(tile_id, TileScrollConfig::vertical())
-        .unwrap();
-    let root_id = SceneId::new();
-    scene
-        .set_tile_root(
-            tile_id,
-            Node {
-                layout: Default::default(),
-                id: root_id,
-                children: vec![],
-                data: NodeData::TextMarkdown(TextMarkdownNode {
-                    content: content.to_owned(),
-                    bounds: Rect::new(0.0, 0.0, 120.0, 120.0),
-                    font_size_px: 14.0,
-                    font_family: FontFamily::SystemSansSerif,
-                    color: Rgba::new(0.9, 0.9, 0.9, 1.0),
-                    background: Some(Rgba::new(0.04, 0.05, 0.07, 1.0)),
-                    alignment: TextAlign::Start,
-                    overflow: TextOverflow::Ellipsis,
-                    color_runs: Box::default(),
-                }),
-            },
-        )
-        .unwrap();
-    scene.tiles.get_mut(&tile_id).unwrap().opacity = opacity;
-    (scene, tile_id)
-}
-
-/// A tile at opacity 0 must contribute NO text items — the minimize path hides
-/// the backdrop AND the glyphs, together.
-#[tokio::test]
-async fn hud_dat3x_zero_tile_opacity_collects_no_text() {
-    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);
-    let (scene, _tile_id) = dat3x_markdown_tile_scene("hello transcript", 0.0);
-
-    let items = compositor.collect_text_items(&scene, 256.0, 256.0);
-    assert!(
-        items.iter().all(|t| !t.text.contains("hello")),
-        "a tile at opacity 0 must yield no transcript text items, got {} item(s)",
-        items.len()
-    );
-}
-
-/// A tile at fractional opacity must blend its glyphs proportionally: the text
-/// item carries the tile alpha (0.5), matching the backdrop fade.
-#[tokio::test]
-async fn hud_dat3x_fractional_tile_opacity_blends_text() {
-    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);
-    let (scene, _tile_id) = dat3x_markdown_tile_scene("hello transcript", 0.5);
-
-    let items = compositor.collect_text_items(&scene, 256.0, 256.0);
-    let item = items
-        .iter()
-        .find(|t| t.text.contains("hello"))
-        .expect("a tile at opacity 0.5 must still render its text");
-    assert!(
-        (item.opacity - 0.5).abs() < 1e-4,
-        "tile opacity 0.5 must fold into the text item opacity: got {}",
-        item.opacity
-    );
-}
-
-/// Control: a fully-opaque tile renders its text at full opacity (no regression
-/// to the steady-state path).
-#[tokio::test]
-async fn hud_dat3x_full_tile_opacity_renders_text_opaque() {
-    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);
-    let (scene, _tile_id) = dat3x_markdown_tile_scene("hello transcript", 1.0);
-
-    let items = compositor.collect_text_items(&scene, 256.0, 256.0);
-    let item = items
-        .iter()
-        .find(|t| t.text.contains("hello"))
-        .expect("a fully-opaque tile must render its text");
-    assert!(
-        (item.opacity - 1.0).abs() < 1e-4,
-        "full tile opacity must leave text opacity at 1.0: got {}",
-        item.opacity
-    );
-}
-
-/// A portal fading IN (durable `tile.opacity == 1`, TRANSIENT animation
-/// opacity pinned at ~0) must STILL collect and shape its text — only the item
-/// alpha rides the transient fade to ~0. The skip-shaping optimization gates on
-/// the DURABLE scene-level `tile.opacity` only; gating it on the combined value
-/// would defer the warm-up shape into the middle of the animation, forcing a
-/// re-shape hitch when the tile crosses the visibility threshold (
-/// steady-state reuse). This is the inverse of the durable-minimize skip.
-#[tokio::test]
-async fn hud_dat3x_transient_portal_fade_still_shapes_text() {
-    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);
-    let (scene, tile_id) = dat3x_markdown_tile_scene("hello transcript", 1.0);
-
-    // Pin the portal fade at ~0 while leaving tile.opacity = 1.0.
-    // `duration_ms: 0` makes `current_opacity_eased` return `target_opacity`.
-    compositor.portal_tile_anim_states.insert(
-        tile_id,
-        super::draw_cmds::ZoneAnimationState {
-            transition_start: std::time::Instant::now(),
-            duration_ms: 0,
-            easing: super::easing::Easing::Linear,
-            from_opacity: 0.0,
-            target_opacity: 0.0,
-        },
-    );
-
-    let items = compositor.collect_text_items(&scene, 256.0, 256.0);
-    let item = items
-        .iter()
-        .find(|t| t.text.contains("hello"))
-        .expect("a fading-in portal (durable opacity 1) must STILL shape its text (warm-up)");
-    assert!(
-        item.opacity <= 1e-4,
-        "transient fade must blend the item alpha to ~0: got {}",
-        item.opacity
-    );
+    let bounds = Rect::new(0.0, 0.0, 120.0, 120.0);
+    let tile_id = w41ef_portal_tile(&mut scene, bounds, bounds);
+    let root = scene.tiles[&tile_id].root_node.unwrap();
+    let NodeData::TextMarkdown(text) = &mut scene.nodes.get_mut(&root).unwrap().data else {
+        unreachable!()
+    };
+    text.content = "hello transcript".into();
+    let transcript_alpha = |c: &Compositor, scene: &SceneGraph| {
+        c.collect_text_items(scene, 256.0, 256.0)
+            .into_iter()
+            .find(|item| item.text.contains("hello"))
+            .map(|item| item.opacity)
+    };
+    for opacity in [0.0, 0.5, 1.0] {
+        scene.tiles.get_mut(&tile_id).unwrap().opacity = opacity;
+        assert_eq!(
+            transcript_alpha(&compositor, &scene),
+            (opacity > 0.0).then_some(opacity),
+            "durable tile opacity {opacity}"
+        );
+    }
+    pin_fade(&mut compositor, tile_id, 0.0);
+    assert_eq!(transcript_alpha(&compositor, &scene), Some(0.0));
 }

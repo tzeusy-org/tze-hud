@@ -8,7 +8,6 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use tze_hud_input::{InputProcessor, KeyboardProcessor};
-use tze_hud_telemetry::TelemetryCollector;
 
 use tokio::sync::Mutex as TokioMutex;
 use tze_hud_input::{FocusManager, FocusRequest};
@@ -66,7 +65,7 @@ pub(super) fn make_shared_state() -> Arc<TokioMutex<SharedState>> {
         ),
         runtime_widget_store: None,
         element_store: tze_hud_scene::element_store::ElementStore::default(),
-        element_store_path: None,
+        element_store_file: None,
         safe_mode_atomic: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         active_tab_mirror: Arc::new(std::sync::Mutex::new(None)),
         token_store: TokenStore::new(),
@@ -276,7 +275,6 @@ pub(super) fn make_windowed_keyboard_test_app(
             false,
             Default::default(),
         )),
-        pairing: None,
         control_panel: None,
         pending_input_latency: Arc::new(StdMutex::new(VecDeque::new())),
         frame_ready_rx,
@@ -284,12 +282,10 @@ pub(super) fn make_windowed_keyboard_test_app(
         frame_ready_tx: Some(frame_ready_tx),
         frame_presented_tx: None,
         degradation_notices: None,
-        compositor: None,
         window_surface: None,
         input_processor,
         focus_manager,
         keyboard_processor: KeyboardProcessor::new(),
-        telemetry: TelemetryCollector::new(),
         pipeline: FramePipeline::new(),
         shutdown: ShutdownToken::new(),
         quiescent_failed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -312,22 +308,29 @@ pub(super) fn make_windowed_keyboard_test_app(
         primary_monitor: None,
         secondaries: Vec::new(),
         display_targets: Default::default(),
+        placement_layout: Default::default(),
         displays_dirty: Default::default(),
         surface_factory: None,
         zone_displays: Default::default(),
         display_keys: Vec::new(),
         zone_targets: Default::default(),
         cursor_window: None,
+        keyboard_window: None,
         secondary_recreates: Default::default(),
         overlay_refits: Default::default(),
         press_window: None,
         zone_press: None,
+        press_guard: Default::default(),
         notification_link_opener: Default::default(),
+        link_feedback: None,
+        window_go_to: Default::default(),
         context_menu_press: None,
         context_menu_open: false,
         context_menu_dismiss_pending: false,
         primary_drag_gesture: None,
         global_tokens: std::collections::HashMap::new(),
+        resize_affordance_px: Default::default(),
+        cursor_shape_window: None,
         appearance: None,
         tokens_seen: 0,
         capture_seen: 0,
@@ -336,6 +339,7 @@ pub(super) fn make_windowed_keyboard_test_app(
         input_event_tx: Some(input_event_tx),
         composer_pointer_drag_anchor: None,
         reading_cursor: None,
+        pressable_regions: Vec::new(),
         portal_resize_states: std::collections::HashMap::new(),
         consumed_portal_resize_keydowns: std::collections::HashSet::new(),
         consumed_shell_shortcut_keydowns: std::collections::HashSet::new(),
@@ -346,6 +350,8 @@ pub(super) fn make_windowed_keyboard_test_app(
         consumed_command_keydowns: std::collections::HashSet::new(),
         local_composer_state: Arc::new(StdMutex::new(None)),
         composer_preedit: None,
+        kept_composer_drafts_state: Arc::new(StdMutex::new(None)),
+        kept_drafts_drawn: Vec::new(),
         focus_ring_owner_state: Arc::new(StdMutex::new(None)),
         surface_ui: Default::default(),
         resize_grip_hover_state: Arc::new(StdMutex::new(None)),
@@ -614,7 +620,7 @@ mod tests {
         {
             let st = shared.lock().await;
             // Replace the empty default scene with our composer scene and seed
-            // the mirror, mimicking the post-apply_batch refresh.
+            // the mirror, mimicking the runtime scene refresh.
             *st.scene.lock().await = scene;
             st.refresh_active_tab_mirror(&*st.scene.lock().await);
         }
@@ -1073,7 +1079,7 @@ mod tests {
         assert_eq!(
             scene.zone_registry.active_for_zone("alert-banner").len(),
             0,
-            "notification must be removed after dismiss pointer-up [hud-ltgk.6 regression]"
+            "notification must be removed after dismiss pointer-up"
         );
 
         // The hit region must also be pruned immediately (local feedback first).

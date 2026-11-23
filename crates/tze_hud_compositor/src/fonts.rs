@@ -425,20 +425,28 @@ pub(crate) fn normalize_locale(tag: &str) -> String {
     }
 }
 
-/// The Windows user default locale name, e.g. `ja-JP`.
-#[cfg(windows)]
-fn user_default_locale() -> Option<String> {
-    use windows::Win32::Globalization::GetUserDefaultLocaleName;
-    // LOCALE_NAME_MAX_LENGTH is 85 UTF-16 units including the terminator.
-    let mut buf = [0u16; 85];
-    // SAFETY: the slice is live and its length is passed by the binding.
-    let len = unsafe { GetUserDefaultLocaleName(&mut buf) };
-    (len > 1).then(|| String::from_utf16_lossy(&buf[..(len - 1) as usize]))
+/// The two OS lookups font loading needs. Platform code installs them once
+/// with [`install_os_font_lookups`] (the runtime does on Windows); without
+/// them the locale comes from `LANG` or `en-US`, and no system face loads.
+#[derive(Clone, Copy, Debug)]
+pub struct OsFontLookups {
+    /// The user default locale name, e.g. `ja-JP`.
+    pub user_locale: fn() -> Option<String>,
+    /// The system font table as `(value name, file)` pairs, machine fonts
+    /// first: a file is relative to `%WINDIR%\Fonts` or absolute.
+    pub font_entries: fn() -> Vec<(String, String)>,
 }
 
-#[cfg(not(windows))]
+static OS_FONT_LOOKUPS: OnceLock<OsFontLookups> = OnceLock::new();
+
+/// Install the OS lookups; the first installation wins.
+pub fn install_os_font_lookups(lookups: OsFontLookups) {
+    let _ = OS_FONT_LOOKUPS.set(lookups);
+}
+
+/// The user default locale name, if platform code installed the lookup.
 fn user_default_locale() -> Option<String> {
-    None
+    OS_FONT_LOOKUPS.get().and_then(|l| (l.user_locale)())
 }
 
 fn is_font_file(path: &Path) -> bool {
@@ -787,27 +795,58 @@ fn share_file_data(db: &mut fontdb::Database) {
 
 /// On-demand system font lookup by family name.
 ///
-/// Windows: reads the value names of
-/// `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts` (machine fonts,
-/// relative file names under `%WINDIR%\Fonts`) and the same key under `HKCU`
-/// (per-user fonts, absolute paths under `%LOCALAPPDATA%\Microsoft\Windows\Fonts`).
-/// A value name such as `"Segoe UI Semibold (TrueType)"` or
+/// Reads the system font table that platform code installed
+/// ([`OsFontLookups::font_entries`]; on Windows the runtime reads the `Fonts`
+/// registry key). A value name such as `"Segoe UI Semibold (TrueType)"` or
 /// `"Cambria & Cambria Math (TrueType)"` names the families in its file; only
 /// files whose value name matches the requested family are loaded.
 ///
-/// Other platforms: a no-op (Linux builds are headless CI only).
+/// Without installed lookups (Linux headless CI, tools) it loads nothing.
 pub(crate) mod system {
     use glyphon::fontdb;
+    use std::path::{Path, PathBuf};
 
     /// Load the system font files for `family` into `db`; returns how many
     /// files were loaded.  Never scans a directory.
     pub(crate) fn load_family(db: &mut fontdb::Database, family: &str) -> usize {
-        imp::load_family(db, family)
+        let Some(lookups) = super::OS_FONT_LOOKUPS.get() else {
+            return 0;
+        };
+        let windir = std::env::var_os("WINDIR")
+            .or_else(|| std::env::var_os("SystemRoot"))
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("C:\\Windows"));
+        let fonts_dir = windir.join("Fonts");
+        let mut files: Vec<PathBuf> = Vec::new();
+        for (name, data) in (lookups.font_entries)() {
+            if registry_name_matches(&name, family) {
+                let path = Path::new(&data);
+                let path = if path.is_absolute() {
+                    path.to_path_buf()
+                } else {
+                    fonts_dir.join(path)
+                };
+                if !files.contains(&path) {
+                    files.push(path);
+                }
+            }
+        }
+        let mut loaded = 0;
+        for path in files.iter().take(MAX_FILES_PER_FAMILY) {
+            match db.load_font_file(path) {
+                Ok(()) => loaded += 1,
+                Err(e) => tracing::debug!(
+                    file = %path.display(),
+                    error = %e,
+                    "system font file unreadable; skipped"
+                ),
+            }
+        }
+        loaded
     }
 
     /// Upper bound on files loaded for one name; `"Arial"` style prefixes can
     /// match a large family (Arial, Arial Black, Arial Nova, …).
-    #[cfg_attr(not(windows), allow(dead_code))] // used by the Windows impl only
     pub(crate) const MAX_FILES_PER_FAMILY: usize = 64;
 
     /// Does registry value name `value_name` describe a file containing
@@ -815,7 +854,6 @@ pub(crate) mod system {
     /// on `" & "`, and accepts an exact match or the family followed by a style
     /// word (`"Segoe UI Semibold"` matches `"Segoe UI"`).  Over-matching only
     /// loads an extra file; the caller re-checks real family names after loading.
-    #[cfg_attr(not(windows), allow(dead_code))] // Windows impl + unit tests
     pub(crate) fn registry_name_matches(value_name: &str, family: &str) -> bool {
         let base = match value_name.rfind(" (") {
             Some(i) if value_name.ends_with(')') => &value_name[..i],
@@ -833,128 +871,6 @@ pub(crate) mod system {
                 && (part.len() == family.len() || part.as_bytes()[family.len()] == b' ')
         })
     }
-
-    #[cfg(windows)]
-    mod imp {
-        use super::{MAX_FILES_PER_FAMILY, registry_name_matches};
-        use glyphon::fontdb;
-        use std::ffi::OsString;
-        use std::os::windows::ffi::OsStringExt;
-        use std::path::{Path, PathBuf};
-        use windows::Win32::Foundation::ERROR_NO_MORE_ITEMS;
-        use windows::Win32::System::Registry::{
-            HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, REG_EXPAND_SZ, REG_SZ,
-            REG_VALUE_TYPE, RegCloseKey, RegEnumValueW, RegOpenKeyExW,
-        };
-        use windows::core::{PCWSTR, PWSTR, w};
-
-        const FONTS_KEY: PCWSTR = w!("SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Fonts");
-
-        pub(super) fn load_family(db: &mut fontdb::Database, family: &str) -> usize {
-            let windir = std::env::var_os("WINDIR")
-                .or_else(|| std::env::var_os("SystemRoot"))
-                .map(PathBuf::from)
-                .unwrap_or_else(|| PathBuf::from("C:\\Windows"));
-            let fonts_dir = windir.join("Fonts");
-            let mut files: Vec<PathBuf> = Vec::new();
-            for root in [HKEY_LOCAL_MACHINE, HKEY_CURRENT_USER] {
-                for (name, data) in font_values(root) {
-                    if registry_name_matches(&name, family) {
-                        let path = Path::new(&data);
-                        let path = if path.is_absolute() {
-                            path.to_path_buf()
-                        } else {
-                            fonts_dir.join(path)
-                        };
-                        if !files.contains(&path) {
-                            files.push(path);
-                        }
-                    }
-                }
-            }
-            let mut loaded = 0;
-            for path in files.iter().take(MAX_FILES_PER_FAMILY) {
-                match db.load_font_file(path) {
-                    Ok(()) => loaded += 1,
-                    Err(e) => tracing::debug!(
-                        file = %path.display(),
-                        error = %e,
-                        "system font file unreadable; skipped"
-                    ),
-                }
-            }
-            loaded
-        }
-
-        /// `(value name, string data)` pairs of the `Fonts` key under `root`.
-        fn font_values(root: HKEY) -> Vec<(String, String)> {
-            let mut out = Vec::new();
-            let mut key = HKEY::default();
-            // SAFETY: FONTS_KEY is a static NUL-terminated wide string; `key`
-            // is written by the call and closed below.
-            if unsafe { RegOpenKeyExW(root, FONTS_KEY, 0, KEY_READ, &mut key) }.is_err() {
-                return out;
-            }
-            let mut name_buf = vec![0u16; 1024];
-            let mut data_buf = vec![0u8; 2048];
-            // Bounded: the walk ends at ERROR_NO_MORE_ITEMS long before this.
-            for index in 0..100_000 {
-                let mut name_len = name_buf.len() as u32;
-                let mut data_len = data_buf.len() as u32;
-                let mut kind = 0u32;
-                // SAFETY: buffers are live and their lengths are passed in
-                // elements (name) / bytes (data) as the API requires.
-                let rc = unsafe {
-                    RegEnumValueW(
-                        key,
-                        index,
-                        PWSTR(name_buf.as_mut_ptr()),
-                        &mut name_len,
-                        None,
-                        Some(&mut kind),
-                        Some(data_buf.as_mut_ptr()),
-                        Some(&mut data_len),
-                    )
-                };
-                if rc == ERROR_NO_MORE_ITEMS {
-                    break;
-                }
-                if rc.is_err() {
-                    // e.g. ERROR_MORE_DATA: a value larger than the buffers
-                    // is not a font entry we can use; skip it.
-                    continue;
-                }
-                let kind = REG_VALUE_TYPE(kind);
-                if kind != REG_SZ && kind != REG_EXPAND_SZ {
-                    continue;
-                }
-                let name = OsString::from_wide(&name_buf[..name_len as usize])
-                    .to_string_lossy()
-                    .into_owned();
-                let wide: Vec<u16> = data_buf[..data_len as usize]
-                    .chunks_exact(2)
-                    .map(|c| u16::from_le_bytes([c[0], c[1]]))
-                    .take_while(|&u| u != 0)
-                    .collect();
-                let data = OsString::from_wide(&wide).to_string_lossy().into_owned();
-                out.push((name, data));
-            }
-            // SAFETY: `key` was opened above and is closed exactly once.
-            unsafe {
-                let _ = RegCloseKey(key);
-            }
-            out
-        }
-    }
-
-    #[cfg(not(windows))]
-    mod imp {
-        use glyphon::fontdb;
-
-        pub(super) fn load_family(_db: &mut fontdb::Database, _family: &str) -> usize {
-            0
-        }
-    }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -964,70 +880,58 @@ mod tests {
     use super::*;
     use glyphon::{Attrs, Buffer, Family, Metrics, Shaping, Wrap};
 
-    /// Shape `text` in `family` and return the family name of the face used
-    /// for each glyph.
-    fn faces_used(fs: &mut FontSystem, family: Family<'_>, text: &str) -> Vec<String> {
-        let mut buf = Buffer::new(fs, Metrics::new(16.0, 22.0));
-        buf.set_size(fs, Some(2000.0), Some(200.0));
-        buf.set_wrap(fs, Wrap::None);
-        buf.set_text(fs, text, Attrs::new().family(family), Shaping::Advanced);
-        buf.shape_until_scroll(fs, false);
-        let ids: Vec<_> = buf
-            .layout_runs()
-            .flat_map(|r| r.glyphs.iter().map(|g| (g.font_id, g.glyph_id)))
-            .collect();
-        ids.into_iter()
-            .map(|(id, glyph)| {
-                assert_ne!(glyph, 0, "notdef glyph shaped for {text:?}");
-                fs.db().face(id).unwrap().families[0].0.clone()
-            })
-            .collect()
-    }
-
-    // ── Lazy system fallback (hud-ljhku.13) ──────────────────────────────
-
     use test_standins::{STANDIN_EMOJI, all_standins, standin_source};
 
-    /// `(family, glyph id)` of every shaped glyph of `text` in the sans role.
-    fn shaped(fs: &mut FontSystem, text: &str) -> Vec<(String, u16)> {
-        let mut buf = Buffer::new(fs, Metrics::new(16.0, 22.0));
-        buf.set_size(fs, Some(2000.0), Some(200.0));
-        buf.set_text(
-            fs,
-            text,
-            Attrs::new().family(Family::SansSerif),
-            Shaping::Advanced,
-        );
-        buf.shape_until_scroll(fs, false);
-        let glyphs: Vec<_> = buf
+    fn shape_buffer(fs: &mut FontSystem, text: &str, attrs: Attrs<'_>) -> Buffer {
+        let mut buffer = Buffer::new(fs, Metrics::new(16.0, 22.0));
+        buffer.set_size(fs, Some(2000.0), Some(200.0));
+        buffer.set_wrap(fs, Wrap::None);
+        buffer.set_text(fs, text, attrs, Shaping::Advanced);
+        buffer.shape_until_scroll(fs, false);
+        buffer
+    }
+
+    fn shaped_with_family(
+        fs: &mut FontSystem,
+        family: Family<'_>,
+        text: &str,
+        include_whitespace: bool,
+    ) -> Vec<(String, u16)> {
+        let buffer = shape_buffer(fs, text, Attrs::new().family(family));
+        buffer
             .layout_runs()
-            .flat_map(|r| {
-                r.glyphs
-                    .iter()
-                    .filter(|g| !r.text[g.start..g.end].trim().is_empty())
-                    .map(|g| (g.font_id, g.glyph_id))
-                    .collect::<Vec<_>>()
+            .flat_map(|run| {
+                run.glyphs.iter().filter(move |g| {
+                    include_whitespace || !run.text[g.start..g.end].trim().is_empty()
+                })
             })
-            .collect();
-        glyphs
-            .into_iter()
-            .map(|(id, glyph)| (fs.db().face(id).unwrap().families[0].0.clone(), glyph))
+            .map(|g| {
+                (
+                    fs.db().face(g.font_id).unwrap().families[0].0.clone(),
+                    g.glyph_id,
+                )
+            })
             .collect()
     }
 
-    /// The characters of `text` that shaped to `.notdef`.
+    fn shaped(fs: &mut FontSystem, text: &str) -> Vec<(String, u16)> {
+        shaped_with_family(fs, Family::SansSerif, text, false)
+    }
+
+    fn faces_used(fs: &mut FontSystem, family: Family<'_>, text: &str) -> Vec<String> {
+        shaped_with_family(fs, family, text, true)
+            .into_iter()
+            .map(|(face, glyph)| {
+                assert_ne!(glyph, 0, "notdef glyph shaped for {text:?}");
+                face
+            })
+            .collect()
+    }
+
     fn notdef_text(fs: &mut FontSystem, text: &str) -> String {
-        let mut buf = Buffer::new(fs, Metrics::new(16.0, 22.0));
-        buf.set_size(fs, Some(2000.0), Some(200.0));
-        buf.set_text(
-            fs,
-            text,
-            Attrs::new().family(Family::SansSerif),
-            Shaping::Advanced,
-        );
-        buf.shape_until_scroll(fs, false);
+        let buffer = shape_buffer(fs, text, Attrs::new().family(Family::SansSerif));
         let mut missing = String::new();
-        for run in buf.layout_runs() {
+        for run in buffer.layout_runs() {
             for g in run.glyphs.iter().filter(|g| g.glyph_id == 0) {
                 missing.push_str(&run.text[g.start..g.end]);
             }
@@ -1062,8 +966,10 @@ mod tests {
         let mut fs = bundled_font_system();
         let wakes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let counter = Arc::clone(&wakes);
+        let (wake_done_tx, wake_done_rx) = std::sync::mpsc::channel();
         fallback.set_wake(RenderWakeNotifier::new(move || {
             counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let _ = wake_done_tx.send(());
         }));
 
         // S3: text the bundled faces cover asks for nothing.
@@ -1082,6 +988,10 @@ mod tests {
         assert!(shaped(&mut fs, text).iter().any(|(_, g)| *g == 0));
 
         assert!(wait_and_install(&mut fallback, &mut fs));
+        // The worker sends the faces before it calls the wake notifier.
+        wake_done_rx
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("fallback load must wake the renderer");
         assert_eq!(wakes.load(std::sync::atomic::Ordering::SeqCst), 1);
         // S1: after the install, no shaped glyph is.notdef.
         let after = shaped(&mut fs, text);
@@ -1091,15 +1001,12 @@ mod tests {
             assert!(families.contains(expected), "{families:?}");
         }
 
-        // The loader never ran on this (frame) thread.
         let calls = log.lock().unwrap().clone();
-        assert!(!calls.is_empty());
-        for (family, thread) in &calls {
-            assert_eq!(thread.as_deref(), Some("tze-font-fallback"), "{family}");
-        }
-        // en-US Han -> Microsoft YaHei UI; Hangul -> Malgun Gothic; then the
-        // common emoji/symbol faces, each asked for exactly once.
-        let asked: Vec<&str> = calls.iter().map(|(f, _)| f.as_str()).collect();
+        assert!(
+            calls
+                .iter()
+                .all(|(_, thread)| thread.as_deref() == Some("tze-font-fallback"))
+        );
         for family in [
             "Microsoft YaHei UI",
             "Malgun Gothic",
@@ -1107,9 +1014,9 @@ mod tests {
             "Segoe UI Symbol",
         ] {
             assert_eq!(
-                asked.iter().filter(|f| **f == family).count(),
+                calls.iter().filter(|(name, _)| name == family).count(),
                 1,
-                "{asked:?}"
+                "{family}: {calls:?}"
             );
         }
 
@@ -1204,6 +1111,10 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn windows_system_fallback_draws_real_faces() {
+        install_os_font_lookups(OsFontLookups {
+            user_locale: tze_hud_runtime::os_fonts::user_locale,
+            font_entries: tze_hud_runtime::os_fonts::font_entries,
+        });
         for (locale, han) in [("en-US", "Microsoft YaHei UI"), ("ja", "Yu Gothic")] {
             let (mut fs, _) =
                 build_font_system_with_locale(&FontConfig::default(), locale.to_owned());
@@ -1230,41 +1141,24 @@ mod tests {
                 started.elapsed().as_secs_f64() * 1e3
             );
             for (sample, family) in samples {
-                let has = |fs: &FontSystem, id| {
-                    fs.db().face(id).is_some_and(|face| {
-                        face.families
-                            .iter()
-                            .any(|(n, _)| n.eq_ignore_ascii_case(family))
-                    })
-                };
-                let installed = fs.db().faces().any(|face| {
+                let has_family = |face: &fontdb::FaceInfo| {
                     face.families
                         .iter()
-                        .any(|(n, _)| n.eq_ignore_ascii_case(family))
-                });
-                if !installed {
+                        .any(|(name, _)| name.eq_ignore_ascii_case(family))
+                };
+                if !fs.db().faces().any(has_family) {
                     println!(
                         "tier-W font fallback [{locale}]: {family} not on this runner; skipped"
                     );
                     continue;
                 }
-                let mut buf = Buffer::new(&mut fs, Metrics::new(16.0, 22.0));
-                buf.set_text(
-                    &mut fs,
-                    sample,
-                    Attrs::new().family(Family::SansSerif),
-                    Shaping::Advanced,
-                );
-                buf.shape_until_scroll(&mut fs, false);
-                let glyphs: Vec<_> = buf
-                    .layout_runs()
-                    .flat_map(|r| r.glyphs.iter().map(|g| (g.font_id, g.glyph_id)))
-                    .collect();
+                let buffer = shape_buffer(&mut fs, sample, Attrs::new().family(Family::SansSerif));
+                let glyphs: Vec<_> = buffer.layout_runs().flat_map(|run| run.glyphs).collect();
                 assert!(!glyphs.is_empty());
-                for (id, glyph) in glyphs {
-                    assert_ne!(glyph, 0, "[{locale}] {sample:?} shaped .notdef");
+                for glyph in glyphs {
+                    assert_ne!(glyph.glyph_id, 0, "[{locale}] {sample:?} shaped .notdef");
                     assert!(
-                        has(&fs, id),
+                        fs.db().face(glyph.font_id).is_some_and(has_family),
                         "[{locale}] {sample:?} not drawn with {family}"
                     );
                 }
@@ -1277,46 +1171,23 @@ mod tests {
 
     #[test]
     fn fallback_families_follow_cosmic_text_windows_table() {
-        assert_eq!(
-            fallback_families("\u{5b8c}", "ja"),
-            ["Yu Gothic", "Segoe UI Emoji", "Segoe UI Symbol"]
-        );
-        assert_eq!(
-            fallback_families("\u{5b8c}", "zh-TW")[0],
-            "Microsoft JhengHei UI"
-        );
-        assert_eq!(fallback_families("\u{5b8c}", "zh-HK")[0], "MingLiU_HKSCS");
-        assert_eq!(
-            fallback_families("\u{5b8c}", "en-US")[0],
-            "Microsoft YaHei UI"
-        );
-        assert_eq!(fallback_families("\u{d14c}", "en-US")[0], "Malgun Gothic");
-        assert_eq!(fallback_families("\u{304b}", "en-US")[0], "Yu Gothic");
-        // Review N1: a Hangul or kana miss also asks for the locale's Han
-        // face, since Malgun / Yu Gothic alone would claim later Han text.
-        assert_eq!(
-            fallback_families("\u{d14c}", "en-US"),
-            [
-                "Malgun Gothic",
-                "Microsoft YaHei UI",
-                "Segoe UI Emoji",
-                "Segoe UI Symbol"
-            ]
-        );
-        assert_eq!(
-            fallback_families("\u{304b}", "zh-TW")[..2],
-            ["Yu Gothic", "Microsoft JhengHei UI"]
-        );
-        assert_eq!(
-            fallback_families("\u{d14c}", "ko"),
-            ["Malgun Gothic", "Segoe UI Emoji", "Segoe UI Symbol"]
-        );
-        assert!(!fallback_families("\u{0915}", "en-US").contains(&"Microsoft YaHei UI"));
-        assert_eq!(fallback_families("\u{0915}", "en-US")[0], "Nirmala UI");
-        assert_eq!(
-            fallback_families("\u{2705}", "en-US"),
-            COMMON_FALLBACK_FAMILIES
-        );
+        // Kana/Hangul also request the locale's Han face so shaping these
+        // first can't accidentally claim later Han text.
+        for (text, locale, prefix) in [
+            ("完", "ja", &["Yu Gothic"][..]),
+            ("完", "zh-TW", &["Microsoft JhengHei UI"]),
+            ("完", "zh-HK", &["MingLiU_HKSCS"]),
+            ("完", "en-US", &["Microsoft YaHei UI"]),
+            ("테", "en-US", &["Malgun Gothic", "Microsoft YaHei UI"]),
+            ("か", "en-US", &["Yu Gothic", "Microsoft YaHei UI"]),
+            ("か", "zh-TW", &["Yu Gothic", "Microsoft JhengHei UI"]),
+            ("테", "ko", &["Malgun Gothic"]),
+            ("क", "en-US", &["Nirmala UI"]),
+            ("✅", "en-US", &[]),
+        ] {
+            let expected = [prefix, &COMMON_FALLBACK_FAMILIES].concat();
+            assert_eq!(fallback_families(text, locale), expected, "{text} {locale}");
+        }
         assert!(fallback_families(" \n\t", "en-US").is_empty());
     }
 
@@ -1339,36 +1210,27 @@ mod tests {
         ] {
             assert_eq!(normalize_locale(tag), want, "{tag}");
         }
-        // LANG wins over the Windows user locale; either is normalized.
-        assert_eq!(
-            locale_from(Some("ja_JP.UTF-8".into()), || Some("en-US".into())),
-            "ja"
-        );
-        assert_eq!(locale_from(None, || Some("zh-TW".into())), "zh-TW");
-        assert_eq!(locale_from(Some(String::new()), || None), "en-US");
-        assert_eq!(locale_from(None, || None), "en-US");
-        // `LANG=C` / `POSIX` (common in shells) name no language.
-        assert_eq!(locale_from(Some("C".into()), || Some("ja-JP".into())), "ja");
-        assert_eq!(locale_from(Some("POSIX".into()), || None), "en-US");
-        assert_eq!(
-            locale_from(Some("C.UTF-8".into()), || Some("ko-KR".into())),
-            "ko"
-        );
+        // Shell locale takes precedence when it names a language.
+        for (shell, windows, expected) in [
+            (Some("ja_JP.UTF-8"), Some("en-US"), "ja"),
+            (None, Some("zh-TW"), "zh-TW"),
+            (Some(""), None, "en-US"),
+            (None, None, "en-US"),
+            (Some("C"), Some("ja-JP"), "ja"),
+            (Some("POSIX"), None, "en-US"),
+            (Some("C.UTF-8"), Some("ko-KR"), "ko"),
+        ] {
+            assert_eq!(
+                locale_from(shell.map(str::to_owned), || windows.map(str::to_owned)),
+                expected
+            );
+        }
     }
 
     #[test]
-    fn bundled_fonts_load_exactly_the_embedded_faces() {
-        // Each embedded file is a single-face TTF; more faces would mean
-        // system fonts leaked in.
-        assert_eq!(
-            bundled_font_system().db().faces().count(),
-            BUNDLED_FONT_FACE_COUNT
-        );
-    }
-
-    #[test]
-    fn roles_default_to_ibm_plex_and_dejavu_serif() {
+    fn bundled_fonts_define_the_expected_faces_roles_and_weights() {
         let mut fs = bundled_font_system();
+        assert_eq!(fs.db().faces().count(), BUNDLED_FONT_FACE_COUNT);
         for (family, expected) in [
             (Family::SansSerif, DEFAULT_SANS_FAMILY),
             (Family::Monospace, DEFAULT_MONO_FAMILY),
@@ -1376,38 +1238,21 @@ mod tests {
         ] {
             let used = faces_used(&mut fs, family, "Hello world");
             assert!(
-                used.iter().all(|f| f == expected),
-                "{family:?} used {used:?}"
+                !used.is_empty() && used.iter().all(|f| f == expected),
+                "{family:?}: {used:?}"
             );
         }
-    }
-
-    #[test]
-    fn plex_weights_resolve_to_distinct_faces() {
-        let mut fs = bundled_font_system();
-        let mut ids = Vec::new();
-        for weight in [400, 500, 600, 700] {
-            let mut buf = Buffer::new(&mut fs, Metrics::new(16.0, 22.0));
-            let attrs = Attrs::new()
-                .family(Family::SansSerif)
-                .weight(glyphon::Weight(weight));
-            buf.set_text(&mut fs, "A", attrs, Shaping::Advanced);
-            buf.shape_until_scroll(&mut fs, false);
-            ids.push(buf.layout_runs().next().unwrap().glyphs[0].font_id);
-        }
-        ids.dedup();
-        assert_eq!(
-            ids.len(),
-            4,
-            "400/500/600/700 must each map to their own face"
-        );
-    }
-
-    /// Symbols the HUD and its bundled widgets emit that IBM Plex lacks must
-    /// still shape to real glyphs via the DejaVu coverage fallback.
-    #[test]
-    fn symbols_missing_from_plex_fall_back_to_dejavu() {
-        let mut fs = bundled_font_system();
+        let ids: HashSet<_> = [400, 500, 600, 700]
+            .map(|weight| {
+                let attrs = Attrs::new()
+                    .family(Family::SansSerif)
+                    .weight(glyphon::Weight(weight));
+                let buffer = shape_buffer(&mut fs, "A", attrs);
+                buffer.layout_runs().next().unwrap().glyphs[0].font_id
+            })
+            .into();
+        assert_eq!(ids.len(), 4, "400/500/600/700 each map to their own face");
+        // Symbols used by the HUD and bundles must shape through DejaVu where Plex lacks coverage.
         let symbols = "─▍⚠✕●◐▲◆◇○⋯⇒☾⊘◌☀☕⚡سلام";
         let used = faces_used(&mut fs, Family::SansSerif, symbols);
         assert!(!used.is_empty());
@@ -1535,21 +1380,27 @@ mod tests {
 
     #[test]
     fn registry_value_names_match_family_and_styles_only() {
-        use system::registry_name_matches as m;
-        assert!(m("Segoe UI (TrueType)", "Segoe UI"));
-        assert!(m("Segoe UI Semibold Italic (TrueType)", "segoe ui"));
-        assert!(m("Cambria & Cambria Math (TrueType)", "Cambria Math"));
-        assert!(m("Bahnschrift", "Bahnschrift"));
-        assert!(!m("Segoe UIX (TrueType)", "Segoe UI"));
-        assert!(!m("Arial (TrueType)", "Arial Nova"));
-        assert!(!m("Arial (TrueType)", ""));
+        for (value, family, expected) in [
+            ("Segoe UI (TrueType)", "Segoe UI", true),
+            ("Segoe UI Semibold Italic (TrueType)", "segoe ui", true),
+            ("Cambria & Cambria Math (TrueType)", "Cambria Math", true),
+            ("Bahnschrift", "Bahnschrift", true),
+            ("Segoe UIX (TrueType)", "Segoe UI", false),
+            ("Arial (TrueType)", "Arial Nova", false),
+            ("Arial (TrueType)", "", false),
+        ] {
+            assert_eq!(
+                system::registry_name_matches(value, family),
+                expected,
+                "{value} vs {family}"
+            );
+        }
     }
 
+    // Not on Windows: the real-registry test installs lookups process-wide.
+    #[cfg(not(windows))]
     #[test]
-    fn system_lookup_is_noop_off_windows() {
-        if cfg!(windows) {
-            return;
-        }
+    fn system_lookup_is_noop_without_os_lookups() {
         let mut db = fontdb::Database::new();
         assert_eq!(system::load_family(&mut db, "Segoe UI"), 0);
         assert_eq!(db.len(), 0);

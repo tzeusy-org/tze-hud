@@ -66,9 +66,7 @@ jobs:
   # ── Static: no compilation ──────────────────────────────────────────────────
   #
   # The Python suites are pure-Python and hermetic: no GPU, Windows, live HUD
-  # runtime or network. Live-HUD CLI tools under the user-test skill's
-  # scripts/ (stress_test_zones.py, publish_*_batch.py, *_exemplar.py) are not
-  # test suites and stay out.
+  # runtime or external network. Live-HUD commands use fake transports here.
 
   static:
     name: static checks
@@ -80,8 +78,17 @@ jobs:
         run: bash scripts/ci/check_untracked_evidence.sh
       - name: Check tracked files carry no host identifiers
         run: python3 scripts/ci/check_host_identifiers.py
-      - name: Check current source references
+      - name: Check current source references and doc links
         run: python3 scripts/ci/check_current_references.py
+      # Report only; no line target is enforced.
+      - name: Report lines per surface
+        run: python3 scripts/ci/size_report.py --output-dir test_results/size-report
+      - name: Upload size report
+        uses: actions/upload-artifact@v4
+        with:
+          name: size-report
+          path: test_results/size-report/
+          if-no-files-found: error
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.88"
@@ -206,14 +213,14 @@ jobs:
       - name: Install Mesa / llvmpipe
         timeout-minutes: 5
         run: |
-          # Remove only the observed Azure HTTP route; keep signed HTTPS fallbacks.
+          # Remove only the observed Azure and us-east-2 EC2 HTTP routes; keep signed HTTPS fallbacks.
           # An unsupported hosted image layout must fail before package acquisition.
           apt_mirror_list=/etc/apt/apt-mirrors.txt
           test -f "$apt_mirror_list"
           test ! -L "$apt_mirror_list"
           grep -Eq '^https://archive[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$apt_mirror_list"
           grep -Eq '^https://security[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$apt_mirror_list"
-          sudo sed -Ei '\|^http://azure[.]archive[.]ubuntu[.]com/ubuntu/?([[:space:]].*)?$|d' "$apt_mirror_list"
+          sudo sed -Ei '\#^http://(azure[.]archive|us-east-2[.]ec2[.]archive)[.]ubuntu[.]com/ubuntu/?([[:space:]].*)?$#d' "$apt_mirror_list"
           sudo apt-get $APT_OPTS update -q --error-on=any
           sudo apt-get $APT_OPTS install -y --no-install-recommends \
             libvulkan1 \

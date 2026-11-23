@@ -1,7 +1,7 @@
 //! Agent session management — authentication, capabilities, session state.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use tokio::sync::{Mutex, mpsc};
@@ -13,6 +13,21 @@ use tze_hud_scene::graph::SceneGraph;
 
 use crate::proto::session::ServerMessage;
 use crate::token::TokenStore;
+
+/// The element-store file and its writer. The runtime owns the one writer and
+/// hands it in here, so the protocol crate never serializes the file itself.
+#[derive(Clone, Debug)]
+pub struct ElementStoreFile {
+    pub path: PathBuf,
+    pub write: fn(&ElementStore, &Path) -> std::io::Result<()>,
+}
+
+impl ElementStoreFile {
+    /// Save `store` to this file with the runtime's writer.
+    pub fn save(&self, store: &ElementStore) -> std::io::Result<()> {
+        (self.write)(store, &self.path)
+    }
+}
 
 /// Shared state between the gRPC server and the compositor.
 ///
@@ -34,12 +49,12 @@ pub struct SharedState {
     pub runtime_widget_store: Option<RuntimeWidgetStore>,
     /// Persistent element identity store (zone/widget/tile Scene IDs).
     pub element_store: ElementStore,
-    /// On-disk path for `element_store.toml`. When `None`, persistence is disabled.
-    pub element_store_path: Option<PathBuf>,
+    /// Where `element_store.toml` is saved. When `None`, persistence is disabled.
+    pub element_store_file: Option<ElementStoreFile>,
     /// Whether the runtime is currently in safe mode.
     ///
     /// This is the **single source of truth** for the runtime-global safe-mode
-    /// flag.  When `true`, all active sessions reject MutationBatch with
+    /// flag.  When `true`, all active sessions reject Publish with
     /// SAFE_MODE_ACTIVE, and the winit event thread captures input locally.
     ///
     /// It is an `AtomicBool` so it can be read lock-free on the winit event

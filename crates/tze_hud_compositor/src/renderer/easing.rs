@@ -269,262 +269,145 @@ impl StreamFadeRamp {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use Easing::{EaseInOut, EaseInQuad, EaseOutQuad, Linear};
+    use std::collections::HashMap;
 
     const EPS: f32 = 1e-5;
 
-    // ── Easing curves ───────────────────────────────────────────────────────
-
     #[test]
-    fn easing_fixed_endpoints() {
-        for e in [
-            Easing::Linear,
-            Easing::EaseInOut,
-            Easing::EaseOutQuad,
-            Easing::EaseInQuad,
+    fn easing_curves_clamp_and_grow_without_overshoot() {
+        for (curve, quarter, midpoint) in [
+            (Linear, 0.25, 0.5),
+            (EaseInOut, 0.15625, 0.5),
+            (EaseOutQuad, 0.4375, 0.75),
+            (EaseInQuad, 0.0625, 0.25),
         ] {
-            assert!((e.apply(0.0) - 0.0).abs() < EPS, "{e:?} f(0) != 0");
-            assert!((e.apply(1.0) - 1.0).abs() < EPS, "{e:?} f(1) != 1");
-        }
-    }
-
-    #[test]
-    fn easing_clamps_out_of_range() {
-        for e in [
-            Easing::Linear,
-            Easing::EaseInOut,
-            Easing::EaseOutQuad,
-            Easing::EaseInQuad,
-        ] {
-            assert!(
-                (e.apply(-5.0) - 0.0).abs() < EPS,
-                "{e:?} below-0 not clamped"
-            );
-            assert!(
-                (e.apply(5.0) - 1.0).abs() < EPS,
-                "{e:?} above-1 not clamped"
-            );
-        }
-    }
-
-    #[test]
-    fn ease_in_out_is_symmetric_half() {
-        // Smoothstep is symmetric about t=0.5 → f(0.5) == 0.5.
-        assert!((Easing::EaseInOut.apply(0.5) - 0.5).abs() < EPS);
-        // Symmetry: f(t) + f(1-t) == 1.
-        for &t in &[0.1f32, 0.25, 0.4] {
-            let s = Easing::EaseInOut.apply(t) + Easing::EaseInOut.apply(1.0 - t);
-            assert!((s - 1.0).abs() < EPS, "asymmetric at t={t}");
-        }
-    }
-
-    #[test]
-    fn ease_out_quad_decelerates() {
-        // Ease-out is ahead of linear in the first half (fast start).
-        assert!(Easing::EaseOutQuad.apply(0.25) > 0.25);
-        assert!((Easing::EaseOutQuad.apply(0.5) - 0.75).abs() < EPS);
-        assert!((Easing::EaseInQuad.apply(0.25) - 0.0625).abs() < EPS);
-        assert!((Easing::EaseInQuad.apply(0.5) - 0.25).abs() < EPS);
-        let profile = ZoneMotion::from_token_map(&std::collections::HashMap::from([
-            ("motion.enter.easing".into(), "decelerate".into()),
-            ("motion.exit.easing".into(), "accelerate".into()),
-            ("motion.exit.ms".into(), "240".into()),
-        ]));
-        assert_eq!(profile.enter, Easing::EaseOutQuad);
-        assert_eq!(profile.exit, Easing::EaseInQuad);
-        assert_eq!(profile.exit_ms, 240);
-        let fallback = ZoneMotion::from_token_map(&std::collections::HashMap::from([
-            ("motion.enter.easing".into(), "invalid".into()),
-            ("motion.exit.easing".into(), "invalid".into()),
-            ("motion.exit.ms".into(), "-10".into()),
-        ]));
-        assert_eq!(fallback.enter, Easing::EaseOutQuad);
-        assert_eq!(fallback.exit, Easing::EaseInQuad);
-        assert_eq!(fallback.exit_ms, 120);
-        let linear = ZoneMotion::from_token_map(&std::collections::HashMap::from([
-            ("motion.enter.easing".into(), "linear".into()),
-            ("motion.exit.easing".into(), "standard".into()),
-        ]));
-        assert_eq!(linear.enter, Easing::Linear);
-        assert_eq!(linear.exit, Easing::EaseInOut);
-    }
-
-    #[test]
-    fn easing_is_monotonic_non_decreasing() {
-        for e in [
-            Easing::Linear,
-            Easing::EaseInOut,
-            Easing::EaseOutQuad,
-            Easing::EaseInQuad,
-        ] {
-            let mut prev = e.apply(0.0);
-            for i in 1..=100 {
-                let v = e.apply(i as f32 / 100.0);
-                assert!(
-                    v + EPS >= prev,
-                    "{e:?} not monotonic at i={i}: {v} < {prev}"
-                );
-                prev = v;
+            for (t, expected) in [
+                (-5.0, 0.0),
+                (0.0, 0.0),
+                (0.25, quarter),
+                (0.5, midpoint),
+                (1.0, 1.0),
+                (5.0, 1.0),
+            ] {
+                assert!((curve.apply(t) - expected).abs() < EPS, "{curve:?} at {t}");
+            }
+            for i in 0..100 {
+                let left = curve.apply(i as f32 / 100.0);
+                let right = curve.apply((i + 1) as f32 / 100.0);
+                assert!(left <= right + EPS, "{curve:?} not monotonic at {i}");
             }
         }
+        for t in [0.1, 0.25, 0.4] {
+            assert!((EaseInOut.apply(t) + EaseInOut.apply(1.0 - t) - 1.0).abs() < EPS);
+        }
     }
 
-    // ── Interpolation ───────────────────────────────────────────────────────
-
     #[test]
-    fn lerp_endpoints_and_mid() {
-        assert!((lerp(10.0, 20.0, 0.0) - 10.0).abs() < EPS);
-        assert!((lerp(10.0, 20.0, 1.0) - 20.0).abs() < EPS);
-        assert!((lerp(10.0, 20.0, 0.5) - 15.0).abs() < EPS);
+    fn motion_tokens_parse_curves_and_fall_back_to_canonical_defaults() {
+        for (enter, exit, ms, expected) in [
+            (
+                "decelerate",
+                "accelerate",
+                Some("240"),
+                (EaseOutQuad, EaseInQuad, 240),
+            ),
+            (
+                "invalid",
+                "invalid",
+                Some("-10"),
+                (EaseOutQuad, EaseInQuad, 120),
+            ),
+            ("linear", "standard", None, (Linear, EaseInOut, 120)),
+        ] {
+            let mut tokens = HashMap::from([
+                ("motion.enter.easing".into(), enter.into()),
+                ("motion.exit.easing".into(), exit.into()),
+            ]);
+            if let Some(ms) = ms {
+                tokens.insert("motion.exit.ms".into(), ms.into());
+            }
+            let motion = ZoneMotion::from_token_map(&tokens);
+            assert_eq!((motion.enter, motion.exit, motion.exit_ms), expected);
+        }
     }
 
-    // ── Exponential smoothing factor ────────────────────────────────────────
-
     #[test]
-    fn smooth_factor_endpoints() {
-        assert!((exp_smooth_factor(0.0, 90.0) - 0.0).abs() < EPS);
+    fn interpolation_and_smoothing_keep_endpoints() {
+        for (t, expected) in [(0.0, 10.0), (0.5, 15.0), (1.0, 20.0)] {
+            assert_eq!(lerp(10.0, 20.0, t), expected);
+        }
+        assert_eq!(exp_smooth_factor(0.0, 90.0), 0.0);
         assert!(exp_smooth_factor(10_000.0, 90.0) > 0.99);
-        // dt == tau → 1 - 1/e.
-        let expected = 1.0 - std::f32::consts::E.recip();
-        assert!((exp_smooth_factor(90.0, 90.0) - expected).abs() < 1e-4);
-    }
-
-    #[test]
-    fn smooth_factor_monotonic_in_dt() {
-        let mut prev = exp_smooth_factor(0.0, 90.0);
-        for i in 1..=200 {
-            let v = exp_smooth_factor(i as f32, 90.0);
-            assert!(v + EPS >= prev, "not monotonic at dt={i}");
-            prev = v;
+        assert!((exp_smooth_factor(90.0, 90.0) - (1.0 - std::f32::consts::E.recip())).abs() < 1e-4);
+        for tau in [0.0, -10.0] {
+            assert_eq!(exp_smooth_factor(5.0, tau), 1.0);
+        }
+        for dt in 0..200 {
+            assert!(exp_smooth_factor(dt as f32, 90.0) <= exp_smooth_factor((dt + 1) as f32, 90.0));
         }
     }
 
     #[test]
-    fn smooth_factor_non_positive_tau_snaps() {
-        assert!((exp_smooth_factor(5.0, 0.0) - 1.0).abs() < EPS);
-        assert!((exp_smooth_factor(5.0, -10.0) - 1.0).abs() < EPS);
-    }
+    fn scroll_smoother_rebases_once_then_settles_without_overshoot() {
+        let mut scroll = ScrollSmoother::new(12.0, 34.0, (5.0, -700.0));
+        assert_eq!(scroll.displayed(), (12.0, 34.0));
+        scroll.rebase((5.0, -700.0));
+        assert!(scroll.is_settled(12.0, 34.0));
 
-    // ── ScrollSmoother ──────────────────────────────────────────────────────
+        scroll.rebase((12.0, -730.0));
+        assert_eq!(scroll.displayed(), (19.0, 4.0));
+        scroll.rebase((12.0, -730.0));
+        assert_eq!(scroll.displayed(), (19.0, 4.0));
 
-    #[test]
-    fn scroll_smoother_starts_settled() {
-        let mut s = ScrollSmoother::new(12.0, 34.0, (5.0, -700.0));
-        assert_eq!(s.displayed(), (12.0, 34.0));
-        // Fresh construction has already observed the cumulative origin.
-        s.rebase((5.0, -700.0));
-        assert!(s.is_settled(12.0, 34.0));
-        // Two coalesced corrections are consumed once, without a target snap.
-        s.rebase((5.0 + 3.0 + 4.0, -700.0 - 10.0 - 20.0));
-        assert_eq!(s.displayed(), (19.0, 4.0));
-        s.rebase((12.0, -730.0));
-        assert_eq!(s.displayed(), (19.0, 4.0));
-    }
-
-    #[test]
-    fn scroll_smoother_is_settled_tracks_inflight_state() {
-        // Settled on the construction offset; not settled once the target moves
-        // far away; settles again once the displayed offset converges onto it.
-        // This is the predicate the idle render gate uses to tell a
-        // still-catching-up smoother (keep rendering) from a finished one (idle).
-        let mut s = ScrollSmoother::new(0.0, 0.0, (0.0, 0.0));
-        assert!(s.is_settled(0.0, 0.0));
-
-        // Target jumps 500px away: catch-up in flight, not yet settled.
-        s.advance(0.0, 500.0, 16.6);
+        let (mut previous_x, mut previous_y) = scroll.advance(19.1, 500.0, 16.6);
+        assert_eq!(previous_x, 19.1, "snap to the nearby target immediately");
+        assert!((4.0..=500.0).contains(&previous_y));
         assert!(
-            !s.is_settled(0.0, 500.0),
-            "a mid-flight smoother must not report settled"
+            !scroll.is_settled(19.1, 500.0),
+            "long-axis motion stays active"
         );
-
-        // Drive it to the target; once within snap_epsilon it reports settled.
-        let mut frames = 0;
-        while !s.is_settled(0.0, 500.0) {
-            s.advance(0.0, 500.0, 16.6);
-            frames += 1;
-            assert!(frames < 240, "did not settle within 240 frames");
-        }
-        assert!(s.is_settled(0.0, 500.0));
-    }
-
-    #[test]
-    fn scroll_smoother_converges_to_target() {
-        let mut s = ScrollSmoother::new(0.0, 0.0, (0.0, 0.0));
-        // 16.6ms frames toward a target 500px away — must converge within ~2s.
-        let mut frames = 0;
-        loop {
-            let (_, y) = s.advance(0.0, 500.0, 16.6);
-            frames += 1;
-            if (y - 500.0).abs() < EPS {
+        for _ in 0..239 {
+            let (x, y) = scroll.advance(19.1, 500.0, 16.6);
+            assert!(previous_x <= x && x <= 19.1);
+            assert!(previous_y <= y && y <= 500.0);
+            (previous_x, previous_y) = (x, y);
+            if (x, y) == (19.1, 500.0) {
                 break;
             }
-            assert!(frames < 240, "did not converge within 240 frames");
         }
-        assert!((s.displayed().1 - 500.0).abs() < EPS);
+        assert_eq!(scroll.displayed(), (19.1, 500.0));
+        assert!(scroll.is_settled(19.1, 500.0));
     }
 
     #[test]
-    fn scroll_smoother_monotonic_approach() {
-        let mut s = ScrollSmoother::new(0.0, 0.0, (0.0, 0.0));
-        let mut prev = 0.0;
-        for _ in 0..30 {
-            let (_, y) = s.advance(0.0, 100.0, 16.6);
-            assert!(y + EPS >= prev, "overshoot/regress: {y} < {prev}");
-            assert!(y <= 100.0 + EPS, "overshoot past target: {y}");
-            prev = y;
+    fn scroll_smoothing_depends_on_elapsed_time() {
+        let elapsed = |steps, ms| {
+            let mut scroll = ScrollSmoother::new(0.0, 0.0, (0.0, 0.0));
+            for _ in 0..steps {
+                scroll.advance(0.0, 100.0, ms);
+            }
+            scroll.displayed().1
+        };
+        let coarse = elapsed(1, 100.0);
+        let fine = elapsed(100, 1.0);
+        assert!((coarse - fine).abs() < 1.0, "{coarse} vs {fine}");
+    }
+
+    #[test]
+    fn stream_fade_respects_dwell_and_saturates() {
+        let linear = StreamFadeRamp::new(Linear);
+        for (frame, window, expected) in [
+            (0, 10, 0.0),
+            (5, 10, 0.5),
+            (10, 10, 1.0),
+            (20, 10, 1.0),
+            (0, 0, 1.0),
+        ] {
+            assert_eq!(linear.alpha(frame, window), expected);
         }
-    }
-
-    #[test]
-    fn scroll_smoother_frame_rate_independent() {
-        // One 100ms step vs many small steps summing to 100ms land close.
-        let mut coarse = ScrollSmoother::new(0.0, 0.0, (0.0, 0.0));
-        coarse.advance(0.0, 100.0, 100.0);
-
-        let mut fine = ScrollSmoother::new(0.0, 0.0, (0.0, 0.0));
-        for _ in 0..100 {
-            fine.advance(0.0, 100.0, 1.0);
-        }
-        assert!(
-            (coarse.displayed().1 - fine.displayed().1).abs() < 1.0,
-            "coarse {} vs fine {}",
-            coarse.displayed().1,
-            fine.displayed().1
-        );
-    }
-
-    #[test]
-    fn scroll_smoother_snaps_within_epsilon() {
-        let mut s = ScrollSmoother::new(99.9, 0.0, (0.0, 0.0));
-        let (x, _) = s.advance(100.0, 0.0, 16.6);
-        assert_eq!(x, 100.0, "should snap exactly when within epsilon");
-    }
-
-    // ── StreamFadeRamp ──────────────────────────────────────────────────────
-
-    #[test]
-    fn stream_fade_ramps_zero_to_one() {
-        let ramp = StreamFadeRamp::new(Easing::Linear);
-        assert!((ramp.alpha(0, 10) - 0.0).abs() < EPS);
-        assert!((ramp.alpha(5, 10) - 0.5).abs() < EPS);
-        assert!((ramp.alpha(10, 10) - 1.0).abs() < EPS);
-    }
-
-    #[test]
-    fn stream_fade_eased_is_ahead_of_linear_midway() {
-        // EaseOutQuad (default) reveals faster early than linear.
-        let ramp = StreamFadeRamp::default();
-        assert!(ramp.alpha(5, 10) > 0.5);
-    }
-
-    #[test]
-    fn stream_fade_zero_window_is_full() {
-        let ramp = StreamFadeRamp::default();
-        assert!((ramp.alpha(0, 0) - 1.0).abs() < EPS);
-    }
-
-    #[test]
-    fn stream_fade_saturates_after_window() {
-        let ramp = StreamFadeRamp::new(Easing::Linear);
-        assert!((ramp.alpha(20, 10) - 1.0).abs() < EPS);
+        let eased = StreamFadeRamp::default();
+        assert!(eased.alpha(5, 10) > linear.alpha(5, 10));
+        assert_eq!(eased.alpha(0, 0), 1.0);
     }
 }

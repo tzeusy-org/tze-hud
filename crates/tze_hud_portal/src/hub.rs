@@ -168,7 +168,7 @@ impl Default for PortalLimits {
 }
 
 /// Longest portal id, display name, or coalesce key.
-const MAX_NAME_BYTES: usize = 128;
+pub const MAX_NAME_BYTES: usize = 128;
 
 /// Why a portal call was refused. The MCP layer maps each to the shared
 /// error set.
@@ -402,6 +402,9 @@ pub struct Publish {
 pub struct PublishOutcome {
     pub reattached: bool,
     pub pending_input: usize,
+    /// Output units the viewer had not reached before this publish (the
+    /// native unread badge count, excluding the unit this call appended).
+    pub unread: usize,
 }
 
 /// One input item returned by [`PortalHub::poll_input`].
@@ -425,6 +428,8 @@ pub struct PortalSummary {
     pub id: String,
     pub status: PortalStatus,
     pub pending_input: usize,
+    /// The native unread badge count: output the viewer has not reached.
+    pub unread: usize,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -645,6 +650,7 @@ impl PortalHub {
             self.portals.insert(key.clone(), portal);
         }
         let portal = self.portals.get_mut(key).expect("attached above");
+        let unread = portal.unread_output_count();
         portal.touch(now_us);
         portal.dirty = true;
         if let Some(name) = p.display_name {
@@ -693,6 +699,7 @@ impl PortalHub {
         Ok(PublishOutcome {
             reattached,
             pending_input: portal.inputs.len(),
+            unread,
         })
     }
 
@@ -803,6 +810,7 @@ impl PortalHub {
                 id: key.id.clone(),
                 status: p.status,
                 pending_input: p.inputs.len(),
+                unread: p.unread_output_count(),
             })
             .collect()
     }
@@ -903,18 +911,6 @@ impl PortalHub {
         }
     }
 
-    /// Degrade all live portals when their shared upstream goes away.
-    /// Returns only changed identities; holds cannot keep a disconnected stream live.
-    pub fn degrade_all(&mut self, now_us: u64) -> Vec<PortalKey> {
-        let mut changed = Vec::new();
-        for (key, portal) in &mut self.portals {
-            if portal.degrade(now_us) {
-                changed.push(key.clone());
-            }
-        }
-        changed
-    }
-
     /// The runtime took the portal away (viewer dismiss, lost surface).
     pub fn reclaim(&mut self, key: &PortalKey) {
         if let Some(portal) = self.portals.get_mut(key) {
@@ -927,7 +923,7 @@ impl PortalHub {
     pub fn reclaim_agent(&mut self, agent: &str) -> usize {
         let mut reclaimed = 0;
         for (key, portal) in &mut self.portals {
-            if key.agent == agent && portal.live() {
+            if tze_hud_scene::scope::owner_agent(&key.agent) == agent && portal.live() {
                 *portal = Portal::tombstone();
                 reclaimed += 1;
             }
@@ -957,16 +953,12 @@ impl PortalHub {
         }
     }
 
-    /// Live portals per agent.
+    /// Live portals per agent, across its session scopes.
     pub fn live_counts(&self) -> std::collections::BTreeMap<String, usize> {
         let mut counts = std::collections::BTreeMap::new();
-        for key in self
-            .portals
-            .iter()
-            .filter(|(_, p)| p.live())
-            .map(|(k, _)| k)
-        {
-            *counts.entry(key.agent.clone()).or_insert(0) += 1;
+        for (key, _) in self.portals.iter().filter(|(_, p)| p.live()) {
+            let agent = tze_hud_scene::scope::owner_agent(&key.agent);
+            *counts.entry(agent.to_owned()).or_insert(0) += 1;
         }
         counts
     }
@@ -1173,6 +1165,7 @@ mod tests {
                 id: "main".into(),
                 status: PortalStatus::Active,
                 pending_input: 0,
+                unread: 1,
             }]
         );
         assert!(hub.list("bob").is_empty());
