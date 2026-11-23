@@ -10,7 +10,7 @@ use crate::common;
 
 use std::sync::Arc;
 
-use common::{Frame, Gpu, publish_notification};
+use common::{Frame, Gpu, publish_notification, relative};
 use tze_hud_scene::graph::SceneGraph;
 use tze_hud_scene::types::{
     ContentionPolicy, DisplayEdge, GeometryPolicy, ImageFitMode, LayerAttachment, Node, NodeData,
@@ -21,8 +21,8 @@ use tze_hud_scene::types::{
 const CLEAR: [u8; 4] = [63, 63, 89, 255];
 const TOL: u8 = 12;
 
-/// Lift the ambient-background opacity ceiling so a test can check exact
-/// fill colors; `ambient_background_opacity_is_capped` covers the ceiling.
+/// Lift the ambient opacity ceiling for exact fill colors after the default
+/// cap check in `assert_solid_ambient_pixels`.
 fn uncap_ambient(gpu: &mut Gpu) {
     gpu.compositor.set_token_map(
         [("opacity.ambient.max".to_owned(), "1".to_owned())]
@@ -90,12 +90,7 @@ fn notification_scene() -> SceneGraph {
     register_zone(
         &mut scene,
         "notification-area",
-        GeometryPolicy::Relative {
-            x_pct: 0.75,
-            y_pct: 0.0,
-            width_pct: 0.24,
-            height_pct: 0.30,
-        },
+        relative(0.75, 0.0, 0.24, 0.30),
         RenderingPolicy {
             backdrop: Some(Rgba::new(0.05, 0.05, 0.05, 0.85)),
             text_color: Some(Rgba::WHITE),
@@ -110,53 +105,66 @@ fn notification_scene() -> SceneGraph {
 // Canonical card tones at opacity.notification (0.92) over clear:
 // color.notification.container, caution.container, error.container.
 const NOTIF_LOW: [u8; 4] = [37, 42, 55, 255];
-const NOTIF_NORMAL: [u8; 4] = NOTIF_LOW;
 const NOTIF_URGENT: [u8; 4] = [73, 58, 30, 255];
 const NOTIF_CRITICAL: [u8; 4] = [90, 31, 34, 255];
 
 /// Urgency 0-1 share the neutral card tone; 2 and 3 take the caution and
 /// error containers.
 #[tokio::test]
-async fn notification_urgency_maps_to_backdrop_color() {
+async fn notification_and_alert_pixels_follow_their_content_and_roles() {
     let Some(mut gpu) = Gpu::new(256, 256).await else {
         return;
     };
-    for (urgency, expected) in [
-        (0, NOTIF_LOW),
-        (1, NOTIF_NORMAL),
-        (2, NOTIF_URGENT),
-        (3, NOTIF_CRITICAL),
-    ] {
-        let mut scene = notification_scene();
-        publish_notification(&mut scene, "notification-area", urgency, String::new(), "a");
-        gpu.render(&mut scene)
-            .expect(222, 17, expected, TOL, &format!("urgency {urgency}"));
-    }
-}
-
-/// The icon renders as a texture when its bytes are registered; with no icon, or
-/// an icon whose bytes were never registered, the slot shows only the backdrop.
-#[tokio::test]
-async fn notification_icon_renders_only_when_bytes_registered() {
-    let Some(mut gpu) = Gpu::new(256, 256).await else {
-        return;
-    };
+    assert_alert_pixels(&mut gpu);
+    gpu.compositor.set_token_map(Default::default());
     let (icon_id, icon_bytes) = rgba_image(24, 24, [0, 200, 0, 255]);
     gpu.compositor
         .register_image_bytes(icon_id, Arc::from(icon_bytes.as_slice()), 24, 24);
     let unregistered = ResourceId::of(b"unregistered-icon");
 
-    // Icon centre: zone x 192 + space.l 16 + half the space.xxl (32) icon;
-    // y: centred on the 52 px body-only text block.
-    for (icon, expected, what) in [
-        (icon_id.to_hex(), [0, 200, 0, 255], "registered icon"),
-        (String::new(), NOTIF_LOW, "no icon"),
-        (unregistered.to_hex(), NOTIF_LOW, "unregistered icon"),
+    // Use the registered icon first: the frame evicts unused textures.
+    for (urgency, icon, (x, y), expected, tolerance, what) in [
+        (
+            0,
+            Some(icon_id),
+            (224, 26),
+            [0, 200, 0, 255],
+            20,
+            "registered icon",
+        ),
+        (2, None, (222, 17), NOTIF_URGENT, TOL, "caution"),
+        (3, None, (222, 17), NOTIF_CRITICAL, TOL, "critical"),
+        (1, None, (224, 26), NOTIF_LOW, TOL, "no icon"),
+        (
+            0,
+            Some(unregistered),
+            (224, 26),
+            NOTIF_LOW,
+            20,
+            "unregistered icon",
+        ),
     ] {
         let mut scene = notification_scene();
-        publish_notification(&mut scene, "notification-area", 0, icon, "a");
-        gpu.render(&mut scene).expect(224, 26, expected, 20, what);
+        let icon = icon.map_or_else(String::new, |id| id.to_hex());
+        publish_notification(&mut scene, "notification-area", urgency, icon, "a");
+        gpu.render(&mut scene)
+            .expect(x, y, expected, tolerance, what);
     }
+
+    gpu.compositor
+        .init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+    let mut scene = notification_scene();
+    scene
+        .zone_registry
+        .zones
+        .get_mut("notification-area")
+        .unwrap()
+        .geometry_policy = relative(0.1, 0.0, 0.8, 0.3);
+    publish_notification(&mut scene, "notification-area", 1, String::new(), "a");
+    assert!(
+        gpu.render(&mut scene).has_bright_pixel(42..180, 16..36),
+        "notification body draws glyphs"
+    );
 }
 
 // ─── Alert banner ────────────────────────────────────────────────────────────
@@ -210,69 +218,11 @@ fn alert_scene(gpu: &mut Gpu, theme: &str) -> SceneGraph {
     scene
 }
 
-/// Urgency 0-1 use the neutral container, 2 the caution container and >=3
-/// the error container. Classic retains blue/amber/red strips; modern themes
-/// carry info/caution severity in their marks. Stream text keeps the base fill.
-#[tokio::test]
-async fn alert_banner_urgency_maps_to_severity_color() {
-    let Some(mut gpu) = Gpu::new(256, 256).await else {
-        return;
-    };
-    for theme in &ALERT_THEMES {
-        for (urgency, tone) in [(0, 0), (1, 0), (2, 1), (3, 2), (5, 2)] {
-            let mut scene = alert_scene(&mut gpu, theme.name);
-            publish_notification(&mut scene, "alert-banner", urgency, String::new(), "a");
-            let frame = gpu.render(&mut scene);
-            let label = format!("{} urgency {urgency}", theme.name);
-            frame.expect(128, theme.centers_y[0], theme.tones[tone], 8, &label);
-            frame.expect(
-                4,
-                theme.centers_y[0],
-                if theme.inset {
-                    CLEAR
-                } else {
-                    theme.tones[tone]
-                },
-                8,
-                &format!("{label}: outer margin"),
-            );
-        }
-        let mut scene = alert_scene(&mut gpu, theme.name);
-        // Stream text keeps the explicit policy backdrop, independently of
-        // notification tones. A sentinel colour makes that contract observable.
-        let policy = &mut scene
-            .zone_registry
-            .zones
-            .get_mut("alert-banner")
-            .unwrap()
-            .rendering_policy;
-        policy.backdrop = Some(Rgba::new(0.1, 0.1, 0.16, 0.9));
-        policy.backdrop_opacity = Some(0.9);
-        publish(
-            &mut scene,
-            "alert-banner",
-            ZoneContent::StreamText("alert".into()),
-        );
-        gpu.render(&mut scene).expect(
-            128,
-            theme.centers_y[0],
-            [87, 87, 109, 255],
-            8,
-            &format!("{} stream text policy backdrop", theme.name),
-        );
-    }
-}
-
-/// Severity ordering remains critical/caution/info for all themes; the modern
-/// card inset/gaps and Classic's flush edge are actual painted geometry.
-#[tokio::test]
-async fn alert_banner_stacks_by_severity() {
-    let Some(mut gpu) = Gpu::new(256, 256).await else {
-        return;
-    };
-    for theme in &ALERT_THEMES {
-        let mut scene = alert_scene(&mut gpu, theme.name);
-        for (urgency, agent) in [(1, "info"), (2, "warning"), (3, "critical")] {
+// Severity controls the stack, with modern inset cards and Classic strips.
+fn assert_alert_pixels(gpu: &mut Gpu) {
+    for (theme, [low, critical]) in ALERT_THEMES.iter().zip([[1, 3], [0, 3], [1, 5]]) {
+        let mut scene = alert_scene(gpu, theme.name);
+        for (urgency, agent) in [(low, "info"), (2, "warning"), (critical, "critical")] {
             publish_notification(&mut scene, "alert-banner", urgency, String::new(), agent);
         }
         let frame = gpu.render(&mut scene);
@@ -296,6 +246,29 @@ async fn alert_banner_stacks_by_severity() {
             frame.expect(128, 72, CLEAR, 2, "inter-card gap stays clear");
         }
     }
+    // Stream text uses the zone backdrop instead of a notification role.
+    let theme = &ALERT_THEMES[0];
+    let mut scene = alert_scene(gpu, theme.name);
+    let policy = &mut scene
+        .zone_registry
+        .zones
+        .get_mut("alert-banner")
+        .unwrap()
+        .rendering_policy;
+    policy.backdrop = Some(Rgba::new(0.1, 0.1, 0.16, 0.9));
+    policy.backdrop_opacity = Some(0.9);
+    publish(
+        &mut scene,
+        "alert-banner",
+        ZoneContent::StreamText("alert".into()),
+    );
+    gpu.render(&mut scene).expect(
+        128,
+        theme.centers_y[0],
+        [87, 87, 109, 255],
+        8,
+        "stream text keeps its policy backdrop",
+    );
 }
 
 // ─── Subtitle ────────────────────────────────────────────────────────────────
@@ -343,78 +316,69 @@ async fn subtitle_backdrop_follows_policy() {
     let Some(mut gpu) = Gpu::new(256, 256).await else {
         return;
     };
-    // The center adds color.surface (#0F1216) at opacity.scrim (0.72)
-    // over the whole-zone fill. Outside the content-hugging pill, the
-    // original whole-zone contrast control keeps its exact result.
+    use tze_hud_scene::DegradationLevel::{Nominal, Simplified};
+
+    // Independent samples of the whole-zone fill and the local subtitle pill.
+    let red = Some(Rgba::new(1.0, 0.0, 0.0, 1.0));
     let cases = [
         (
-            "black token default",
+            Nominal,
+            None,
+            true,
             Some(Rgba::BLACK),
             [39, 39, 56, 255],
             [24, 26, 35, 255],
         ),
         (
-            "red token override",
-            Some(Rgba::new(1.0, 0.0, 0.0, 1.0)),
+            Nominal,
+            Some(6.0),
+            true,
+            red,
             [206, 39, 56, 255],
             [116, 26, 35, 255],
         ),
-        ("no whole-zone backdrop", None, CLEAR, [36, 37, 52, 255]),
+        (Nominal, None, true, None, CLEAR, [36, 37, 52, 255]),
+        (
+            Nominal,
+            Some(6.0),
+            false,
+            red,
+            [206, 39, 56, 255],
+            [206, 39, 56, 255],
+        ),
+        (
+            Simplified,
+            Some(6.0),
+            true,
+            red,
+            [255, 0, 0, 255],
+            [15, 18, 22, 255],
+        ),
+        (Simplified, None, true, None, CLEAR, [15, 18, 22, 255]),
+        (Simplified, None, false, None, CLEAR, CLEAR),
     ];
-    for level in [
-        tze_hud_scene::DegradationLevel::Nominal,
-        tze_hud_scene::DegradationLevel::Simplified,
-    ] {
+    for (level, radius, pill, backdrop, outside, inside) in cases {
         gpu.compositor
             .set_degradation_policy(tze_hud_compositor::CompositorDegradationPolicy {
                 level,
                 ..Default::default()
             });
-        for radius in [None, Some(6.0)] {
-            for pill in [true, false] {
-                gpu.compositor
-                    .set_token_map(std::collections::HashMap::from([(
-                        "opacity.subtitle".into(),
-                        if pill { "1" } else { "0" }.into(),
-                    )]));
-                for (what, backdrop, outside, inside) in cases {
-                    let mut policy = subtitle_policy(backdrop);
-                    policy.backdrop_radius = radius;
-                    let mut scene = subtitle_scene(256, policy);
-                    // Simplified's existing flat-alpha policy makes visible fills
-                    // opaque; the pill still sits above the optional zone fill.
-                    let (outside, inside) = if level >= tze_hud_scene::DegradationLevel::Simplified
-                    {
-                        let outside = backdrop.map_or(CLEAR, |c| {
-                            [
-                                (c.r * 255.0) as u8,
-                                (c.g * 255.0) as u8,
-                                (c.b * 255.0) as u8,
-                                255,
-                            ]
-                        });
-                        (outside, [15, 18, 22, 255])
-                    } else {
-                        (outside, inside)
-                    };
-                    let frame = gpu.render(&mut scene);
-                    frame.expect(
-                        28,
-                        SUBTITLE_Y,
-                        outside,
-                        10,
-                        &format!("{what}: whole zone outside pill"),
-                    );
-                    frame.expect(
-                        128,
-                        SUBTITLE_Y,
-                        if pill { inside } else { outside },
-                        10,
-                        &format!("{what}: themed pill={pill}"),
-                    );
-                    frame.expect(128, 170, CLEAR, 10, &format!("{what}: above zone"));
-                }
-            }
+        gpu.compositor
+            .set_token_map(std::collections::HashMap::from([(
+                "opacity.subtitle".into(),
+                if pill { "1" } else { "0" }.into(),
+            )]));
+        let mut policy = subtitle_policy(backdrop);
+        policy.backdrop_radius = radius;
+        let mut scene = subtitle_scene(256, policy);
+        let frame = gpu.render(&mut scene);
+        let label = format!("level={level:?} radius={radius:?} pill={pill} fill={backdrop:?}");
+        for (x, y, expected) in [
+            (28, SUBTITLE_Y, outside),
+            (128, SUBTITLE_Y, inside),
+            (128, 170, CLEAR),
+        ] {
+            frame.expect(x, y, expected, 10, &label);
         }
     }
 }
@@ -434,10 +398,9 @@ async fn subtitle_text_is_drawn() {
         "white subtitle text must put bright pixels in the zone"
     );
 
-    let mut empty = subtitle_scene(512, subtitle_policy(Some(Rgba::BLACK)));
-    empty.zone_registry.active_publishes.clear();
+    scene.clear_zone("subtitle").unwrap();
     assert!(
-        !gpu.render(&mut empty).has_bright_pixel(51..461, 416..464),
+        !gpu.render(&mut scene).has_bright_pixel(51..461, 416..464),
         "no publication, no bright pixels"
     );
 }
@@ -447,81 +410,44 @@ async fn subtitle_text_is_drawn() {
 const AMBIENT_BLUE: [u8; 4] = [89, 89, 148, 255];
 const PLACEHOLDER: [u8; 4] = [149, 149, 149, 255];
 
-/// A solid colour fills the display, and nothing published leaves the clear colour.
-#[tokio::test]
-async fn ambient_background_fills_display_or_stays_clear() {
-    let Some(mut gpu) = Gpu::new(64, 64).await else {
-        return;
-    };
-    let mut scene = default_scene(64, 64);
-    publish(&mut scene, "ambient-background", solid(0.1, 0.1, 0.3));
-    let frame = gpu.render(&mut scene);
-    for (x, y) in [(0, 0), (63, 0), (0, 63), (63, 63), (32, 32)] {
-        frame.expect(x, y, AMBIENT_BLUE, 8, "solid fill");
-    }
+const CORNERS: [(u32, u32); 4] = [(0, 0), (255, 0), (0, 255), (255, 255)];
 
-    let frame = gpu.render(&mut default_scene(64, 64));
-    frame.expect(32, 32, CLEAR, 8, "no publication");
-}
-
-/// Latest wins: only the last publication is drawn, however many came before it.
 #[tokio::test]
-async fn ambient_background_shows_only_latest_publication() {
-    let Some(mut gpu) = Gpu::new(64, 64).await else {
-        return;
-    };
-    uncap_ambient(&mut gpu);
-    type Colors = &'static [(f32, f32, f32)];
-    let cases: [(&str, Colors, [u8; 4]); 2] = [
-        (
-            "red then blue",
-            &[(1.0, 0.0, 0.0), (0.0, 0.0, 1.0)],
-            [0, 0, 255, 255],
-        ),
-        (
-            "ten colours",
-            &[
-                (1.0, 0.0, 0.0),
-                (0.0, 0.0, 1.0),
-                (1.0, 1.0, 0.0),
-                (1.0, 0.0, 1.0),
-                (0.0, 1.0, 1.0),
-                (0.5, 0.5, 0.5),
-                (1.0, 0.5, 0.0),
-                (0.5, 0.0, 0.5),
-                (0.0, 0.5, 0.0),
-                (0.0, 1.0, 0.0),
-            ],
-            [0, 255, 0, 255],
-        ),
-    ];
-    for (what, colors, expected) in cases {
-        let mut scene = default_scene(64, 64);
-        for &(r, g, b) in colors {
-            publish(&mut scene, "ambient-background", solid(r, g, b));
-        }
-        gpu.render(&mut scene).expect(32, 32, expected, 8, what);
-    }
-}
-
-/// Layer order: a content-layer zone occludes the background; the background
-/// still shows outside it.
-#[tokio::test]
-async fn background_layer_renders_below_content_zone() {
+async fn ambient_background_composites_latest_solid_or_image() {
     let Some(mut gpu) = Gpu::new(256, 256).await else {
         return;
     };
-    uncap_ambient(&mut gpu);
+    assert_solid_ambient_pixels(&mut gpu);
+    assert_ambient_image_pixels(&mut gpu);
+}
+
+fn assert_solid_ambient_pixels(gpu: &mut Gpu) {
     let mut scene = default_scene(256, 256);
+    gpu.render(&mut scene)
+        .expect(128, 128, CLEAR, 8, "no publication");
+    publish(&mut scene, "ambient-background", solid(0.1, 0.1, 0.3));
+    let frame = gpu.render(&mut scene);
+    for (x, y) in CORNERS.into_iter().chain([(128, 128)]) {
+        frame.expect(x, y, AMBIENT_BLUE, 8, "solid fill");
+    }
+    publish(&mut scene, "ambient-background", solid(0.0, 0.0, 1.0));
+    let capped = gpu.render(&mut scene).at(128, 128);
+    assert!(
+        capped[0] > 8 && capped[1] > 8 && capped[2] > 200,
+        "opacity cap lets base through: {capped:?}"
+    );
+
+    uncap_ambient(gpu);
+    for (r, g, b) in [(1.0, 0.0, 0.0), (0.0, 0.0, 1.0), (0.0, 1.0, 0.0)] {
+        publish(&mut scene, "ambient-background", solid(r, g, b));
+    }
+    gpu.render(&mut scene)
+        .expect(128, 128, [0, 255, 0, 255], 8, "latest solid wins");
+
     register_zone(
         &mut scene,
         "centre-content",
-        GeometryPolicy::Relative {
-            x_pct: 0.25,
-            y_pct: 0.25,
-            width_pct: 0.5,
-            height_pct: 0.5,
-        },
+        relative(0.25, 0.25, 0.5, 0.5),
         RenderingPolicy::default(),
         ContentionPolicy::Replace,
         LayerAttachment::Content,
@@ -529,256 +455,102 @@ async fn background_layer_renders_below_content_zone() {
     publish(&mut scene, "ambient-background", solid(0.0, 0.0, 0.5));
     publish(&mut scene, "centre-content", solid(1.0, 0.0, 0.0));
     let frame = gpu.render(&mut scene);
-    for (x, y) in [(0, 0), (255, 0), (0, 255), (255, 255)] {
-        frame.expect(x, y, [0, 0, 188, 255], 8, "background corner");
+    for (x, y) in CORNERS {
+        frame.expect(x, y, [0, 0, 188, 255], 8, "uncovered background");
     }
     frame.expect(128, 128, [255, 0, 0, 255], 8, "content over background");
 }
 
-/// The ambient fill never reaches full opacity (default `opacity.ambient.max`
-/// 0.9): the topmost overlay must not hide the whole desktop.
-#[tokio::test]
-async fn ambient_background_opacity_is_capped() {
-    let Some(mut gpu) = Gpu::new(64, 64).await else {
-        return;
-    };
-    let mut scene = default_scene(64, 64);
-    publish(&mut scene, "ambient-background", solid(0.0, 0.0, 1.0));
-    let px = gpu.render(&mut scene).at(32, 32);
-    assert!(
-        px[0] > 8 && px[1] > 8 && px[2] > 200,
-        "an opaque blue fill must let the clear color show through, got {px:?}"
-    );
-}
-
-/// A static image draws its texture (any aspect ratio) once bytes are registered,
-/// and the warm-grey placeholder until then.
-#[tokio::test]
-async fn ambient_static_image_draws_texture_or_placeholder() {
-    let require_gpu = std::env::var("TZE_HUD_REQUIRE_GPU").is_ok_and(|v| v.trim() == "1");
-    let Some(mut gpu) = Gpu::new(256, 256).await else {
-        assert!(
-            !require_gpu,
-            "required ambient-image GPU proof cannot skip or lack an adapter"
-        );
-        return;
-    };
-    uncap_ambient(&mut gpu);
-    // Textures are evicted once unreferenced, so register right before each frame.
-    // Retain the old centre check; the controls below test full-zone coverage
-    // rather than assuming a tile-style non-square fitting policy.
-    let cases = [
-        (
-            "square",
-            Some((8, 8, [255, 0, 0, 255])),
-            [255, 0, 0, 255],
-            true,
-        ),
-        (
-            "non-square",
-            Some((16, 8, [0, 0, 255, 255])),
-            [0, 0, 255, 255],
-            false,
-        ),
-        ("unregistered", None, PLACEHOLDER, true),
-    ];
-    for (what, image, expected, full_display) in cases {
-        let id = match image {
-            Some((w, h, px)) => {
-                let (id, bytes) = rgba_image(w, h, px);
-                println!(
-                    "ambient image input {what}: {w}x{h}, RGBA bytes={}, resource={}",
-                    bytes.len(),
-                    id.to_hex()
-                );
-                gpu.compositor
-                    .register_image_bytes(id, Arc::from(bytes.as_slice()), w, h);
-                id
-            }
-            None => ResourceId::of(b"never registered"),
-        };
-        let mut scene = default_scene(256, 256);
-        publish(
-            &mut scene,
-            "ambient-background",
-            ZoneContent::StaticImage(id),
-        );
-        let frame = gpu.render(&mut scene);
-        let points: &[(u32, u32)] = if full_display {
-            &[(0, 0), (255, 255), (128, 128)]
-        } else {
-            &[(128, 128)]
-        };
-        for &(x, y) in points {
-            frame.expect(x, y, expected, 20, what);
-        }
-        if what == "non-square" {
-            let definition = scene
-                .zone_registry
-                .get_by_name("ambient-background")
-                .unwrap();
-            println!(
-                "default ambient geometry={:?}, policy={:?}, contention={:?}, layer={:?}",
-                definition.geometry_policy,
-                definition.rendering_policy,
-                definition.contention_policy,
-                definition.layer_attachment
-            );
-            // Source suggests full-zone/full-UV coverage; these literal pixels
-            // decide whether the original opaque 16x8 symptom is reproducible.
-            // Sample the top edge outside the default drag grip at x=116..140.
-            let repeated = gpu.render(&mut scene);
-            for (x, y) in [
-                (0, 0),
-                (255, 0),
-                (0, 255),
-                (255, 255),
-                (64, 0),
-                (128, 255),
-                (0, 128),
-                (255, 128),
-                (128, 128),
-            ] {
-                println!(
-                    "opaque16x8 ({x},{y}): actual={:?}, expected={expected:?}, repeated={:?}",
-                    frame.at(x, y),
-                    repeated.at(x, y)
-                );
-                frame.expect(x, y, expected, 20, "opaque 16x8 full-zone sample");
-                assert_eq!(frame.at(x, y), repeated.at(x, y), "referenced repeat");
-            }
-        }
-    }
-
-    // Directional source quadrants pin UV orientation and scaling without a
-    // private draw-command oracle or sampling a filtered colour boundary.
-    let mut directional: Vec<u8> = Vec::with_capacity(16 * 8 * 4);
-    for y in 0..8 {
-        for x in 0..16 {
-            directional.extend_from_slice(&match (x < 8, y < 4) {
-                (true, true) => [255, 0, 0, 255],
-                (false, true) => [0, 255, 0, 255],
-                (true, false) => [0, 0, 255, 255],
-                (false, false) => [255, 255, 0, 255],
-            });
-        }
-    }
-    let directional_id = ResourceId::of(&directional);
-    println!(
-        "directional16x8 RGBA bytes={}, resource={}",
-        directional.len(),
-        directional_id.to_hex()
-    );
-    gpu.compositor
-        .register_image_bytes(directional_id, Arc::from(directional.as_slice()), 16, 8);
+fn assert_ambient_image_pixels(gpu: &mut Gpu) {
     let mut scene = default_scene(256, 256);
-    publish(
-        &mut scene,
-        "ambient-background",
-        ZoneContent::StaticImage(directional_id),
-    );
-    let directional_frame = gpu.render(&mut scene);
-    let directional_repeat = gpu.render(&mut scene);
-    for (x, y, expected) in [
-        (32, 32, [255, 0, 0, 255]),
-        (224, 32, [0, 255, 0, 255]),
-        (32, 224, [0, 0, 255, 255]),
-        (224, 224, [255, 255, 0, 255]),
-    ] {
-        println!(
-            "directional16x8 ({x},{y}): actual={:?}, expected={expected:?}",
-            directional_frame.at(x, y)
-        );
-        directional_frame.expect(x, y, expected, 20, "directional quadrant");
+    let extent = CORNERS
+        .into_iter()
+        .chain([(64, 0), (128, 255), (0, 128), (255, 128), (128, 128)]);
+    let red = [255, 0, 0, 255];
+    let green = [0, 255, 0, 255];
+    let blue = [0, 0, 255, 255];
+    let yellow = [255, 255, 0, 255];
+
+    let register_image = |gpu: &mut Gpu, w, h, bytes: &[u8]| {
+        let id = ResourceId::of(bytes);
+        gpu.compositor
+            .register_image_bytes(id, Arc::from(bytes), w, h);
+        id
+    };
+    let ambient = |scene: &mut SceneGraph, id| {
+        publish(scene, "ambient-background", ZoneContent::StaticImage(id))
+    };
+
+    let opaque = blue.repeat(16 * 8);
+    // A single non-square texture pins the full extent and UV orientation.
+    let directional: Vec<u8> = (0..8)
+        .flat_map(|y| {
+            (0..16).flat_map(move |x| match (x < 8, y < 4) {
+                (true, true) => red,
+                (false, true) => green,
+                (true, false) => blue,
+                (false, false) => yellow,
+            })
+        })
+        .collect();
+    ambient(&mut scene, register_image(gpu, 16, 8, &directional));
+    let frame = gpu.render(&mut scene);
+    let retained = gpu.render(&mut scene);
+    for (x, y) in CORNERS
+        .into_iter()
+        .chain([(32, 32), (224, 32), (32, 224), (224, 224)])
+    {
+        let expected = match (x < 128, y < 128) {
+            (true, true) => red,
+            (false, true) => green,
+            (true, false) => blue,
+            (false, false) => yellow,
+        };
+        frame.expect(x, y, expected, 20, "wide image quadrant and display edge");
         assert_eq!(
-            directional_frame.at(x, y),
-            directional_repeat.at(x, y),
-            "directional referenced repeat"
+            retained.at(x, y),
+            frame.at(x, y),
+            "retained directional texture"
         );
     }
 
-    // Zero-alpha source corners show the compositor clear colour, not a missing
-    // resource placeholder. The opaque source centre remains independently green.
-    let mut alpha: Vec<u8> = Vec::with_capacity(16 * 8 * 4);
-    for y in 0..8 {
-        for x in 0..16 {
-            alpha.extend_from_slice(&if (4..12).contains(&x) && (2..6).contains(&y) {
-                [0, 255, 0, 255]
-            } else {
-                [0, 0, 0, 0]
-            });
-        }
+    let alpha: Vec<u8> = (0..8)
+        .flat_map(|y| {
+            (0..16).flat_map(move |x| {
+                if (4..12).contains(&x) && (2..6).contains(&y) {
+                    green
+                } else {
+                    [0; 4]
+                }
+            })
+        })
+        .collect();
+    ambient(&mut scene, register_image(gpu, 16, 8, &alpha));
+    let frame = gpu.render(&mut scene);
+    for (x, y) in CORNERS {
+        frame.expect(x, y, CLEAR, 20, "transparent source");
+        assert_ne!(frame.at(x, y), PLACEHOLDER);
     }
-    let alpha_id = ResourceId::of(&alpha);
-    println!(
-        "alpha16x8 RGBA bytes={}, resource={}",
-        alpha.len(),
-        alpha_id.to_hex()
-    );
-    gpu.compositor
-        .register_image_bytes(alpha_id, Arc::from(alpha.as_slice()), 16, 8);
-    publish(
-        &mut scene,
-        "ambient-background",
-        ZoneContent::StaticImage(alpha_id),
-    );
-    let alpha_frame = gpu.render(&mut scene);
-    for (x, y) in [(0, 0), (255, 0), (0, 255), (255, 255)] {
-        println!(
-            "alpha16x8 ({x},{y}): actual={:?}, clear={CLEAR:?}, placeholder={PLACEHOLDER:?}",
-            alpha_frame.at(x, y)
-        );
-        alpha_frame.expect(x, y, CLEAR, 20, "transparent source corner");
-        assert_ne!(alpha_frame.at(x, y), PLACEHOLDER);
-    }
-    alpha_frame.expect(
-        128,
-        128,
-        [0, 255, 0, 255],
-        20,
-        "opaque alpha-control centre",
-    );
+    frame.expect(128, 128, green, 20, "opaque source centre");
 
-    // Default Replace transitions keep resource identity: missing -> registered
-    // -> missing -> registered cannot retain a previous texture or placeholder.
-    let missing = ResourceId::of(b"replace-never-registered");
-    let (blue_id, blue) = rgba_image(16, 8, [0, 0, 255, 255]);
-    for (what, registered, expected) in [
-        ("replace missing", false, PLACEHOLDER),
-        ("replace registered", true, [0, 0, 255, 255]),
-        ("replace missing again", false, PLACEHOLDER),
-        ("replace registered again", true, [0, 0, 255, 255]),
+    // Replacement leaves no stale texture or placeholder, including after
+    // the compositor evicts the resource from an unreferenced frame.
+    let missing = ResourceId::of(b"unregistered ambient image");
+    for (registered, expected) in [
+        (false, PLACEHOLDER),
+        (true, blue),
+        (false, PLACEHOLDER),
+        (true, blue),
     ] {
         let id = if registered {
-            // The previous missing frame legitimately evicts unreferenced bytes.
-            gpu.compositor
-                .register_image_bytes(blue_id, Arc::from(blue.as_slice()), 16, 8);
-            blue_id
+            register_image(gpu, 16, 8, &opaque)
         } else {
             missing
         };
-        publish(
-            &mut scene,
-            "ambient-background",
-            ZoneContent::StaticImage(id),
-        );
+        ambient(&mut scene, id);
         let frame = gpu.render(&mut scene);
-        for (x, y) in [
-            (0, 0),
-            (255, 0),
-            (0, 255),
-            (255, 255),
-            (64, 0),
-            (128, 255),
-            (0, 128),
-            (255, 128),
-            (128, 128),
-        ] {
-            println!(
-                "{what} ({x},{y}): actual={:?}, expected={expected:?}",
-                frame.at(x, y)
-            );
-            frame.expect(x, y, expected, 20, what);
+        for (x, y) in extent.clone() {
+            frame.expect(x, y, expected, 20, "ambient replacement");
         }
     }
 }
@@ -793,12 +565,7 @@ fn rounded_scene(radius: Option<f32>, backdrop: bool, layer: LayerAttachment) ->
     register_zone(
         &mut scene,
         "rounded",
-        GeometryPolicy::Relative {
-            x_pct: 0.25,
-            y_pct: 0.40,
-            width_pct: 0.50,
-            height_pct: 0.20,
-        },
+        relative(0.25, 0.40, 0.50, 0.20),
         RenderingPolicy {
             backdrop: backdrop.then(|| Rgba::new(0.0, 0.5, 0.0, 1.0)),
             backdrop_radius: radius,
@@ -818,7 +585,7 @@ fn rounded_scene(radius: Option<f32>, backdrop: bool, layer: LayerAttachment) ->
 /// backdrop_radius rounds the zone backdrop's corners (flat without it, on any
 /// layer), and does nothing when the policy has no backdrop.
 #[tokio::test]
-async fn zone_backdrop_radius_rounds_corners() {
+async fn zones_and_tiles_round_their_backdrop_corners() {
     let Some(mut gpu) = Gpu::new(256, 256).await else {
         return;
     };
@@ -857,40 +624,43 @@ async fn zone_backdrop_radius_rounds_corners() {
         frame.expect(128, 128, interior, TOL, &format!("{what}: interior"));
         frame.expect(66, 104, corner, TOL, &format!("{what}: corner"));
     }
-}
 
-/// A tile's solid-colour root with a radius rounds its corners the same way.
-#[tokio::test]
-async fn tile_solid_color_radius_rounds_corners() {
-    let Some(mut gpu) = Gpu::new(256, 256).await else {
-        return;
-    };
-    let mut scene = SceneGraph::new(256.0, 256.0);
-    let tab = scene.create_tab("Main", 0).unwrap();
-    let lease = scene.grant_lease("test-agent", 300_000);
-    let tile = scene
-        .create_tile(
-            tab,
-            "test-agent",
-            lease,
-            Rect::new(64.0, 102.0, 128.0, 51.0),
-            10,
-        )
-        .unwrap();
-    let root = |radius| Node {
-        layout: Default::default(),
-        id: SceneId::new(),
-        children: vec![],
-        data: NodeData::SolidColor(SolidColorNode {
-            color: Rgba::new(0.0, 0.5, 0.0, 1.0),
-            bounds: Rect::new(0.0, 0.0, 128.0, 51.0),
-            radius,
-        }),
-    };
-    scene.set_tile_root(tile, root(Some(16.0))).unwrap();
-    let frame = gpu.render(&mut scene);
+    let tile = NodeData::SolidColor(SolidColorNode {
+        color: Rgba::new(0.0, 0.5, 0.0, 1.0),
+        bounds: Rect::new(0.0, 0.0, 128.0, 51.0),
+        radius: Some(16.0),
+    });
+    let frame = gpu.render(&mut tile_scene(
+        Rect::new(64.0, 102.0, 128.0, 51.0),
+        tile,
+        None,
+    ));
     frame.expect(128, 128, GREEN, TOL, "tile interior");
     frame.expect(64, 102, CLEAR, TOL, "rounded tile corner");
+}
+
+fn tile_scene(bounds: Rect, content: NodeData, image: Option<ResourceId>) -> SceneGraph {
+    let mut scene = SceneGraph::new(256.0, 256.0);
+    if let Some(image) = image {
+        scene.register_resource(image);
+    }
+    let tab = scene.create_tab("Main", 0).unwrap();
+    let lease = scene.grant_lease("test-agent", 60_000);
+    let tile = scene
+        .create_tile(tab, "test-agent", lease, bounds, 1)
+        .unwrap();
+    scene
+        .set_tile_root(
+            tile,
+            Node {
+                layout: Default::default(),
+                id: SceneId::new(),
+                children: vec![],
+                data: content,
+            },
+        )
+        .unwrap();
+    scene
 }
 
 /// Each image fit mode places a solid-colour image in a 256x256 tile:
@@ -905,73 +675,49 @@ async fn tile_static_image_fit_modes() {
     let blue = [0, 0, 255, 255];
     let magenta = [255, 0, 255, 255];
     let green = [0, 255, 0, 255];
-    // Tile background (dark) is anything with a low blue/red channel; compare to CLEAR.
     let cases = [
-        ("fill", Fill, (8, 8), green, (128, 128), green),
-        ("contain centre", Contain, (16, 8), blue, (128, 128), blue),
+        (Fill, (8, 8), green, &[(128, 128, green)][..]),
         (
-            "contain letterbox",
             Contain,
             (16, 8),
             blue,
-            (128, 30),
-            CLEAR,
+            &[(128, 128, blue), (128, 30, CLEAR)][..],
         ),
-        ("cover centre", Cover, (8, 16), magenta, (128, 128), magenta),
-        ("cover corner", Cover, (8, 16), magenta, (2, 2), magenta),
         (
-            "scale-down native",
+            Cover,
+            (8, 16),
+            magenta,
+            &[(128, 128, magenta), (2, 2, magenta)][..],
+        ),
+        (
             ScaleDown,
             (4, 4),
             yellow,
-            (128, 128),
-            yellow,
-        ),
-        (
-            "scale-down surround",
-            ScaleDown,
-            (4, 4),
-            yellow,
-            (0, 0),
-            CLEAR,
+            &[(128, 128, yellow), (0, 0, CLEAR)][..],
         ),
     ];
-    for (what, fit_mode, (w, h), px, (x, y), expected) in cases {
+    for (fit_mode, (w, h), px, points) in cases {
         let (id, bytes) = rgba_image(w, h, px);
+        let bounds = Rect::new(0.0, 0.0, 256.0, 256.0);
+        let image = NodeData::StaticImage(StaticImageNode {
+            resource_id: id,
+            width: w,
+            height: h,
+            decoded_bytes: u64::from(w) * u64::from(h) * 4,
+            fit_mode,
+            bounds,
+        });
+        let mut scene = tile_scene(bounds, image, Some(id));
+        if fit_mode == Fill {
+            let placeholder = gpu.render(&mut scene);
+            placeholder.expect(2, 2, [196, 188, 179, 255], TOL, "placeholder frame");
+            placeholder.expect(128, 128, [225, 218, 211, 255], TOL, "placeholder inset");
+        }
         gpu.compositor
             .register_image_bytes(id, Arc::from(bytes.as_slice()), w, h);
-        let mut scene = SceneGraph::new(256.0, 256.0);
-        scene.register_resource(id);
-        let tab = scene.create_tab("test", 0).unwrap();
-        let lease = scene.grant_lease("test-agent", 60_000);
-        let tile = scene
-            .create_tile(
-                tab,
-                "test-agent",
-                lease,
-                Rect::new(0.0, 0.0, 256.0, 256.0),
-                1,
-            )
-            .unwrap();
-        scene
-            .set_tile_root(
-                tile,
-                Node {
-                    layout: Default::default(),
-                    id: SceneId::new(),
-                    children: vec![],
-                    data: NodeData::StaticImage(StaticImageNode {
-                        resource_id: id,
-                        width: w,
-                        height: h,
-                        decoded_bytes: u64::from(w) * u64::from(h) * 4,
-                        fit_mode,
-                        bounds: Rect::new(0.0, 0.0, 256.0, 256.0),
-                    }),
-                },
-            )
-            .unwrap();
         let frame: Frame = gpu.render(&mut scene);
-        frame.expect(x, y, expected, 40, what);
+        for &(x, y, expected) in points {
+            frame.expect(x, y, expected, 40, &format!("{fit_mode:?}"));
+        }
     }
 }

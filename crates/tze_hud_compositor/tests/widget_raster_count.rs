@@ -8,33 +8,18 @@
 //!
 //! Set `TZE_HUD_SKIP_GPU_TESTS=1` to skip; run with `HEADLESS_FORCE_SOFTWARE=1`.
 
+use crate::common::{
+    Gpu, pixel_at, publish_params, register_bundle, register_instance, relative, tokens,
+};
 use std::collections::HashMap;
 
-use tze_hud_compositor::{Compositor, CompositorError, surface::HeadlessSurface};
+use tze_hud_compositor::Compositor;
 use tze_hud_scene::graph::SceneGraph;
-use tze_hud_scene::types::{GeometryPolicy, SceneId, WidgetInstance, WidgetParameterValue};
-use tze_hud_telemetry::FrameTelemetry;
-use tze_hud_widget::loader::{BundleScanResult, load_bundle_from_files};
+use tze_hud_scene::types::{
+    GeometryPolicy, SceneId, WidgetInstance, WidgetParameterValue as Value,
+};
+use tze_hud_widget::loader::BundleScanResult;
 
-macro_rules! bundle {
-    ($name:literal, [$($file:literal),*]) => {
-        load_bundle_from_files(
-            $name,
-            &[
-                ("widget.toml", include_bytes!(concat!("../../../assets/widget_bundles/", $name, "/widget.toml")) as &[u8]),
-                $(($file, include_bytes!(concat!("../../../assets/widget_bundles/", $name, "/", $file)) as &[u8])),*
-            ],
-            &tokens(),
-        )
-    };
-}
-
-/// The canonical design tokens the built-in bundles resolve against.
-fn tokens() -> HashMap<String, String> {
-    tze_hud_config::tokens::resolve_tokens(&Default::default(), &Default::default())
-}
-
-/// `#RRGGBB` token value as bytes.
 fn token_rgb(key: &str) -> [u8; 3] {
     let value = &tokens()[key];
     let hex = value.strip_prefix('#').expect("hex color token");
@@ -64,16 +49,36 @@ fn configured_instance(
     tze_hud_config::widgets::build_widget_instance(&raw, tab, &types).unwrap()
 }
 
-fn render(c: &mut Compositor, scene: &mut SceneGraph, s: &mut HeadlessSurface) -> FrameTelemetry {
-    c.prime_markdown_cache(scene);
-    c.render_frame_headless(scene, s)
+fn raster_count(c: &Compositor, instance: &str) -> u64 {
+    c.widget_renderer().unwrap().raster_count(instance)
 }
 
-fn publish(scene: &mut SceneGraph, instance: &str, param: &str, v: f32) {
-    let params = HashMap::from([(param.to_string(), WidgetParameterValue::F32(v))]);
-    scene
-        .publish_to_widget(instance, params, "agent-a", None, 0, None)
-        .unwrap();
+#[track_caller]
+fn assert_color(
+    actual: [u8; 4],
+    expected: [u8; 3],
+    tolerance: u8,
+    context: impl std::fmt::Display,
+) {
+    assert!(
+        actual
+            .iter()
+            .zip(expected)
+            .all(|(actual, expected)| actual.abs_diff(expected) <= tolerance),
+        "{context}: {actual:?} vs {expected:?}"
+    );
+}
+
+fn publish(scene: &mut SceneGraph, instance: &str, param: &'static str, value: f32) {
+    publish_params(scene, instance, "agent-a", 0, [(param, Value::F32(value))]);
+}
+
+fn string(value: impl Into<String>) -> Value {
+    Value::String(value.into())
+}
+
+fn enumeration(value: &str) -> Value {
+    Value::Enum(value.into())
 }
 
 fn widget_region(
@@ -85,10 +90,7 @@ fn widget_region(
     let (x, y, width, height) = local;
     (y..y + height)
         .flat_map(|y| {
-            (x..x + width).map(move |x| {
-                let offset = (((origin.1 + y) * canvas_width + origin.0 + x) * 4) as usize;
-                pixels[offset..offset + 4].try_into().unwrap()
-            })
+            (x..x + width).map(move |x| pixel_at(pixels, canvas_width, origin.0 + x, origin.1 + y))
         })
         .collect()
 }
@@ -132,35 +134,43 @@ fn expected_badge_pixel(layers: &[([u8; 3], f64)], background: [u8; 4]) -> [u8; 
     expected
 }
 
+fn gauge_scene(compositor: &mut Compositor) -> (SceneGraph, SceneId, String) {
+    let mut scene = SceneGraph::new(512.0, 256.0);
+    let tab = scene.create_tab("Main", 0).unwrap();
+    let name = register_bundle(
+        compositor,
+        &mut scene,
+        bundle!("gauge", ["background.svg", "fill.svg"]),
+    );
+    (scene, tab, name)
+}
+
+fn widget_ledger(bytes: u64) -> tze_hud_resource::ResidentLedger {
+    use tze_hud_resource::{ResidentLedger, ResidentLedgerLimits};
+    ResidentLedger::new(ResidentLedgerLimits {
+        aggregate_bytes: 2 * bytes,
+        widget_source_bytes: bytes,
+        widget_raster_bytes: bytes,
+        resource_bytes: 0,
+        font_bytes: 0,
+    })
+}
+
+const FULL_FRAME: GeometryPolicy = relative(0.0, 0.0, 1.0, 1.0);
+
+#[cfg(feature = "dev-mode")]
+#[track_caller]
+fn assert_widget_work(c: &mut Compositor, raster: u64, upload: u64) {
+    let work = c.take_work_counts().expect("completed widget frame");
+    assert_eq!((work.layout, work.raster, work.upload), (0, raster, upload));
+    assert!(c.take_work_counts().is_none(), "single-frame drain");
+}
+
 #[tokio::test]
 async fn widget_param_update_rasterizes_only_that_instance() {
-    let require_gpu = std::env::var("TZE_HUD_REQUIRE_GPU").is_ok_and(|v| v.trim() == "1");
-    if std::env::var("TZE_HUD_SKIP_GPU_TESTS").is_ok_and(|v| v.trim() == "1") {
-        assert!(
-            !require_gpu,
-            "TZE_HUD_REQUIRE_GPU=1 forbids skipping widget raster assertions"
-        );
-        eprintln!("SKIPPED: widget_raster_count TZE_HUD_SKIP_GPU_TESTS=1");
+    let Some(mut gpu) = Gpu::with_widgets(512, 256).await else {
         return;
-    }
-    let compositor_init = {
-        let _guard = crate::common::lock_gpu_init().await;
-        Compositor::new_headless(512, 256).await
     };
-    let mut compositor = match compositor_init {
-        Ok(c) => c,
-        Err(CompositorError::NoAdapter) => {
-            assert!(
-                !require_gpu,
-                "TZE_HUD_REQUIRE_GPU=1 but no adapter for widget raster assertions"
-            );
-            eprintln!("SKIPPED: widget_raster_count no GPU adapter");
-            return;
-        }
-        Err(e) => panic!("unexpected compositor error: {e}"),
-    };
-    let mut surface = HeadlessSurface::new(&compositor.device, 512, 256);
-    compositor.init_widget_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
 
     let mut scene = SceneGraph::new(512.0, 256.0);
     let tab = scene.create_tab("Main", 0).unwrap();
@@ -174,698 +184,340 @@ async fn widget_param_update_rasterizes_only_that_instance() {
             "main-progress",
         ),
     ] {
-        let BundleScanResult::Ok(b) = bundle else {
-            panic!("built-in bundle for {instance} failed to load");
-        };
-        let type_name = b.definition.id.clone();
-        for (file, bytes) in b.svg_contents {
-            compositor
-                .widget_renderer_mut()
-                .unwrap()
-                .register_svg(&type_name, &file, bytes);
-        }
-        scene.widget_registry.register_definition(b.definition);
-        scene.widget_registry.register_instance(WidgetInstance {
-            id: SceneId::new(),
-            widget_type_name: type_name,
-            tab_id: tab,
-            geometry_override: None,
-            contention_override: None,
-            instance_name: instance.to_string(),
-            current_params: HashMap::new(),
-            auto_clear_ms: None,
-        });
+        let name = register_bundle(&mut gpu.compositor, &mut scene, bundle);
+        register_instance(&mut scene, tab, &name, instance, None, false);
     }
 
-    // Both widgets get their first raster.
+    let counts = |c: &Compositor| {
+        (
+            raster_count(c, "main-gauge"),
+            raster_count(c, "main-progress"),
+        )
+    };
     publish(&mut scene, "main-gauge", "level", 0.25);
     publish(&mut scene, "main-progress", "progress", 0.25);
-    let first = render(&mut compositor, &mut scene, &mut surface);
-    let count = |c: &Compositor, n: &str| c.widget_renderer().unwrap().raster_count(n);
-    assert_eq!(
-        (
-            count(&compositor, "main-gauge"),
-            count(&compositor, "main-progress")
-        ),
-        (1, 1)
-    );
-    assert_eq!(first.widget_rasterized.len(), 2);
-    #[cfg(feature = "dev-mode")]
-    {
-        let work = compositor.take_work_counts().expect("first widget frame");
-        assert_eq!((work.layout, work.raster, work.upload), (0, 2, 2));
-    }
-
-    // Publish to the gauge only: gauge +1, progress +0.
-    publish(&mut scene, "main-gauge", "level", 0.75);
-    let update = render(&mut compositor, &mut scene, &mut surface);
-    assert_eq!(count(&compositor, "main-gauge"), 2);
-    assert_eq!(count(&compositor, "main-progress"), 1);
-    assert_eq!(update.widget_rasterized, ["main-gauge"]);
-    #[cfg(feature = "dev-mode")]
-    {
-        let work = compositor.take_work_counts().expect("changed widget frame");
-        assert_eq!((work.layout, work.raster, work.upload), (0, 1, 1));
-        assert!(
-            compositor.take_work_counts().is_none(),
-            "single-frame drain"
+    for (level_update, expected, rasterized) in [
+        (None, (1, 1), &["main-gauge", "main-progress"][..]),
+        (Some(0.75), (2, 1), &["main-gauge"][..]),
+        (None, (2, 1), &[][..]),
+    ] {
+        if let Some(level) = level_update {
+            publish(&mut scene, "main-gauge", "level", level);
+        }
+        let mut frame = gpu.draw(&mut scene);
+        frame.widget_rasterized.sort_unstable();
+        assert_eq!(counts(&gpu.compositor), expected);
+        assert_eq!(frame.widget_rasterized, rasterized);
+        #[cfg(feature = "dev-mode")]
+        assert_widget_work(
+            &mut gpu.compositor,
+            rasterized.len() as u64,
+            rasterized.len() as u64,
         );
-        // Nothing called the renderer after that drain: there is no synthetic
-        // observation of an idle frame, even though the last image persists.
-        assert!(compositor.take_work_counts().is_none(), "no new frame");
     }
-
-    // Idle frame: nothing is re-rasterized.
-    let idle = render(&mut compositor, &mut scene, &mut surface);
-    assert_eq!(count(&compositor, "main-gauge"), 2);
-    assert_eq!(count(&compositor, "main-progress"), 1);
-    assert!(idle.widget_rasterized.is_empty());
     #[cfg(feature = "dev-mode")]
     {
-        // This explicitly invoked frame still presents the full image, despite
-        // no new shaping/raster/upload work. It is distinct from no render.
-        let work = compositor
-            .take_work_counts()
-            .expect("actual unchanged frame");
-        assert_eq!((work.layout, work.raster, work.upload), (0, 0, 0));
-
         // A real raster admission failure must count the entered invocation,
         // while recording no RGBA submission. Keep the live per-instance and
         // FrameTelemetry attempt observations independent of upload success.
-        let ledger =
-            tze_hud_resource::ResidentLedger::new(tze_hud_resource::ResidentLedgerLimits {
-                aggregate_bytes: 0,
-                resource_bytes: 0,
-                widget_source_bytes: 0,
-                widget_raster_bytes: 0,
-                font_bytes: 0,
-            });
-        compositor.set_resident_ledger(ledger.clone());
+        let ledger = widget_ledger(0);
+        gpu.compositor.set_resident_ledger(ledger.clone());
         publish(&mut scene, "main-gauge", "level", 0.5);
-        let denied = render(&mut compositor, &mut scene, &mut surface);
-        let denied_work = compositor
-            .take_work_counts()
-            .expect("completed denied-raster frame");
-        assert_eq!(
-            (denied_work.layout, denied_work.raster, denied_work.upload),
-            (0, 1, 0)
-        );
-        assert_eq!(count(&compositor, "main-gauge"), 3);
-        assert_eq!(count(&compositor, "main-progress"), 1);
+        let denied = gpu.draw(&mut scene);
+        assert_widget_work(&mut gpu.compositor, 1, 0);
+        assert_eq!(counts(&gpu.compositor), (3, 1));
         assert_eq!(denied.widget_rasterized, ["main-gauge"]);
         assert_eq!(ledger.snapshot().class_denial_count, 1);
-        assert!(compositor.take_work_counts().is_none());
-        println!(
-            "observed widget frames: first raster/upload=2/2; changed=1/1; unchanged=0/0; admission-denied=1/0"
-        );
+        assert!(gpu.compositor.take_work_counts().is_none());
     }
 
     // The original observations, including zero-quota denial, are complete.
     // Reset only this fixture's ledger/renderer; the status section has its own
     // bounded admission and fresh texture/raster-count baseline on the same GPU.
-    compositor.set_resident_ledger(tze_hud_resource::ResidentLedger::new(
-        tze_hud_resource::ResidentLedgerLimits {
-            aggregate_bytes: 2 * 1024 * 1024,
-            resource_bytes: 0,
-            widget_source_bytes: 1024 * 1024,
-            widget_raster_bytes: 1024 * 1024,
-            font_bytes: 0,
-        },
-    ));
-    compositor.init_widget_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+    gpu.compositor
+        .set_resident_ledger(widget_ledger(1024 * 1024));
+    gpu.compositor
+        .init_widget_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
     let mut status_scene = SceneGraph::new(512.0, 256.0);
     let tab = status_scene.create_tab("Status", 0).unwrap();
-    let BundleScanResult::Ok(status_bundle) = bundle!("status-indicator", ["indicator.svg"]) else {
-        panic!("shipped status-indicator bundle failed to load");
-    };
-    let type_name = status_bundle.definition.id.clone();
-    for (file, bytes) in status_bundle.svg_contents {
-        compositor
-            .widget_renderer_mut()
-            .unwrap()
-            .register_svg(&type_name, &file, bytes);
-    }
-    status_scene
-        .widget_registry
-        .register_definition(status_bundle.definition);
-    status_scene
-        .widget_registry
-        .register_instance(WidgetInstance {
-            id: SceneId::new(),
-            widget_type_name: type_name,
-            tab_id: tab,
-            geometry_override: Some(GeometryPolicy::Relative {
-                x_pct: 32.0 / 512.0,
-                y_pct: 32.0 / 256.0,
-                width_pct: 320.0 / 512.0,
-                height_pct: 124.0 / 256.0,
-            }),
-            contention_override: None,
-            instance_name: "status-matrix".into(),
-            current_params: HashMap::new(),
-            auto_clear_ms: None,
-        });
-    let GeometryPolicy::Relative {
-        x_pct,
-        y_pct,
-        width_pct,
-        height_pct,
-    } = status_scene
-        .widget_registry
-        .resolve_geometry_policy_for_instance("status-matrix", None)
-        .unwrap()
-    else {
-        panic!("status fixture must resolve relative geometry");
-    };
-    assert_eq!(
-        (
-            compositor.width as f32 * width_pct,
-            compositor.height as f32 * height_pct
-        ),
-        (320.0, 124.0)
+    let name = register_bundle(
+        &mut gpu.compositor,
+        &mut status_scene,
+        bundle!("status-indicator", ["indicator.svg"]),
     );
-    let origin = (
-        (compositor.width as f32 * x_pct) as u32,
-        (compositor.height as f32 * y_pct) as u32,
+    register_instance(
+        &mut status_scene,
+        tab,
+        &name,
+        "status-matrix",
+        Some(relative(
+            32.0 / 512.0,
+            32.0 / 256.0,
+            320.0 / 512.0,
+            124.0 / 256.0,
+        )),
+        false,
     );
-    let region = |pixels: &[u8], local| widget_region(pixels, 512, origin, local);
-    let clean = render(&mut compositor, &mut status_scene, &mut surface);
+    let region = |pixels: &[u8], local| widget_region(pixels, 512, (32, 32), local);
+    let clean = gpu.draw(&mut status_scene);
     assert!(clean.widget_rasterized.is_empty());
-    let baseline = surface.read_pixels(&compositor.device);
+    let baseline = gpu.pixels();
     #[cfg(feature = "dev-mode")]
-    {
-        let work = compositor
-            .take_work_counts()
-            .expect("clean status baseline");
-        assert_eq!((work.layout, work.raster, work.upload), (0, 0, 0));
-    }
-    let set_status = |scene: &mut SceneGraph,
-                      theme: &str,
-                      status: &str,
-                      label: &str,
-                      reason: &str,
-                      tooltip: f32| {
-        let definition = &scene.widget_registry.definitions["status-indicator"];
-        let configured = configured_instance(
-            definition,
+    assert_widget_work(&mut gpu.compositor, 0, 0);
+    let draw_status =
+        |gpu: &mut Gpu,
+         scene: &mut SceneGraph,
+         (status, label, reason, tooltip): (&str, &str, &str, f32)| {
+            scene
+                .set_widget_param_local("status-matrix", "tooltip_visible", Value::F32(tooltip))
+                .unwrap();
+            publish_params(
+                scene,
+                "status-matrix",
+                "agent-a",
+                0,
+                [
+                    ("status", enumeration(status)),
+                    ("label", string(label)),
+                    ("reason", string(reason)),
+                ],
+            );
+            let before = raster_count(&gpu.compositor, "status-matrix");
+            assert_eq!(gpu.draw(scene).widget_rasterized, ["status-matrix"]);
+            #[cfg(feature = "dev-mode")]
+            assert_widget_work(&mut gpu.compositor, 1, 1);
+            assert_eq!(raster_count(&gpu.compositor, "status-matrix"), before + 1);
+            gpu.pixels()
+        };
+    let tile = (token_rgb("color.surface.container.low"), 0.92);
+    let tooltip_roi = (0, 48, 320, 76);
+    let badge_roi = (0, 0, 100, 40);
+    let pill_reason = (106, 8, 200, 24);
+    let glyph_roi = (7, 10, 20, 20);
+    let [panel, label, reason] = [(24, 52, 260, 3), (32, 63, 200, 18), (16, 92, 280, 16)];
+    let badge_rgb = |at, layers: &[([u8; 3], f64)]| {
+        expected_badge_pixel(layers, region(&baseline, at)[0])[..3]
+            .try_into()
+            .unwrap()
+    };
+
+    // The bundle tests check every discrete mapping. Give each actual theme
+    // one independent authored pixel oracle and compare the same status glyph
+    // across two themes. The gesture suite owns pointer dwell and leave.
+    let [_minimal, system, friendly, mut previous] = [
+        ("minimal", "away", "color.caution", (17, 20, 1, 1), 1.0),
+        ("system", "online", "color.success", (17, 12, 1, 1), 0.22),
+        ("friendly", "online", "color.success", (17, 12, 1, 1), 0.22),
+        (
+            "friendly",
+            "offline",
+            "color.on_surface.variant",
+            (17, 12, 1, 1),
+            0.22,
+        ),
+    ]
+    .map(|(theme, status, color, marker, opacity)| {
+        let instance = configured_instance(
+            &status_scene.widget_registry.definitions["status-indicator"],
             tab,
             "status-matrix",
-            serde_json::json!({"theme":theme}),
+            serde_json::json!({"theme": theme}),
         );
-        // Preserve the geometry and model publication while applying the owner
-        // setting produced by the config builder.
-        scene
+        status_scene
             .widget_registry
             .instances
             .get_mut("status-matrix")
             .unwrap()
             .current_params
-            .insert("theme".into(), configured.current_params["theme"].clone());
-        scene
-            .set_widget_param_local(
-                "status-matrix",
-                "tooltip_visible",
-                WidgetParameterValue::F32(tooltip),
-            )
-            .unwrap();
-        scene
-            .publish_to_widget(
-                "status-matrix",
-                HashMap::from([
-                    ("status".into(), WidgetParameterValue::Enum(status.into())),
-                    ("label".into(), WidgetParameterValue::String(label.into())),
-                    ("reason".into(), WidgetParameterValue::String(reason.into())),
-                ]),
-                "agent-a",
-                None,
-                0,
-                None,
-            )
-            .unwrap();
-    };
-    // Contract literals come from the shipped SVG/TOML, not the rasterizer.
-    // Full-width pill, with a minimal r=5 dot at (17,20) or a tonal r=9
-    // owner-style marker. Sample the tonal marker above its glyph.
-    let tile = (token_rgb("color.surface.container.low"), 0.92);
-    let panel_roi = (24, 52, 260, 3);
-    let label_roi = (32, 63, 200, 18);
-    let reason_roi = (16, 92, 280, 16);
-    let statuses = ["online", "away", "busy", "offline"];
-    // status -> color role, from the shipped value maps.
-    let fills = [
-        "color.success",
-        "color.caution",
-        "color.caution",
-        "color.on_surface.variant",
-    ]
-    .map(token_rgb);
-    let mut glyphs = HashMap::new();
-    for (theme, badge_roi, fill_opacity) in [
-        ("minimal", (17, 20, 1, 1), 1.0),
-        ("system", (17, 12, 1, 1), 0.22),
-        ("friendly", (17, 12, 1, 1), 0.22),
-    ] {
-        let mut previous_badge = None;
-        for (status, fill) in statuses.into_iter().zip(fills) {
-            let before = count(&compositor, "status-matrix");
-            set_status(
-                &mut status_scene,
-                theme,
-                status,
-                "READY",
-                "ALL SYSTEMS GO",
-                0.0,
-            );
-            let frame = render(&mut compositor, &mut status_scene, &mut surface);
-            assert_eq!(frame.widget_rasterized, ["status-matrix"]);
-            assert_eq!(count(&compositor, "status-matrix"), before + 1);
-            #[cfg(feature = "dev-mode")]
-            {
-                let work = compositor.take_work_counts().expect("status raster/upload");
-                assert_eq!((work.layout, work.raster, work.upload), (0, 1, 1));
-            }
-            let pixels = surface.read_pixels(&compositor.device);
-            // A CSS full radius cannot be copied as an oversized SVG rx:
-            // resvg clamps the axes independently and makes an ellipse.
-            // A capsule keeps flat top/bottom edges beyond its round ends.
-            for x in [35, 285] {
-                let actual = region(&pixels, (x, 5, 1, 1))[0];
-                let expected = expected_badge_pixel(&[tile], region(&baseline, (x, 5, 1, 1))[0]);
-                assert!(
-                    (0..3).all(|c| actual[c].abs_diff(expected[c]) <= 2),
-                    "status pill must have a flat interior near both ends: {actual:?} vs {expected:?}"
-                );
-            }
-            let badge = region(&pixels, badge_roi);
-            if status == "online" {
-                glyphs.insert(theme, region(&pixels, (7, 10, 20, 20)));
-            }
-            assert_eq!(
-                status_scene.widget_registry.instances["status-matrix"].current_params["theme"],
-                WidgetParameterValue::Enum(theme.into())
-            );
-            let background = region(&baseline, badge_roi)[0];
-            assert_eq!(background[3], 255);
-            let expected = expected_badge_pixel(&[tile, (fill, fill_opacity)], background);
-            assert!(badge[0] != background, "invisible {theme}/{status} badge");
-            assert_eq!(badge[0][3], 255, "opaque readback is not group opacity");
-            for channel in 0..3 {
-                assert!(
-                    badge[0][channel].abs_diff(expected[channel]) <= 4,
-                    "{theme}/{status} fill channel {channel}: actual {:?}, expected {expected:?}",
-                    badge[0]
-                );
-            }
-            if let Some((previous_status, previous)) = &previous_badge {
-                assert!(
-                    badge != *previous || (previous_status == &"away" && status == "busy"),
-                    "status change retained stale badge pixels"
-                );
-            }
-            previous_badge = Some((status, badge.clone()));
-            for roi in [panel_roi, label_roi, reason_roi] {
-                assert!(
-                    region(&pixels, roi) == region(&baseline, roi),
-                    "hidden tooltip leaked into its local region"
-                );
-            }
-            let idle = render(&mut compositor, &mut status_scene, &mut surface);
-            assert!(idle.widget_rasterized.is_empty());
-            assert_eq!(count(&compositor, "status-matrix"), before + 1);
-            #[cfg(feature = "dev-mode")]
-            {
-                let work = compositor
-                    .take_work_counts()
-                    .expect("unchanged status frame");
-                assert_eq!((work.layout, work.raster, work.upload), (0, 0, 0));
-                assert!(compositor.take_work_counts().is_none());
-            }
-            assert!(
-                surface.read_pixels(&compositor.device) == pixels,
-                "unchanged {theme}/{status} frame changed pixels"
-            );
-            println!(
-                "status-indicator {theme}/{status}: badge {:?}, expected {expected:?}; raster/upload=1/1, unchanged=0/0",
-                badge[0]
-            );
-        }
-    }
-
-    assert_ne!(
-        glyphs["system"], glyphs["friendly"],
-        "owner friendly theme must draw a distinct glyph across model publishes"
-    );
-    let hidden = surface.read_pixels(&compositor.device);
-    let badge_roi = (0, 0, 100, 40);
-    let mut tooltip_frames = Vec::new();
-    for (label, reason, visible) in [
-        ("READY", "ALL SYSTEMS GO", 1.0),
-        ("PAUSED", "ALL SYSTEMS GO", 1.0),
-        ("PAUSED", "AWAITING OPERATOR", 1.0),
-        ("PAUSED", "AWAITING OPERATOR", 0.0),
-    ] {
-        let before = count(&compositor, "status-matrix");
-        set_status(
+            .insert("theme".into(), instance.current_params["theme"].clone());
+        let frame = draw_status(
+            &mut gpu,
             &mut status_scene,
-            "friendly",
-            "offline",
-            label,
-            reason,
-            visible,
+            (status, "READY", "ALL SYSTEMS GO", 0.0),
         );
-        let frame = render(&mut compositor, &mut status_scene, &mut surface);
-        assert_eq!(frame.widget_rasterized, ["status-matrix"]);
-        assert_eq!(count(&compositor, "status-matrix"), before + 1);
-        #[cfg(feature = "dev-mode")]
-        {
-            let work = compositor.take_work_counts().expect("tooltip update");
-            assert_eq!((work.layout, work.raster, work.upload), (0, 1, 1));
-        }
-        let pixels = surface.read_pixels(&compositor.device);
-        assert!(
-            region(&pixels, badge_roi) == region(&hidden, badge_roi),
-            "tooltip changed badge"
-        );
-        let idle = render(&mut compositor, &mut status_scene, &mut surface);
-        assert!(idle.widget_rasterized.is_empty());
-        assert_eq!(count(&compositor, "status-matrix"), before + 1);
-        #[cfg(feature = "dev-mode")]
-        {
-            let work = compositor
-                .take_work_counts()
-                .expect("unchanged tooltip frame");
-            assert_eq!((work.layout, work.raster, work.upload), (0, 0, 0));
-            assert!(compositor.take_work_counts().is_none());
-        }
-        assert!(
-            surface.read_pixels(&compositor.device) == pixels,
-            "unchanged tooltip frame changed pixels"
-        );
-        tooltip_frames.push(pixels);
-    }
-    // Report the existing isolation predicates before a foreground failure can
-    // stop their later assertions. These diagnostics do not change the oracle.
-    println!(
-        "tooltip binding isolation: label_changed={} reason_stable_on_label={} reason_changed={} label_stable_on_reason={}",
-        region(&tooltip_frames[0], label_roi) != region(&tooltip_frames[1], label_roi),
-        region(&tooltip_frames[0], reason_roi) == region(&tooltip_frames[1], reason_roi),
-        region(&tooltip_frames[1], reason_roi) != region(&tooltip_frames[2], reason_roi),
-        region(&tooltip_frames[1], label_roi) == region(&tooltip_frames[2], label_roi),
-    );
-    for (case, pixels) in tooltip_frames[..3].iter().enumerate() {
-        assert!(
-            region(pixels, panel_roi) != region(&baseline, panel_roi),
-            "tooltip panel missing"
-        );
-        for (name, roi) in [("label", label_roi), ("reason", reason_roi)] {
-            let roi_pixels = region(pixels, roi);
-            let peak_pixel = roi_pixels
-                .iter()
-                .max_by_key(|p| p[..3].iter().copied().min().unwrap_or(0))
-                .copied()
-                .unwrap_or([0; 4]);
-            let peak_min_rgb = peak_pixel[..3].iter().copied().min().unwrap_or(0);
-            let channel_max: [u8; 3] = std::array::from_fn(|channel| {
-                roi_pixels.iter().map(|p| p[channel]).max().unwrap_or(0)
-            });
-            // The shipped opaque panel color; all shown cases bind
-            // tooltip_visible=1, so its interior has no text coverage.
-            let expected_panel = expected_badge_pixel(
-                &[(token_rgb("color.surface.container.highest"), 1.0)],
-                region(&baseline, roi)[0],
-            );
-            let maximum_panel_contrast = roi_pixels
-                .iter()
-                .map(|p| {
-                    (0..3)
-                        .map(|channel| p[channel].abs_diff(expected_panel[channel]))
-                        .max()
-                        .unwrap_or(0)
-                })
-                .max()
-                .unwrap_or(0);
-            let bright_pixels = roi_pixels
-                .iter()
-                .filter(|p| p[..3].iter().all(|v| *v > 180))
-                .count();
-            let case_name = ["ready", "label-paused", "reason-awaiting-operator"][case];
-            println!(
-                "tooltip diagnostic case={case_name} roi={name} local_bounds={roi:?} origin={origin:?} peak_min_rgb={peak_min_rgb} peak_pixel={peak_pixel:?} channel_max={channel_max:?} foreground_gt180_count={bright_pixels} expected_panel={expected_panel:?} maximum_panel_contrast={maximum_panel_contrast} observed_panel_sample={:?}",
-                region(pixels, panel_roi)[0],
-            );
-            assert!(
-                region(pixels, roi).iter().any(|p| (0..3).all(
-                    |channel| u16::from(p[channel]) >= u16::from(expected_panel[channel]) + 64
-                )),
-                "tooltip text region contains no foreground"
+        for sample in [(35, 5, 1, 1), (285, 5, 1, 1)] {
+            assert_color(
+                region(&frame, sample)[0],
+                badge_rgb(sample, &[tile]),
+                2,
+                theme,
             );
         }
-    }
-    assert!(
-        region(&tooltip_frames[0], label_roi) != region(&tooltip_frames[1], label_roi),
-        "label binding did not change label pixels"
-    );
-    assert!(
-        region(&tooltip_frames[0], reason_roi) == region(&tooltip_frames[1], reason_roi),
-        "label update changed reason pixels"
-    );
-    assert!(
-        region(&tooltip_frames[1], reason_roi) != region(&tooltip_frames[2], reason_roi),
-        "reason binding did not change reason pixels"
-    );
-    assert!(
-        region(&tooltip_frames[1], label_roi) == region(&tooltip_frames[2], label_roi),
-        "reason update changed label pixels"
-    );
-    assert_eq!(
-        region(&tooltip_frames[3], (0, 48, 320, 76)),
-        region(&baseline, (0, 48, 320, 76)),
-        "hidden tooltip retained stale pixels"
-    );
-    assert_eq!(
-        region(&tooltip_frames[3], (106, 8, 200, 24)),
-        region(&tooltip_frames[2], (106, 8, 200, 24)),
-        "hiding the tooltip must retain its reason in the pill"
-    );
-    set_status(
-        &mut status_scene,
-        "friendly",
-        "offline",
-        "PAUSED",
-        &"W".repeat(160),
-        0.0,
-    );
-    render(&mut compositor, &mut status_scene, &mut surface);
-    let long_reason = surface.read_pixels(&compositor.device);
+        let actual = region(&frame, marker)[0];
+        assert_eq!(actual[3], 255);
+        assert_color(
+            actual,
+            badge_rgb(marker, &[tile, (token_rgb(color), opacity)]),
+            4,
+            status,
+        );
+        assert_eq!(region(&frame, tooltip_roi), region(&baseline, tooltip_roi));
+        frame
+    });
     assert_ne!(
-        region(&long_reason, (106, 8, 200, 24)),
-        region(&tooltip_frames[3], (106, 8, 200, 24)),
-        "the long reason must actually render inside its clip"
+        region(&system, glyph_roi),
+        region(&friendly, glyph_roi),
+        "owner theme produces a distinct glyph"
     );
+    let idle_rasters = raster_count(&gpu.compositor, "status-matrix");
+    assert!(gpu.draw(&mut status_scene).widget_rasterized.is_empty());
+    #[cfg(feature = "dev-mode")]
+    assert_widget_work(&mut gpu.compositor, 0, 0);
+    assert_eq!(raster_count(&gpu.compositor, "status-matrix"), idle_rasters);
+    assert_eq!(gpu.pixels(), previous);
+
+    let badge = region(&previous, badge_roi);
+    let panel_color = (token_rgb("color.surface.container.highest"), 1.0);
+    for (caption, message, visible, changes) in [
+        ("READY", "ALL SYSTEMS GO", 1.0, [true, true]),
+        ("PAUSED", "ALL SYSTEMS GO", 1.0, [true, false]),
+        ("PAUSED", "AWAITING OPERATOR", 1.0, [false, true]),
+        ("PAUSED", "AWAITING OPERATOR", 0.0, [true, true]),
+    ] {
+        let frame = draw_status(
+            &mut gpu,
+            &mut status_scene,
+            ("offline", caption, message, visible),
+        );
+        assert_eq!(region(&frame, badge_roi), badge, "tooltip preserves badge");
+        assert_eq!(
+            [label, reason].map(|roi| region(&frame, roi) != region(&previous, roi)),
+            changes
+        );
+        if visible == 0.0 {
+            assert_eq!(region(&frame, tooltip_roi), region(&baseline, tooltip_roi));
+            assert_eq!(region(&frame, pill_reason), region(&previous, pill_reason));
+        } else {
+            assert_ne!(region(&frame, panel), region(&baseline, panel));
+            for roi in [label, reason] {
+                let background = badge_rgb(roi, &[panel_color]);
+                assert!(
+                    region(&frame, roi).iter().any(|pixel| {
+                        pixel[..3]
+                            .iter()
+                            .zip(background)
+                            .all(|(got, base)| i16::from(*got) - i16::from(base) >= 64)
+                    }),
+                    "missing readable glyphs in {roi:?}"
+                );
+            }
+        }
+        previous = frame;
+    }
+    let long = draw_status(
+        &mut gpu,
+        &mut status_scene,
+        ("offline", "PAUSED", &"W".repeat(160), 0.0),
+    );
+    assert_ne!(region(&long, pill_reason), region(&previous, pill_reason));
+    let inset = (307, 8, 12, 24);
     assert_eq!(
-        region(&long_reason, (307, 8, 12, 24)),
-        region(&tooltip_frames[3], (307, 8, 12, 24)),
-        "a maximum-length reason must not escape into the pill's right inset"
+        region(&long, inset),
+        region(&previous, inset),
+        "reason stays inside its clip"
     );
     status_scene
         .clear_widget_for_publisher("status-matrix", "agent-a")
         .unwrap();
-    let cleared = render(&mut compositor, &mut status_scene, &mut surface);
-    assert!(cleared.widget_rasterized.is_empty());
-    assert!(
-        surface.read_pixels(&compositor.device) == baseline,
-        "clear retained stale status texture"
-    );
+    assert!(gpu.draw(&mut status_scene).widget_rasterized.is_empty());
+    assert_eq!(gpu.pixels(), baseline, "clear removes the status texture");
     #[cfg(feature = "dev-mode")]
-    {
-        let work = compositor.take_work_counts().expect("cleared status frame");
-        assert_eq!((work.layout, work.raster, work.upload), (0, 0, 0));
-    }
-    println!(
-        "status-indicator: 12 local theme/status cells, separate label/reason controls, hidden/clear baselines, adapter {:?}",
-        compositor.adapter_info()
+    assert_widget_work(&mut gpu.compositor, 0, 0);
+
+    // The shipped gauge's arc, severity and edge pixels are covered by
+    // gauge_binding_rendering. Here keep the distinct progress-bar frame.
+    let mut scene = SceneGraph::new(512.0, 256.0);
+    let name = register_bundle(
+        &mut gpu.compositor,
+        &mut scene,
+        bundle!("progress-bar", ["track.svg", "fill.svg"]),
     );
-    // Shipped severity fills, including return-to-info after warning/error.
-    // Fixed logical geometry makes sampled ring/bar interiors independent of
-    // display-relative layout; all expected colors come from theme tokens.
-    for (loaded, level_name, width, height, sample) in [
-        (
-            bundle!("gauge", ["background.svg", "fill.svg"]),
-            "level",
-            128.0,
-            132.0,
-            (98, 56), // Solid ring centreline at 3 o'clock, filled at level 0.75.
-        ),
-        (
-            bundle!("progress-bar", ["track.svg", "fill.svg"]),
-            "progress",
-            320.0,
-            50.0,
-            (100, 37),
-        ),
-    ] {
-        let BundleScanResult::Ok(bundle) = loaded else {
-            panic!("severity bundle");
+    let tab = scene.create_tab("Progress", 0).unwrap();
+    let definition = scene.widget_registry.definitions[&name].clone();
+    let mut paint = |scene: &mut SceneGraph, params: &[(&'static str, Value)]| {
+        publish_params(scene, &name, "model", 0, params.iter().cloned());
+        gpu.render_pixels(scene)
+    };
+    let at = |pixels: &[u8], roi| widget_region(pixels, 512, (0, 0), roi);
+    let readout = (270, 10, 35, 16);
+    let track = token_rgb("color.outline.variant");
+    let mut severity_frames = HashMap::new();
+    for owner in [false, true] {
+        let (initial, fill) = if owner {
+            (
+                serde_json::json!({ "fill_color": [12, 210, 123, 255] }),
+                [12, 210, 123],
+            )
+        } else {
+            (serde_json::json!({}), token_rgb("color.primary"))
         };
-        let name = bundle.definition.id.clone();
-        for (file, bytes) in bundle.svg_contents {
-            compositor
-                .widget_renderer_mut()
-                .unwrap()
-                .register_svg(&name, &file, bytes);
-        }
-        let mut severity_frames: HashMap<&str, Vec<u8>> = HashMap::new();
-        for owner in [false, true] {
-            let mut scene = SceneGraph::new(512.0, 256.0);
-            let tab = scene.create_tab("Severity", 0).unwrap();
-            let initial = if owner {
-                serde_json::json!({"fill_color":[12,210,123,255]})
-            } else {
-                serde_json::json!({})
-            };
-            let mut instance = configured_instance(&bundle.definition, tab, &name, initial);
-            instance.geometry_override = Some(GeometryPolicy::Relative {
-                x_pct: 0.0,
-                y_pct: 0.0,
-                width_pct: width / 512.0,
-                height_pct: height / 256.0,
-            });
-            scene
-                .widget_registry
-                .register_definition(bundle.definition.clone());
-            scene.widget_registry.register_instance(instance);
-            if level_name == "progress" {
-                // Zero, half and full must change the actual track span while
-                // leaving both end insets intact. No hover is needed for the
-                // exact percent row to have foreground pixels.
-                let mut previous_readout = None;
-                for (progress, fill_to) in [(0.0, 15), (0.5, 160), (1.0, 305)] {
-                    scene
-                        .publish_to_widget(
-                            &name,
-                            HashMap::from([
-                                (level_name.into(), WidgetParameterValue::F32(progress)),
-                                ("label".into(), WidgetParameterValue::String(String::new())),
-                            ]),
-                            "model",
-                            None,
-                            0,
-                            None,
-                        )
-                        .unwrap();
-                    render(&mut compositor, &mut scene, &mut surface);
-                    let pixels = surface.read_pixels(&compositor.device);
-                    let fill = if owner {
-                        [12, 210, 123]
-                    } else {
-                        token_rgb("color.primary")
-                    };
-                    for x in [18, 155, 165, 301] {
-                        let actual = widget_region(&pixels, 512, (0, 0), (x, 37, 1, 1))[0];
-                        let expected = if x < fill_to {
-                            fill
-                        } else {
-                            token_rgb("color.outline.variant")
-                        };
-                        assert!(
-                            (0..3).all(|c| actual[c].abs_diff(expected[c]) <= 2),
-                            "progress={progress}, x={x}: {actual:?} vs {expected:?}"
-                        );
-                    }
-                    let readout = widget_region(&pixels, 512, (0, 0), (270, 10, 35, 16));
-                    assert!(
-                        readout.iter().any(|p| (0..3).all(|c| p[c] > 128)),
-                        "percent foreground must remain visible without hover"
-                    );
-                    if let Some(previous) = &previous_readout {
-                        assert_ne!(
-                            &readout, previous,
-                            "percentage must update as a shaped text run"
-                        );
-                    }
-                    previous_readout = Some(readout);
-                    // The maximum valid label must stay visible without
-                    // touching the permanent percent or escaping the card.
-                    scene
-                        .publish_to_widget(
-                            &name,
-                            HashMap::from([(
-                                "label".into(),
-                                WidgetParameterValue::String("W".repeat(32)),
-                            )]),
-                            "model",
-                            None,
-                            0,
-                            None,
-                        )
-                        .unwrap();
-                    render(&mut compositor, &mut scene, &mut surface);
-                    let long_label = surface.read_pixels(&compositor.device);
+        let mut scene = scene.clone();
+        let mut instance = configured_instance(&definition, tab, &name, initial);
+        instance.geometry_override = Some(relative(0.0, 0.0, 320.0 / 512.0, 50.0 / 256.0));
+        scene.widget_registry.register_instance(instance);
+
+        // Sample the empty, half and full interior. The custom fill uses the
+        // same boundaries, so a mid-fill check there suffices for the role.
+        let stages = [(0.0, 15), (0.5, 160), (1.0, 305)];
+        let mut last_readout = Vec::new();
+        for &(progress, fill_to) in if owner { &stages[1..2] } else { &stages[..] } {
+            let pixels = paint(
+                &mut scene,
+                &[("progress", Value::F32(progress)), ("label", string(""))],
+            );
+            for x in [18, 155, 165, 301] {
+                let expected = if x < fill_to { fill } else { track };
+                assert_color(
+                    pixel_at(&pixels, 512, x, 37),
+                    expected,
+                    2,
+                    format_args!("progress={progress}, x={x}"),
+                );
+            }
+            let text = at(&pixels, readout);
+            assert!(
+                text.iter()
+                    .any(|p| p[..3].iter().all(|&channel| channel > 128))
+            );
+            assert_ne!(text, last_readout, "readout updates when progress changes");
+            last_readout = text;
+            if progress == 0.5 && owner {
+                let long = paint(&mut scene, &[("label", string("W".repeat(32)))]);
+                for (roi, stable) in [
+                    (readout, true),
+                    ((320, 0, 192, 50), true),
+                    ((15, 10, 220, 16), false),
+                ] {
                     assert_eq!(
-                        widget_region(&long_label, 512, (0, 0), (270, 10, 50, 16)),
-                        widget_region(&pixels, 512, (0, 0), (270, 10, 50, 16)),
-                        "maximum label must leave the {progress} percent and right inset unchanged"
-                    );
-                    assert_eq!(
-                        widget_region(&long_label, 512, (0, 0), (320, 0, 192, 50)),
-                        widget_region(&pixels, 512, (0, 0), (320, 0, 192, 50)),
-                        "maximum label must not draw beyond the card"
-                    );
-                    assert_ne!(
-                        widget_region(&long_label, 512, (0, 0), (15, 10, 220, 16)),
-                        widget_region(&pixels, 512, (0, 0), (15, 10, 220, 16)),
-                        "clipping must preserve visible label text"
+                        at(&long, roi) == at(&pixels, roi),
+                        stable,
+                        "long label at {roi:?}"
                     );
                 }
             }
-            for severity in ["info", "warning", "error", "info"] {
-                scene
-                    .publish_to_widget(
-                        &name,
-                        HashMap::from([
-                            (level_name.into(), WidgetParameterValue::F32(0.75)),
-                            (
-                                "severity".into(),
-                                WidgetParameterValue::Enum(severity.into()),
-                            ),
-                        ]),
-                        "model",
-                        None,
-                        0,
-                        None,
-                    )
-                    .unwrap();
-                render(&mut compositor, &mut scene, &mut surface);
-                let pixels = surface.read_pixels(&compositor.device);
-                if severity != "info" {
-                    if owner {
-                        let baseline = &severity_frames[severity];
-                        let changed = pixels
-                            .chunks_exact(4)
-                            .zip(baseline.chunks_exact(4))
-                            .filter(|(actual, expected)| actual != expected)
-                            .count();
-                        assert_eq!(
-                            changed, 0,
-                            "{name}/{severity}: owner info fill altered non-info pixels, including rounded edges"
-                        );
-                    } else {
-                        severity_frames.insert(severity, pixels.clone());
-                    }
-                }
-                let actual = widget_region(&pixels, 512, (0, 0), (sample.0, sample.1, 1, 1))[0];
-                let expected = match severity {
-                    "warning" => token_rgb("color.caution"),
-                    "error" => token_rgb("color.error"),
-                    _ if owner => [12, 210, 123],
-                    _ => token_rgb("color.primary"),
-                };
-                for channel in 0..3 {
-                    assert!(
-                        actual[channel].abs_diff(expected[channel]) <= 2,
-                        "{name} owner={owner} severity={severity}: {actual:?} vs {expected:?}"
-                    );
-                }
+        }
+        for (severity, expected) in [
+            ("warning", token_rgb("color.caution")),
+            ("error", token_rgb("color.error")),
+            ("info", fill),
+        ] {
+            let pixels = paint(
+                &mut scene,
+                &[
+                    ("progress", Value::F32(0.75)),
+                    ("severity", enumeration(severity)),
+                    ("label", string("")),
+                ],
+            );
+            assert_color(pixel_at(&pixels, 512, 100, 37), expected, 2, severity);
+            if severity != "info" {
+                let baseline = severity_frames
+                    .entry(severity)
+                    .or_insert_with(|| pixels.clone());
+                assert!(
+                    pixels == *baseline,
+                    "owner info fill changed {severity} pixels"
+                );
             }
         }
     }
@@ -879,88 +531,47 @@ async fn widget_param_update_rasterizes_only_that_instance() {
 async fn hidden_widgets_do_no_raster_work_and_draw_nothing() {
     use tze_hud_scene::graph::SurfaceClasses;
 
-    if std::env::var("TZE_HUD_SKIP_GPU_TESTS").is_ok_and(|v| v.trim() == "1") {
-        eprintln!("SKIPPED: hidden widgets TZE_HUD_SKIP_GPU_TESTS=1");
+    let Some(mut gpu) = Gpu::with_widgets(512, 256).await else {
         return;
-    }
-    let compositor_init = {
-        let _guard = crate::common::lock_gpu_init().await;
-        Compositor::new_headless(512, 256).await
     };
-    let mut compositor = match compositor_init {
-        Ok(c) => c,
-        Err(CompositorError::NoAdapter) => {
-            assert!(
-                !std::env::var("TZE_HUD_REQUIRE_GPU").is_ok_and(|v| v.trim() == "1"),
-                "TZE_HUD_REQUIRE_GPU=1 but no adapter"
-            );
-            return;
-        }
-        Err(e) => panic!("unexpected compositor error: {e}"),
-    };
-    let mut surface = HeadlessSurface::new(&compositor.device, 512, 256);
-    compositor.init_widget_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
-    let mut scene = SceneGraph::new(512.0, 256.0);
-    let tab = scene.create_tab("Main", 0).unwrap();
-    let BundleScanResult::Ok(b) = bundle!("gauge", ["background.svg", "fill.svg"]) else {
-        panic!("gauge bundle failed to load");
-    };
-    let type_name = b.definition.id.clone();
-    for (file, bytes) in b.svg_contents {
-        compositor
-            .widget_renderer_mut()
-            .unwrap()
-            .register_svg(&type_name, &file, bytes);
-    }
-    scene.widget_registry.register_definition(b.definition);
-    scene.widget_registry.register_instance(WidgetInstance {
-        id: SceneId::new(),
-        widget_type_name: type_name,
-        tab_id: tab,
-        geometry_override: None,
-        contention_override: None,
-        instance_name: "main-gauge".to_string(),
-        current_params: HashMap::new(),
-        auto_clear_ms: None,
-    });
-    let count = |c: &Compositor| c.widget_renderer().unwrap().raster_count("main-gauge");
+    let (mut scene, tab, name) = gauge_scene(&mut gpu.compositor);
+    register_instance(&mut scene, tab, &name, "main-gauge", None, false);
+    let count = |c: &Compositor| raster_count(c, "main-gauge");
     // The frame with no published widget: what "nothing drawn" looks like.
-    render(&mut compositor, &mut scene, &mut surface);
-    let empty = surface.read_pixels(&compositor.device);
+    let empty = gpu.render_pixels(&mut scene);
 
     // What the newest value (0.75) looks like when published directly.
     publish(&mut scene, "main-gauge", "level", 0.75);
-    render(&mut compositor, &mut scene, &mut surface);
-    let at_075 = surface.read_pixels(&compositor.device);
+    let at_075 = gpu.render_pixels(&mut scene);
     assert!(at_075 != empty, "the gauge draws");
 
     publish(&mut scene, "main-gauge", "level", 0.25);
-    render(&mut compositor, &mut scene, &mut surface);
-    assert_eq!(count(&compositor), 2);
+    gpu.draw(&mut scene);
+    assert_eq!(count(&gpu.compositor), 2);
 
     scene.set_owner_hidden(SurfaceClasses {
         widgets: true,
         ..SurfaceClasses::NONE
     });
     // Published with a transition while hidden.
-    let params = HashMap::from([("level".to_string(), WidgetParameterValue::F32(0.75))]);
-    scene
-        .publish_to_widget("main-gauge", params, "agent-a", None, 500, None)
-        .unwrap();
-    let hidden = render(&mut compositor, &mut scene, &mut surface);
-    assert_eq!(count(&compositor), 2, "no raster while hidden");
-    assert!(hidden.widget_rasterized.is_empty());
-    assert!(
-        surface.read_pixels(&compositor.device) == empty,
-        "nothing drawn while hidden"
+    publish_params(
+        &mut scene,
+        "main-gauge",
+        "agent-a",
+        500,
+        [("level", Value::F32(0.75))],
     );
+    let hidden = gpu.draw(&mut scene);
+    assert_eq!(count(&gpu.compositor), 2, "no raster while hidden");
+    assert!(hidden.widget_rasterized.is_empty());
+    assert!(gpu.pixels() == empty, "nothing drawn while hidden");
 
     scene.set_owner_hidden(SurfaceClasses::NONE);
-    let shown = render(&mut compositor, &mut scene, &mut surface);
-    assert_eq!(count(&compositor), 3, "one raster of the newest params");
+    let shown = gpu.draw(&mut scene);
+    assert_eq!(count(&gpu.compositor), 3, "one raster of the newest params");
     assert_eq!(shown.widget_rasterized, ["main-gauge"]);
     assert!(
-        !compositor
+        !gpu.compositor
             .widget_renderer()
             .unwrap()
             .has_active_transition(),
@@ -968,7 +579,7 @@ async fn hidden_widgets_do_no_raster_work_and_draw_nothing() {
     );
     // Raster rounding varies by one step; a transition starting from the
     // pre-hide 0.25 would differ by whole fill colors.
-    let again = surface.read_pixels(&compositor.device);
+    let again = gpu.pixels();
     let max_step = again
         .iter()
         .zip(&at_075)
@@ -981,200 +592,67 @@ async fn hidden_widgets_do_no_raster_work_and_draw_nothing() {
     );
 }
 
-/// The owner resizes a widget (control panel layout): it re-rasters once at
-/// the new size; moving it without resizing re-rasters nothing.
 #[tokio::test]
-async fn resizing_a_widget_rerasters_it_and_moving_does_not() {
-    if std::env::var("TZE_HUD_SKIP_GPU_TESTS").is_ok_and(|v| v.trim() == "1") {
+async fn widget_raster_is_invalidated_by_size_and_source_changes() {
+    let Some(mut gpu) = Gpu::with_widgets(512, 256).await else {
         return;
-    }
-    let compositor_init = {
-        let _guard = crate::common::lock_gpu_init().await;
-        Compositor::new_headless(512, 256).await
     };
-    let mut compositor = match compositor_init {
-        Ok(c) => c,
-        Err(CompositorError::NoAdapter) => {
-            assert!(
-                !std::env::var("TZE_HUD_REQUIRE_GPU").is_ok_and(|v| v.trim() == "1"),
-                "TZE_HUD_REQUIRE_GPU=1 but no adapter"
-            );
-            return;
-        }
-        Err(e) => panic!("unexpected compositor error: {e}"),
-    };
-    let mut surface = HeadlessSurface::new(&compositor.device, 512, 256);
-    compositor.init_widget_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
-    let mut scene = SceneGraph::new(512.0, 256.0);
-    let tab = scene.create_tab("Main", 0).unwrap();
-    let BundleScanResult::Ok(b) = bundle!("gauge", ["background.svg", "fill.svg"]) else {
+    let BundleScanResult::Ok(bundle) = bundle!("gauge", ["background.svg", "fill.svg"]) else {
         panic!("built-in gauge bundle failed to load");
     };
-    let type_name = b.definition.id.clone();
-    for (file, bytes) in b.svg_contents {
-        compositor
-            .widget_renderer_mut()
-            .unwrap()
-            .register_svg(&type_name, &file, bytes);
-    }
-    scene.widget_registry.register_definition(b.definition);
-    let at = |x_pct, width_pct| GeometryPolicy::Relative {
-        x_pct,
-        y_pct: 0.1,
-        width_pct,
-        height_pct: 0.5,
-    };
-    scene.widget_registry.register_instance(WidgetInstance {
-        id: SceneId::new(),
-        widget_type_name: type_name,
-        tab_id: tab,
-        geometry_override: Some(at(0.1, 0.25)),
-        contention_override: None,
-        instance_name: "g".to_string(),
-        current_params: HashMap::new(),
-        auto_clear_ms: None,
-    });
+    let mut scene = SceneGraph::new(512.0, 256.0);
+    let tab = scene.create_tab("Main", 0).unwrap();
+    let mut source = bundle.svg_contents["fill.svg"].clone();
+    let name = register_bundle(
+        &mut gpu.compositor,
+        &mut scene,
+        BundleScanResult::Ok(bundle),
+    );
+    let at = |x_pct, width_pct| relative(x_pct, 0.1, width_pct, 0.5);
+    register_instance(&mut scene, tab, &name, "g", Some(at(0.1, 0.25)), false);
     publish(&mut scene, "g", "level", 0.5);
-    let count = |c: &Compositor| c.widget_renderer().unwrap().raster_count("g");
-    let size = |c: &Compositor| {
-        let e = c.widget_renderer().unwrap().texture_entry("g").unwrap();
-        (e.width, e.height)
+    let check = |gpu: &mut Gpu, scene: &mut SceneGraph, (rastered, count, width)| {
+        let frame = gpu.draw(scene);
+        let c = &gpu.compositor;
+        let expected: &[&str] = if rastered { &["g"] } else { &[] };
+        assert_eq!(frame.widget_rasterized, expected);
+        let texture = c.widget_renderer().unwrap().texture_entry("g").unwrap();
+        assert_eq!(
+            (raster_count(c, "g"), texture.width, texture.height),
+            (count, width, 128)
+        );
     };
-    render(&mut compositor, &mut scene, &mut surface);
-    assert_eq!((count(&compositor), size(&compositor)), (1, (128, 128)));
 
+    check(&mut gpu, &mut scene, (true, 1, 128));
     assert!(scene.set_widget_geometry("g", at(0.5, 0.25)));
-    let moved = render(&mut compositor, &mut scene, &mut surface);
-    assert!(
-        moved.widget_rasterized.is_empty(),
-        "a move keeps the raster"
-    );
-    assert_eq!(count(&compositor), 1);
-
+    check(&mut gpu, &mut scene, (false, 1, 128));
     assert!(scene.set_widget_geometry("g", at(0.5, 0.5)));
-    let resized = render(&mut compositor, &mut scene, &mut surface);
-    assert_eq!(resized.widget_rasterized, ["g"]);
-    assert_eq!((count(&compositor), size(&compositor)), (2, (256, 128)));
+    check(&mut gpu, &mut scene, (true, 2, 256));
     assert!(!scene.set_widget_geometry("missing", at(0.0, 0.1)));
-}
 
-/// A theme change re-registers a widget type's SVGs with new token values:
-/// its instances re-raster once; the same bytes again cost nothing.
-#[tokio::test]
-async fn a_restyled_widget_type_rerasters_once() {
-    if std::env::var("TZE_HUD_SKIP_GPU_TESTS").is_ok_and(|v| v.trim() == "1") {
-        return;
-    }
-    let compositor_init = {
-        let _guard = crate::common::lock_gpu_init().await;
-        Compositor::new_headless(512, 256).await
+    let register = |c: &mut Compositor, bytes| {
+        c.widget_renderer_mut()
+            .unwrap()
+            .register_svg(&name, "fill.svg", bytes);
     };
-    let mut compositor = match compositor_init {
-        Ok(c) => c,
-        Err(CompositorError::NoAdapter) => {
-            assert!(
-                !std::env::var("TZE_HUD_REQUIRE_GPU").is_ok_and(|v| v.trim() == "1"),
-                "TZE_HUD_REQUIRE_GPU=1 but no adapter"
-            );
-            return;
-        }
-        Err(e) => panic!("unexpected compositor error: {e}"),
-    };
-    let mut surface = HeadlessSurface::new(&compositor.device, 512, 256);
-    compositor.init_widget_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
-    let mut scene = SceneGraph::new(512.0, 256.0);
-    let tab = scene.create_tab("Main", 0).unwrap();
-    let BundleScanResult::Ok(b) = bundle!("gauge", ["background.svg", "fill.svg"]) else {
-        panic!("built-in gauge bundle failed to load");
-    };
-    let type_name = b.definition.id.clone();
-    let svgs = b.svg_contents.clone();
-    let register = |c: &mut Compositor, svgs: &HashMap<String, Vec<u8>>| {
-        for (file, bytes) in svgs {
-            c.widget_renderer_mut()
-                .unwrap()
-                .register_svg(&type_name, file, bytes.clone());
-        }
-    };
-    register(&mut compositor, &svgs);
-    scene.widget_registry.register_definition(b.definition);
-    scene.widget_registry.register_instance(WidgetInstance {
-        id: SceneId::new(),
-        widget_type_name: type_name.clone(),
-        tab_id: tab,
-        geometry_override: None,
-        contention_override: None,
-        instance_name: "g".to_string(),
-        current_params: HashMap::new(),
-        auto_clear_ms: None,
-    });
-    publish(&mut scene, "g", "level", 0.5);
-    render(&mut compositor, &mut scene, &mut surface);
-    let count = |c: &Compositor| c.widget_renderer().unwrap().raster_count("g");
-    assert_eq!(count(&compositor), 1);
-
-    register(&mut compositor, &svgs);
-    let same = render(&mut compositor, &mut scene, &mut surface);
-    assert!(
-        same.widget_rasterized.is_empty(),
-        "same bytes keep the raster"
-    );
-
-    let restyled: HashMap<String, Vec<u8>> = svgs
-        .iter()
-        .map(|(file, bytes)| {
-            let mut bytes = bytes.clone();
-            bytes.extend_from_slice(b"<!-- restyled -->");
-            (file.clone(), bytes)
-        })
-        .collect();
-    register(&mut compositor, &restyled);
-    let frame = render(&mut compositor, &mut scene, &mut surface);
-    assert_eq!(frame.widget_rasterized, ["g"]);
-    let next = render(&mut compositor, &mut scene, &mut surface);
-    assert!(next.widget_rasterized.is_empty(), "once");
+    register(&mut gpu.compositor, source.clone());
+    check(&mut gpu, &mut scene, (false, 2, 256));
+    source.extend_from_slice(b"<!-- restyled -->");
+    register(&mut gpu.compositor, source);
+    check(&mut gpu, &mut scene, (true, 3, 256));
+    check(&mut gpu, &mut scene, (false, 3, 256));
 }
 
 /// Render gauges sharing one box (each `(instance, level)`) in a fresh scene
 /// and read the frame back.
-fn overlapping_gauges_frame(
-    compositor: &mut Compositor,
-    surface: &mut HeadlessSurface,
-    gauges: &[(&str, f32)],
-) -> Vec<u8> {
-    let mut scene = SceneGraph::new(512.0, 256.0);
-    let tab = scene.create_tab("Main", 0).unwrap();
-    let BundleScanResult::Ok(b) = bundle!("gauge", ["background.svg", "fill.svg"]) else {
-        panic!("built-in gauge bundle failed to load");
-    };
-    let type_name = b.definition.id.clone();
-    for (file, bytes) in b.svg_contents {
-        compositor
-            .widget_renderer_mut()
-            .unwrap()
-            .register_svg(&type_name, &file, bytes);
-    }
-    scene.widget_registry.register_definition(b.definition);
+fn overlapping_gauges_frame(gpu: &mut Gpu, gauges: &[(&str, f32)]) -> Vec<u8> {
+    let (mut scene, tab, name) = gauge_scene(&mut gpu.compositor);
+    let at = relative(0.1, 0.1, 0.25, 0.5);
     for &(instance, level) in gauges {
-        scene.widget_registry.register_instance(WidgetInstance {
-            id: SceneId::new(),
-            widget_type_name: type_name.clone(),
-            tab_id: tab,
-            geometry_override: Some(GeometryPolicy::Relative {
-                x_pct: 0.1,
-                y_pct: 0.1,
-                width_pct: 0.25,
-                height_pct: 0.5,
-            }),
-            contention_override: None,
-            instance_name: instance.to_string(),
-            current_params: HashMap::new(),
-            auto_clear_ms: None,
-        });
+        register_instance(&mut scene, tab, &name, instance, Some(at), false);
         publish(&mut scene, instance, "level", level);
     }
-    render(compositor, &mut scene, surface);
-    surface.read_pixels(&compositor.device)
+    gpu.render_pixels(&mut scene)
 }
 
 /// Every widget shares one z-order, so overlapping widgets stack by instance
@@ -1182,28 +660,10 @@ fn overlapping_gauges_frame(
 /// iteration order (a `HashMap`, reseeded per scene).
 #[tokio::test]
 async fn overlapping_widgets_stack_by_instance_name() {
-    if std::env::var("TZE_HUD_SKIP_GPU_TESTS").is_ok_and(|v| v.trim() == "1") {
+    let Some(mut gpu) = Gpu::with_widgets(512, 256).await else {
         return;
-    }
-    let compositor_init = {
-        let _guard = crate::common::lock_gpu_init().await;
-        Compositor::new_headless(512, 256).await
     };
-    let mut compositor = match compositor_init {
-        Ok(c) => c,
-        Err(CompositorError::NoAdapter) => {
-            assert!(
-                !std::env::var("TZE_HUD_REQUIRE_GPU").is_ok_and(|v| v.trim() == "1"),
-                "TZE_HUD_REQUIRE_GPU=1 but no adapter"
-            );
-            return;
-        }
-        Err(e) => panic!("unexpected compositor error: {e}"),
-    };
-    let mut surface = HeadlessSurface::new(&compositor.device, 512, 256);
-    compositor.init_widget_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
-    let mut frame =
-        |gauges: &[(&str, f32)]| overlapping_gauges_frame(&mut compositor, &mut surface, gauges);
+    let mut frame = |gauges: &[(&str, f32)]| overlapping_gauges_frame(&mut gpu, gauges);
     let full = frame(&[("b", 1.0)]);
     let empty = frame(&[("b", 0.0)]);
     // Probe the ring's solid foreground/track interiors, with a clear
@@ -1244,17 +704,15 @@ async fn overlapping_widgets_stack_by_instance_name() {
             distance(px, &expected[i..i + 4]) < distance(px, &other[i..i + 4])
         })
     };
-    for gauges in [[("a", 0.0), ("b", 1.0)], [("b", 1.0), ("a", 0.0)]] {
-        assert!(
-            shows(&frame(&gauges), &full, &empty),
-            "b draws over a: {gauges:?}"
-        );
-    }
-    for gauges in [[("a", 1.0), ("b", 0.0)], [("b", 0.0), ("a", 1.0)]] {
-        assert!(
-            shows(&frame(&gauges), &empty, &full),
-            "b draws over a: {gauges:?}"
-        );
+    for (b_level, expected, other) in [(1.0, &full, &empty), (0.0, &empty, &full)] {
+        let mut gauges = [("a", 1.0 - b_level), ("b", b_level)];
+        for _ in 0..2 {
+            assert!(
+                shows(&frame(&gauges), expected, other),
+                "b draws over a: {gauges:?}"
+            );
+            gauges.reverse();
+        }
     }
 }
 
@@ -1263,20 +721,10 @@ async fn overlapping_widgets_stack_by_instance_name() {
 #[tokio::test]
 async fn countdown_kpi_and_stepper_render_their_shipped_contracts() {
     use std::sync::Arc;
-    use tze_hud_scene::{Clock, TestClock, WidgetDeadline};
-    let require_gpu = std::env::var("TZE_HUD_REQUIRE_GPU").is_ok_and(|v| v.trim() == "1");
-    if std::env::var("TZE_HUD_SKIP_GPU_TESTS").is_ok_and(|v| v.trim() == "1") {
-        assert!(!require_gpu, "required GPU bundle proof cannot skip");
+    use tze_hud_scene::{TestClock, WidgetDeadline, graph::SurfaceClasses};
+    let Some(mut gpu) = Gpu::with_widgets(360, 124).await else {
         return;
-    }
-    let mut compositor = match crate::common::new_headless_serialized(360, 124).await {
-        Ok(compositor) => compositor,
-        Err(CompositorError::NoAdapter) if !require_gpu => return,
-        Err(error) => panic!("bundle compositor: {error}"),
     };
-    println!("countdown_adapter={:?}", compositor.adapter_info());
-    compositor.init_widget_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
-    let mut surface = HeadlessSurface::new(&compositor.device, 360, 124);
     let clock = Arc::new(TestClock::new(1_000));
     let mut scene = SceneGraph::new_with_clock(360.0, 124.0, clock.clone());
     let tab = scene.create_tab("Bundles", 0).unwrap();
@@ -1285,109 +733,52 @@ async fn countdown_kpi_and_stepper_render_their_shipped_contracts() {
         bundle!("kpi", ["card.svg"]),
         bundle!("stepper", ["card.svg"]),
     ] {
-        let BundleScanResult::Ok(bundle) = loaded else {
-            panic!("shipped bundle must load")
-        };
-        let name = bundle.definition.id.clone();
-        for (file, bytes) in bundle.svg_contents {
-            compositor
-                .widget_renderer_mut()
-                .unwrap()
-                .register_svg(&name, &file, bytes);
-        }
-        scene.widget_registry.register_instance(WidgetInstance {
-            id: SceneId::new(),
-            widget_type_name: name.clone(),
-            tab_id: tab,
-            geometry_override: Some(GeometryPolicy::Relative {
-                x_pct: 0.0,
-                y_pct: 0.0,
-                width_pct: 1.0,
-                height_pct: 1.0,
-            }),
-            contention_override: None,
-            instance_name: name,
-            current_params: bundle
-                .definition
-                .parameter_schema
-                .iter()
-                .map(|p| (p.name.clone(), p.default_value.clone()))
-                .collect(),
-            auto_clear_ms: None,
-        });
-        scene.widget_registry.register_definition(bundle.definition);
+        let name = register_bundle(&mut gpu.compositor, &mut scene, loaded);
+        register_instance(&mut scene, tab, &name, &name, Some(FULL_FRAME), true);
     }
-    let publish = |scene: &mut SceneGraph, name, params| {
-        scene
-            .publish_to_widget(name, params, "agent", None, 200, None)
-            .unwrap();
+    let publish = |scene: &mut SceneGraph, name, params: &[(&'static str, Value)]| {
+        publish_params(scene, name, "agent", 200, params.iter().cloned());
     };
-    let string = |value: &str| WidgetParameterValue::String(value.into());
-    let enumeration = |value: &str| WidgetParameterValue::Enum(value.into());
-    let color_at = |pixels: &[u8], x, y, token| {
-        let actual = widget_region(pixels, 360, (0, 0), (x, y, 1, 1))[0];
-        let expected = token_rgb(token);
-        for channel in 0..3 {
-            assert!(
-                actual[channel].abs_diff(expected[channel]) <= 4,
-                "{token} at {x},{y}: {actual:?} != {expected:?}"
-            );
-        }
+    let dot_color = |pixels: &[u8], dot: u32, token| {
+        assert_color(
+            pixel_at(pixels, 360, 20 + dot * 29, 54),
+            token_rgb(token),
+            4,
+            format_args!("{token} at step {dot}"),
+        );
     };
     publish(
         &mut scene,
         "stepper",
-        HashMap::from([
-            ("step".into(), WidgetParameterValue::F32(2.0)),
-            ("total".into(), WidgetParameterValue::F32(5.0)),
-            ("state".into(), enumeration("blocked")),
-        ]),
+        &[
+            ("step", Value::F32(2.0)),
+            ("total", Value::F32(5.0)),
+            ("state", enumeration("blocked")),
+        ],
     );
-    render(&mut compositor, &mut scene, &mut surface);
-    let blocked = surface.read_pixels(&compositor.device);
-    color_at(&blocked, 20, 54, "color.primary");
-    color_at(&blocked, 49, 54, "color.caution");
-    color_at(&blocked, 78, 54, "color.outline.variant");
-    for (step, filled) in [(2.0, 2), (7.0, 5)] {
-        publish(
-            &mut scene,
-            "stepper",
-            HashMap::from([("step".into(), WidgetParameterValue::F32(step))]),
-        );
-        // A numeric transition uses injected monotonic time and then stops.
-        render(&mut compositor, &mut scene, &mut surface);
-        clock.advance(201);
-        render(&mut compositor, &mut scene, &mut surface);
-        let pixels = surface.read_pixels(&compositor.device);
-        for dot in 1..=5 {
-            color_at(
-                &pixels,
-                20 + (dot - 1) * 29,
-                54,
-                if dot < filled {
-                    "color.primary"
-                } else if dot == filled {
-                    "color.caution"
-                } else {
-                    "color.outline.variant"
-                },
-            );
+    for (step, active) in [(None, 1), (Some(7.0), 4)] {
+        if let Some(step) = step {
+            publish(&mut scene, "stepper", &[("step", Value::F32(step))]);
+            gpu.draw(&mut scene);
+            clock.advance(201);
         }
-        if filled == 2 {
-            assert_eq!(
-                pixels, blocked,
-                "republishing the same whole step changes no pixel"
+        let pixels = gpu.render_pixels(&mut scene);
+        for dot in 0..5 {
+            dot_color(
+                &pixels,
+                dot,
+                match dot.cmp(&active) {
+                    std::cmp::Ordering::Less => "color.primary",
+                    std::cmp::Ordering::Equal => "color.caution",
+                    std::cmp::Ordering::Greater => "color.outline.variant",
+                },
             );
         }
     }
     for (state, token) in [("active", "color.primary"), ("done", "color.success")] {
-        publish(
-            &mut scene,
-            "stepper",
-            HashMap::from([("state".into(), enumeration(state))]),
-        );
-        render(&mut compositor, &mut scene, &mut surface);
-        color_at(&surface.read_pixels(&compositor.device), 136, 54, token);
+        publish(&mut scene, "stepper", &[("state", enumeration(state))]);
+        let pixels = gpu.render_pixels(&mut scene);
+        dot_color(&pixels, 4, token);
     }
     scene
         .clear_widget_for_publisher("stepper", "agent")
@@ -1395,15 +786,14 @@ async fn countdown_kpi_and_stepper_render_their_shipped_contracts() {
     publish(
         &mut scene,
         "kpi",
-        HashMap::from([
-            ("value".into(), string("3 fail")),
-            ("label".into(), string("Tests")),
-            ("trend".into(), enumeration("down")),
-            ("severity".into(), enumeration("error")),
-        ]),
+        &[
+            ("value", string("3 fail")),
+            ("label", string("Tests")),
+            ("trend", enumeration("down")),
+            ("severity", enumeration("error")),
+        ],
     );
-    render(&mut compositor, &mut scene, &mut surface);
-    let failure = surface.read_pixels(&compositor.device);
+    let failure = gpu.render_pixels(&mut scene);
     let glyph = widget_region(&failure, 360, (0, 0), (310, 40, 20, 22));
     let error = token_rgb("color.error");
     assert!(
@@ -1415,13 +805,9 @@ async fn countdown_kpi_and_stepper_render_their_shipped_contracts() {
     publish(
         &mut scene,
         "kpi",
-        HashMap::from([
-            ("value".into(), string("")),
-            ("trend".into(), enumeration("up")),
-        ]),
+        &[("value", string("")), ("trend", enumeration("up"))],
     );
-    render(&mut compositor, &mut scene, &mut surface);
-    let changed = surface.read_pixels(&compositor.device);
+    let changed = gpu.render_pixels(&mut scene);
     assert_ne!(
         widget_region(&failure, 360, (0, 0), (16, 40, 160, 24)),
         widget_region(&changed, 360, (0, 0), (16, 40, 160, 24)),
@@ -1433,90 +819,53 @@ async fn countdown_kpi_and_stepper_render_their_shipped_contracts() {
         "down differs from up"
     );
     scene.clear_widget_for_publisher("kpi", "agent").unwrap();
-    render(&mut compositor, &mut scene, &mut surface);
-    let clean = surface.read_pixels(&compositor.device);
-    let clear_pixel: [u8; 4] = clean[..4].try_into().unwrap();
+    let clean = gpu.render_pixels(&mut scene);
+    let clear_pixel = pixel_at(&clean, 360, 0, 0);
+    let remaining = |ms| ("ends_in_ms", Value::Deadline(WidgetDeadline::relative(ms)));
     publish(
         &mut scene,
         "countdown",
-        HashMap::from([
-            (
-                "ends_in_ms".into(),
-                WidgetParameterValue::Deadline(WidgetDeadline::relative(300_000)),
-            ),
-            ("severity".into(), enumeration("error")),
-        ]),
+        &[remaining(300_000), ("severity", enumeration("error"))],
     );
-    assert!(compositor.widget_deadline_needs_render(&scene));
-    render(&mut compositor, &mut scene, &mut surface);
-    let count = |c: &Compositor| c.widget_renderer().unwrap().raster_count("countdown");
-    let first = count(&compositor);
-    let five = surface.read_pixels(&compositor.device);
-    let value = &compositor
-        .widget_renderer()
-        .unwrap()
-        .texture_entry("countdown")
-        .unwrap()
-        .last_rendered_params["ends_in_ms"];
-    assert_eq!(*value, string("5 min"));
-    assert!(
-        !compositor.has_inflight_animation(&scene),
-        "clock text must not create frame-rate animation"
-    );
-    clock.advance(59_999);
-    assert!(!compositor.widget_deadline_needs_render(&scene));
-    render(&mut compositor, &mut scene, &mut surface);
-    assert_eq!(count(&compositor), first);
-    clock.advance(1);
-    assert!(compositor.widget_deadline_needs_render(&scene));
-    render(&mut compositor, &mut scene, &mut surface);
-    assert_eq!(count(&compositor), first + 1);
-    assert!(!compositor.has_inflight_animation(&scene));
-    use tze_hud_scene::graph::SurfaceClasses;
+    assert!(gpu.compositor.widget_deadline_needs_render(&scene));
+    let five = gpu.render_pixels(&mut scene);
+    let rendered_text = |c: &Compositor| {
+        c.widget_renderer()
+            .unwrap()
+            .texture_entry("countdown")
+            .unwrap()
+            .last_rendered_params["ends_in_ms"]
+            .clone()
+    };
+    assert_eq!(rendered_text(&gpu.compositor), string("5 min"));
+    let initial_rasters = raster_count(&gpu.compositor, "countdown");
+
+    // The windowed idle-gate harness covers ordinary cadence and safe mode.
+    // Here test owner hiding and zero geometry.
     scene.set_owner_hidden(SurfaceClasses {
         widgets: true,
         ..SurfaceClasses::NONE
     });
     clock.advance(60_000);
-    assert_eq!(compositor.next_widget_deadline_wall_us(&scene), None);
-    assert!(!compositor.widget_deadline_needs_render(&scene));
-    assert!(
-        render(&mut compositor, &mut scene, &mut surface)
-            .widget_rasterized
-            .is_empty()
-    );
-    assert_eq!(count(&compositor), first + 1);
+    assert_eq!(gpu.compositor.next_widget_deadline_wall_us(&scene), None);
+    assert!(!gpu.compositor.widget_deadline_needs_render(&scene));
+    assert!(gpu.draw(&mut scene).widget_rasterized.is_empty());
+    assert_eq!(raster_count(&gpu.compositor, "countdown"), initial_rasters);
+
     scene.set_owner_hidden(SurfaceClasses::NONE);
-    assert!(compositor.widget_deadline_needs_render(&scene));
-    render(&mut compositor, &mut scene, &mut surface);
-    assert_eq!(count(&compositor), first + 2);
+    assert!(gpu.compositor.widget_deadline_needs_render(&scene));
+    assert_eq!(gpu.draw(&mut scene).widget_rasterized, ["countdown"]);
+    assert_eq!(rendered_text(&gpu.compositor), string("4 min"));
     assert_eq!(
-        compositor
-            .widget_renderer()
-            .unwrap()
-            .texture_entry("countdown")
-            .unwrap()
-            .last_rendered_params["ends_in_ms"],
-        string("3 min")
+        raster_count(&gpu.compositor, "countdown"),
+        initial_rasters + 1
     );
-    scene.pause_widget_ttls();
-    clock.advance(180_000);
-    assert_eq!(compositor.next_widget_deadline_wall_us(&scene), None);
-    assert!(!compositor.widget_deadline_needs_render(&scene));
-    render(&mut compositor, &mut scene, &mut surface);
-    assert_eq!(count(&compositor), first + 2);
-    scene.resume_widget_ttls();
-    assert!(compositor.widget_deadline_needs_render(&scene));
-    render(&mut compositor, &mut scene, &mut surface);
-    let entry = compositor
-        .widget_renderer()
-        .unwrap()
-        .texture_entry("countdown")
-        .unwrap();
-    assert_eq!(entry.last_rendered_params["ends_in_ms"], string("0:00"));
-    assert_eq!(entry.last_rendered_params["severity"], enumeration("error"));
-    assert_eq!(compositor.next_widget_deadline_wall_us(&scene), None);
-    let zero = surface.read_pixels(&compositor.device);
+    assert!(!gpu.compositor.has_inflight_animation(&scene));
+
+    clock.advance(240_000);
+    let zero = gpu.render_pixels(&mut scene);
+    assert_eq!(rendered_text(&gpu.compositor), string("0:00"));
+    assert_eq!(gpu.compositor.next_widget_deadline_wall_us(&scene), None);
     assert_ne!(five, zero);
     // Small text may have no fully opaque glyph pixel. Its brightest red
     // pixel must still match the error token at nontrivial mask coverage,
@@ -1532,37 +881,28 @@ async fn countdown_kpi_and_stepper_render_their_shipped_contracts() {
         }),
         "zero retains its severity at antialiased coverage: {actual:?}"
     );
-    publish(
-        &mut scene,
-        "countdown",
-        HashMap::from([(
-            "ends_in_ms".into(),
-            WidgetParameterValue::Deadline(WidgetDeadline::relative(90_000)),
-        )]),
+    publish(&mut scene, "countdown", &[remaining(90_000)]);
+    assert!(
+        gpu.compositor
+            .next_widget_deadline_wall_us(&scene)
+            .is_some()
     );
-    assert!(compositor.next_widget_deadline_wall_us(&scene).is_some());
     scene
         .widget_registry
         .instances
         .get_mut("countdown")
         .unwrap()
-        .geometry_override = Some(GeometryPolicy::Relative {
-        x_pct: 0.0,
-        y_pct: 0.0,
-        width_pct: 0.0,
-        height_pct: 1.0,
-    });
-    assert_eq!(compositor.next_widget_deadline_wall_us(&scene), None);
-    assert!(!compositor.widget_deadline_needs_render(&scene));
-    render(&mut compositor, &mut scene, &mut surface);
+        .geometry_override = Some(relative(0.0, 0.0, 0.0, 1.0));
+    assert_eq!(gpu.compositor.next_widget_deadline_wall_us(&scene), None);
+    assert!(!gpu.compositor.widget_deadline_needs_render(&scene));
+    gpu.draw(&mut scene);
     assert!(
-        compositor
+        gpu.compositor
             .widget_renderer()
             .unwrap()
             .texture_entry("countdown")
             .is_none()
     );
-    assert_eq!(clock.now_us(), scene.now_wall_us());
 }
 
 /// The elapsed timer rasterizes once per display change and never between
@@ -1571,70 +911,34 @@ async fn countdown_kpi_and_stepper_render_their_shipped_contracts() {
 async fn elapsed_rasterizes_once_per_display_change_and_fits_its_longest_strings() {
     use std::sync::Arc;
     use tze_hud_scene::{TestClock, WidgetDeadline};
-    let require_gpu = std::env::var("TZE_HUD_REQUIRE_GPU").is_ok_and(|v| v.trim() == "1");
-    if std::env::var("TZE_HUD_SKIP_GPU_TESTS").is_ok_and(|v| v.trim() == "1") {
-        assert!(!require_gpu, "required GPU bundle proof cannot skip");
+    let Some(mut gpu) = Gpu::with_widgets(360, 124).await else {
         return;
-    }
-    let mut compositor = match crate::common::new_headless_serialized(360, 124).await {
-        Ok(compositor) => compositor,
-        Err(CompositorError::NoAdapter) if !require_gpu => return,
-        Err(error) => panic!("bundle compositor: {error}"),
     };
-    compositor.init_widget_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
-    let mut surface = HeadlessSurface::new(&compositor.device, 360, 124);
     let clock = Arc::new(TestClock::new(1_000));
     let mut scene = SceneGraph::new_with_clock(360.0, 124.0, clock.clone());
     let tab = scene.create_tab("Bundles", 0).unwrap();
-    let BundleScanResult::Ok(bundle) = bundle!("elapsed", ["card.svg"]) else {
-        panic!("shipped bundle must load")
+    let name = register_bundle(
+        &mut gpu.compositor,
+        &mut scene,
+        bundle!("elapsed", ["card.svg"]),
+    );
+    register_instance(&mut scene, tab, &name, &name, Some(FULL_FRAME), true);
+    let start = |scene: &mut SceneGraph, ago_ms| {
+        publish_params(
+            scene,
+            "elapsed",
+            "agent",
+            0,
+            [
+                (
+                    "started_ms_ago",
+                    Value::Deadline(WidgetDeadline::relative(ago_ms)),
+                ),
+                ("label", string("Tests")),
+            ],
+        );
     };
-    for (file, bytes) in bundle.svg_contents {
-        compositor
-            .widget_renderer_mut()
-            .unwrap()
-            .register_svg("elapsed", &file, bytes);
-    }
-    scene.widget_registry.register_instance(WidgetInstance {
-        id: SceneId::new(),
-        widget_type_name: "elapsed".into(),
-        tab_id: tab,
-        geometry_override: Some(GeometryPolicy::Relative {
-            x_pct: 0.0,
-            y_pct: 0.0,
-            width_pct: 1.0,
-            height_pct: 1.0,
-        }),
-        contention_override: None,
-        instance_name: "elapsed".into(),
-        current_params: bundle
-            .definition
-            .parameter_schema
-            .iter()
-            .map(|p| (p.name.clone(), p.default_value.clone()))
-            .collect(),
-        auto_clear_ms: None,
-    });
-    scene.widget_registry.register_definition(bundle.definition);
-    let start = |scene: &mut SceneGraph, ago_ms: i64| {
-        scene
-            .publish_to_widget(
-                "elapsed",
-                HashMap::from([
-                    (
-                        "started_ms_ago".into(),
-                        WidgetParameterValue::Deadline(WidgetDeadline::relative(ago_ms)),
-                    ),
-                    ("label".into(), WidgetParameterValue::String("Tests".into())),
-                ]),
-                "agent",
-                None,
-                0,
-                None,
-            )
-            .unwrap();
-    };
-    let count = |c: &Compositor| c.widget_renderer().unwrap().raster_count("elapsed");
+    let count = |c: &Compositor| raster_count(c, "elapsed");
     let shown = |c: &Compositor| {
         c.widget_renderer()
             .unwrap()
@@ -1643,54 +947,42 @@ async fn elapsed_rasterizes_once_per_display_change_and_fits_its_longest_strings
             .last_rendered_params["started_ms_ago"]
             .clone()
     };
-    let text = |s: &str| WidgetParameterValue::String(s.into());
-    start(&mut scene, 0);
-    render(&mut compositor, &mut scene, &mut surface);
-    let first = count(&compositor);
-    assert_eq!(shown(&compositor), text("0:00"));
-    assert!(!compositor.has_inflight_animation(&scene));
-    // Per second under two minutes: nothing between, one raster at the change.
-    clock.advance(999);
-    assert!(!compositor.widget_deadline_needs_render(&scene));
-    render(&mut compositor, &mut scene, &mut surface);
-    assert_eq!(count(&compositor), first);
-    clock.advance(1);
-    assert!(compositor.widget_deadline_needs_render(&scene));
-    render(&mut compositor, &mut scene, &mut surface);
-    assert_eq!(
-        (count(&compositor), shown(&compositor)),
-        (first + 1, text("0:01"))
-    );
-    // Per minute past two minutes.
-    start(&mut scene, 180_000);
-    render(&mut compositor, &mut scene, &mut surface);
-    let three = count(&compositor);
-    assert_eq!(shown(&compositor), text("3 min"));
-    clock.advance(59_999);
-    assert!(!compositor.widget_deadline_needs_render(&scene));
-    render(&mut compositor, &mut scene, &mut surface);
-    assert_eq!(count(&compositor), three);
-    clock.advance(1);
-    render(&mut compositor, &mut scene, &mut surface);
-    assert_eq!(
-        (count(&compositor), shown(&compositor)),
-        (three + 1, text("4 min"))
-    );
+    for (start_ms, before, after, boundary) in [
+        (0, "0:00", "0:01", 1_000),
+        (180_000, "3 min", "4 min", 60_000),
+    ] {
+        start(&mut scene, start_ms);
+        gpu.draw(&mut scene);
+        assert_eq!(shown(&gpu.compositor), string(before));
+        assert!(!gpu.compositor.has_inflight_animation(&scene));
+        let before_count = count(&gpu.compositor);
+        clock.advance(boundary - 1);
+        assert!(!gpu.compositor.widget_deadline_needs_render(&scene));
+        gpu.draw(&mut scene);
+        assert_eq!(count(&gpu.compositor), before_count);
+        clock.advance(1);
+        assert!(gpu.compositor.widget_deadline_needs_render(&scene));
+        gpu.draw(&mut scene);
+        assert_eq!(
+            (count(&gpu.compositor), shown(&gpu.compositor)),
+            (before_count + 1, string(after))
+        );
+    }
     // The longest strings stay inside the card with its 16 px inset.
     for (ago_ms, expected) in [(86_340_000, "23 h 59"), (86_400_000, "1 d 00 h")] {
         start(&mut scene, ago_ms);
-        render(&mut compositor, &mut scene, &mut surface);
-        assert_eq!(shown(&compositor), text(expected));
+        gpu.draw(&mut scene);
+        assert_eq!(shown(&gpu.compositor), string(expected));
     }
     clock.advance(99 * 24 * 3_600_000);
-    render(&mut compositor, &mut scene, &mut surface);
-    assert_eq!(shown(&compositor), text("99 d 23 h"));
+    gpu.draw(&mut scene);
+    assert_eq!(shown(&gpu.compositor), string("99 d 23 h"));
     assert_eq!(
-        compositor.next_widget_deadline_wall_us(&scene),
+        gpu.compositor.next_widget_deadline_wall_us(&scene),
         None,
         "held"
     );
-    let pixels = surface.read_pixels(&compositor.device);
+    let pixels = gpu.pixels();
     let primary = token_rgb("color.primary");
     let ink = |x: u32| {
         widget_region(&pixels, 360, (0, 0), (x, 40, 1, 24))

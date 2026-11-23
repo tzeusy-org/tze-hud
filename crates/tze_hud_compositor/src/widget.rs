@@ -3221,8 +3221,7 @@ impl WidgetRenderer {
 
     /// Rasterize an SVG layer with parameter bindings applied and upload to GPU.
     ///
-    /// Per-instance raster counts (`raster_count`) are the observable cost;
-    /// timing lives in `tests/widget_rasterize_budget.rs`, not on this path.
+    /// Per-instance raster counts (`raster_count`) track this path's work.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn rasterize_and_upload(
         &mut self,
