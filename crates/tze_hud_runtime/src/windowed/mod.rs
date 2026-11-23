@@ -1626,6 +1626,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         let system_card_for_compositor = self.state.system_card.clone();
         let control_panel_for_compositor = self.state.control_panel.clone();
         let mut control_panel_seen = 0u64;
+        let mut control_panel_visit = None;
         let live_for_compositor = Arc::clone(&self.state.live);
         let mut live_seen = 0u64;
         // The compositor was given the tokens in effect when it started
@@ -1860,7 +1861,18 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                     let panel_changed = control_panel_for_compositor
                         .as_ref()
                         .and_then(|panel| panel.model_if_changed(&mut control_panel_seen))
-                        .is_some_and(|model| compositor.set_control_panel(model));
+                        .is_some_and(|panel| {
+                            let previous_visit = control_panel_visit;
+                            control_panel_visit = panel.as_ref().map(|panel| panel.visit);
+                            let pixels_changed = match panel {
+                                Some(panel) => compositor
+                                    .set_control_panel_on_display(Some(panel.model), panel.display),
+                                None => compositor.set_control_panel(None),
+                            };
+                            // An identical model can reopen between turns. Build
+                            // once to publish its geometry under the new visit.
+                            pixels_changed || control_panel_visit != previous_visit
+                        });
                     // Its closed-state notice (hidden content) likewise.
                     let notice_changed = control_panel_for_compositor
                         .as_ref()
@@ -2016,10 +2028,11 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                             // Hand the panel the geometry this frame draws, so a
                             // click hits what is on screen.
                             if let Some(panel) = &control_panel_for_compositor
+                                && let Some(visit) = control_panel_visit
                                 && let Some((generation, geometry)) =
                                     compositor.control_panel_geometry(surf_w as f32, surf_h as f32)
                             {
-                                panel.set_geometry(generation, || geometry.clone());
+                                panel.set_geometry(visit, generation, || geometry.clone());
                             }
                             // Hit-region refresh + hit-test snapshot are still
                             // computed under the lock, from the geometry we are
@@ -2458,7 +2471,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                 self.state.cursor_y = y;
                 self.state.cursor_window = Some(window_id);
                 self.state.cursor_left_window = false;
-                if self.panel_pointer_moved(secondary.is_none()) {
+                if self.panel_pointer_moved(secondary) {
                     self.update_overlay_cursor_hittest();
                     return;
                 }
@@ -2522,7 +2535,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                     }
                     _ => step.to_px(delta_y, tze_hud_input::WHEEL_LINE_PX, 0.0),
                 };
-                if self.panel_wheel(panel_dy, secondary.is_none()) {
+                if self.panel_wheel(panel_dy, secondary) {
                     return;
                 }
                 self.enqueue_scroll_event(delta_x, delta_y, step);
@@ -2547,7 +2560,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                 // ── Control panel: owns the keyboard while open ─────────────
                 // Chords (pause, panel, pairing) are global hotkeys and never
                 // arrive here.
-                if self.panel_key_event(&event) {
+                if self.panel_key_event(secondary, &event) {
                     return;
                 }
 
@@ -2652,7 +2665,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
             }
             WindowEvent::Ime(winit::event::Ime::Commit(text)) => {
                 self.state.composer_preedit = None;
-                if self.panel_text(&text) {
+                if self.panel_text(secondary, &text) {
                     return;
                 }
                 if let Some(source) = wake_source {
@@ -2898,6 +2911,8 @@ impl WindowedRuntime {
                 .with_capture(capture),
         );
         let placement_layout = Arc::new(StdMutex::new(Default::default()));
+        let display_probe: Arc<dyn crate::question_placement::DisplayProbe> =
+            Arc::new(crate::question_placement::Win32Probe);
         crate::question_placement::install(
             &mut shared_scene
                 .try_lock()
@@ -2905,7 +2920,7 @@ impl WindowedRuntime {
             cfg.config_toml.as_deref(),
             &live.publication_defaults,
             Arc::clone(&placement_layout),
-            Arc::new(crate::question_placement::Win32Probe),
+            Arc::clone(&display_probe),
         );
         let appearance = Arc::new(crate::appearance::Appearance::for_startup(
             raw_config_for_startup.as_ref(),
@@ -3210,6 +3225,8 @@ impl WindowedRuntime {
         let control_panel = network_rt.as_ref().map(|rt| {
             let deps = crate::shell::control_panel::ControlPanelDeps {
                 clipboard: Default::default(),
+                display_probe: Arc::clone(&display_probe),
+                display_layout: Arc::clone(&placement_layout),
                 scene: Arc::clone(&shared_scene),
                 pause: crate::shell::control_panel::PauseControl::new(
                     Arc::clone(&shared_state),

@@ -1,20 +1,21 @@
 //! Owner answer intent: resolve a current rendered question on the main
 //! thread, then take native focus after releasing every scene/state guard.
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use tze_hud_scene::{ZoneContent, ZoneInteractionKind};
 
 use super::WinitApp;
 use super::keyboard::keyboard_key_identity;
 use super::lifecycle::{INTERACTION_LOCK_BUDGET, spin_acquire};
+use crate::shell::control_panel::TrayVisit;
 
 #[derive(Default)]
 pub(super) struct AnswerKeyboardState {
     pub requested: Arc<AtomicBool>,
     /// A tray click: questions only, and a stale click opens the panel.
-    pub tray_requested: Arc<AtomicBool>,
+    pub tray_requested: Arc<Mutex<Option<TrayVisit>>>,
     pub focus: Option<AnswerFocus>,
     pub return_key: Option<String>,
     /// The key holding a destructive action; its release ends the hold.
@@ -178,8 +179,8 @@ impl AnswerKeyboardState {
         wake: tze_hud_scene::render_wake::RenderWakeNotifier,
     ) -> crate::shell::control_panel::AnswerHook {
         let requested = Arc::clone(&self.tray_requested);
-        Arc::new(move || {
-            requested.store(true, Ordering::Release);
+        Arc::new(move |visit| {
+            *requested.lock().unwrap_or_else(|e| e.into_inner()) = Some(visit);
             wake.notify();
         })
     }
@@ -189,10 +190,17 @@ impl WinitApp {
     pub(super) fn sync_answer_focus(&mut self) {
         let keyboard = &self.state.answer_keyboard;
         let chord = keyboard.requested.swap(false, Ordering::AcqRel);
-        let tray = keyboard.tray_requested.swap(false, Ordering::AcqRel);
-        if !chord && !tray {
+        let tray = keyboard
+            .tray_requested
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take();
+        if !chord && tray.is_none() {
             return;
         }
+        let tray_origin = tray
+            .as_ref()
+            .map(|visit| super::lifecycle::tray_focus_return(visit.origin));
         let paused = self.state.safe_mode_atomic.load(Ordering::Acquire);
         let panel_open = self
             .state
@@ -206,15 +214,15 @@ impl WinitApp {
         };
         // Cards win; with none, only the chord falls through to a portal.
         let found = match found {
-            Ok(false) if chord && !tray && !paused => self.focus_waiting_portal(),
+            Ok(false) if chord && tray.is_none() && !paused => self.focus_waiting_portal(),
             found => found,
         };
         match found {
             Ok(true) => {
-                if tray {
-                    // Only cards answer a tray click. The tray took the
-                    // foreground; return to the app that was behind it.
-                    super::lifecycle::return_to_tray_click_origin();
+                if let Some(origin) = tray_origin {
+                    // A tray-focused card returns to the app sampled at the
+                    // click, including the outer origin of a nested visit.
+                    super::lifecycle::redirect_focus_return(origin);
                 }
                 if panel_open && let Some(panel) = &self.state.control_panel {
                     // This explicit owner handoff closes settings only after a
@@ -226,19 +234,26 @@ impl WinitApp {
                 }
             }
             #[cfg(any(target_os = "windows", test, feature = "test-harness"))]
-            Ok(false) if tray => {
+            Ok(false) => {
                 // The question went between click and focus: a click is never dead.
-                if let Some(panel) = &self.state.control_panel {
+                if let (Some(panel), Some(visit)) = (&self.state.control_panel, tray) {
                     use crate::shell::control_panel::{PanelEvent, TrayCommand};
-                    panel.send(PanelEvent::Tray(TrayCommand::OpenPanel));
+                    panel.send(PanelEvent::Tray(TrayCommand::OpenPanel, visit));
                 }
             }
             Err(()) => {
                 let keyboard = &self.state.answer_keyboard;
                 keyboard.requested.fetch_or(chord, Ordering::AcqRel);
-                keyboard.tray_requested.fetch_or(tray, Ordering::AcqRel);
+                if let Some(visit) = tray {
+                    keyboard
+                        .tray_requested
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .get_or_insert(visit);
+                }
                 self.schedule_shared_scene_availability_wake();
             }
+            #[cfg(not(any(target_os = "windows", test, feature = "test-harness")))]
             Ok(false) => {}
         }
     }

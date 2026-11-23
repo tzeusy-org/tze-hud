@@ -571,6 +571,7 @@ impl StatusSource {
             "agents": agents,
             "safe_mode": self.safe_mode.load(Ordering::Relaxed),
             "tray": tray_status(),
+            "panel_display": surfaces.panel_display,
             "session_locked": session_locked(),
             "safe_mode_hotkey": hotkey(ChordRole::Pause).to_json_for(ChordRole::Pause),
             "panel_hotkey": hotkey(ChordRole::Panel).to_json_for(ChordRole::Panel),

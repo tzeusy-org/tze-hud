@@ -307,12 +307,14 @@ pub(super) fn display_scales(
                 .find(|m| m.name == display)
                 .map(|m| (zone.clone(), m.scale))
         })
-        // A question card placed on a secondary draws at that monitor's scale.
-        .chain(secondaries.iter().map(|m| {
-            (
-                tze_hud_compositor::placed_zone_key(QUESTION_ZONE, &m.name),
-                m.scale,
-            )
+        // Both movable surfaces draw at the selected monitor's scale.
+        .chain(secondaries.iter().flat_map(|m| {
+            [QUESTION_ZONE, "control-panel"].map(|surface| {
+                (
+                    tze_hud_compositor::placed_zone_key(surface, &m.name),
+                    m.scale,
+                )
+            })
         }))
         .collect();
     crate::appearance::DisplayScales {
@@ -2051,12 +2053,14 @@ mod tests {
             scales.zones,
             HashMap::from([
                 ("subtitle".to_string(), 2.0),
-                // Each secondary also scales a question placed there.
+                // Each secondary also scales questions and the panel.
                 (
                     "notification-area@DISPLAY6".to_string(),
                     secondaries[0].scale
                 ),
                 ("notification-area@DISPLAY8".to_string(), 2.0),
+                ("control-panel@DISPLAY6".to_string(), secondaries[0].scale),
+                ("control-panel@DISPLAY8".to_string(), 2.0),
             ])
         );
     }
@@ -2086,6 +2090,8 @@ mod tests {
                     secondaries[0].scale
                 ),
                 ("notification-area@DISPLAY8".to_string(), 1.5),
+                ("control-panel@DISPLAY6".to_string(), secondaries[0].scale),
+                ("control-panel@DISPLAY8".to_string(), 1.5),
             ])
         );
     }

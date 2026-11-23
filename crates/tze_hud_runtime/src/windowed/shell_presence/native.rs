@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 use std::sync::{Arc, OnceLock, RwLock};
 
 use serde_json::{Value, json};
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
     BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CreateBitmap, CreateDIBSection, DIB_RGB_COLORS,
     DeleteObject,
@@ -35,7 +35,10 @@ use super::{
     GlyphColors, Inputs, Presentation, Registration, SessionState, ShellIcon, ShellOperation,
     TrayClick, WindowFacts,
 };
-use crate::shell::control_panel::{ControlPanelHandle, PanelEvent, TrayCommand};
+use crate::question_placement::Win32Probe;
+use crate::shell::control_panel::{
+    ControlPanelHandle, PanelEvent, TrayCommand, TrayFocusOrigin, TrayVisit,
+};
 
 const ICON_ID: u32 = 1;
 const NIN_KEYSELECT: u32 = NIN_SELECT | 1;
@@ -159,9 +162,9 @@ impl Bridge {
         }
     }
 
-    fn command(&self, command: TrayCommand) {
+    fn command(&self, command: TrayCommand, visit: TrayVisit) {
         if let Some(panel) = &self.panel {
-            panel.send(PanelEvent::Tray(command));
+            panel.send(PanelEvent::Tray(command, visit));
         } else if command == TrayCommand::Quit {
             (self.quit)();
         }
@@ -449,8 +452,8 @@ impl Host {
                     return Some(LRESULT(0));
                 }
                 match event {
-                    NIN_SELECT | NIN_KEYSELECT => self.click(),
-                    WM_CONTEXTMENU => self.menu(wparam),
+                    NIN_SELECT | NIN_KEYSELECT => self.click(wparam),
+                    WM_CONTEXTMENU => self.menu(),
                     _ => {}
                 }
             }
@@ -473,21 +476,42 @@ impl Host {
     }
 
     /// Left click or Win+B Enter: answer while a click would, else the panel.
-    fn click(&self) {
-        if self.view().click == TrayClick::Answer {
-            crate::windowed::lifecycle::note_tray_click_origin(app_window_in_front());
-            self.bridge.command(TrayCommand::AnswerNext);
+    fn click(&self, position: WPARAM) {
+        let origin = sample_tray_origin();
+        // VERSION_4 supplies the activation point, including the icon's
+        // anchor when activated by keyboard.
+        let point = POINT {
+            x: position.0 as u16 as i16 as i32,
+            y: (position.0 >> 16) as u16 as i16 as i32,
+        };
+        let command = if self.view().click == TrayClick::Answer {
+            TrayCommand::AnswerNext
         } else {
-            self.bridge.command(TrayCommand::TogglePanel);
-        }
+            TrayCommand::TogglePanel
+        };
+        self.bridge.command(
+            command,
+            TrayVisit {
+                display: Win32Probe::display_at(point),
+                origin,
+            },
+        );
     }
 
-    fn menu(&self, position: WPARAM) {
+    fn menu(&self) {
+        let origin = sample_tray_origin();
         let view = self.view();
-        // Sampled before the menu takes the foreground.
-        let origin = (view.click == TrayClick::Answer)
-            .then(app_window_in_front)
-            .flatten();
+        // VERSION_4 does not specify a WM_CONTEXTMENU anchor in wParam.
+        // Capture the pointer at invocation, before the native menu takes
+        // focus or the pointer moves to one of its items.
+        let mut point = POINT::default();
+        let visit = TrayVisit {
+            // SAFETY: point is a valid out-parameter.
+            display: unsafe { GetCursorPos(&mut point) }
+                .ok()
+                .and_then(|()| Win32Probe::display_at(point)),
+            origin,
+        };
         let menu = match unsafe { CreatePopupMenu() } {
             Ok(menu) => Menu(menu),
             Err(error) => {
@@ -508,13 +532,6 @@ impl Host {
         let default = items
             .first()
             .map_or(0, |(command, _)| command.menu_id() as u32);
-        let mut point = windows::Win32::Foundation::POINT {
-            x: position.0 as u16 as i16 as i32,
-            y: (position.0 >> 16) as u16 as i16 as i32,
-        };
-        if point.x == -1 && point.y == -1 {
-            let _ = unsafe { GetCursorPos(&mut point) };
-        }
         // Notification menus require foreground ownership and the trailing
         // WM_NULL for reliable dismiss/reopen. TrackPopupMenu dispatches this
         // same thread's display/session messages while it is open.
@@ -537,10 +554,7 @@ impl Host {
         };
         self.bridge.menu_open.store(false, Ordering::Release);
         if let Some(command) = TrayCommand::from_menu_id(id) {
-            if command == TrayCommand::AnswerNext {
-                crate::windowed::lifecycle::note_tray_click_origin(origin);
-            }
-            self.bridge.command(command);
+            self.bridge.command(command, visit);
         }
     }
 
@@ -672,6 +686,31 @@ fn icon(svg: &str, size: i32) -> Result<Icon, String> {
         let _ = DeleteObject(color);
         result
     }
+}
+
+/// Capture real focus before a menu or an overlay gets a chance to take it.
+fn sample_tray_origin() -> TrayFocusOrigin {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetClassNameW, GetForegroundWindow, GetWindowThreadProcessId,
+    };
+
+    // SAFETY: the HWND is only queried, and the out-parameters are local.
+    let foreground = unsafe {
+        let window = GetForegroundWindow();
+        (!window.is_invalid()).then(|| {
+            let mut pid = 0;
+            GetWindowThreadProcessId(window, Some(&mut pid));
+            let mut class = [0u16; 64];
+            let len = GetClassNameW(window, &mut class).max(0) as usize;
+            WindowFacts {
+                hwnd: window.0 as isize,
+                hud: pid == std::process::id(),
+                class: String::from_utf16_lossy(&class[..len]),
+                ..Default::default()
+            }
+        })
+    };
+    super::tray_focus_origin(foreground, app_window_in_front)
 }
 
 /// One look, top to bottom in z-order, for the app window behind the tray.

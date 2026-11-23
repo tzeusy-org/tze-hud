@@ -464,6 +464,8 @@ impl HeadlessEventLoopHarness {
         let effects: Arc<std::sync::Mutex<Vec<String>>> = Arc::default();
         let deps = crate::shell::control_panel::ControlPanelDeps {
             clipboard: Default::default(),
+            display_probe: Arc::new(crate::question_placement::Win32Probe),
+            display_layout: Arc::clone(&state.placement_layout),
             scene: Arc::clone(&panel_scene),
             pause: crate::shell::control_panel::PauseControl::new(
                 Arc::clone(&state.shared_state),
@@ -631,7 +633,10 @@ impl HeadlessEventLoopHarness {
             "quit" => TrayCommand::Quit,
             _ => panic!("unknown tray test command"),
         };
-        assert!(self.control_panel().send(PanelEvent::Tray(command)));
+        assert!(
+            self.control_panel()
+                .send(PanelEvent::Tray(command, Default::default()))
+        );
     }
 
     /// Press one of the HUD's global chords.
@@ -1154,10 +1159,12 @@ impl HeadlessEventLoopHarness {
                 Key::Character(ch.to_string().into())
             };
             assert!(
-                self.app.panel_key_input(physical, &logical, None, true),
+                self.app
+                    .panel_key_input(None, physical, &logical, None, true),
                 "the panel is open"
             );
-            self.app.panel_key_input(physical, &logical, None, false);
+            self.app
+                .panel_key_input(None, physical, &logical, None, false);
         }
     }
 
@@ -1180,10 +1187,12 @@ impl HeadlessEventLoopHarness {
         let physical = PhysicalKey::Unidentified(NativeKeyCode::Unidentified);
         let logical = Key::Named(named);
         assert!(
-            self.app.panel_key_input(physical, &logical, None, true),
+            self.app
+                .panel_key_input(None, physical, &logical, None, true),
             "the panel is open"
         );
-        self.app.panel_key_input(physical, &logical, None, false);
+        self.app
+            .panel_key_input(None, physical, &logical, None, false);
     }
 
     /// Press and release a named key (e.g. `"Enter"`), as winit delivers it.
@@ -5608,7 +5617,7 @@ mod tests {
                 1080.0,
             );
             let background = geometry.panel;
-            panel.set_geometry(1, || geometry.clone());
+            panel.set_geometry(panel.open_visit().unwrap(), 1, || geometry.clone());
             // The top-left inset is background, outside every row/control.
             (harness.app.state.cursor_x, harness.app.state.cursor_y) =
                 (background.x + 1.0, background.y + 1.0);
@@ -7716,10 +7725,10 @@ mod tests {
         };
         let tray = |harness: &mut HeadlessEventLoopHarness, command| {
             let requested = Arc::clone(&harness.app.state.answer_keyboard.tray_requested);
-            assert!(panel.send(PanelEvent::Tray(command)));
+            assert!(panel.send(PanelEvent::Tray(command, Default::default())));
             if command == TrayCommand::AnswerNext {
                 wait("the panel task ran the hook", &|| {
-                    requested.load(std::sync::atomic::Ordering::Acquire)
+                    requested.lock().unwrap().is_some()
                 });
                 harness.drain();
             }
@@ -8027,9 +8036,9 @@ mod tests {
             assert!(
                 !harness
                     .app
-                    .panel_key_input(physical, &logical, Some("2"), true)
+                    .panel_key_input(None, physical, &logical, Some("2"), true)
             );
-            assert!(!harness.app.panel_text("2"));
+            assert!(!harness.app.panel_text(None, "2"));
             wait_open(false);
             harness.app.sync_panel_focus();
             assert!(harness.app.state.answer_keyboard.focus.is_some());

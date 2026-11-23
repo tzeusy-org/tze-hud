@@ -1174,6 +1174,10 @@ unlock and console/remote connection events update `session_locked` without
 polling. This observation alone does **not** freeze question deadlines or hold
 new cards; that separate desktop-presence delivery remains outstanding.
 
+`/admin/status` reports the normalized display name of the open control
+panel as `panel_display` (for example, `"DISPLAY3"`). It is `null` when
+the panel is closed or no overlay display is known.
+
 A global chord takes its keys from every other app while the HUD runs, so the
 defaults are F-key chords; rebind one that clashes (Ctrl+Shift+F10 is also
 JetBrains IDEs' "Run", and Ctrl+Shift+F8 its "View Breakpoints" on Windows). The pairing chord is not registered when the MCP port
@@ -1254,14 +1258,22 @@ before closing. An answer-chord visit entered from another app uses Esc to
 leave without answering. Key repeats, text and matching releases from a card
 activation stay local; native focus returns after the activation key releases.
 
-The control panel is a full-width pane over the primary display: a search
-field, quick-action tiles, and section cards of settings that scroll
-vertically. Its header line counts the agents connected or showing
+The control panel opens on the foreground window's monitor at that display's
+scale. If the HUD or desktop is in front, or there is no foreground window,
+it uses the pointer's monitor. A tray open uses the monitor at the icon
+activation or context-menu invocation. The primary is the fallback when the
+chosen monitor has no overlay. The panel stays on its display until closed
+and chooses again on reopening. The hidden-content pill and pairing system
+card use the primary.
+
+The full-width pane contains a search field, quick-action tiles, and section
+cards that scroll vertically. Its header line counts the agents connected or showing
 something and what they hold ("3 agents · 2 portals · 5 zones · 1 widget")
 and says "restart pending" while a saved setting waits for a
-restart (Restart now is in System, Alt+8). It takes keyboard focus when it
-opens (if Windows refuses, the header says to click it) and returns focus
-on close. Typing searches every row; Space continues the query after automatic
+restart (Restart now is in System, Alt+8). The panel takes keyboard focus on
+that display (if Windows refuses, the header says to click it). On close it
+returns focus to the prior app if the HUD still owns focus. Typing searches
+every row; Space continues the query after automatic
 result focus. Arrows and Tab navigate, Enter acts on the best match, and Space
 acts on an explicitly selected control. Esc clears the search, then closes.
 A row whose value differs from

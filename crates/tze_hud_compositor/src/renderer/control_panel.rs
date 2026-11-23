@@ -4,8 +4,8 @@
 //! platform-neutral [`ControlPanelModel`] through
 //! [`Compositor::set_control_panel`]. It never enters the scene graph, so no
 //! agent surface can observe it (docs/invariants.md §3), and `/admin/screenshot`
-//! leaves it out. The final system-card pass draws it on the primary display,
-//! in place of the card while it is open.
+//! leaves it out. The final chrome pass draws it on its chosen display;
+//! the system card belongs to the primary.
 //!
 //! Every size, color and font comes from the theme's role tokens (`color.*`,
 //! `shape.*`, `space.*`, `type.*`, `state.*`, `focus.*`) plus the
@@ -2056,14 +2056,32 @@ pub fn estimate_control_panel_geometry(
 impl Compositor {
     /// Mirror the runtime's control panel (`None`: closed); returns true when
     /// it changed (the caller must then repaint once, since no scene change
-    /// accompanies it). While open, the panel replaces the system card.
+    /// accompanies it). The panel uses the primary display by default.
     pub fn set_control_panel(&mut self, panel: Option<ControlPanelModel>) -> bool {
-        if self.control_panel == panel {
+        self.set_control_panel_on_display(panel, None)
+    }
+
+    /// Mirror the panel and the normalized display it chose on opening.
+    pub fn set_control_panel_on_display(
+        &mut self,
+        panel: Option<ControlPanelModel>,
+        display: Option<String>,
+    ) -> bool {
+        if self.control_panel == panel && self.control_panel_display == display {
             return false;
         }
         self.control_panel = panel;
+        self.control_panel_display = display;
         self.control_panel_layout = None;
         true
+    }
+
+    pub(super) fn control_panel_secondary(&self) -> Option<&crate::DisplayRect> {
+        let selected = self.control_panel_display.as_ref()?;
+        self.display_layout
+            .displays()
+            .iter()
+            .find(|display| !display.primary && &display.name == selected)
     }
 
     pub fn control_panel_open(&self) -> bool {
@@ -2117,28 +2135,32 @@ impl Compositor {
         sh: f32,
     ) -> Option<&ControlPanelLayout> {
         let model = self.control_panel.as_ref()?;
-        let key = (sw.to_bits(), sh.to_bits());
+        let secondary_key = self
+            .control_panel_secondary()
+            .map(|display| crate::display::placed_zone_key("control-panel", &display.name));
+        let tokens = secondary_key
+            .as_ref()
+            .and_then(|key| self.secondary_zone_tokens.get(key))
+            .unwrap_or(&self.token_map);
+        let scale = tze_hud_config::tokens::px_scale(tokens);
+        let key = (sw.to_bits(), sh.to_bits(), scale.to_bits());
         if self
             .control_panel_layout
             .as_ref()
             .is_none_or(|(k, _)| *k != key)
         {
             let layout = match self.text_rasterizer.as_mut() {
-                Some(tr) => control_panel_layout(
-                    &self.token_map,
-                    model,
-                    sw,
-                    sh,
-                    &mut |text, size, weight, mono| {
+                Some(tr) => {
+                    control_panel_layout(tokens, model, sw, sh, &mut |text, size, weight, mono| {
                         let family = if mono {
                             FontFamily::SystemMonospace
                         } else {
                             FontFamily::SystemSansSerif
                         };
                         tr.measure_single_line(text, size, family, weight)
-                    },
-                ),
-                None => control_panel_layout(&self.token_map, model, sw, sh, &mut estimate_width),
+                    })
+                }
+                None => control_panel_layout(tokens, model, sw, sh, &mut estimate_width),
             };
             self.control_panel_layout = Some((key, layout));
             self.control_panel_layout_generation += 1;
@@ -2153,6 +2175,9 @@ impl Compositor {
         sw: f32,
         sh: f32,
     ) -> Option<(u64, &ControlPanelGeometry)> {
+        let (sw, sh) = self.control_panel_secondary().map_or((sw, sh), |display| {
+            (display.rect.width, display.rect.height)
+        });
         self.ensure_control_panel_layout(sw, sh)?;
         let generation = self.control_panel_layout_generation;
         self.control_panel_layout
@@ -2162,8 +2187,13 @@ impl Compositor {
 
     /// Flat quads of the final chrome pass: the panel scrim while the panel is
     /// open, else the system card backdrop.
-    pub(super) fn final_chrome_vertices(&mut self, sw: f32, sh: f32) -> Vec<RectVertex> {
-        if self.control_panel.is_none() {
+    pub(super) fn final_chrome_vertices(
+        &mut self,
+        sw: f32,
+        sh: f32,
+        panel_here: bool,
+    ) -> Vec<RectVertex> {
+        if !panel_here || self.control_panel.is_none() {
             return self.system_card_vertices(sw, sh);
         }
         let rects = match self.ensure_control_panel_layout(sw, sh) {
@@ -2184,8 +2214,12 @@ impl Compositor {
         &mut self,
         sw: f32,
         sh: f32,
+        panel_here: bool,
     ) -> (Vec<RoundedRectDrawCmd>, usize) {
-        let (shapes, notice) = match self.ensure_control_panel_layout(sw, sh) {
+        let (shapes, notice) = match panel_here
+            .then(|| self.ensure_control_panel_layout(sw, sh))
+            .flatten()
+        {
             Some(layout) => (layout.shapes.clone(), 0),
             None => {
                 let shapes = self.closed_notice_draw(sw, sh).0;
@@ -2220,8 +2254,13 @@ impl Compositor {
     /// Text of the final chrome pass: the panel's while it is open, else the
     /// panel notice's and the system card's. The count is how many leading
     /// items belong to the notice, which the admin capture leaves out.
-    pub(super) fn final_chrome_text_items(&mut self, sw: f32, sh: f32) -> (Vec<TextItem>, usize) {
-        if self.control_panel.is_none() {
+    pub(super) fn final_chrome_text_items(
+        &mut self,
+        sw: f32,
+        sh: f32,
+        panel_here: bool,
+    ) -> (Vec<TextItem>, usize) {
+        if !panel_here || self.control_panel.is_none() {
             let mut items = self.closed_notice_draw(sw, sh).1;
             let notice = items.len();
             items.extend(self.system_card_text_items(sw, sh));

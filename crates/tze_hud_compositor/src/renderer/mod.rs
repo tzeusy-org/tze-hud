@@ -229,12 +229,12 @@ pub struct Compositor {
     safe_mode_overlay: bool,
     /// Runtime system card / toast (see [`Compositor::set_system_card`]).
     system_card: Option<SystemCardModel>,
-    /// Runtime control panel (see [`Compositor::set_control_panel`]); while
-    /// open it replaces the system card in the final chrome pass.
+    /// Runtime control panel (see [`Compositor::set_control_panel`]).
     control_panel: Option<ControlPanelModel>,
+    control_panel_display: Option<String>,
     /// Last panel layout, keyed by surface size; cleared on model or token
     /// change.
-    control_panel_layout: Option<((u32, u32), control_panel::ControlPanelLayout)>,
+    control_panel_layout: Option<((u32, u32, u32), control_panel::ControlPanelLayout)>,
     /// Bumped on every panel re-layout so the runtime can skip unchanged
     /// geometry.
     control_panel_layout_generation: u64,
@@ -1087,6 +1087,7 @@ impl Compositor {
             safe_mode_overlay: false,
             system_card: None,
             control_panel: None,
+            control_panel_display: None,
             control_panel_layout: None,
             control_panel_layout_generation: 0,
             closed_notice: None,
@@ -1440,6 +1441,7 @@ impl Compositor {
             safe_mode_overlay: false,
             system_card: None,
             control_panel: None,
+            control_panel_display: None,
             control_panel_layout: None,
             control_panel_layout_generation: 0,
             closed_notice: None,
@@ -2719,7 +2721,7 @@ impl Compositor {
         surf_w: u32,
         surf_h: u32,
     ) -> EncodeInputs {
-        let sources = self.collect_encode_sources(scene, surf_w, surf_h);
+        let sources = self.collect_encode_sources(scene, surf_w, surf_h, true);
         self.prepare_encode_inputs(sources, (surf_w, surf_h))
     }
 
@@ -2732,6 +2734,7 @@ impl Compositor {
         scene: &SceneGraph,
         surf_w: u32,
         surf_h: u32,
+        panel_on_primary: bool,
     ) -> EncodeSources {
         let sw = surf_w as f32;
         let sh = surf_h as f32;
@@ -2755,7 +2758,7 @@ impl Compositor {
             vec![]
         };
         let (card_items, notice_items) = if has_text_rasterizer {
-            self.final_chrome_text_items(sw, sh)
+            self.final_chrome_text_items(sw, sh, panel_on_primary)
         } else {
             (vec![], 0)
         };
