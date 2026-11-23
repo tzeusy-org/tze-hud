@@ -685,6 +685,15 @@ async fn resident_raster_publish_admits_current_grants_before_enqueue_and_apply(
         assert!(
             scene
                 .zone_registry
+                .get_occupancy("ambient-background", tze_hud_scene::SceneId::new())
+                .unwrap()
+                .active_publications
+                .iter()
+                .all(|r| r.resident_raster.is_none())
+        );
+        assert!(
+            scene
+                .zone_registry
                 .snapshot()
                 .active_publishes
                 .iter()

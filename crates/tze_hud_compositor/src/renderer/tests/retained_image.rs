@@ -221,6 +221,23 @@ async fn resident_raster_uses_store_pixels_without_generic_image_authority() {
     render_pixels(&mut compositor, &mut scene, &surface);
     assert!(compositor.resident_image_texture_cache.is_empty());
     assert_eq!(ledger.snapshot().resource_bytes, 8);
+    // Preserve an independently owned eligible peer behind the newer raster.
+    scene
+        .zone_registry
+        .zones
+        .get_mut("resident")
+        .unwrap()
+        .contention_policy = ContentionPolicy::MergeByKey { max_keys: 4 };
+    scene
+        .publish_to_zone(
+            "resident",
+            ZoneContent::SolidColor(Rgba::new(0.0, 0.0, 1.0, 1.0)),
+            "mcp-peer",
+            Some("peer".into()),
+            None,
+            None,
+        )
+        .unwrap();
     scene
         .publish(
             &tze_hud_scene::Publisher {
@@ -242,7 +259,21 @@ async fn resident_raster_uses_store_pixels_without_generic_image_authority() {
     assert_pixel_color(&republished, 128, 8, 32, [255, 0, 0, 255], 8, "republished").unwrap();
     directory.with_agents_of(Default::default());
     let revoked = render_pixels(&mut compositor, &mut scene, &surface);
-    assert_ne!(pixel_at(&revoked, 128, 8, 32), [255, 0, 0, 255]);
+    assert_pixel_color(
+        &revoked,
+        128,
+        8,
+        32,
+        [0, 0, 255, 255],
+        8,
+        "eligible peer wins after raster revocation",
+    )
+    .unwrap();
+    assert_eq!(scene.drain_revoked_resident_rasters(), 1);
+    assert_eq!(
+        scene.zone_registry.active_for_zone("resident")[0].publisher_namespace,
+        "mcp-peer"
+    );
     assert!(compositor.resident_image_texture_cache.is_empty());
     assert_eq!(
         ledger.snapshot().resource_bytes,

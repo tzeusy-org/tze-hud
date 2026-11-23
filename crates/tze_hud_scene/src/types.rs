@@ -3436,7 +3436,16 @@ impl ZoneRegistry {
         let pubs = self
             .active_publishes
             .get(zone_name)
-            .cloned()
+            .map(|records| {
+                records
+                    .iter()
+                    .cloned()
+                    .map(|mut record| {
+                        record.resident_raster = None;
+                        record
+                    })
+                    .collect::<Vec<_>>()
+            })
             .unwrap_or_default();
         let occupant_count = pubs.len() as u32;
         Some(ZoneOccupancy {
