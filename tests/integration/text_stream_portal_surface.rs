@@ -1030,8 +1030,8 @@ fn portal_scroll_updates_local_first_via_input_processor() {
     );
 }
 
-/// A lagging agent retains the latest available absolute scroll sample. Losing
-/// older notifications must not reset the local viewport or replay old offsets.
+/// Local scroll changes coalesce into one dirty frame commit. Committing the
+/// frame must preserve the latest viewport offset without replaying older deltas.
 #[test]
 fn portal_scroll_coalesces_commits_without_resetting_visible_window() {
     use tze_hud_input::{ScrollConfig, ScrollState};
