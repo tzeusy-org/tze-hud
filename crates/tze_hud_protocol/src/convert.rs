@@ -76,46 +76,6 @@ pub fn proto_zone_content_to_scene(c: &proto::ZoneContent) -> Option<ZoneContent
     }
 }
 
-/// Convert a scene GeometryPolicy to a protobuf GeometryPolicyProto.
-pub fn geometry_policy_to_proto(gp: &GeometryPolicy) -> proto::GeometryPolicyProto {
-    use proto::geometry_policy_proto::Policy;
-    let policy = match gp {
-        GeometryPolicy::Relative {
-            x_pct,
-            y_pct,
-            width_pct,
-            height_pct,
-        } => Policy::Relative(proto::RelativeGeometryPolicy {
-            x_pct: *x_pct,
-            y_pct: *y_pct,
-            width_pct: *width_pct,
-            height_pct: *height_pct,
-        }),
-        GeometryPolicy::EdgeAnchored {
-            edge,
-            height_pct,
-            width_pct,
-            margin_px,
-        } => {
-            let edge_proto = match edge {
-                DisplayEdge::Top => proto::DisplayEdge::Top,
-                DisplayEdge::Bottom => proto::DisplayEdge::Bottom,
-                DisplayEdge::Left => proto::DisplayEdge::Left,
-                DisplayEdge::Right => proto::DisplayEdge::Right,
-            };
-            Policy::EdgeAnchored(proto::EdgeAnchoredGeometryPolicy {
-                edge: edge_proto as i32,
-                height_pct: *height_pct,
-                width_pct: *width_pct,
-                margin_px: *margin_px,
-            })
-        }
-    };
-    proto::GeometryPolicyProto {
-        policy: Some(policy),
-    }
-}
-
 // ─── Widget conversions ───────────────────────────────────────────────────────
 
 /// Convert a proto WidgetParameterValueProto to a scene (name, WidgetParameterValue) pair.

@@ -54,9 +54,7 @@ pub use budget_gate::{
     MutationBudgetDecision, MutationBudgetEnforcer, SharedMutationBudgetEnforcer,
 };
 pub use degradation_notice_bus::{DegradationNoticeReceiver, DegradationNoticeSender};
-use element_persist::{
-    ElementStorePersistRequest, persist_element_store, touch_element_store_entry_by_namespace,
-};
+use element_persist::{persist_element_store, touch_element_store_entry_by_namespace};
 #[cfg(test)]
 use handshake::handle_session_init;
 use handshake::{HandshakeCtx, handle_handshake_read};
@@ -95,10 +93,6 @@ pub(super) fn now_ms() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as u64
-}
-
-pub(super) fn scene_id_to_bytes(id: tze_hud_scene::SceneId) -> Vec<u8> {
-    id.as_uuid().as_bytes().to_vec()
 }
 
 #[cfg(test)]

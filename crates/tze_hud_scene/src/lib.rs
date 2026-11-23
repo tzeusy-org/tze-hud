@@ -32,10 +32,7 @@ pub mod config;
 pub mod lease;
 
 pub use clock::{Clock, SystemClock, TestClock};
-pub use element_store::{
-    ElementStore, ElementStoreEntry, ElementType, ZERO_GEOMETRY_POLICY,
-    fallback_geometry_for_element,
-};
+pub use element_store::{ElementStore, ElementStoreEntry, ElementType};
 // TOML serialization and file persistence for `ElementStore` live in
 // `tze_hud_runtime::element_store` to keep this crate I/O-free.
 pub use graph::{

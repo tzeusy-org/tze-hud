@@ -2037,12 +2037,12 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                             hit_test_snapshot.store(Arc::new(new_snap));
                             let built_scene_version = scene.version;
                             let built_geometry_epoch = scene.geometry_epoch;
-                            // ── Batch-correlated present ack drain ──
+                            // ── Local input-response correlation ───────────
                             // SceneGraph::publish records internal publication IDs.
                             // Drain under the scene lock before GPU submission;
                             // a failed primary attempt can consume ids without a
-                            // telemetry sample. Broadcast after local GPU work,
-                            // off the scene lock; main-thread present is separate.
+                            // local latency sample. Correlate after local GPU
+                            // work; main-thread presentation remains separate.
                             let presented_batch_ids = scene.drain_present_ack_batch_ids();
                             // ── DROP the scene lock BEFORE the vsync-blocking
                             // acquire/encode/submit/poll ────────────

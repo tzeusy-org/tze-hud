@@ -25,7 +25,7 @@ except ImportError:
 
 source = Path(sys.argv[1]) / "crates/tze_hud_protocol/proto"
 output = Path(sys.argv[2]).resolve()
-files = [source / f"{name}.proto" for name in ("types", "events", "session")]
+files = [source / f"{name}.proto" for name in ("types", "session")]
 for path in files:
     if not path.is_file():
         raise SystemExit(f"Missing protocol source: {path}")
@@ -38,7 +38,7 @@ if result:
     raise SystemExit(result)
 for path in output.glob("*_pb2*.py"):
     text = re.sub(
-        r"^import ((?:types|events|session)_pb2) as (\w+)$",
+        r"^import ((?:types|session)_pb2) as (\w+)$",
         r"from . import \1 as \2", path.read_text(), flags=re.MULTILINE,
     )
     path.write_text(text)
