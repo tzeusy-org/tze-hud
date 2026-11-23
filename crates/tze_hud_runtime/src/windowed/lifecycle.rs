@@ -2719,9 +2719,7 @@ impl WinitApp {
         focused: bool,
         hud_foreground: bool,
     ) {
-        if self.panel_targets_window(secondary) {
-            self.panel_window_focus(focused);
-        }
+        self.panel_window_focus(secondary, focused);
         if focused {
             self.state.keyboard_window = secondary;
         }

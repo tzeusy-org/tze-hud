@@ -1159,10 +1159,12 @@ impl HeadlessEventLoopHarness {
                 Key::Character(ch.to_string().into())
             };
             assert!(
-                self.app.panel_key_input(physical, &logical, None, true),
+                self.app
+                    .panel_key_input(None, physical, &logical, None, true),
                 "the panel is open"
             );
-            self.app.panel_key_input(physical, &logical, None, false);
+            self.app
+                .panel_key_input(None, physical, &logical, None, false);
         }
     }
 
@@ -1185,10 +1187,12 @@ impl HeadlessEventLoopHarness {
         let physical = PhysicalKey::Unidentified(NativeKeyCode::Unidentified);
         let logical = Key::Named(named);
         assert!(
-            self.app.panel_key_input(physical, &logical, None, true),
+            self.app
+                .panel_key_input(None, physical, &logical, None, true),
             "the panel is open"
         );
-        self.app.panel_key_input(physical, &logical, None, false);
+        self.app
+            .panel_key_input(None, physical, &logical, None, false);
     }
 
     /// Press and release a named key (e.g. `"Enter"`), as winit delivers it.
@@ -8032,9 +8036,9 @@ mod tests {
             assert!(
                 !harness
                     .app
-                    .panel_key_input(physical, &logical, Some("2"), true)
+                    .panel_key_input(None, physical, &logical, Some("2"), true)
             );
-            assert!(!harness.app.panel_text("2"));
+            assert!(!harness.app.panel_text(None, "2"));
             wait_open(false);
             harness.app.sync_panel_focus();
             assert!(harness.app.state.answer_keyboard.focus.is_some());

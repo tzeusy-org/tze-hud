@@ -219,7 +219,12 @@ pub(crate) struct WindowFacts {
 fn is_tray_shell_window(class: &str) -> bool {
     matches!(
         class,
-        "Shell_TrayWnd" | "Shell_SecondaryTrayWnd" | "Progman" | "WorkerW"
+        "Shell_TrayWnd"
+            | "Shell_SecondaryTrayWnd"
+            | "NotifyIconOverflowWindow"
+            | "TopLevelWindowForOverflowXamlIsland"
+            | "Progman"
+            | "WorkerW"
     )
 }
 
@@ -764,7 +769,7 @@ mod tests {
         };
         assert_eq!(return_window([app(1), app(2)]), Some(1), "top of z-order");
         type Exclude = fn(&mut WindowFacts);
-        let exclusions: [(&str, Exclude); 11] = [
+        let exclusions: [(&str, Exclude); 13] = [
             ("hidden", |w| w.visible = false),
             ("minimised", |w| w.minimized = true),
             ("cloaked", |w| w.cloaked = true),
@@ -775,6 +780,12 @@ mod tests {
             ("taskbar", |w| w.class = "Shell_TrayWnd".into()),
             ("second taskbar", |w| {
                 w.class = "Shell_SecondaryTrayWnd".into()
+            }),
+            ("classic tray overflow", |w| {
+                w.class = "NotifyIconOverflowWindow".into()
+            }),
+            ("XAML tray overflow", |w| {
+                w.class = "TopLevelWindowForOverflowXamlIsland".into()
             }),
             ("desktop", |w| w.class = "Progman".into()),
             ("wallpaper", |w| w.class = "WorkerW".into()),
@@ -795,12 +806,19 @@ mod tests {
             tray_focus_origin(Some(modal), || panic!("foreground was available")),
             TrayFocusOrigin::Replace(Some(1))
         );
-        let mut shell = app(1);
-        shell.class = "Shell_SecondaryTrayWnd".into();
-        assert_eq!(
-            tray_focus_origin(Some(shell), || return_window([app(2)])),
-            TrayFocusOrigin::Replace(Some(2))
-        );
+        for class in [
+            "Shell_SecondaryTrayWnd",
+            "NotifyIconOverflowWindow",
+            "TopLevelWindowForOverflowXamlIsland",
+        ] {
+            let mut shell = app(1);
+            shell.class = class.into();
+            assert_eq!(
+                tray_focus_origin(Some(shell), || return_window([app(2)])),
+                TrayFocusOrigin::Replace(Some(2)),
+                "{class}"
+            );
+        }
         let mut hud = app(3);
         hud.hud = true;
         assert_eq!(

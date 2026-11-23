@@ -2560,7 +2560,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                 // ── Control panel: owns the keyboard while open ─────────────
                 // Chords (pause, panel, pairing) are global hotkeys and never
                 // arrive here.
-                if self.panel_targets_window(secondary) && self.panel_key_event(&event) {
+                if self.panel_key_event(secondary, &event) {
                     return;
                 }
 
@@ -2665,7 +2665,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
             }
             WindowEvent::Ime(winit::event::Ime::Commit(text)) => {
                 self.state.composer_preedit = None;
-                if self.panel_targets_window(secondary) && self.panel_text(&text) {
+                if self.panel_text(secondary, &text) {
                     return;
                 }
                 if let Some(source) = wake_source {

@@ -250,10 +250,10 @@ impl ControlPanelHandle {
 
     /// Only actual fields/search take native focus on a pointer press.
     /// Disclosure rows also draw as Value, so use the core's control metadata.
-    pub(crate) fn accepts_text(&self, target: &PanelHitTarget) -> bool {
+    pub(crate) fn accepts_text(&self, visit: NonZeroU64, target: &PanelHitTarget) -> bool {
         use tze_hud_compositor::PanelPart;
         let guard = self.shared.model.read().unwrap_or_else(|e| e.into_inner());
-        if guard.model.is_none() {
+        if self.open_visit() != Some(visit) {
             return false;
         }
         match target {
