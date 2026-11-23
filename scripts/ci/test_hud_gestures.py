@@ -324,6 +324,185 @@ class WindowsGuardTests(unittest.TestCase):
         self.assertEqual(events, [])
         self.assertEqual(run.timeline, [])
 
+    def test_card_link_rearms_before_any_input_and_refuses_unstable_targets(self) -> None:
+        hud, browser, auxiliary = 0x123456780, 0x123456781, 0x123456782
+        point = (891, 106)
+        status = {"pid": 4242, "notifications": [{
+            "s": "zone:notification-area", "key": "gesture-card-link", "state": "shown",
+            "actions": [{"label": "Open test page", "kind": "url", "rect": {"x": 784, "y": 90, "w": 214, "h": 32}}],
+        }]}
+        changed = copy.deepcopy(status)
+        changed["notifications"][0]["actions"][0]["rect"]["x"] += 4
+        cases = ("covered", "foreground lost before publish", "deadline", "expired during native recheck", "expired during guard",
+                 "expired at cursor sample", "stale HUD handle", "card moved", "late takeover",
+                 "zero events", "partial click")
+        for case in cases:
+            with self.subTest(case=case):
+                native = native_input_boundary()
+                run = g.Run(exe=Path("tze_hud.exe"), out=Path("."), injector="sendinput", owned_pids=[4242])
+                run.smoke = mock.Mock(url="http://127.0.0.1:5555/mcp")
+                run.inj = native.SendInput(run.guard)
+                now = 0.0
+                recovered_at = float("inf")
+                scenario_entry = case == "foreground lost before publish"
+                foreground = browser if scenario_entry else hud
+                initially_parked = {"covered", "deadline", "stale HUD handle", "card moved", "expired during native recheck"}
+                cursor = (1, 1) if case in initially_parked or scenario_entry else point
+                cursor_samples = 0
+                point_samples = 0
+                published = False
+                presses = []
+
+                def sleep(seconds):
+                    nonlocal now
+                    now += seconds
+
+                def status_at():
+                    nonlocal now
+                    if case == "expired during guard" and cursor_samples:
+                        now = 0.1
+                    if scenario_entry:
+                        return {
+                            **status, "notifications": status["notifications"] if published else [],
+                            "frames_presented": int(published), "idle_since_ms": 500,
+                            "link_launches": int(bool(presses)), "link_feedback": "opened" if presses else None,
+                        }
+                    return changed if case == "card moved" and now >= 0.04 else status
+
+                def tool(name, _payload, **_kwargs):
+                    nonlocal published
+                    if name == "hud_publish":
+                        self.assertEqual(foreground, browser)
+                        native.user32.SendInput.assert_not_called()
+                        published = True
+                    else:
+                        self.assertEqual(name, "hud_input")
+                    return False, {}
+
+                def window_pid(handle, output):
+                    self.assertIn(handle, (hud, browser, auxiliary))
+                    output._obj.value = 9900 if handle == browser or case == "stale HUD handle" else 4242
+                    return 1
+
+                def bounds(handle, output):
+                    rect = output._obj
+                    rect.left, rect.top, rect.right, rect.bottom = (0, 0, 1024 if handle == hud else 50, 768)
+                    return True
+
+                def raise_window(*args):
+                    nonlocal recovered_at
+                    self.assertEqual(args, (hud, 0, 0, 0, 0, 0, 0x4213))
+                    if case != "deadline":
+                        recovered_at = now + 0.02
+                    return 1  # An accepted request alone must not authorize input.
+
+                def foreground_window(handle):
+                    nonlocal foreground
+                    self.assertEqual(handle, hud)
+                    foreground = hud
+                    return 1
+
+                def cursor_pos(output):
+                    nonlocal cursor_samples, now
+                    cursor_samples += 1
+                    output._obj.x, output._obj.y = cursor
+                    if case == "expired at cursor sample" and cursor_samples == 2:
+                        now = 0.1
+                    return 1
+
+                def window_at(coords):
+                    nonlocal now, point_samples
+                    point_samples += 1
+                    if case == "expired during native recheck" and point_samples == 2:
+                        now = 0.1
+                    return browser if ((coords.x, coords.y) == point
+                                       and (now < recovered_at or (case == "late takeover" and cursor_samples >= 2))) else hud
+
+                def send(count, items, _size):
+                    nonlocal cursor
+                    if items[0].mi.dwFlags & native.MOUSE_MOVE:
+                        self.assertGreaterEqual(now, recovered_at + 0.02 - 1e-9,
+                                                "the pointer must wait for consecutive owned-point samples")
+                        cursor = point
+                        return count
+                    presses.append((now, count))
+                    return {"partial click": 1, "zero events": 0}.get(case, count)
+
+                if cursor == point:
+                    recovered_at = 0.0
+                native.user32.IsWindowVisible.return_value = True
+                native.user32.GetWindowThreadProcessId.side_effect = window_pid
+                native.user32.GetWindowRect.side_effect = bounds
+                native.user32.GetForegroundWindow.side_effect = lambda: foreground
+                native.user32.GetCursorPos.side_effect = cursor_pos
+                native.user32.WindowFromPoint.side_effect = window_at
+                native.user32.SetForegroundWindow.side_effect = foreground_window
+                native.user32.SetWindowPos.side_effect = raise_window
+                native.user32.GetClassNameW.return_value = 0
+                native.kernel32.OpenProcess.return_value = 0
+                native.user32.SendInput.side_effect = send
+                run.smoke.call.side_effect = tool
+                with mock.patch.object(g, "WIN", native), mock.patch.object(run, "status", side_effect=status_at), \
+                        mock.patch.object(native, "_windows_of", return_value=[auxiliary, hud]), \
+                        mock.patch.object(native, "screen_size", return_value=(1024, 768)), \
+                        mock.patch.object(native.ctypes, "get_last_error", return_value=0, create=True), \
+                        mock.patch.object(g, "pid_alive", return_value=True), \
+                        mock.patch.dict(g.os.environ, {"GITHUB_ACTIONS": "true", "RUNNER_ENVIRONMENT": "github-hosted"}), \
+                        mock.patch.object(g.time, "monotonic", side_effect=lambda: now), \
+                        mock.patch.object(g.time, "sleep", side_effect=sleep):
+                    def attempt():
+                        return g.press_hosted_card_link(run, "gesture-card-link", "Open test page", point,
+                                                        deadline=0.1, press="second press")
+
+                    if scenario_entry:
+                        g.scenario_card_link(run)
+                        self.assertTrue(published)
+                        self.assertEqual([call["sent"] for call in run.inj.calls], [1, 2, 2])
+                        self.assertLess(presses[1][0] - presses[0][0], 1.8)
+                        native.user32.SetForegroundWindow.assert_called_once_with(hud)
+                        native.user32.SetWindowPos.assert_called_once()
+                    elif case == "covered":
+                        self.assertEqual(attempt(), presses[0][0])
+                        self.assertEqual([call["requested"] for call in run.inj.calls], [1, 2])
+                        self.assertEqual([count for _, count in presses], [2])
+                        native.user32.SetWindowPos.assert_called_once()
+                        native.user32.SetForegroundWindow.assert_not_called()
+                    elif case == "partial click":
+                        later = mock.Mock()
+                        def card(_run):
+                            attempt()
+
+                        with mock.patch.object(run, "snapshot"), \
+                                mock.patch.dict(g.SCENARIOS, {"card": card, "later": later}, clear=True), \
+                                self.assertRaises(g.PartialButtonBatch) as partial:
+                            g.run_scenarios(run, ["card", "later"])
+                        self.assertEqual([r["outcome"] for r in partial.exception.results], ["FAIL"])
+                        later.assert_not_called()
+                        self.assertEqual([count for _, count in presses], [2], "the click must not be retried")
+                        self.assertEqual(run.inj.calls[-1]["sent"], 1)
+                    else:
+                        with self.assertRaises(g.ScenarioFailed) as failed:
+                            attempt()
+                        if case == "zero events":
+                            self.assertEqual(failed.exception.last["sendinput"]["sent"], 0)
+                            native.user32.SendInput.assert_called_once()
+                        else:
+                            self.assertEqual(presses, [])
+                            native.user32.SendInput.assert_not_called()
+                        if case in {"deadline", "expired during native recheck", "expired during guard",
+                                    "expired at cursor sample", "stale HUD handle"}:
+                            self.assertEqual(now, 0.1)
+                        if case == "deadline":
+                            self.assertEqual(failed.exception.last["card_link_point"]["at_point"]["pid"], 9900)
+                            native.user32.SetWindowPos.assert_called_once()
+                        elif case in {"stale HUD handle", "expired during native recheck"}:
+                            native.user32.SetWindowPos.assert_not_called()
+                            native.user32.SetForegroundWindow.assert_not_called()
+                        elif case == "card moved":
+                            self.assertEqual(failed.exception.last["current_point"], (895, 106))
+                        elif case == "late takeover":
+                            self.assertEqual(failed.exception.last["click_target_before_send"]["at_cursor"]["pid"], 9900)
+
     def test_a_refused_guard_keeps_earlier_outcomes(self) -> None:
         run = mock.Mock(out=Path("unused"))
         run.clear_publications.return_value = []
@@ -614,20 +793,21 @@ class WindowsGuardTests(unittest.TestCase):
 class RequiredGateTests(unittest.TestCase):
     """hud-ljhku.16: only required scenarios (and harness failures that cost one its PASS) fail the run."""
 
-    def gate(self, required, outcomes, *, refuse=None, mode="fullscreen"):
+    def gate(self, required, outcomes, *, refuse=None, mode="fullscreen", refusal=g.Refused):
         """`refuse` is how many scenarios finish before the harness refuses."""
         with tempfile.TemporaryDirectory() as directory:
-            fake = mock.Mock(home=None, log=None, display="", port=0)
+            fake = mock.Mock(home=Path(directory), log=None, display="", port=0)
             fake.exe = Path("target/release-dev/tze_hud.exe")
             fake.timeline = []
             fake.status.return_value = {}
             fake.inj = None
             fake.smoke.ok.return_value = {}
+            fake.stop.return_value = []
 
             def scenarios(_run, names):
                 results = [{"scenario": n, "outcome": outcomes.get(n, "PASS"), "seconds": 0} for n in names]
                 if refuse is not None:
-                    err = g.Refused("foreground lost")
+                    err = refusal("input stopped")
                     err.results = results[:refuse]
                     raise err
                 return results
@@ -639,6 +819,7 @@ class RequiredGateTests(unittest.TestCase):
                 code = g.main(["--exe", "unused.exe", "--injector", "sendinput", "--window-mode", mode,
                                "--out", directory, *gate])
             verdict = json.loads((Path(directory) / "verdict.json").read_text())
+            fake.stop.assert_called_once_with()
             return code, run.call_args.args[1] if run.call_args else None, verdict
 
     def test_required_scenarios_run_first_and_informational_follow_in_the_same_boot(self) -> None:
@@ -663,6 +844,11 @@ class RequiredGateTests(unittest.TestCase):
                 self.assertEqual(verdict["blocking"], bool(expected))
         _, _, verdict = self.gate("composer", {"keyboard": "FAIL"})
         self.assertEqual(verdict["informational_failed"], ["keyboard"])
+        for refusal in (g.Refused, g.PartialButtonBatch):
+            with self.subTest(refusal=refusal):
+                code, _, verdict = self.gate("tray", {}, refuse=0, refusal=refusal)
+                self.assertEqual(code, 0, "the fullscreen harness has no required scenario in this invocation")
+                self.assertIs(verdict["partial_button_batch"], refusal is g.PartialButtonBatch)
         self.assertEqual(verdict["required_failed"], [])
 
     def test_unknown_required_name_is_a_usage_error(self) -> None:

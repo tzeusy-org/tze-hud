@@ -18,6 +18,7 @@ import ctypes
 import json
 import ntpath
 import subprocess
+import time
 from ctypes import wintypes
 from typing import Callable
 
@@ -36,6 +37,8 @@ for fn, res, args in (
     ("GetWindowThreadProcessId", wintypes.DWORD, [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]),
     ("IsWindowVisible", wintypes.BOOL, [wintypes.HWND]),
     ("SetForegroundWindow", wintypes.BOOL, [wintypes.HWND]),
+    ("SetWindowPos", wintypes.BOOL, [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
+                                     ctypes.c_int, ctypes.c_int, wintypes.UINT]),
     ("ShowWindow", wintypes.BOOL, [wintypes.HWND, ctypes.c_int]),
     ("GetWindowRect", wintypes.BOOL, [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]),
     ("GetCursorPos", wintypes.BOOL, [ctypes.POINTER(wintypes.POINT)]),
@@ -103,6 +106,8 @@ MOUSE_MOVE, LEFT_DOWN, LEFT_UP, WHEEL, ABSOLUTE = 0x1, 0x2, 0x4, 0x800, 0x8000
 RIGHT_DOWN, RIGHT_UP = 0x8, 0x10
 GWL_EXSTYLE, WS_EX_TOPMOST, WS_EX_TRANSPARENT = -20, 0x8, 0x20
 WS_EX_NOACTIVATE = 0x08000000
+HWND_TOP = 0
+SWP_NOSIZE, SWP_NOMOVE, SWP_NOACTIVATE, SWP_NOOWNERZORDER, SWP_ASYNCWINDOWPOS = 1, 2, 0x10, 0x200, 0x4000
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 KEY_UP, KEY_UNICODE = 0x2, 0x4
 WHEEL_DELTA = 120
@@ -375,6 +380,40 @@ def foreground_identity() -> dict | None:
     return _window_identity(user32.GetForegroundWindow())
 
 
+def window_at(point: tuple[int, int]) -> dict | None:
+    return _window_identity(user32.WindowFromPoint(wintypes.POINT(*point)))
+
+
+def fullscreen_window(pid: int) -> int | None:
+    """Find the unique visible window covering the harness's primary screen."""
+    width, height = screen_size()
+    matches = []
+    for hwnd in _windows_of(pid):
+        rect = wintypes.RECT()
+        if (user32.GetWindowRect(hwnd, ctypes.byref(rect))
+                and (rect.left, rect.top, rect.right, rect.bottom) == (0, 0, width, height)):
+            matches.append(hwnd)
+    return matches[0] if len(matches) == 1 else None
+
+
+def rearm_link_window(hwnd: int, pid: int, point: tuple[int, int], *, deadline: float) -> str | None:
+    """Request a native raise of the checked HUD window. The caller observes the result."""
+    owned = {"hwnd": hwnd, "pid": pid}
+    foreground = foreground_identity()
+    point_owner = window_at(point)
+    if (_window_identity(hwnd) != owned or not user32.IsWindowVisible(hwnd)
+            or time.monotonic() >= deadline):
+        return None
+    if foreground != owned:
+        user32.SetForegroundWindow(hwnd)
+        return "activate"
+    if point_owner != owned:
+        user32.SetWindowPos(hwnd, HWND_TOP, 0, 0, 0, 0,
+                            SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_ASYNCWINDOWPOS)
+        return "raise"
+    return None
+
+
 def click_target_snapshot() -> dict:
     """Sample the physical cursor, window at that point, and foreground."""
     point = wintypes.POINT()
@@ -524,10 +563,10 @@ class SendInput:
         self.calls.append({"what": what, "requested": len(items), "sent": sent,
                            "last_error": ctypes.get_last_error()})
 
-    def move_abs(self, x: int, y: int) -> None:
+    def move_abs(self, x: int, y: int, *, before_send: Callable[[], None] | None = None) -> None:
         width, height = screen_size()
         self._send(f"move {x},{y}", [_mouse(MOUSE_MOVE | ABSOLUTE, round(x * 65535 / (width - 1)),
-                                            round(y * 65535 / (height - 1)))])
+                                            round(y * 65535 / (height - 1)))], before_send=before_send)
 
     def move_relative(self, dx: int, dy: int) -> None:
         self._send(f"relative {dx},{dy}", [_mouse(MOUSE_MOVE, dx, dy)])
