@@ -803,16 +803,15 @@ async fn publish_zone<'a>(
     // Measured at admission with the renderer's shaper and current tokens.
     // Stream text scrolls and tail-anchors by design, so only cards and
     // status entries report.
-    let clipped: Vec<(String, usize)> = match (&content, ctx.text_fit) {
-        (ZoneContent::Notification(payload), Some(fit)) => fit
-            .notification(&scene, zone, payload)
-            .into_iter()
-            .map(|(name, drawn)| (name.to_owned(), drawn))
-            .collect(),
+    let mut clipped = match (&content, ctx.text_fit) {
         (ZoneContent::StatusBar(payload), Some(fit)) => {
             fit.status_bar(&scene, zone, payload, p.key.as_deref())
         }
         _ => Vec::new(),
+    };
+    let notification_fit = match (&content, ctx.text_fit) {
+        (ZoneContent::Notification(payload), Some(fit)) => Some((fit, payload.clone())),
+        _ => None,
     };
     // Read the owner default exactly once, after resolving the content. Explicit
     // zero remains held; ordinary zone content keeps its historical default.
@@ -869,7 +868,7 @@ async fn publish_zone<'a>(
     let now = now_us(&scene);
     let present_at = now.saturating_add(delay_ms.saturating_mul(1_000));
     let expires_at = (ttl_ms > 0).then(|| present_at.saturating_add(ttl_ms.saturating_mul(1_000)));
-    if delay_ms > 0 {
+    let display = if delay_ms > 0 {
         let publisher = Publisher {
             namespace: ns.clone(),
             lease_id: Some(lease_id),
@@ -905,16 +904,24 @@ async fn publish_zone<'a>(
                     expires_at_wall_us = expires_at, is_subtitle = true);
             }
         }
+        None
     } else if let Some(claim) = &claim {
         scene
             .publish_notification_until_with_id(
                 zone, content, &ns, lease_id, p.key, expires_at, claim.id,
             )
-            .map_err(|error| refused(&mut scene, &error))?;
+            .map_err(|error| refused(&mut scene, &error))?
     } else {
         scene
             .publish_to_zone_until_with_lease(zone, content, &ns, lease_id, p.key, expires_at)
-            .map_err(|error| refused(&mut scene, &error))?;
+            .map_err(|error| refused(&mut scene, &error))?
+    };
+    if let Some((fit, payload)) = notification_fit {
+        clipped = fit
+            .notification(&scene, zone, &payload, display.as_deref())
+            .into_iter()
+            .map(|(name, drawn)| (name.to_owned(), drawn))
+            .collect();
     }
     if let Some((scope, label)) = relabel {
         scope.set_label(label);

@@ -293,6 +293,7 @@ impl SceneGraph {
             true,
             None,
         )
+        .map(|_| ())
     }
 
     /// `urgency_default` gives a notification with no explicit expiry its
@@ -311,7 +312,7 @@ impl SceneGraph {
         publication_origin: Option<SceneId>,
         urgency_default: bool,
         publication_id: Option<SceneId>,
-    ) -> Result<(), ValidationError> {
+    ) -> Result<Option<String>, ValidationError> {
         // Check zone exists and content type is accepted
         let (contention_policy, max_publishers, accepted) = {
             let zone = self.zone_registry.get_by_name(zone_name).ok_or_else(|| {
@@ -422,6 +423,7 @@ impl SceneGraph {
             }
             None => None,
         };
+        let display = record.display.clone();
         let mut new_records = Vec::new();
         let mut slot = self
             .zone_registry
@@ -492,7 +494,7 @@ impl SceneGraph {
         }
         self.prune_publication_orphans();
         self.version += 1;
-        Ok(())
+        Ok(display)
     }
 
     /// Resolve the "best" lease state for a given namespace.
@@ -572,6 +574,7 @@ impl SceneGraph {
     /// Publish under an active, namespace-owned lease using an already resolved
     /// absolute deadline. `None` means held, including notifications; no urgency
     /// default is applied. This touches only publication state, not tile topology.
+    /// Returns the display assigned during admission, if any.
     pub fn publish_to_zone_until_with_lease(
         &mut self,
         zone_name: &str,
@@ -580,7 +583,7 @@ impl SceneGraph {
         lease_id: SceneId,
         merge_key: Option<String>,
         expires_at_wall_us: Option<u64>,
-    ) -> Result<(), ValidationError> {
+    ) -> Result<Option<String>, ValidationError> {
         self.check_zone_publish_lease(publisher_namespace, lease_id)?;
         self.publish_to_zone_inner(
             zone_name,
@@ -598,6 +601,7 @@ impl SceneGraph {
     }
 
     /// Admit an MCP question under a pre-reserved, runtime-only identity.
+    /// Returns the display assigned during admission, if any.
     #[allow(clippy::too_many_arguments)]
     pub fn publish_notification_until_with_id(
         &mut self,
@@ -608,7 +612,7 @@ impl SceneGraph {
         key: Option<String>,
         expiry: Option<u64>,
         id: SceneId,
-    ) -> Result<(), ValidationError> {
+    ) -> Result<Option<String>, ValidationError> {
         self.check_zone_publish_lease(namespace, lease)?;
         self.publish_to_zone_inner(
             zone,
@@ -644,6 +648,7 @@ impl SceneGraph {
             merge_key,
             None,
         )
+        .map(|_| ())
     }
 
     fn check_zone_publish_lease(

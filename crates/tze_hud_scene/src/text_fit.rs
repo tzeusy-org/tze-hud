@@ -18,14 +18,15 @@ use std::collections::HashMap;
 pub trait TextFit: Send + Sync + std::fmt::Debug {
     /// The notification fields (`"title"`, `"body"`, `"actions"`) whose
     /// rendered text would be cut on `zone`, in that order, each with its
-    /// drawn character count; `"actions"` carries the smallest count among
-    /// the cut labels. Empty when everything fits or the zone does not draw
-    /// notification cards.
+    /// drawn character count. `display` is the assigned display, if known at
+    /// admission. `"actions"` carries the smallest count among the cut labels.
+    /// Empty when everything fits or the zone does not draw notification cards.
     fn notification(
         &self,
         scene: &SceneGraph,
         zone: &str,
         payload: &NotificationPayload,
+        display: Option<&str>,
     ) -> Vec<(&'static str, usize)>;
 
     /// The string parameters of widget instance `widget` whose rendered text

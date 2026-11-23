@@ -5231,6 +5231,7 @@ async fn portal_unread_is_reported_until_the_viewer_reaches_the_tail() {
 #[derive(Debug, Default)]
 struct MarkerFit {
     calls: std::sync::atomic::AtomicUsize,
+    notification_displays: std::sync::Mutex<Vec<Option<String>>>,
 }
 
 /// Characters before the "LONG" marker, when `text` carries one.
@@ -5244,8 +5245,13 @@ impl tze_hud_scene::TextFit for MarkerFit {
         _: &SceneGraph,
         _: &str,
         payload: &tze_hud_scene::types::NotificationPayload,
+        display: Option<&str>,
     ) -> Vec<(&'static str, usize)> {
         self.calls.fetch_add(1, Ordering::SeqCst);
+        self.notification_displays
+            .lock()
+            .unwrap()
+            .push(display.map(str::to_owned));
         let actions = payload
             .actions
             .iter()
@@ -5301,6 +5307,63 @@ fn fit_server() -> (McpServer, Arc<MarkerFit>) {
     let (server, _) = server();
     let fit = Arc::new(MarkerFit::default());
     (server.with_text_fit(fit.clone()), fit)
+}
+
+#[tokio::test(start_paused = true)]
+async fn clipping_uses_the_admitted_question_display_without_placing_twice() {
+    #[derive(Debug, Default)]
+    struct ChangingDisplays(std::sync::atomic::AtomicUsize);
+
+    impl tze_hud_scene::QuestionPlacer for ChangingDisplays {
+        fn place(&self) -> Option<String> {
+            let index = self.0.fetch_add(1, Ordering::SeqCst);
+            Some(format!("DISPLAY{}", index + 2))
+        }
+    }
+
+    let (server, clock) = server();
+    let fit = Arc::new(MarkerFit::default());
+    let server = server.with_text_fit(fit.clone());
+    let placer = Arc::new(ChangingDisplays::default());
+    server.scene.lock().await.overlay.question_placer = Some(placer.clone());
+    let question = |key, delay_ms| {
+        json!({
+            "surface":"zone:notification-area", "key":key, "delay_ms":delay_ms,
+            "content":{"title":"Press LONG","actions":[{"label":"OK","callback_id":"ok"}]}
+        })
+    };
+    for (key, delay, wait_ms) in [
+        ("first", 0, None),
+        ("new", 0, Some(20)),
+        ("first", 0, None),
+        ("delayed", 100, None),
+    ] {
+        let mut args = question(key, delay);
+        if let Some(wait_ms) = wait_ms {
+            args["wait_ms"] = json!(wait_ms);
+        }
+        let reply = call(&server, "hud_publish", args).await;
+        assert_eq!(reply["clipped"]["title"], 6, "{reply}");
+    }
+    assert_eq!(
+        *fit.notification_displays.lock().unwrap(),
+        [
+            Some("DISPLAY2".into()),
+            Some("DISPLAY3".into()),
+            Some("DISPLAY2".into()),
+            None,
+        ],
+    );
+    assert_eq!(placer.0.load(Ordering::SeqCst), 2);
+
+    clock.advance(101);
+    let mut scene = server.scene.lock().await;
+    assert!(scene.apply_due_publications()[0].result.is_ok());
+    assert_eq!(placer.0.load(Ordering::SeqCst), 3);
+    let cards = scene.zone_registry.active_for_zone("notification-area");
+    assert_eq!(cards[0].display.as_deref(), Some("DISPLAY2"));
+    assert_eq!(cards[1].display.as_deref(), Some("DISPLAY3"));
+    assert_eq!(cards[2].display.as_deref(), Some("DISPLAY4"));
 }
 
 /// R5.1 S1/S2/S4: each cut card field is

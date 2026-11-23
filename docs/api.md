@@ -467,6 +467,10 @@ with the same cancellation and idle semantics as a `hud_input` wait.
   behind a link action. A HUD built before this shape returns a list of the
   cut field names instead.
 
+  An immediate notification uses the bounds and scale of the display where
+  it draws at admission. Delayed notifications use the notification zone's
+  display for this estimate because their placement is decided at presentation.
+
 For example, publish a notification whose button arrives at `hud_input` as
 `{"action":"approve","s":"zone:notification-area",...}`:
 
@@ -1144,7 +1148,8 @@ DISPLAY2`). Other cards, including url- and copy-only ones, use the
 notification display. A placed card draws at the notification-area position
 on its display's rect and scale, in that display's stack; it never moves,
 a same-key replacement keeps its display, and if its display disconnects it
-shows on the notification display. All displays share one `Stack{max_depth:5}`
+shows on the notification display until its assigned display reconnects. All
+displays share one `Stack{max_depth:5}`
 trim. A changed setting applies to the next question; no visible card moves.
 For the launch settings, precedence, highest first: a command-line
 flag (`--mcp-port`, `--grpc-port`, `--fps`, `--debug-zones`), an
