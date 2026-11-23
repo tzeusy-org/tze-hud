@@ -344,6 +344,7 @@ impl ReplyDraft {
                 return ReplyKey::Submit;
             }
             "KeyA" if shortcut => self.draft.select_all(),
+            "Space" if plain => self.draft.insert(" "),
             "Backspace" if plain => self.draft.backspace(),
             "Delete" if plain => self.draft.delete_forward(),
             "ArrowLeft" if plain && mods.shift => self.draft.select_left(),

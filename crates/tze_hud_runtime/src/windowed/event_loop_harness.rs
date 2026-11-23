@@ -976,6 +976,7 @@ impl HeadlessEventLoopHarness {
     /// input retained behind a busy scene lock.
     pub fn tick(&mut self) -> bool {
         self.last_turn_submitted = false;
+        self.app.sync_notification_reply();
         self.app.sync_design_tokens();
         if let Some((primary, secondaries)) = &self.display_fixture {
             self.app.sync_zone_assignments_for(primary, secondaries);
@@ -1229,10 +1230,12 @@ impl HeadlessEventLoopHarness {
     }
 
     /// Display-space center of the on-screen notification action button
-    /// whose callback is `callback_id`, as hit-tested after the last
+    /// whose fixed or typed callback is `callback_id`, as hit-tested after the last
     /// [`Self::tick`].
     pub fn notification_action_center(&self, callback_id: &str) -> Option<(f32, f32)> {
-        self.notification_target_center(|a| a.callback_id.as_deref() == Some(callback_id))
+        self.notification_target_center(|a| {
+            a.callback_id.as_deref().or(a.reply.as_deref()) == Some(callback_id)
+        })
     }
 
     /// Display center of a live link, using the compositor's exact action index.
@@ -1462,6 +1465,7 @@ impl HeadlessEventLoopHarness {
     /// Run the genuine production drain over the pending queue.
     #[cfg(test)]
     pub(super) fn drain(&mut self) {
+        self.app.sync_notification_reply();
         self.app.sync_answer_focus();
         self.app.drain_pending_keyboard_events();
     }
@@ -5300,6 +5304,90 @@ mod tests {
             0.0
         );
         assert!(take_action_ids(&harness).is_empty());
+    }
+
+    #[test]
+    fn notification_reply_only_question_digit_keeps_its_draft_across_escape_and_sends_once() {
+        let mut harness = approve_reject_notification_harness();
+        {
+            let mut scene = harness.scene();
+            let card = &mut scene
+                .zone_registry
+                .active_publishes
+                .get_mut("notification-area")
+                .unwrap()[0];
+            let tze_hud_scene::ZoneContent::Notification(payload) = &mut card.content else {
+                panic!("notification card");
+            };
+            payload.actions = vec![tze_hud_scene::NotificationAction {
+                label: "Other…".into(),
+                reply: Some("database".into()),
+                ..Default::default()
+            }];
+            scene.version += 1;
+        }
+        assert!(harness.tick());
+        let start = harness.notification_action_center("database").unwrap();
+        let open = |harness: &mut HeadlessEventLoopHarness| {
+            harness
+                .app
+                .state
+                .answer_keyboard
+                .requested
+                .store(true, std::sync::atomic::Ordering::Release);
+            harness.drain();
+            harness.type_text("1");
+            harness.drain();
+            assert!(harness.tick());
+        };
+        open(&mut harness);
+        assert_eq!(harness.notification_action_center("database"), Some(start));
+        assert!(
+            harness
+                .scene()
+                .overlay
+                .notification_reply
+                .as_ref()
+                .unwrap()
+                .text
+                .is_empty()
+        );
+        assert!(
+            harness.scene().overlay.notification_geometry[0]
+                .reply_caret
+                .is_some()
+        );
+        harness.type_text("use the staging DB");
+        harness.drain();
+        harness.press_named_key("Escape");
+        harness.drain();
+        assert!(harness.scene().overlay.notification_reply.is_none());
+        assert!(take_action_ids(&harness).is_empty());
+
+        open(&mut harness);
+        assert_eq!(
+            harness
+                .scene()
+                .overlay
+                .notification_reply
+                .as_ref()
+                .unwrap()
+                .text,
+            "use the staging DB"
+        );
+        harness.press_named_key("Enter");
+        harness.drain();
+        let mut scene = harness.scene();
+        assert!(scene.overlay.notification_reply.is_none());
+        let actions = scene.take_pending_actions("notif-agent");
+        assert_eq!(actions.len(), 1);
+        assert_eq!(
+            actions[0].kind,
+            tze_hud_scene::graph::PendingActionKind::Reply {
+                callback_id: "database".into(),
+                text: "use the staging DB".into(),
+            }
+        );
     }
 
     #[test]
