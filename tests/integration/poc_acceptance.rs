@@ -2462,6 +2462,7 @@ async fn poc_panel_runtime_rows_apply_save_and_stage_a_restart() {
                 proto::NotificationPayload {
                     text: "Continue?".into(),
                     actions: vec![proto::NotificationActionProto {
+                        copy: None,
                         label: "Yes".into(),
                         callback_id: "yes".into(),
                         url: String::new(),

@@ -700,7 +700,7 @@ pub(crate) fn measure_raw_content_height(
 ) -> f32 {
     // Same font-size clamp `TextItem::from_text_markdown_node` applies to
     // `node.font_size_px`.
-    let font_size_px = font_size_px.clamp(6.0, 200.0);
+    let font_size_px = clamp_raw_font_size(font_size_px);
     let line_height_multiplier = crate::markdown::MarkdownTokens::default().line_height_multiplier;
     let line_height = font_size_px * line_height_multiplier;
     let mut buf = Buffer::new(font_system, Metrics::new(font_size_px, line_height));
@@ -718,6 +718,10 @@ pub(crate) fn measure_raw_content_height(
         .last()
         .map(|run| run.line_top + run.line_height)
         .unwrap_or(line_height)
+}
+
+pub(crate) fn clamp_raw_font_size(size: f32) -> f32 {
+    size.clamp(6.0, 200.0)
 }
 
 pub(crate) struct ShapedDocumentMetrics {

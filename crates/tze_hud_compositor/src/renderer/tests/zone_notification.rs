@@ -504,6 +504,7 @@ async fn notification_actions_layout_matches_hit_regions() {
                             .iter()
                             .enumerate()
                             .map(|(i, label)| NotificationAction {
+                                copy: None,
                                 label: (*label).into(),
                                 callback_id: (i % 2 == 0).then(|| i.to_string()),
                                 url: (i % 2 == 1).then(|| format!("https://example.com/{i}")),
@@ -788,12 +789,14 @@ async fn check_notification_action_row(margin: Option<f32>) {
         "policy margin, else space.l"
     );
     let action = |label: &str| tze_hud_scene::types::NotificationAction {
+        copy: None,
         label: label.to_owned(),
         callback_id: Some(label.to_lowercase()),
         url: None,
         role: None,
     };
     let payload = |title: &str, text: &str, labels: &[&str]| NotificationPayload {
+        progress: None,
         text: text.to_owned(),
         icon: String::new(),
         urgency: 1,
@@ -1042,12 +1045,14 @@ async fn notification_action_button_is_visible_and_hover_brightens_it() {
         .publish_to_zone(
             "notification-area",
             ZoneContent::Notification(NotificationPayload {
+                progress: None,
                 text: "Approve the deploy?".to_owned(),
                 icon: String::new(),
                 urgency: 0,
                 ttl_ms: None,
                 title: "Deploy".to_owned(),
                 actions: vec![tze_hud_scene::types::NotificationAction {
+                    copy: None,
                     label: "Approve".to_owned(),
                     callback_id: Some("approve".to_owned()),
                     url: None,
@@ -1144,6 +1149,7 @@ async fn test_notification_with_opaque_backdrop() {
         .publish_to_zone(
             "notification-area",
             ZoneContent::Notification(NotificationPayload {
+                progress: None,
                 text: "Notification with opaque backdrop".to_owned(),
                 icon: String::new(),
                 urgency: 1,
@@ -1221,6 +1227,7 @@ async fn test_alert_banner_urgency2_maps_to_alert_caution_container() {
         .publish_to_zone(
             "alert-banner",
             ZoneContent::Notification(NotificationPayload {
+                progress: None,
                 text: "Warning: disk space low".to_owned(),
                 icon: String::new(),
                 urgency: 2,
@@ -1318,6 +1325,7 @@ async fn test_notification_area_does_not_use_severity_tokens() {
         .publish_to_zone(
             "notification-area",
             ZoneContent::Notification(NotificationPayload {
+                progress: None,
                 text: "System alert".to_owned(),
                 icon: String::new(),
                 urgency: 3, // Critical — the error-container tone, NOT color.severity.critical
@@ -1453,6 +1461,7 @@ async fn test_notification_area_backdrop_opacity() {
         .publish_to_zone(
             "notification-area",
             ZoneContent::Notification(NotificationPayload {
+                progress: None,
                 text: "test".to_owned(),
                 icon: String::new(),
                 urgency: 1, // normal
@@ -1524,6 +1533,7 @@ fn bordered_notification_scene(radius: Option<f32>) -> SceneGraph {
         .publish_to_zone(
             "notification-area",
             ZoneContent::Notification(NotificationPayload {
+                progress: None,
                 text: "border test".to_owned(),
                 icon: String::new(),
                 urgency: 0,
@@ -1671,6 +1681,7 @@ async fn test_notification_card_border_is_an_sdf_border() {
                     text: name.clone(),
                     urgency: if index == 7 { 2 } else { 0 },
                     actions: vec![NotificationAction {
+                        copy: None,
                         label: "Act".into(),
                         callback_id: Some("act".into()),
                         url: None,
@@ -1975,6 +1986,7 @@ async fn test_alert_banner_transparent_roles_draw_no_border_or_mark() {
         .publish_to_zone(
             "alert-banner",
             ZoneContent::Notification(NotificationPayload {
+                progress: None,
                 text: "no border here".to_owned(),
                 icon: String::new(),
                 urgency: 2,
@@ -2154,6 +2166,7 @@ async fn test_custom_alert_tokens_affect_alert_banner_backdrop() {
         .publish_to_zone(
             "alert-banner",
             ZoneContent::Notification(NotificationPayload {
+                progress: None,
                 text: "Custom token warning".to_owned(),
                 icon: String::new(),
                 urgency: 2,
@@ -2391,6 +2404,7 @@ async fn test_notification_no_backdrop_when_backdrop_is_none() {
         .publish_to_zone(
             "notification-area",
             ZoneContent::Notification(NotificationPayload {
+                progress: None,
                 text: "no backdrop".to_owned(),
                 icon: String::new(),
                 urgency: 2,

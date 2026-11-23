@@ -39,6 +39,7 @@ fn scene() -> (SceneGraph, TestClock) {
 
 fn card(text: &str, actions: Vec<NotificationAction>) -> ZoneContent {
     ZoneContent::Notification(NotificationPayload {
+        progress: None,
         text: text.into(),
         icon: String::new(),
         urgency: 1,
@@ -56,6 +57,7 @@ fn question(text: &str) -> ZoneContent {
     card(
         text,
         vec![NotificationAction {
+            copy: None,
             label: "Yes".into(),
             callback_id: Some(format!("{text}-yes")),
             url: None,
@@ -68,6 +70,7 @@ fn link(text: &str) -> ZoneContent {
     card(
         text,
         vec![NotificationAction {
+            copy: None,
             label: "Open".into(),
             callback_id: None,
             url: Some("https://example.com/report".into()),
@@ -201,15 +204,25 @@ fn answered_question_no_longer_counts_as_a_question() {
 }
 
 #[test]
-fn url_only_cards_are_not_questions() {
+fn cards_with_only_local_actions_are_not_questions() {
     for plane in [Plane::Mcp, Plane::Grpc] {
-        let (mut scene, _) = scene();
-        publish(&mut scene, plane, "asker", question("q1"));
-        publish(&mut scene, plane, "asker", link("u2"));
-        for text in ["q3", "q4", "q5", "q6"] {
-            publish(&mut scene, plane, "asker", question(text));
+        for copy in [false, true] {
+            let (mut scene, _) = scene();
+            let mut local = link("u2");
+            if copy && let ZoneContent::Notification(payload) = &mut local {
+                payload.actions.push(NotificationAction {
+                    label: "Copy".into(),
+                    copy: Some("job-42".into()),
+                    ..Default::default()
+                });
+            }
+            publish(&mut scene, plane, "asker", question("q1"));
+            publish(&mut scene, plane, "asker", local);
+            for text in ["q3", "q4", "q5", "q6"] {
+                publish(&mut scene, plane, "asker", question(text));
+            }
+            assert_eq!(shown(&scene), ["q1", "q3", "q4", "q5", "q6"], "{plane:?}");
         }
-        assert_eq!(shown(&scene), ["q1", "q3", "q4", "q5", "q6"], "{plane:?}");
     }
 }
 

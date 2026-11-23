@@ -60,7 +60,7 @@ impl super::Compositor {
     // twelve genuinely-varying `TextItem` fields, each a distinct primitive.
     // Bundling them into a struct would just rename the same flat argument list.
     #[allow(clippy::too_many_arguments)]
-    fn make_zone_text_item(
+    pub(super) fn make_zone_text_item(
         text: Arc<str>,
         pixel_x: f32,
         pixel_y: f32,
@@ -262,9 +262,8 @@ impl super::Compositor {
         items
     }
 
-    /// Prime only stack notification title/body bands, using the exact same
-    /// collector as drawing. Action/dismiss labels keep their existing Clip
-    /// policy, and non-notification zones retain their current priming path.
+    /// Prime the ellipsized notification bands and labels using the same
+    /// collector as drawing.
     pub(super) fn collect_notification_ellipsis_items(
         &self,
         scene: &SceneGraph,
@@ -272,7 +271,7 @@ impl super::Compositor {
         sh: f32,
     ) -> Vec<TextItem> {
         let mut items = Vec::new();
-        self.collect_zone_text_items(scene, sw, sh, true, &mut items);
+        self.collect_zone_text_items(scene, sw, sh, true, &mut items, None);
         items.retain(|item| item.overflow == TextOverflow::Ellipsis);
         items
     }
@@ -286,7 +285,9 @@ impl super::Compositor {
         sh: f32,
         notifications_only: bool,
         items: &mut Vec<TextItem>,
+        mut reveal: Option<&mut Vec<super::notification_reveal::RevealCandidate>>,
     ) {
+        use tze_hud_scene::graph::overlay::NotificationRevealField;
         let now = std::time::Instant::now();
         // ── Zone StreamText, Notification, and StatusBar content ─────────────
         for stack in self.zone_stacks(scene) {
@@ -477,6 +478,30 @@ impl super::Compositor {
                                     if let Some(m) = band.line_multiplier {
                                         item.line_height_multiplier = m;
                                     }
+                                    if let Some(reveal) = reveal.as_deref_mut()
+                                        && let Some(field) = match band.field {
+                                            "title" => Some(NotificationRevealField::Title),
+                                            "body" => Some(NotificationRevealField::Body),
+                                            _ => None,
+                                        }
+                                        && self.notification_text_was_ellipsized(&item)
+                                    {
+                                        reveal.push(
+                                            super::notification_reveal::RevealCandidate::new(
+                                                record,
+                                                card,
+                                                &stack.token_key(),
+                                                field,
+                                                &item,
+                                                Rect::new(
+                                                    item.pixel_x,
+                                                    item.pixel_y,
+                                                    width,
+                                                    band.height,
+                                                ),
+                                            ),
+                                        );
+                                    }
                                     items.push(item);
                                 }
 
@@ -613,8 +638,8 @@ impl super::Compositor {
                                     });
                                     let label_y = b.y + action_layout.label_y;
                                     let label_h = action_layout.label_height.max(1.0);
-                                    // A pressed url action's feedback replaces its
-                                    // label in the same bounds; failure is the error color.
+                                    // Local link and copy feedback replaces the
+                                    // label without moving the button.
                                     let feedback = match &scene.overlay.link_feedback {
                                         Some((
                                             tze_hud_scene::LinkFeedbackTarget::CardAction {
@@ -629,11 +654,17 @@ impl super::Compositor {
                                         }
                                         _ => None,
                                     };
-                                    let error_color = feedback
-                                        .filter(|s| *s == tze_hud_scene::LinkFeedbackState::Failed)
-                                        .and_then(|_| self.token_map.get("color.error"))
-                                        .and_then(|hex| super::token_colors::parse_hex_color(hex))
-                                        .map(tone_color);
+                                    let copy_feedback =
+                                        scene.overlay.notification_copy_feedback.filter(|result| {
+                                            action.copy.is_some()
+                                                && result.publication_id == record.publication_id
+                                                && result.index == index
+                                        });
+                                    let failed = feedback
+                                        == Some(tze_hud_scene::LinkFeedbackState::Failed)
+                                        || copy_feedback.is_some_and(|result| !result.succeeded);
+                                    let error_color =
+                                        failed.then(|| tone_color(style.destructive_outline()));
                                     let label = |text: Arc<str>, x: f32, width: f32, align| {
                                         let mut item = Self::make_zone_text_item(
                                             text,
@@ -667,14 +698,33 @@ impl super::Compositor {
                                         ));
                                     }
                                     let mut text = label(
-                                        Arc::from(match feedback {
-                                            Some(state) => state.label(),
-                                            None => action.label.as_str(),
+                                        Arc::from(match (feedback, copy_feedback) {
+                                            (_, Some(result)) if result.succeeded => "Copied",
+                                            (_, Some(_)) => "Copy failed",
+                                            (Some(state), None) => state.label(),
+                                            (None, None) => action.label.as_str(),
                                         }),
                                         b.x + action_layout.padding + hint_width,
                                         action_layout.label_width(&b, index),
                                         tze_hud_scene::types::TextAlign::Center,
                                     );
+                                    text.overflow = TextOverflow::Ellipsis;
+                                    if let Some(reveal) = reveal.as_deref_mut()
+                                        && feedback.is_none()
+                                        && copy_feedback.is_none()
+                                        && self.notification_text_was_ellipsized(&text)
+                                    {
+                                        reveal.push(
+                                            super::notification_reveal::RevealCandidate::new(
+                                                record,
+                                                card,
+                                                &stack.token_key(),
+                                                NotificationRevealField::Action(index),
+                                                &text,
+                                                b,
+                                            ),
+                                        );
+                                    }
                                     if let Some(color) = error_color {
                                         text.color = color;
                                     }
@@ -997,7 +1047,18 @@ impl super::Compositor {
     /// the color channels so text fades with the backdrop.
     ///
     /// Returns a flat `Vec<TextItem>` ready for `TextRasterizer::prepare_text_items`.
+    #[cfg(any(test, feature = "dev-mode"))]
     pub(super) fn collect_text_items(&self, scene: &SceneGraph, sw: f32, sh: f32) -> Vec<TextItem> {
+        self.collect_text_items_with_reveal(scene, sw, sh, None)
+    }
+
+    pub(super) fn collect_text_items_with_reveal(
+        &self,
+        scene: &SceneGraph,
+        sw: f32,
+        sh: f32,
+        reveal: Option<&mut Vec<super::notification_reveal::RevealCandidate>>,
+    ) -> Vec<TextItem> {
         let mut items: Vec<TextItem> = Vec::new();
 
         // Transcript optimal-measure cap: resolve once per frame; a
@@ -1100,7 +1161,7 @@ impl super::Compositor {
             }
         }
 
-        self.collect_zone_text_items(scene, sw, sh, false, &mut items);
+        self.collect_zone_text_items(scene, sw, sh, false, &mut items, reveal);
 
         // ── Composer echo text ───────────────────────────────────
         // Inject a TextItem for the local composer draft + caret glyph on top of

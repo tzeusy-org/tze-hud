@@ -976,6 +976,7 @@ fn test_zone_publish_media_type_mismatch() {
     let result = scene.publish_to_zone(
         "subtitle",
         ZoneContent::Notification(NotificationPayload {
+            progress: None,
             text: "Hello".to_string(),
             icon: "".to_string(),
             urgency: 1,
@@ -1001,6 +1002,7 @@ fn test_contention_stack() {
 
     let notification = |text: &str| {
         ZoneContent::Notification(NotificationPayload {
+            progress: None,
             text: text.to_string(),
             icon: "".to_string(),
             urgency: 1,
@@ -1230,6 +1232,7 @@ fn publish_notification(scene: &mut SceneGraph, urgency: u32, expires_at: Option
         .publish_to_zone(
             "alert-banner",
             ZoneContent::Notification(NotificationPayload {
+                progress: None,
                 text: format!("urgency-{urgency}"),
                 icon: "".to_string(),
                 urgency,
@@ -1542,6 +1545,7 @@ fn test_contention_zone_max_publishers_rejected() {
 
     let notification = |text: &str| {
         ZoneContent::Notification(NotificationPayload {
+            progress: None,
             text: text.to_string(),
             icon: String::new(),
             urgency: 1,
@@ -1664,6 +1668,7 @@ fn test_contention_zone_stack_max_depth_zero_discards_all() {
 
     let notification = |text: &str| {
         ZoneContent::Notification(NotificationPayload {
+            progress: None,
             text: text.to_string(),
             icon: String::new(),
             urgency: 1,
@@ -1920,6 +1925,7 @@ fn test_notification_expiry_follows_held_flag() {
         let publication = crate::Publication::Zone {
             zone_name: "alert-banner".to_string(),
             content: ZoneContent::Notification(NotificationPayload {
+                progress: None,
                 text: "n".to_string(),
                 icon: String::new(),
                 urgency: 1,

@@ -25,11 +25,12 @@ use super::notification_layout::NotificationLayoutCache;
 use super::notification_text::notification_text_layout;
 use super::{Compositor, ZoneStack};
 use crate::display::DisplayLayout;
+use crate::overflow::{
+    DEFAULT_MAX_TRUNCATION_INPUT_BYTES, TRUNCATION_OVERSCAN_LINES, TruncationViewport,
+    viewport_adjacent_input,
+};
 
 /// The compositor's current drawing inputs, shared with MCP admission.
-/// Antialiasing slack: a label ending on its clip edge is not cut.
-const EDGE_SLACK_PX: f32 = 0.5;
-
 #[derive(Default)]
 pub struct TextFitMeasurer {
     state: Mutex<FitState>,
@@ -73,7 +74,7 @@ impl TextFitMeasurer {
         self.state().layout = layout;
     }
 
-    /// The text byte budget the status bar measures within.
+    /// The profile's byte threshold for windowing ellipsis input.
     pub fn set_max_truncation_input_bytes(&self, bytes: usize) {
         self.state().max_input_bytes = Some(bytes);
     }
@@ -175,7 +176,6 @@ impl tze_hud_scene::TextFit for TextFitMeasurer {
             agent_icon,
         );
         let fonts = cards.fallback_fonts(&zone_tokens);
-        let text_family = text.font_family;
         let mut clipped = Vec::new();
         for band in &text.bands {
             let attrs = Attrs::new()
@@ -199,36 +199,45 @@ impl tze_hud_scene::TextFit for TextFitMeasurer {
         }
         let style =
             super::notification_style::NotificationStyle::for_zone(zone, &zone_tokens, policy);
-        let label = (style.action_label.size, style.action_label.weight);
-        let mut fits = |text: &str, room: f32| {
-            crate::text::single_line_width(fonts, text, label.0, text_family, label.1)
-                <= room + EDGE_SLACK_PX
-        };
-        // The smallest drawn count among the cut labels: a label that fits
-        // is measured once; a cut one is searched for its longest fitting
-        // prefix, which stops before a line break.
+        let label = style.action_label;
+        let attrs = Attrs::new()
+            .family(family(text.font_family))
+            .weight(Weight(label.weight.clamp(100, 900)));
+        let line_height = label.size
+            * actions
+                .label_line_multiplier
+                .unwrap_or(crate::text::LINE_HEIGHT_MULTIPLIER);
+        let label_height = actions.label_height.max(1.0);
+        let max_input_bytes = state
+            .max_input_bytes
+            .unwrap_or(DEFAULT_MAX_TRUNCATION_INPUT_BYTES);
+        // Report the smallest drawn prefix among the ellipsized labels.
         let cut_label = payload
             .actions
             .iter()
             .zip(actions.bounds(card.x, card.y, card.width, card.height))
             .enumerate()
             .filter_map(|(index, (action, bound))| {
-                let room = actions.label_width(&bound, index);
-                let line = action.label.split('\n').next().unwrap_or_default();
-                let broken = line.len() < action.label.len();
-                if !broken && fits(line, room) {
-                    return None;
-                }
-                let line_chars = line.chars().count();
-                // An unbroken label is known not to fit whole.
-                let upper = if broken {
-                    line_chars
-                } else {
-                    line_chars.saturating_sub(1)
-                };
-                Some(crate::overflow::longest_fitting_prefix(upper, |n| {
-                    fits(crate::overflow::char_prefix(line, n), room)
-                }))
+                let input = viewport_adjacent_input(
+                    &action.label,
+                    label_height,
+                    line_height,
+                    TruncationViewport::HeadAnchored,
+                    max_input_bytes,
+                    TRUNCATION_OVERSCAN_LINES,
+                );
+                let result = crate::overflow::truncate_for_ellipsis(
+                    input,
+                    attrs,
+                    actions.label_width(&bound, index),
+                    label_height,
+                    label.size,
+                    line_height,
+                    fonts,
+                );
+                result
+                    .was_truncated
+                    .then(|| result.drawn_chars(&action.label))
             })
             .min();
         if let Some(count) = cut_label {
@@ -364,7 +373,7 @@ impl tze_hud_scene::TextFit for TextFitMeasurer {
             cards.fallback_fonts(&zone_tokens),
             state
                 .max_input_bytes
-                .unwrap_or(crate::overflow::DEFAULT_MAX_TRUNCATION_INPUT_BYTES),
+                .unwrap_or(DEFAULT_MAX_TRUNCATION_INPUT_BYTES),
         )
     }
 }
@@ -407,6 +416,7 @@ mod tests {
                 .iter()
                 .enumerate()
                 .map(|(i, label)| NotificationAction {
+                    copy: None,
                     label: (*label).into(),
                     callback_id: Some(format!("a{i}")),
                     url: None,
@@ -490,8 +500,8 @@ mod tests {
         assert!(again.is_empty(), "{t}/{b}: {again:?}");
     }
 
-    /// `actions` is the smallest count among the cut labels, each found
-    /// within the per-field layout bound; shortening every label to it fits.
+    /// `actions` is the smallest drawn count among the cut labels.
+    /// Shortening every label to that count fits.
     #[test]
     fn actions_report_the_smallest_cut_label() {
         let (fit, scene) = measurer_and_scene();
@@ -500,13 +510,7 @@ mod tests {
         let longer =
             "Roll back every region, then page the on-call engineer for a full incident review";
         let labels = [long, "Hold", longer];
-        PREFIX_PROBES.with(|p| p.set(0));
         let clipped = fit.notification(&scene, ZONE, &card("", "Deploy?", &labels), None);
-        let probes = PREFIX_PROBES.with(std::cell::Cell::get);
-        assert!(
-            probes <= bound(long.chars().count()) + bound(longer.chars().count()),
-            "{probes} layouts"
-        );
         let n = reported(&clipped, "actions").expect("labels cut");
         assert_eq!(clipped, [("actions", n)]);
         // Each cut label alone reports its own count; the reply carries the
@@ -528,15 +532,6 @@ mod tests {
         let shortened: Vec<&str> = labels.iter().map(|l| char_prefix(l, n)).collect();
         let again = fit.notification(&scene, ZONE, &card("", "Deploy?", &shortened), None);
         assert!(again.is_empty(), "{n}: {again:?}");
-        let one_more = [char_prefix(long, a + 1), "Hold", "Ok"];
-        assert_eq!(
-            reported(
-                &fit.notification(&scene, ZONE, &card("", "Deploy?", &one_more), None),
-                "actions"
-            ),
-            Some(a),
-            "one more character is cut"
-        );
     }
 
     /// A label with a line break counts up to the break when that fits, and
@@ -575,12 +570,14 @@ mod tests {
             text: "Deploy?".into(),
             actions: vec![
                 NotificationAction {
+                    copy: None,
                     label: first.into(),
                     callback_id: Some("go".into()),
                     url: None,
                     role: None,
                 },
                 NotificationAction {
+                    copy: None,
                     label: second.into(),
                     callback_id: None,
                     url: Some("https://example.com/".into()),

@@ -195,7 +195,9 @@ mod keyboard;
 mod lifecycle;
 mod monitor_identity;
 mod network;
+mod notification_copy;
 mod notification_hold;
+mod notification_reveal;
 mod panel_input;
 mod portal;
 mod press_guard;
@@ -479,6 +481,9 @@ struct WindowedRuntimeState {
     notification_link_opener: crate::shell::link::LinkOpener,
     /// The newest pressed link's local feedback.
     link_feedback: Option<crate::shell::link::LinkFeedback>,
+    notification_clipboard: crate::clipboard::Clipboard,
+    copy_feedback: Option<notification_copy::CopyFeedback>,
+    notification_reveal: notification_reveal::RevealState,
     window_go_to: window_go_to::WindowGoTo,
     context_menu_press: Option<widgets::ContextMenuPress>,
     context_menu_open: bool,
@@ -967,6 +972,8 @@ impl WinitApp {
         // Retry pointer input that found the scene lock busy.
         let retained_pointer_changed = self.drain_retained_pointer_input();
         let link_feedback_changed = self.settle_link_feedback(Instant::now());
+        let copy_feedback_changed = self.settle_copy_feedback(Instant::now());
+        let reveal_changed = self.settle_notification_reveal(Instant::now());
         let go_to_changed = self.settle_go_to(Instant::now());
         let hold_changed = self.settle_notification_hold();
         let guard_changed = self.settle_press_guard();
@@ -985,6 +992,8 @@ impl WinitApp {
             || chrome_scene_changed
             || retained_pointer_changed
             || link_feedback_changed
+            || copy_feedback_changed
+            || reveal_changed
             || go_to_changed
             || hold_changed
             || guard_changed;
@@ -1170,6 +1179,18 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         }
         // A shown link result ends once; an open handoff waits for its worker's wake.
         if let Some(at) = self.state.link_feedback.as_ref().and_then(|f| f.until) {
+            deadlines.push(Deadline::new(
+                at,
+                crate::idle_efficiency::RuntimeWakeupSource::AnimationDeadline,
+            ));
+        }
+        if let Some(feedback) = self.state.copy_feedback {
+            deadlines.push(Deadline::new(
+                feedback.until,
+                crate::idle_efficiency::RuntimeWakeupSource::AnimationDeadline,
+            ));
+        }
+        if let Some(at) = self.state.notification_reveal.next_deadline() {
             deadlines.push(Deadline::new(
                 at,
                 crate::idle_efficiency::RuntimeWakeupSource::AnimationDeadline,
@@ -2527,6 +2548,11 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                 if let Some(source) = wake_source {
                     self.state.wake.mark_main_work_pending(source);
                 }
+                if self.notification_reveal_panel_under_cursor().is_some()
+                    && (state == ElementState::Pressed || !self.state.left_button_down)
+                {
+                    return;
+                }
                 self.handle_mouse_button(
                     button,
                     state == ElementState::Pressed,
@@ -3442,6 +3468,9 @@ impl WindowedRuntime {
             press_guard: Default::default(),
             notification_link_opener,
             link_feedback: None,
+            notification_clipboard: Default::default(),
+            copy_feedback: None,
+            notification_reveal: Default::default(),
             window_go_to: window_go_to::WindowGoTo::new(go_to_apps),
             context_menu_press: None,
             context_menu_open: false,

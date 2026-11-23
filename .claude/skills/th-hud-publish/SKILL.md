@@ -76,6 +76,12 @@ unreachable or rejects the call, continue in chat and report the limitation once
   and slot, including fresh content/expiry. Missing or empty keys append. Keys
   are exact, case-sensitive UTF-8, at most 256 bytes. This replacement contract
   is specific to notifications; other surfaces retain their own merge policies.
+- For a long job, publish `"progress":0.4` inside notification content and
+  republish the same key as it advances. Use a number from 0 through 1.
+- For a short command or ID, add a local button such as
+  `{"label":"Copy command","copy":"cargo test -p example"}`. Copy text is
+  limited to 2048 UTF-8 bytes without NUL. The card stays and the button
+  queues no reply.
 - Zone TTL defaults to 60000 ms. Action cards instead default to the owner's
   live answer window (currently 60000 ms by default). Explicit `ttl_ms`, including
   `0` for held content, wins; later settings changes do not retime admitted cards.

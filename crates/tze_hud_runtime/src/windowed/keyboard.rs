@@ -1598,7 +1598,25 @@ impl WinitApp {
             if !raw.repeat && self.state.answer_keyboard.hold_key.take().is_some() {
                 super::notification_hold::cancel_hold(&mut scene, &self.state.global_tokens);
             }
-            if let Some(focus) = self.state.answer_keyboard.focus {
+            let reveal_key_handled = !modified
+                && ((is_escape_key(&raw.key, &raw.key_code)
+                    && self.state.notification_reveal.dismiss(&mut scene))
+                    || (scene.overlay.notification_focus.is_some()
+                        && matches!(raw.key_code.as_str(), "PageUp" | "PageDown")
+                        && scene
+                            .overlay
+                            .notification_reveal_panel
+                            .is_some_and(|panel| {
+                                let dy = if raw.key_code == "PageUp" {
+                                    -panel.bounds.height
+                                } else {
+                                    panel.bounds.height
+                                };
+                                super::notification_reveal::scroll_panel(&mut scene, dy)
+                            })));
+            if reveal_key_handled {
+                true
+            } else if let Some(focus) = self.state.answer_keyboard.focus {
                 if !self
                     .state
                     .safe_mode_atomic
@@ -1618,27 +1636,13 @@ impl WinitApp {
                 }
                 true
             } else {
-                let mut controls: Vec<_> = scene
-                    .overlay
-                    .zone_hit_regions
-                    .iter()
-                    .filter(|region| {
-                        matches!(
-                            region.kind,
-                            tze_hud_scene::types::ZoneInteractionKind::Dismiss
-                                | tze_hud_scene::types::ZoneInteractionKind::GoTo
-                                | tze_hud_scene::types::ZoneInteractionKind::Action { .. }
-                        )
-                    })
-                    .cloned()
-                    .collect();
-                controls.sort_by_key(|region| region.tab_order);
+                let controls = super::notification_reveal::keyboard_stops(&scene);
                 if controls.is_empty() || (modified && scene.overlay.notification_focus.is_none()) {
                     false
                 } else if traversal {
-                    let current = controls.iter().position(|r| {
-                        Some(&r.interaction_id) == scene.overlay.notification_focus.as_ref()
-                    });
+                    let current = controls
+                        .iter()
+                        .position(|r| Some(&r.id) == scene.overlay.notification_focus.as_ref());
                     if let Some(index) = current {
                         if (raw.modifiers.shift && index == 0)
                             || (!raw.modifiers.shift && index + 1 == controls.len())
@@ -1655,9 +1659,7 @@ impl WinitApp {
                                 } else {
                                     index + 1
                                 };
-                                scene.focus_notification(Some(
-                                    controls[next].interaction_id.clone(),
-                                ));
+                                scene.focus_notification(Some(controls[next].id.clone()));
                                 tabbed_to = Some(controls[next].bounds);
                             }
                             true
@@ -1676,7 +1678,7 @@ impl WinitApp {
                                 0
                             };
                             scene.overlay.notification_focus_entered_reverse = raw.modifiers.shift;
-                            scene.focus_notification(Some(controls[next].interaction_id.clone()));
+                            scene.focus_notification(Some(controls[next].id.clone()));
                             tabbed_to = Some(controls[next].bounds);
                         }
                         true
@@ -1685,7 +1687,7 @@ impl WinitApp {
                     }
                 } else if let Some(control) = controls
                     .iter()
-                    .find(|r| Some(&r.interaction_id) == scene.overlay.notification_focus.as_ref())
+                    .find(|r| Some(&r.id) == scene.overlay.notification_focus.as_ref())
                 {
                     if is_escape_key(&raw.key, &raw.key_code) {
                         scene.focus_notification(None);
@@ -1695,6 +1697,7 @@ impl WinitApp {
                             .state
                             .safe_mode_atomic
                             .load(std::sync::atomic::Ordering::Acquire)
+                        && let Some(control) = &control.region
                         && (control.kind != tze_hud_scene::ZoneInteractionKind::GoTo
                             || authorize_go_to())
                     {

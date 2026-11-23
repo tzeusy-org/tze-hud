@@ -686,6 +686,7 @@ impl Compositor {
                 ZoneContent::Notification(n) => {
                     style.text_block_height(!n.title.is_empty())
                         + style.caption_height(record.caption.as_deref())
+                        + style.progress_reserve(n)
                         + layouts
                             .borrow_mut()
                             .resolve(token_map, zone_name, record, policy, card_w)

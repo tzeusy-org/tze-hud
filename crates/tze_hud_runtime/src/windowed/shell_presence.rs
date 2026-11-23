@@ -425,6 +425,7 @@ mod tests {
         let mut scene = SceneGraph::new_with_clock(1920.0, 1080.0, clock.clone());
         scene.register_zone(crate::windowed::test_support::make_test_zone("questions"));
         let callback = NotificationAction {
+            copy: None,
             label: "Answer".into(),
             callback_id: Some("answer".into()),
             url: None,
@@ -434,6 +435,7 @@ mod tests {
             vec![callback.clone(), callback.clone()],
             vec![callback],
             vec![NotificationAction {
+                copy: None,
                 label: "Open link".into(),
                 callback_id: None,
                 url: Some("https://example.com".into()),

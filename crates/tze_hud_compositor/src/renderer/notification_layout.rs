@@ -1,6 +1,6 @@
 //! Retained notification geometry. Measurement uses the same font roles,
-//! advanced shaping as the text rasterizer; unchanged frames only
-//! look up the publication's descriptor.
+//! advanced shaping as the text rasterizer. Unchanged frames look up the
+//! publication's descriptor.
 use super::notification_style::NotificationStyle;
 use std::collections::HashMap;
 use tze_hud_scene::types::*;
@@ -255,8 +255,8 @@ impl NotificationLayoutCache {
                 + hint_width
                 > cell
         });
-        // Labels retain the existing bounded Clip policy after row/stack
-        // selection. Unbounded text must not push the fourth option away.
+        // Labels ellipsize within the selected button widths. Long text
+        // cannot push later options away.
         self.shapes += measured;
         // Buttons size from tokens and centre the label line.
         let line = inputs.line_height;

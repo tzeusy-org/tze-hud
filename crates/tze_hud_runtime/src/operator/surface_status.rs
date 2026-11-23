@@ -160,36 +160,105 @@ fn display_index(bounds: Rect, displays: &[Rect]) -> Option<usize> {
 }
 
 fn notifications_json(scene: &SceneGraph, displays: &[Rect]) -> Value {
-    use tze_hud_scene::graph::overlay::NotificationControl;
-    let entries: Vec<Value> = scene.overlay.notification_geometry.iter().filter_map(|card| {
-        let record = scene.zone_registry.active_publishes.get(&card.zone_name)?
-            .iter().find(|r| r.publication_id == card.publication_id)?;
-        let tze_hud_scene::ZoneContent::Notification(payload) = &record.content else {
-            return None;
-        };
-        let actions: Vec<Value> = payload.actions.iter().zip(&card.actions).map(|(action, rect)| {
-            json!({"label": action.label, "kind": if action.url.is_some() { "url" } else { "callback" }, "rect": rect_json(*rect)})
-        }).collect();
-        let focus = match card.focus {
-            Some(NotificationControl::Action(index)) => json!(index),
-            Some(NotificationControl::Close) => json!("close"),
-            Some(NotificationControl::GoTo) => json!("goto"),
-            None => Value::Null,
-        };
-        Some(json!({
-            "s": format!("zone:{}", card.zone_name),
-            "key": record.merge_key,
-            "rect": rect_json(card.bounds),
-            "display": display_index(card.bounds, displays),
-            "actions": actions,
-            "close": rect_json(card.close),
-            "goto": card.goto.map(rect_json),
-            "focus": focus,
-            "chosen": card.chosen,
-            "state": card.state,
-            "guarded": scene.overlay.notification_press_guard == Some(card.publication_id),
-        }))
-    }).collect();
+    use tze_hud_scene::graph::overlay::{NotificationControl, NotificationRevealField};
+    let field = |field| match field {
+        NotificationRevealField::Title => json!("title"),
+        NotificationRevealField::Body => json!("body"),
+        NotificationRevealField::Action(index) => json!(index),
+    };
+    let entries: Vec<Value> = scene
+        .overlay
+        .notification_geometry
+        .iter()
+        .filter_map(|card| {
+            let record = scene
+                .zone_registry
+                .active_publishes
+                .get(&card.zone_name)?
+                .iter()
+                .find(|r| r.publication_id == card.publication_id)?;
+            let tze_hud_scene::ZoneContent::Notification(payload) = &record.content else {
+                return None;
+            };
+            let actions: Vec<Value> = payload
+                .actions
+                .iter()
+                .zip(&card.actions)
+                .enumerate()
+                .map(|(index, (action, rect))| {
+                    let kind = if action.copy.is_some() {
+                        "copy"
+                    } else if action.url.is_some() {
+                        "url"
+                    } else {
+                        "callback"
+                    };
+                    let mut entry =
+                        json!({"label": action.label, "kind": kind, "rect": rect_json(*rect)});
+                    if let Some(feedback) = scene.overlay.notification_copy_feedback
+                        && kind == "copy"
+                        && feedback.publication_id == card.publication_id
+                        && feedback.index == index
+                    {
+                        entry["feedback"] = json!(if feedback.succeeded {
+                            "copied"
+                        } else {
+                            "copy_failed"
+                        });
+                    }
+                    entry
+                })
+                .collect();
+            let focus = match card.focus {
+                Some(NotificationControl::Action(index)) => json!(index),
+                Some(NotificationControl::Close) => json!("close"),
+                Some(NotificationControl::GoTo) => json!("goto"),
+                None => Value::Null,
+            };
+            let mut entry = json!({
+                "s": format!("zone:{}", card.zone_name),
+                "key": record.merge_key,
+                "rect": rect_json(card.bounds),
+                "display": display_index(card.bounds, displays),
+                "actions": actions,
+                "close": rect_json(card.close),
+                "goto": card.goto.map(rect_json),
+                "focus": focus,
+                "chosen": card.chosen,
+                "state": card.state,
+                "guarded": scene.overlay.notification_press_guard == Some(card.publication_id),
+            });
+            let sources: Vec<_> = scene
+                .overlay
+                .notification_reveal_regions
+                .iter()
+                .filter(|region| region.target.publication_id == card.publication_id)
+                .map(|region| {
+                    json!({
+                        "field": field(region.target.field),
+                        "rect": rect_json(region.bounds),
+                    })
+                })
+                .collect();
+            if !sources.is_empty() {
+                entry["reveal_sources"] = json!(sources);
+            }
+            if let (Some(panel), Some(request)) = (
+                scene.overlay.notification_reveal_panel,
+                scene.overlay.notification_reveal,
+            ) && panel.target == request.target
+                && panel.target.publication_id == card.publication_id
+            {
+                entry["reveal"] = json!({
+                    "field": field(panel.target.field),
+                    "rect": rect_json(panel.bounds),
+                    "scrollable": panel.max_scroll > 0.0,
+                    "scrolled": request.scroll > 0.0,
+                });
+            }
+            Some(entry)
+        })
+        .collect();
     json!(entries)
 }
 
@@ -517,6 +586,7 @@ mod tests {
             .publish_to_zone(
                 "notification-area",
                 ZoneContent::Notification(NotificationPayload {
+                    progress: None,
                     text: "private body".into(),
                     title: String::new(),
                     icon: String::new(),
@@ -524,12 +594,14 @@ mod tests {
                     ttl_ms: None,
                     actions: vec![
                         NotificationAction {
+                            copy: None,
                             label: "Reply".into(),
                             callback_id: Some("answer".into()),
                             url: None,
                             role: None,
                         },
                         NotificationAction {
+                            copy: None,
                             label: "Read".into(),
                             callback_id: None,
                             url: Some("https://example.invalid/?secret=value".into()),

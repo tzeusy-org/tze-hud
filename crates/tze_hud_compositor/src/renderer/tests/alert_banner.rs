@@ -119,6 +119,7 @@ fn publish_alert(scene: &mut SceneGraph, text: &str, urgency: u32, publisher: &s
         .publish_to_zone(
             "alert-banner",
             ZoneContent::Notification(NotificationPayload {
+                progress: None,
                 text: text.to_owned(),
                 icon: String::new(),
                 urgency,
@@ -355,6 +356,7 @@ async fn test_alert_banner_is_an_inset_card_matching_its_hit_regions() {
                     actions: ["Inspect the service", "Keep monitoring"]
                         .into_iter()
                         .map(|label| NotificationAction {
+                            copy: None,
                             label: label.into(),
                             callback_id: Some(label.into()),
                             url: None,

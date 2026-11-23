@@ -41,6 +41,7 @@ async fn test_stack_zone_renders_separate_backdrop_per_publication() {
         .publish_to_zone(
             "notification-area",
             ZoneContent::Notification(NotificationPayload {
+                progress: None,
                 text: "First notification".to_owned(),
                 icon: String::new(),
                 urgency: 1,
@@ -58,6 +59,7 @@ async fn test_stack_zone_renders_separate_backdrop_per_publication() {
         .publish_to_zone(
             "notification-area",
             ZoneContent::Notification(NotificationPayload {
+                progress: None,
                 text: "Second notification".to_owned(),
                 icon: String::new(),
                 urgency: 1,
@@ -128,6 +130,7 @@ async fn test_stack_zone_collect_text_items_per_publication() {
         .publish_to_zone(
             "notification-area",
             ZoneContent::Notification(NotificationPayload {
+                progress: None,
                 text: "Alpha alert".to_owned(),
                 icon: String::new(),
                 urgency: 0,
@@ -145,6 +148,7 @@ async fn test_stack_zone_collect_text_items_per_publication() {
         .publish_to_zone(
             "notification-area",
             ZoneContent::Notification(NotificationPayload {
+                progress: None,
                 text: "Beta alert".to_owned(),
                 icon: String::new(),
                 urgency: 1,
@@ -162,6 +166,7 @@ async fn test_stack_zone_collect_text_items_per_publication() {
         .publish_to_zone(
             "notification-area",
             ZoneContent::Notification(NotificationPayload {
+                progress: None,
                 text: "Gamma alert".to_owned(),
                 icon: String::new(),
                 urgency: 2,
@@ -261,6 +266,7 @@ async fn test_stack_slot_layout_five_notifications_distinct_y() {
             .publish_to_zone(
                 "notification-area",
                 ZoneContent::Notification(NotificationPayload {
+                    progress: None,
                     text: format!("N{i}"),
                     icon: String::new(),
                     urgency: 1,
@@ -392,6 +398,7 @@ async fn test_stack_slot_sixth_notification_evicts_oldest() {
         .publish_to_zone(
             "notification-area",
             ZoneContent::Notification(NotificationPayload {
+                progress: None,
                 text: "Oldest".to_owned(),
                 icon: String::new(),
                 urgency: 0,
@@ -410,6 +417,7 @@ async fn test_stack_slot_sixth_notification_evicts_oldest() {
             .publish_to_zone(
                 "notification-area",
                 ZoneContent::Notification(NotificationPayload {
+                    progress: None,
                     text: format!("N{i}"),
                     icon: String::new(),
                     urgency: 1,
@@ -494,6 +502,7 @@ async fn test_stack_slot_clips_at_zone_boundary() {
             .publish_to_zone(
                 "notification-area",
                 ZoneContent::Notification(NotificationPayload {
+                    progress: None,
                     text: format!("M{i}"),
                     icon: String::new(),
                     urgency: 1,
@@ -547,6 +556,7 @@ async fn test_stack_slot_clips_at_zone_boundary() {
         height_pct: 0.3,
     };
     let callback = NotificationAction {
+        copy: None,
         label: "Answer".into(),
         callback_id: Some("answer".into()),
         url: None,
@@ -608,6 +618,7 @@ async fn test_stack_slot_clips_at_zone_boundary() {
         panic!("notification fixture")
     };
     payload.actions = vec![NotificationAction {
+        copy: None,
         label: "Open".into(),
         callback_id: None,
         url: Some("https://example.com/".into()),

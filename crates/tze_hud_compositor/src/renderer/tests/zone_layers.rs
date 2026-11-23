@@ -626,6 +626,7 @@ async fn test_three_pass_ordering_independent_of_registration_order() {
         .publish_to_zone(
             "content-card",
             ZoneContent::Notification(NotificationPayload {
+                progress: None,
                 text: "layered notification".to_owned(),
                 icon: String::new(),
                 urgency: 0,
@@ -801,6 +802,7 @@ fn test_publication_ttl_ms_uses_expires_at_wall_us() {
         zone_name: "alert-banner".to_string(),
         publisher_namespace: "agent-warn".to_string(),
         content: ZoneContent::Notification(NotificationPayload {
+            progress: None,
             text: "Disk space low".to_owned(),
             icon: String::new(),
             urgency: 2,
@@ -837,6 +839,7 @@ fn test_publication_ttl_ms_uses_expires_at_wall_us() {
         zone_name: "alert-banner".to_string(),
         publisher_namespace: "agent-crit".to_string(),
         content: ZoneContent::Notification(NotificationPayload {
+            progress: None,
             text: "System failure".to_owned(),
             icon: String::new(),
             urgency: 3,
@@ -873,6 +876,7 @@ fn test_publication_ttl_ms_uses_expires_at_wall_us() {
         zone_name: "alert-banner".to_string(),
         publisher_namespace: "agent-both".to_string(),
         content: ZoneContent::Notification(NotificationPayload {
+            progress: None,
             text: "Both set".to_owned(),
             icon: String::new(),
             urgency: 2,
@@ -905,6 +909,7 @@ fn test_publication_ttl_ms_uses_expires_at_wall_us() {
         zone_name: "alert-banner".to_string(),
         publisher_namespace: "agent-info".to_string(),
         content: ZoneContent::Notification(NotificationPayload {
+            progress: None,
             text: "All good".to_owned(),
             icon: String::new(),
             urgency: 1,

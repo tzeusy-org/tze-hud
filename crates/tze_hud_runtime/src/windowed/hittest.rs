@@ -143,6 +143,10 @@ pub(super) fn combined_overlay_hit_regions(
     let mut regions = static_regions.to_vec();
     regions.extend(zone_hit_regions_to_overlay_regions(scene));
     regions.extend(content_tile_hit_regions_from_scene(scene));
+    if let Some(panel) = scene.overlay.notification_reveal_panel {
+        let rect = panel.bounds;
+        regions.push(HitRegion::new(rect.x, rect.y, rect.width, rect.height));
+    }
     if let Some(rect) = scene
         .overlay
         .drag_handle_context_menu
@@ -378,6 +382,7 @@ impl WinitApp {
                 .values()
                 .filter(|tracker| tracker.region.contains(x, y))
                 .count() as u32,
+            notification_reveal: self.notification_reveal_under_cursor(),
         }
     }
 
@@ -859,12 +864,14 @@ mod tests {
             .publish_to_zone(
                 "notifications",
                 ZoneContent::Notification(NotificationPayload {
+                    progress: None,
                     text: "Move the stack".into(),
                     title: "Placement".into(),
                     icon: String::new(),
                     urgency: 1,
                     ttl_ms: None,
                     actions: vec![NotificationAction {
+                        copy: None,
                         label: "Open".into(),
                         callback_id: Some("open".into()),
                         url: None,
@@ -1306,12 +1313,14 @@ mod tests {
                         .publish_to_zone(
                             "notifications",
                             ZoneContent::Notification(NotificationPayload {
+                                progress: None,
                                 text: "Move the stack".into(),
                                 title: "Placement".into(),
                                 icon: String::new(),
                                 urgency: 1,
                                 ttl_ms: None,
                                 actions: vec![NotificationAction {
+                                    copy: None,
                                     label: "Open".into(),
                                     callback_id: Some("open".into()),
                                     url: None,

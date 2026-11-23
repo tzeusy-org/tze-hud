@@ -40,6 +40,7 @@ pub(super) struct CursorEntrySignature {
     pub(super) drag_handle: Option<tze_hud_scene::SceneId>,
     /// Number of widget hover regions containing the cursor.
     pub(super) widget_regions: u32,
+    pub(super) notification_reveal: Option<tze_hud_scene::graph::overlay::NotificationRevealTarget>,
 }
 
 /// Cursor-entry bookkeeping kept between event-loop turns.

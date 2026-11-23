@@ -165,6 +165,9 @@ impl WindowedRuntimeState {
             press_guard: Default::default(),
             notification_link_opener: Default::default(),
             link_feedback: None,
+            notification_clipboard: Default::default(),
+            copy_feedback: None,
+            notification_reveal: Default::default(),
             window_go_to: Default::default(),
             context_menu_press: None,
             context_menu_open: false,
@@ -3425,6 +3428,7 @@ mod tests {
                             tze_hud_scene::NotificationPayload {
                                 text: "Blocked browser".into(),
                                 actions: vec![tze_hud_scene::NotificationAction {
+                                    copy: None,
                                     label: "Open".into(),
                                     callback_id: None,
                                     url: Some("https://example.com/frame".into()),
@@ -3798,6 +3802,7 @@ mod tests {
                 ephemeral: false,
             });
             let action = |id: &str, label: &str| NotificationAction {
+                copy: None,
                 label: label.to_string(),
                 callback_id: Some(id.to_string()),
                 url: None,
@@ -3807,6 +3812,7 @@ mod tests {
                 .publish_to_zone(
                     "notification-area",
                     ZoneContent::Notification(NotificationPayload {
+                        progress: None,
                         text: "Click Approve".to_string(),
                         icon: String::new(),
                         urgency: 2,
@@ -5061,6 +5067,7 @@ mod tests {
             };
             for (i, url) in urls.iter().enumerate() {
                 payload.actions[i] = NotificationAction {
+                    copy: None,
                     label: format!("Link {i}"),
                     callback_id: None,
                     url: Some((*url).into()),
@@ -5095,6 +5102,284 @@ mod tests {
             native.complete(receipt);
         }
         harness.drain();
+    }
+
+    #[test]
+    fn notification_reveal_arms_only_for_cut_text_and_esc_suppresses_the_focused_field() {
+        use std::time::{Duration, Instant};
+        use tze_hud_scene::graph::overlay::{
+            NotificationRevealField, NotificationRevealRegion, NotificationRevealTarget,
+        };
+        let mut harness = approve_reject_notification_harness();
+        let start = Instant::now();
+        assert!(!harness.app.settle_notification_reveal(start));
+        assert_eq!(harness.app.state.notification_reveal.next_deadline(), None);
+        let (id, bounds) = {
+            let scene = harness.scene();
+            let card = &scene.overlay.notification_geometry[0];
+            (card.publication_id, card.bounds)
+        };
+        let target = NotificationRevealTarget {
+            publication_id: id,
+            field: NotificationRevealField::Body,
+        };
+        let focus_id = format!("notification-reveal:{id}:body");
+        let source = Rect::new(bounds.x, bounds.y, bounds.width * 0.5, bounds.height * 0.25);
+        let other = NotificationRevealTarget {
+            field: NotificationRevealField::Title,
+            ..target
+        };
+        let other_source = Rect::new(
+            source.x + source.width,
+            source.y,
+            source.width,
+            source.height,
+        );
+        let snapshot = {
+            let mut scene = harness.scene();
+            scene.overlay.notification_reveal_regions.extend([
+                NotificationRevealRegion {
+                    target,
+                    bounds: source,
+                    focus_id: focus_id.clone(),
+                },
+                NotificationRevealRegion {
+                    target: other,
+                    bounds: other_source,
+                    focus_id: format!("notification-reveal:{id}:title"),
+                },
+            ]);
+            crate::pipeline::HitTestSnapshot::from_scene(&scene)
+        };
+        harness
+            .app
+            .state
+            .pipeline
+            .hit_test_snapshot
+            .store(Arc::new(snapshot));
+        harness.app.state.cursor_x = source.x + source.width * 0.5;
+        harness.app.state.cursor_y = source.y + source.height * 0.5;
+        assert!(!harness.app.settle_notification_reveal(start));
+        let deadline = start + Duration::from_millis(180);
+        assert_eq!(
+            harness.app.state.notification_reveal.next_deadline(),
+            Some(deadline)
+        );
+        assert!(
+            !harness
+                .app
+                .settle_notification_reveal(deadline - Duration::from_millis(1))
+        );
+        assert!(harness.scene().overlay.notification_reveal.is_none());
+        assert!(harness.app.settle_notification_reveal(deadline));
+        assert_eq!(
+            harness.scene().overlay.notification_reveal.unwrap().target,
+            target
+        );
+        assert_eq!(harness.app.state.notification_reveal.next_deadline(), None);
+
+        harness.app.state.cursor_left_window = true;
+        assert!(harness.app.settle_notification_reveal(deadline));
+        assert!(harness.scene().overlay.notification_reveal.is_none());
+        harness.enqueue(key_down("Tab", "Tab", 1_000));
+        harness.enqueue(key_up("Tab", "Tab", 1_100));
+        harness.drain();
+        assert_eq!(
+            harness.scene().overlay.notification_focus.as_deref(),
+            Some(focus_id.as_str())
+        );
+        assert!(harness.app.settle_notification_reveal(deadline));
+        assert_eq!(
+            harness.scene().overlay.notification_reveal.unwrap().target,
+            target
+        );
+        harness.enqueue(key_down("Escape", "Escape", 1_200));
+        harness.enqueue(key_up("Escape", "Escape", 1_300));
+        harness.drain();
+        assert!(
+            !harness
+                .app
+                .settle_notification_reveal(deadline + Duration::from_secs(1))
+        );
+        assert!(harness.scene().overlay.notification_reveal.is_none());
+
+        let hovered = deadline + Duration::from_secs(2);
+        harness.app.state.cursor_left_window = false;
+        harness.app.state.cursor_x = other_source.x + other_source.width * 0.5;
+        assert!(!harness.app.settle_notification_reveal(hovered));
+        let dwell = hovered + Duration::from_millis(180);
+        assert_eq!(
+            harness.app.state.notification_reveal.next_deadline(),
+            Some(dwell)
+        );
+        assert!(harness.app.settle_notification_reveal(dwell));
+        assert_eq!(
+            harness.scene().overlay.notification_reveal.unwrap().target,
+            other
+        );
+        assert!(take_action_ids(&harness).is_empty());
+    }
+
+    #[test]
+    fn reveal_wheel_replays_after_contention_without_retargeting() {
+        use tze_hud_scene::graph::overlay::{
+            NotificationRevealField, NotificationRevealPanel, NotificationRevealRequest,
+            NotificationRevealTarget,
+        };
+        let mut harness = approve_reject_notification_harness();
+        let bounds = Rect::new(20.0, 30.0, 200.0, 120.0);
+        let (panel, snapshot) = {
+            let mut scene = harness.scene();
+            let target = NotificationRevealTarget {
+                publication_id: scene.overlay.notification_geometry[0].publication_id,
+                field: NotificationRevealField::Body,
+            };
+            let panel = NotificationRevealPanel {
+                target,
+                bounds,
+                bridge: Rect::new(0.0, 0.0, 0.0, 0.0),
+                max_scroll: 240.0,
+            };
+            scene.overlay.notification_reveal_panel = Some(panel);
+            scene.overlay.notification_reveal = Some(NotificationRevealRequest {
+                target,
+                scroll: 0.0,
+            });
+            (panel, crate::pipeline::HitTestSnapshot::from_scene(&scene))
+        };
+        harness
+            .app
+            .state
+            .pipeline
+            .hit_test_snapshot
+            .store(Arc::new(snapshot));
+        (harness.app.state.cursor_x, harness.app.state.cursor_y) = (50.0, 60.0);
+        let scene_handle = Arc::clone(&harness.app.state.shared_state.blocking_lock().scene);
+        let (dx, dy, step) = crate::windowed::input_dispatch::normalize_mouse_wheel_delta(
+            &winit::event::MouseScrollDelta::LineDelta(0.0, -1.0),
+            crate::os_prefs::WheelLines::Fixed,
+        );
+        let held = scene_handle.blocking_lock();
+        harness.app.enqueue_scroll_event(dx, dy, step);
+        assert_eq!(held.overlay.notification_reveal.unwrap().scroll, 0.0);
+        drop(held);
+        assert!(harness.app.drain_retained_pointer_input());
+        assert_eq!(
+            harness.scene().overlay.notification_reveal.unwrap().scroll,
+            tze_hud_input::WHEEL_LINE_PX
+        );
+
+        let mut held = scene_handle.blocking_lock();
+        harness.app.enqueue_scroll_event(dx, dy, step);
+        let target = NotificationRevealTarget {
+            field: NotificationRevealField::Action(0),
+            ..panel.target
+        };
+        held.overlay.notification_reveal_panel = Some(NotificationRevealPanel { target, ..panel });
+        held.overlay.notification_reveal = Some(NotificationRevealRequest {
+            target,
+            scroll: 0.0,
+        });
+        drop(held);
+        assert!(harness.app.drain_retained_pointer_input());
+        assert_eq!(
+            harness.scene().overlay.notification_reveal.unwrap().scroll,
+            0.0
+        );
+        assert!(take_action_ids(&harness).is_empty());
+    }
+
+    #[test]
+    fn card_copy_pointer_and_answer_digit_write_locally_and_keep_the_card() {
+        const TEXT: &str = "cargo test -p example\njob-42";
+        for (digit, succeeded) in [(false, true), (true, true), (true, false)] {
+            let mut harness = approve_reject_notification_harness();
+            let id = {
+                let mut scene = harness.scene();
+                let card = &mut scene
+                    .zone_registry
+                    .active_publishes
+                    .get_mut("notification-area")
+                    .unwrap()[0];
+                let tze_hud_scene::ZoneContent::Notification(payload) = &mut card.content else {
+                    panic!("expected a notification");
+                };
+                payload.actions[1] = tze_hud_scene::NotificationAction {
+                    label: "Copy cmd".into(),
+                    copy: Some(TEXT.into()),
+                    ..Default::default()
+                };
+                let id = card.publication_id;
+                scene.version += 1;
+                id
+            };
+            assert!(harness.tick());
+            let (tx, rx) = std::sync::mpsc::channel();
+            harness.app.state.notification_clipboard.write = Arc::new(move |text| {
+                tx.send(text.to_owned()).unwrap();
+                if succeeded {
+                    Ok(())
+                } else {
+                    Err("fixture clipboard busy".into())
+                }
+            });
+
+            if digit {
+                harness
+                    .app
+                    .state
+                    .answer_keyboard
+                    .requested
+                    .store(true, std::sync::atomic::Ordering::Release);
+                harness.drain();
+                assert!(harness.app.state.answer_keyboard.focus.is_some());
+                harness.enqueue(key_down("Digit2", "2", 1_000));
+                harness.enqueue(key_up("Digit2", "2", 1_100));
+                harness.drain();
+                assert!(harness.app.state.answer_keyboard.focus.is_none());
+            } else {
+                let bounds = harness
+                    .scene()
+                    .overlay
+                    .zone_hit_regions
+                    .iter()
+                    .find(|r| {
+                        r.publication_id == id
+                            && r.kind
+                                == (tze_hud_scene::types::ZoneInteractionKind::Action { index: 1 })
+                    })
+                    .unwrap()
+                    .bounds;
+                click_at(
+                    &mut harness,
+                    (
+                        bounds.x + bounds.width * 0.5,
+                        bounds.y + bounds.height * 0.5,
+                    ),
+                );
+            }
+
+            assert_eq!(rx.try_recv().unwrap(), TEXT);
+            assert!(rx.try_recv().is_err());
+            harness.app.settle_copy_feedback(std::time::Instant::now());
+            {
+                let scene = harness.scene();
+                assert_eq!(
+                    scene.zone_registry.active_for_zone("notification-area")[0].publication_id,
+                    id
+                );
+                let result = scene.overlay.notification_copy_feedback.unwrap();
+                assert_eq!(
+                    (result.publication_id, result.index, result.succeeded),
+                    (id, 1, succeeded)
+                );
+            }
+            assert!(take_action_ids(&harness).is_empty());
+            let until = harness.app.state.copy_feedback.unwrap().until;
+            assert!(harness.app.settle_copy_feedback(until));
+            assert!(harness.scene().overlay.notification_copy_feedback.is_none());
+            assert!(harness.app.state.copy_feedback.is_none());
+        }
     }
 
     fn publish_go_to_card(
@@ -6035,12 +6320,14 @@ mod tests {
                     unreachable!()
                 };
                 payload.actions[0] = NotificationAction {
+                    copy: None,
                     label: "Docs".into(),
                     callback_id: None,
                     url: Some(urls[0].into()),
                     role: None,
                 };
                 payload.actions[1] = NotificationAction {
+                    copy: None,
                     label: "More".into(),
                     callback_id: None,
                     url: Some(urls[1].into()),
@@ -7004,12 +7291,14 @@ mod tests {
                 .publish_to_zone(
                     "notification-area",
                     ZoneContent::Notification(NotificationPayload {
+                        progress: None,
                         text: "Ship v2?".to_string(),
                         icon: String::new(),
                         urgency: 1,
                         ttl_ms: None,
                         title: "Deploy".to_string(),
                         actions: vec![NotificationAction {
+                            copy: None,
                             label: "Ship".to_string(),
                             callback_id: Some("ship".to_string()),
                             url: None,
@@ -7069,6 +7358,7 @@ mod tests {
                 .publish_to_zone(
                     "notification-area",
                     ZoneContent::Notification(NotificationPayload {
+                        progress: None,
                         text: "Dismiss this notification".into(),
                         icon: String::new(),
                         urgency: 1,
@@ -7086,12 +7376,14 @@ mod tests {
                 .publish_to_zone(
                     "notification-area",
                     ZoneContent::Notification(NotificationPayload {
+                        progress: None,
                         text: "Keep this notification".into(),
                         icon: String::new(),
                         urgency: 1,
                         ttl_ms: None,
                         title: "Control".into(),
                         actions: vec![NotificationAction {
+                            copy: None,
                             label: "Keep".into(),
                             callback_id: Some("keep".into()),
                             url: None,

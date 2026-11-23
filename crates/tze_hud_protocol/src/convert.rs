@@ -43,6 +43,7 @@ pub fn proto_zone_content_to_scene(c: &proto::ZoneContent) -> Option<ZoneContent
             // use the top-level Publish TTL/expiry, counted from presentation.
             ttl_ms: None,
             title: n.title.clone(),
+            progress: n.progress,
             actions: n
                 .actions
                 .iter()
@@ -50,6 +51,7 @@ pub fn proto_zone_content_to_scene(c: &proto::ZoneContent) -> Option<ZoneContent
                     label: a.label.clone(),
                     callback_id: (!a.callback_id.is_empty()).then(|| a.callback_id.clone()),
                     url: (!a.url.is_empty()).then(|| a.url.clone()),
+                    copy: a.copy.clone(),
                     role: None,
                 })
                 .collect(),

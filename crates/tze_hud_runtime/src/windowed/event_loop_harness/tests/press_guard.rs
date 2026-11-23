@@ -148,6 +148,7 @@ fn close_and_link_presses_are_dropped_too() {
         let mut harness = approve_reject_notification_harness_on(clock.clone());
         let card = with_actions(content(&harness), |actions| {
             actions[1] = NotificationAction {
+                copy: None,
                 label: "Docs".into(),
                 callback_id: None,
                 url: Some("https://example.com/docs".into()),

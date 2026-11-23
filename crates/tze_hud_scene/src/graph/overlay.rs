@@ -34,6 +34,48 @@ pub enum NotificationControl {
     GoTo,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NotificationCopyFeedback {
+    pub publication_id: SceneId,
+    pub index: usize,
+    pub succeeded: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NotificationRevealField {
+    Title,
+    Body,
+    Action(usize),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NotificationRevealTarget {
+    pub publication_id: SceneId,
+    pub field: NotificationRevealField,
+}
+
+#[derive(Clone, Debug)]
+pub struct NotificationRevealRegion {
+    pub target: NotificationRevealTarget,
+    pub bounds: Rect,
+    pub focus_id: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NotificationRevealRequest {
+    pub target: NotificationRevealTarget,
+    pub scroll: f32,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct NotificationRevealPanel {
+    pub target: NotificationRevealTarget,
+    pub bounds: Rect,
+    /// A narrow pointer path from the source text to the panel.
+    pub bridge: Rect,
+    pub max_scroll: f32,
+}
+
 /// Window availability is computed once per presented publication. Mutable
 /// attempt feedback is local and expires on a runtime deadline.
 #[derive(Clone, Debug, Default)]
@@ -122,6 +164,16 @@ pub struct RuntimeOverlayState {
     /// sets and clears it, the compositor draws it.
     #[serde(skip, default)]
     pub link_feedback: Option<(crate::LinkFeedbackTarget, crate::LinkFeedbackState)>,
+    /// A local copy result. Clipboard text never enters this display state.
+    #[serde(skip, default)]
+    pub notification_copy_feedback: Option<NotificationCopyFeedback>,
+    /// Painted ellipsized fields and the single owner-local reveal.
+    #[serde(skip, default)]
+    pub notification_reveal_regions: Vec<NotificationRevealRegion>,
+    #[serde(skip, default)]
+    pub notification_reveal: Option<NotificationRevealRequest>,
+    #[serde(skip, default)]
+    pub notification_reveal_panel: Option<NotificationRevealPanel>,
     /// Chooses the display of each newly presented question card; `None`
     /// keeps every card on the notification display.
     #[serde(skip, default)]
