@@ -2196,18 +2196,6 @@ mod portal_reveal_render_tests {
     }
     use tze_hud_scene::types::{FontFamily, Rect, Rgba, TextAlign, TextMarkdownNode, TextOverflow};
 
-    fn plain_attr() -> StyleAttr {
-        StyleAttr {
-            weight: None,
-            italic: false,
-            monospace: false,
-            color: None,
-            background_color: None,
-            size_scale: None,
-            href: None,
-        }
-    }
-
     /// Build a cached markdown `TextItem` whose laid-out text == `plain`, with a
     /// single bold span over the leading `bold_prefix` bytes.
     fn markdown_item(plain: &str, bold_prefix: usize) -> TextItem {
@@ -2218,7 +2206,7 @@ mod portal_reveal_render_tests {
                 end_byte: bold_prefix,
                 attr: StyleAttr {
                     weight: Some(700),
-                    ..plain_attr()
+                    ..StyleAttr::plain()
                 },
             }],
             code_panels: vec![],
@@ -2228,8 +2216,12 @@ mod portal_reveal_render_tests {
             code_blocks: vec![],
             line_height_multiplier: 1.4,
         };
-        let node = TextMarkdownNode {
-            content: plain.to_owned(),
+        TextItem::from_text_markdown_cached(&markdown_node(plain), 0.0, 0.0, &parsed)
+    }
+
+    fn markdown_node(content: &str) -> TextMarkdownNode {
+        TextMarkdownNode {
+            content: content.into(),
             bounds: Rect::new(0.0, 0.0, 400.0, 300.0),
             font_size_px: 16.0,
             font_family: FontFamily::SystemSansSerif,
@@ -2238,18 +2230,12 @@ mod portal_reveal_render_tests {
             alignment: TextAlign::Start,
             overflow: TextOverflow::Clip,
             color_runs: Box::default(),
-        };
-        TextItem::from_text_markdown_cached(&node, 0.0, 0.0, &parsed)
+        }
     }
 
     /// Alpha (0..=255) of the styled run covering `byte`, or `None` if uncovered.
     fn alpha_at(item: &TextItem, byte: usize) -> Option<u8> {
-        item.styled_runs
-            .iter()
-            .rev()
-            .find(|r| r.start_byte <= byte && byte < r.end_byte)
-            .and_then(|r| r.color)
-            .map(|c| c[3])
+        color_at(item, byte).map(|color| color[3])
     }
 
     #[test]
@@ -2363,38 +2349,22 @@ mod portal_reveal_render_tests {
     #[test]
     fn tail_cursor_color_reads_content_end_marker_only() {
         use tze_hud_scene::types::TextColorRun;
-        let content = "some transcript ▍".to_string();
-        let end = content.len() as u32;
-        let accent = Rgba {
-            r: 0.2,
-            g: 0.4,
-            b: 0.8,
-            a: 1.0,
-        };
-        let mut node = TextMarkdownNode {
-            content: content.clone(),
-            bounds: Rect::new(0.0, 0.0, 400.0, 300.0),
-            font_size_px: 16.0,
-            font_family: FontFamily::SystemSansSerif,
-            color: Rgba::WHITE,
-            background: None,
-            alignment: TextAlign::Start,
-            overflow: TextOverflow::Clip,
-            // A byte-0 sentinel (e.g. stale/lifecycle) plus the content-end cursor
-            // marker — only the latter must be picked up.
-            color_runs: Box::from([
-                TextColorRun {
-                    start_byte: 0,
-                    end_byte: 0,
-                    color: Rgba::WHITE,
-                },
-                TextColorRun {
-                    start_byte: end,
-                    end_byte: end,
-                    color: accent,
-                },
-            ]),
-        };
+        let mut node = markdown_node("some transcript ▍");
+        let end = node.content.len() as u32;
+        let accent = Rgba::new(0.2, 0.4, 0.8, 1.0);
+        // Only the content-end marker should be picked up.
+        node.color_runs = Box::from([
+            TextColorRun {
+                start_byte: 0,
+                end_byte: 0,
+                color: Rgba::WHITE,
+            },
+            TextColorRun {
+                start_byte: end,
+                end_byte: end,
+                color: accent,
+            },
+        ]);
         assert_eq!(
             markdown_node_tail_cursor_color(&node),
             Some(crate::text::rgba_to_srgb_u8(accent)),
@@ -2458,60 +2428,36 @@ mod transcript_measure_tests {
     use crate::renderer::token_colors::resolve_transcript_max_measure_px;
     use std::collections::HashMap;
 
-    // ── clamp_transcript_measure: pure logic (no GPU) ──────────────
-
     #[test]
-    fn clamp_unbounded_returns_full_width() {
-        // 0 = unbounded: the measure is left at the full node width so the
-        // default profile (default token value "0") is unchanged.
-        assert!((clamp_transcript_measure(400.0, 0.0) - 400.0).abs() < 1e-4);
+    fn transcript_measure_clamp_only_narrows_a_bounded_width() {
+        for (width, cap, expected) in [
+            (400.0, 0.0, 400.0),
+            (400.0, 120.0, 120.0),
+            (200.0, 640.0, 200.0),
+            (300.0, 300.0, 300.0),
+        ] {
+            let actual = clamp_transcript_measure(width, cap);
+            assert!((actual - expected).abs() < 1e-4, "width={width}, cap={cap}");
+        }
     }
 
     #[test]
-    fn clamp_narrows_when_cap_below_width() {
-        // Cap < node width: the effective measure shrinks to the cap.
-        assert!((clamp_transcript_measure(400.0, 120.0) - 120.0).abs() < 1e-4);
-    }
-
-    #[test]
-    fn clamp_never_widens_when_cap_above_width() {
-        // Cap >= node width: a node already narrower than the cap is left
-        // untouched (the clamp only ever narrows, never widens).
-        assert!((clamp_transcript_measure(200.0, 640.0) - 200.0).abs() < 1e-4);
-        // Exactly equal is a no-op.
-        assert!((clamp_transcript_measure(300.0, 300.0) - 300.0).abs() < 1e-4);
-    }
-
-    // ── resolve_transcript_max_measure_px: token resolution ───────
-
-    #[test]
-    fn resolve_defaults_to_unbounded_when_absent() {
-        let map = HashMap::new();
-        assert_eq!(resolve_transcript_max_measure_px(&map), 0.0);
-    }
-
-    #[test]
-    fn resolve_parses_positive_measure() {
-        let mut map = HashMap::new();
-        map.insert(
-            "portal.transcript.max_measure_px".to_string(),
-            "640".to_string(),
-        );
-        assert!((resolve_transcript_max_measure_px(&map) - 640.0).abs() < 1e-4);
-    }
-
-    #[test]
-    fn resolve_rejects_negative_and_nonfinite() {
-        for bad in ["-1", "nan", "inf", "not-a-number", ""] {
-            let mut map = HashMap::new();
-            map.insert(
-                "portal.transcript.max_measure_px".to_string(),
-                bad.to_string(),
-            );
+    fn resolve_transcript_measure_defaults_to_unbounded_without_a_valid_token() {
+        const KEY: &str = "portal.transcript.max_measure_px";
+        assert_eq!(resolve_transcript_max_measure_px(&HashMap::new()), 0.0);
+        for (value, expected) in [
+            ("640", 640.0),
+            ("-1", 0.0),
+            ("nan", 0.0),
+            ("inf", 0.0),
+            ("not-a-number", 0.0),
+            ("", 0.0),
+        ] {
+            let map = HashMap::from([(KEY.into(), value.into())]);
             assert_eq!(
                 resolve_transcript_max_measure_px(&map),
-                0.0,
-                "value {bad:?} must fall back to unbounded (0.0)"
+                expected,
+                "{value:?}"
             );
         }
     }
@@ -2531,42 +2477,15 @@ mod transcript_measure_tests {
         let line = "The quick brown fox jumps over the lazy dog near the \
                     riverbank at dawn every single morning without fail.";
 
-        let full_measure = clamp_transcript_measure(node_width, 0.0);
-        let capped_measure = clamp_transcript_measure(node_width, cap);
-        assert!((full_measure - node_width).abs() < 1e-4);
-        assert!((capped_measure - cap).abs() < 1e-4);
-
-        let full_lines =
-            crate::text::composer_wrap_line_widths(&mut fs, line, full_measure, font_size_px, lhm)
-                .len();
-        let capped_lines = crate::text::composer_wrap_line_widths(
-            &mut fs,
-            line,
-            capped_measure,
-            font_size_px,
-            lhm,
-        )
-        .len();
-
+        let mut lines_at = |measure: f32| {
+            crate::text::composer_wrap_line_widths(&mut fs, line, measure, font_size_px, lhm).len()
+        };
+        let full = lines_at(node_width);
+        let capped = lines_at(clamp_transcript_measure(node_width, cap));
         assert!(
-            capped_lines > full_lines,
-            "clamped measure ({cap}px) must wrap into more lines than full width \
-             ({node_width}px); got capped={capped_lines} full={full_lines}"
+            capped > full,
+            "{cap}px cap should wrap into more lines than {node_width}px: {capped} vs {full}"
         );
-
-        // Unbounded (0) must reproduce the full-width wrap exactly — no regression.
-        let unbounded_measure = clamp_transcript_measure(node_width, 0.0);
-        let unbounded_lines = crate::text::composer_wrap_line_widths(
-            &mut fs,
-            line,
-            unbounded_measure,
-            font_size_px,
-            lhm,
-        )
-        .len();
-        assert_eq!(
-            unbounded_lines, full_lines,
-            "unbounded (0) measure must match full-width wrapping exactly"
-        );
+        assert_eq!(lines_at(clamp_transcript_measure(node_width, 0.0)), full);
     }
 }
