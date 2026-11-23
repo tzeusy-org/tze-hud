@@ -30,6 +30,25 @@ PAIR = "synthetic-pair"
 PR_URL = "https://example.com/example/project/pull/7"
 TITLE = "A pull request with a title that is substantially longer than sixty characters"
 
+CLEANUP_CHILD = """
+from pathlib import Path
+import sys
+import time
+sys.path.insert(0, sys.argv[1])
+import hud_pr
+barrier = Path(sys.argv[2])
+log = hud_pr.PrState.log
+def pause_after_final_state(state, phase):
+    log(state, phase)
+    if phase == "no watcher":
+        (barrier / "finalized").touch()
+        until = time.monotonic() + 6
+        while not (barrier / "exit").exists() and time.monotonic() < until:
+            time.sleep(0.01)
+hud_pr.PrState.log = pause_after_final_state
+sys.exit(hud_pr.main(["watch", "7"]))
+"""
+
 FAKE_GH = """
 import json
 import os
@@ -41,7 +60,7 @@ args = sys.argv[1:]
 command = " ".join(args[:2])
 plan = json.loads(path.read_text())
 assert "GH_REPO" not in os.environ
-if command != "api graphql" and command != "repo view":
+if args[0] != "api" and command != "repo view":
     assert args[-2:] == ["--repo", "example.com/example/project"], args
 
 def selected(items, count, default):
@@ -55,7 +74,10 @@ def update():
     scratch.replace(path)
 
 fields = {}
-if command == "api graphql":
+if command == "api repos/example/project/rules/branches/main?per_page=100":
+    assert args[2:] == ["--hostname", "example.com", "--paginate", "--slurp"]
+    command = "branch rules"
+elif command == "api graphql":
     assert args[2:4] == ["--hostname", "example.com"]
     fields = dict(arg.split("=", 1) for arg in args[5::2])
     query = fields.pop("query")
@@ -74,6 +96,12 @@ update()
 
 if command == "repo view":
     value = {"nameWithOwner": "example/project", "url": "https://example.com/example/project"}
+elif command == "branch rules":
+    value = plan.get("rules", [
+        [{"type": "required_status_checks", "parameters": {"required_status_checks": [
+            {"context": name, "integration_id": 42} for name in ("static checks", "cargo clippy", "cargo test")
+        ]}}],
+    ])
 elif command == "label read":
     value = {"data": {"repository": {"label": {"id": "label"} if plan["label_exists"] else None}}}
 elif command == "label create":
@@ -105,7 +133,11 @@ elif command in ("pr read", "pr verified"):
     }
     if command == "pr verified":
         first_page = plan.get("check_page") and "checksAfter" not in fields
-        contexts = [{"isRequired": True, "status": "COMPLETED", "conclusion": "SUCCESS"}]
+        contexts = [
+            {"name": name, "isRequired": True, "status": "COMPLETED", "conclusion": "SUCCESS",
+             "checkSuite": {"app": {"databaseId": 42}}}
+            for name in ("static checks", "cargo clippy", "cargo test")
+        ]
         if not first_page:
             contexts = pr.pop("contexts", contexts)
         pr["commits"] = {"nodes": [{"commit": {
@@ -235,6 +267,8 @@ class HeldHud:
         self.inputs = []
         self.publish_result = None
         self.initialize_status = 200
+        self.initialize_entered = threading.Event()
+        self.initialize_release = None
         self.hold = False
         self.poll_entered = threading.Event()
         self.poll_release = None
@@ -272,6 +306,9 @@ class HeldHud:
                     fake.calls.append((fake.clock.now, method, scope, params))
                     if fake.initialize_status == 200:
                         fake.scopes.add(scope)
+                    fake.initialize_entered.set()
+                    if fake.initialize_release is not None:
+                        fake.initialize_release.wait(5)
                     self.reply(fake.initialize_status, {"result": {"protocolVersion": "2025-06-18"}}, scope)
                     return
                 name, arguments = params["name"], params["arguments"]
@@ -305,6 +342,8 @@ class HeldHud:
         self.thread.start()
 
     def close(self):
+        if self.initialize_release is not None:
+            self.initialize_release.set()
         if self.poll_release is not None:
             self.poll_release.set()
         if self.delete_release is not None:
@@ -372,6 +411,17 @@ def wait_for(predicate, seconds=5):
         if time.monotonic() >= deadline:
             pytest.fail("timed out waiting for the synthetic watcher")
         time.sleep(0.02)
+
+
+def stop_is_pending(pid):
+    try:
+        lines = Path(f"/proc/{pid}/status").read_text().splitlines()
+    except FileNotFoundError:
+        return False
+    return any(
+        int(line.split()[1], 16) & (1 << (signal.SIGTERM - 1))
+        for line in lines if line.startswith(("SigPnd:", "ShdPnd:"))
+    )
 
 
 @contextmanager
@@ -467,6 +517,33 @@ def test_rehold_waits_for_delayed_release_before_rearming(scenario, hud):
         assert hud.cards()[0][2] != hud.cards()[1][2]
 
 
+def test_rehold_can_rearm_as_soon_as_the_old_state_is_finalized(scenario, hud):
+    hud.poll_release = threading.Event()
+    barrier = scenario.directory
+    cmd = [sys.executable, str(SCRIPTS / "hud_pr.py")]
+    with held_child(scenario), subprocess.Popen(
+        [sys.executable, "-c", CLEANUP_CHILD, str(SCRIPTS), str(barrier)], stdout=subprocess.DEVNULL,
+    ) as prior:
+        try:
+            assert hud.poll_entered.wait(5)
+            with subprocess.Popen([*cmd, "release", "7"], stdout=subprocess.PIPE, text=True) as release:
+                try:
+                    wait_for(lambda: (barrier / "finalized").exists())
+                    assert prior.poll() is None
+                    assert scenario.cli("hold", "7").stdout == "watcher started\n"
+                    assert scenario.state.read()["pid"] != prior.pid
+                    wait_for(lambda: len(hud.cards()) == 2)
+                finally:
+                    (barrier / "exit").touch()
+                assert release.communicate(timeout=5)[0] == "released\n"
+        finally:
+            (barrier / "exit").touch()
+            if prior.poll() is None:
+                prior.terminate()
+        assert scenario.cli("list").stdout == "#7 card up\n"
+        assert len(hud.request("DELETE")) == 1
+
+
 def test_list_combines_open_labelled_prs_with_their_live_state(scenario):
     scenario.replace(listed=[3, 4, 7, 9])
     states = [hud_pr.PrState(REPO, n) for n in (3, 4, 9)]
@@ -505,6 +582,32 @@ def test_metadata_failure_preserves_the_known_retry_cadence(scenario, hud, initi
     scenario.watch(1_000)
     assert scenario.clock.sleeps == [interval, interval]
     assert not hud.cards()
+
+
+def test_pending_check_timeout_has_one_actual_query_each_minute(scenario, monkeypatch):
+    launches = []
+    github = hud_pr.GitHub(REPO, "example.com")
+    github.read = lambda _number: {
+        "state": "OPEN", "held": True, "headRefOid": HEAD,
+        "baseRefName": "main", "mergeable": "MERGEABLE", "mergeQueueEntry": None,
+    }
+
+    def pending(*args, timeout):
+        assert args[:9] == (
+            "pr", "checks", "7", "--watch", "--required", "--fail-fast", "--interval", "60", "--repo",
+        )
+        launches.append(scenario.clock.now)
+        if timeout > 60:
+            launches.append(scenario.clock.now + 60)
+        scenario.clock.advance(timeout)
+        raise subprocess.TimeoutExpired(args, timeout)
+
+    monkeypatch.setattr(hud_pr, "gh", pending)
+    watcher = hud_pr.Watcher(github, scenario.state, clock=scenario.clock)
+    watcher.end = 137
+    watcher.run()
+    assert launches == [0, 60, 120]
+    assert scenario.clock.now == 137
 
 
 def test_red_head_is_skipped_until_a_new_green_head(scenario, hud):
@@ -572,6 +675,29 @@ def test_green_card_payload_is_exact_with_both_graphql_connections_paginated(sce
     assert any(call["fields"].get("checksAfter") == "checks-more" for call in scenario.calls("pr verified"))
     assert any(call["fields"].get("labelsAfter") == "labels-more" for call in scenario.calls())
     assert [call[2] for call in hud.request("DELETE")] == [opened[2]]
+
+
+@pytest.mark.parametrize("failure", ["unreported", "wrong-app", "not-required", "empty-rules", "malformed-rules"])
+def test_green_requires_every_configured_context_with_matching_provider_evidence(scenario, hud, failure):
+    contexts = [
+        {"name": name, "isRequired": True, "status": "COMPLETED", "conclusion": "SUCCESS",
+         "checkSuite": {"app": {"databaseId": 42}}}
+        for name in ("static checks", "cargo clippy", "cargo test")
+    ]
+    if failure == "unreported":
+        contexts = contexts[:1]
+    elif failure == "wrong-app":
+        contexts[-1]["checkSuite"]["app"]["databaseId"] = 999
+    elif failure == "not-required":
+        contexts[-1]["isRequired"] = False
+    elif failure == "empty-rules":
+        scenario.replace(rules=[[]])
+    else:
+        scenario.replace(rules=[[{"type": "required_status_checks", "parameters": {}}]])
+    scenario.replace(**{"pr verified": [{"contexts": contexts}]})
+    scenario.watch(1)
+    assert not hud.cards() and not scenario.calls("enqueue")
+    assert len(scenario.calls("branch rules")) == 1
 
 
 @pytest.mark.parametrize("condition", ["held", "moved", "moved-during-enqueue", "unheld"])
@@ -704,6 +830,32 @@ def test_clean_signal_releases_the_detached_watchers_own_scope(scenario, hud, si
         wait_for(lambda: hud_pr.process_start(pid) is None)
         assert [call[2] for call in hud.request("DELETE")] == [hud.cards()[0][2]]
         assert scenario.cli("list").stdout == "#7 no watcher\n"
+
+
+@pytest.mark.parametrize("phase", ["initialize", "delete"])
+def test_release_during_scope_transition_deletes_the_scope_before_returning(scenario, hud, phase):
+    unblock = threading.Event()
+    if phase == "initialize":
+        hud.initialize_release = unblock
+        entered = hud.initialize_entered
+    else:
+        hud.inputs.append({"gone": "cleared"})
+        hud.delete_release = unblock
+        entered = hud.delete_entered
+    cmd = [sys.executable, str(SCRIPTS / "hud_pr.py")]
+    with held_child(scenario):
+        assert scenario.cli("hold", "7").stdout == "watcher started\n"
+        assert entered.wait(5)
+        pid = scenario.state.read()["pid"]
+        assert hud.scopes == {"scope-1"}
+        with subprocess.Popen([*cmd, "release", "7"], stdout=subprocess.PIPE, text=True) as release:
+            try:
+                wait_for(lambda: stop_is_pending(pid) or hud_pr.process_start(pid) is None, seconds=2)
+            finally:
+                unblock.set()
+            assert release.communicate(timeout=5)[0] == "released\n"
+        assert len(hud.request("DELETE")) == 1
+        assert not hud.scopes and len(hud.cards()) == int(phase == "delete")
 
 
 def test_watch_stops_at_24_hours_without_a_scope_during_long_wait(scenario, hud):

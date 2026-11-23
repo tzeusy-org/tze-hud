@@ -2,7 +2,7 @@
 """Hold a repository PR for the owner's exact-head merge-queue decision."""
 
 import argparse
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from datetime import datetime, timezone
 import fcntl
 import json
@@ -35,6 +35,7 @@ GH_TIMEOUT = 8
 REPO_PATTERN = r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+"
 HEAD_PATTERN = r"[0-9a-f]{40}"
 ACTIVE_STATES = {"watching", "card up", "waiting after Later"}
+STOP_SIGNALS = {signal.SIGTERM, signal.SIGINT, signal.SIGHUP}
 
 PR_QUERY = """
 query HeldPullRequest($owner: String!, $repo: String!, $number: Int!,
@@ -52,8 +53,11 @@ query HeldPullRequest($owner: String!, $repo: String!, $number: Int!,
               contexts(first: 100, after: $checksAfter) {
                 pageInfo { hasNextPage endCursor }
                 nodes {
-                  ... on CheckRun { isRequired(pullRequestNumber: $number) status conclusion }
-                  ... on StatusContext { isRequired(pullRequestNumber: $number) state }
+                  ... on CheckRun {
+                    isRequired(pullRequestNumber: $number) name status conclusion
+                    checkSuite { app { databaseId } }
+                  }
+                  ... on StatusContext { isRequired(pullRequestNumber: $number) context state }
                 }
               }
             }
@@ -132,13 +136,28 @@ def https_url(value):
         raise PrError("use an HTTPS URL without credentials") from None
 
 
-def required_checks_green(contexts):
-    required = [item for item in contexts if item["isRequired"]]
-    return bool(required) and all(
-        item.get("state") == "SUCCESS" if "state" in item else
-        item.get("status") == "COMPLETED" and item.get("conclusion") in {"SUCCESS", "NEUTRAL", "SKIPPED"}
-        for item in required
-    )
+def required_checks_green(contexts, requirements):
+    passed = set()
+    for item in contexts:
+        if item["isRequired"] is not True:
+            continue
+        if "context" in item:
+            name, app = item["context"], None
+            success = item.get("state") == "SUCCESS"
+        else:
+            name = item["name"]
+            suite = item.get("checkSuite") or {}
+            app = (suite.get("app") or {}).get("databaseId")
+            success = (item.get("status") == "COMPLETED"
+                       and item.get("conclusion") in {"SUCCESS", "NEUTRAL", "SKIPPED"})
+        if not success or not isinstance(name, str) or not name.strip():
+            return False
+        if app is not None:
+            if type(app) is not int or app <= 0:
+                return False
+            passed.add((name, app))
+        passed.add((name, None))
+    return requirements <= passed
 
 
 def next_cursor(connection):
@@ -205,6 +224,41 @@ class GitHub:
         ))
         return sorted(entry["number"] for entry in entries)
 
+    def required_rules(self):
+        pages = parse_json(gh_result(
+            "api", f"repos/{self.repo}/rules/branches/main?per_page=100",
+            "--hostname", self.host, "--paginate", "--slurp", timeout=self.timeout(GH_TIMEOUT),
+        ))
+        required = set()
+        try:
+            if not isinstance(pages, list):
+                raise ValueError
+            for page in pages:
+                if not isinstance(page, list):
+                    raise ValueError
+                for rule in page:
+                    kind = rule["type"]
+                    if not isinstance(kind, str) or not kind:
+                        raise ValueError
+                    if kind != "required_status_checks":
+                        continue
+                    checks = rule["parameters"]["required_status_checks"]
+                    if not isinstance(checks, list) or not checks:
+                        raise ValueError
+                    for check in checks:
+                        name = check["context"]
+                        app = check.get("integration_id")
+                        if not isinstance(name, str) or not name.strip():
+                            raise ValueError
+                        if app is not None and (type(app) is not int or app <= 0):
+                            raise ValueError
+                        required.add((name, app))
+            if not required:
+                raise ValueError
+        except (KeyError, TypeError, ValueError, AttributeError):
+            raise PrError("GitHub did not provide valid required-check rules for main") from None
+        return required
+
     def read(self, number, *, checked_head=None):
         """Read PR metadata and, when requested, required checks for that exact head."""
         labels_cursor = checks_cursor = None
@@ -248,7 +302,9 @@ class GitHub:
                         checks_complete = True
                         contexts = []
                 if labels_complete and checks_complete:
-                    return {**pr, "held": held, "checks_green": required_checks_green(contexts)}
+                    green = (held and pr["state"] == "OPEN" and bool(contexts)
+                             and required_checks_green(contexts, self.required_rules()))
+                    return {**pr, "held": held, "checks_green": green}
         except (KeyError, IndexError, TypeError, AttributeError):
             raise PrError("GitHub returned incomplete pull request data") from None
 
@@ -257,7 +313,8 @@ class GitHub:
             result = gh(
                 "pr", "checks", str(number), "--watch", "--required", "--fail-fast",
                 "--interval", str(CHECK_INTERVAL), "--repo", self.target,
-                timeout=self.timeout(CHECK_INTERVAL + GH_TIMEOUT),
+                # The watcher owns the interval. Bound this launch to its first query.
+                timeout=self.timeout(GH_TIMEOUT),
             )
         except subprocess.TimeoutExpired:
             return "pending"
@@ -309,6 +366,28 @@ def wait_for_exit(pidfd):
             raise PrError("the previous watcher is still stopping")
     finally:
         os.close(pidfd)
+
+
+@contextmanager
+def defer_stop_signals():
+    """Keep the scope handshake and its cleanup together across clean stops."""
+    previous = signal.pthread_sigmask(signal.SIG_BLOCK, STOP_SIGNALS)
+    try:
+        yield previous
+    finally:
+        signal.pthread_sigmask(signal.SIG_SETMASK, previous)
+
+
+@contextmanager
+def card_session(label, connection):
+    with defer_stop_signals() as previous, ExitStack() as cleanup:
+        hud = cleanup.enter_context(AskSession(label=label, connection=connection))
+        try:
+            # The scope's cleanup is registered before delivering any pending stop.
+            signal.pthread_sigmask(signal.SIG_SETMASK, previous)
+            yield hud
+        finally:
+            signal.pthread_sigmask(signal.SIG_BLOCK, STOP_SIGNALS)
 
 
 class PrState:
@@ -385,6 +464,15 @@ class PrState:
         with self.edit():
             self.write(state=phase, **changes)
         self.log(phase)
+
+    def finish_watch(self, lock_fd):
+        with defer_stop_signals(), self.edit(lock_fd):
+            try:
+                self.write(state="no watcher", pid=None, pid_start=None, lock_fd=None,
+                           nonce=None, next_return_at=None)
+            finally:
+                fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        self.log("no watcher")
 
     def log(self, outcome):
         print(f"#{self.number} {outcome}", flush=True)
@@ -555,6 +643,7 @@ class Watcher:
                 if head != state.get("head") or state.get("state") != "watching":
                     self.state.mark("watching", head=head, nonce=None, next_return_at=None)
                 if watching_checks:
+                    start = self.clock.monotonic()
                     checks = self.github.checks(self.number)
                     if checks == "red":
                         current = self.github.read(self.number)
@@ -587,7 +676,7 @@ class Watcher:
         content = card_content(self.number, pr, nonce, review_url)
         outcome = "later"
         try:
-            with AskSession(label=f"PR #{self.number}", connection=pair()) as hud:
+            with card_session(label=f"PR #{self.number}", connection=pair()) as hud:
                 result = hud.call_tool("hud_publish", {
                     "surface": NOTIFICATION, "content": content, "ttl_ms": CARD_TTL_MS, "key": self.key,
                 })
@@ -703,14 +792,14 @@ def watch(github, state, inherited=None):
     with ask_signals(), state.lock_file(inherited) as lock_fd:
         if not try_watch_lock(lock_fd):
             return
-        with state.edit(lock_fd):
-            state.write(state="watching", pid=os.getpid(), pid_start=process_start(os.getpid()), lock_fd=lock_fd)
         try:
+            with state.edit(lock_fd):
+                state.write(state="watching", pid=os.getpid(), pid_start=process_start(os.getpid()), lock_fd=lock_fd)
             Watcher(github, state).run()
         except (WatchElapsed, AskInterrupted):
             pass
         finally:
-            state.mark("no watcher", pid=None, pid_start=None, lock_fd=None, nonce=None, next_return_at=None)
+            state.finish_watch(lock_fd)
 
 
 def parse_number(value):
