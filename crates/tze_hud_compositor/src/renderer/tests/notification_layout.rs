@@ -1713,7 +1713,11 @@ fn test_update_publication_animations_seeds_fresh_state() {
     // Urgency-derived expires_at_wall_us (urgency=1: now + 8 s) sets the delay:
     // 8_000 - NOTIFICATION_FADE_OUT_MS(150) = 7_850. The per-notification
     // ttl_ms=3_000 is superseded.
-    let ttl = Compositor::publication_fade_delay_ms(record, record.published_at_wall_us, 150);
+    let ttl = Compositor::publication_fade_delay_ms(
+        record.expires_at_wall_us,
+        record.published_at_wall_us,
+        150,
+    );
     assert_eq!(
         ttl,
         Some(7_850),
@@ -1746,7 +1750,8 @@ fn test_update_publication_animations_seeds_fresh_state() {
         content_classification: None,
         breakpoints: Vec::new(),
     };
-    let ttl_fallback = Compositor::publication_fade_delay_ms(&record_no_ttl, 2_000_000, 150);
+    let ttl_fallback =
+        Compositor::publication_fade_delay_ms(record_no_ttl.expires_at_wall_us, 2_000_000, 150);
     assert_eq!(
         ttl_fallback, None,
         "a notification with no expiry is held, not faded at the zone auto_clear_ms"
@@ -1756,7 +1761,11 @@ fn test_update_publication_animations_seeds_fresh_state() {
         ("motion.exit.easing".into(), "accelerate".into()),
     ]));
     let mut state = PublicationAnimationState::new(
-        Compositor::publication_fade_delay_ms(record, record.published_at_wall_us, profile.exit_ms),
+        Compositor::publication_fade_delay_ms(
+            record.expires_at_wall_us,
+            record.published_at_wall_us,
+            profile.exit_ms,
+        ),
         record.expires_at_wall_us,
         profile.exit_ms,
         profile.exit,

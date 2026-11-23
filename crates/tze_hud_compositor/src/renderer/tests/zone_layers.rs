@@ -733,7 +733,7 @@ fn test_publication_ttl_ms_uses_expires_at_wall_us() {
         breakpoints: Vec::new(),
     };
     let ttl = Compositor::publication_fade_delay_ms(
-        &record_warning,
+        record_warning.expires_at_wall_us,
         record_warning.published_at_wall_us,
         150,
     );
@@ -771,7 +771,7 @@ fn test_publication_ttl_ms_uses_expires_at_wall_us() {
         breakpoints: Vec::new(),
     };
     let ttl_crit = Compositor::publication_fade_delay_ms(
-        &record_critical,
+        record_critical.expires_at_wall_us,
         record_critical.published_at_wall_us,
         150,
     );
@@ -808,8 +808,11 @@ fn test_publication_ttl_ms_uses_expires_at_wall_us() {
         content_classification: None,
         breakpoints: Vec::new(),
     };
-    let ttl_both =
-        Compositor::publication_fade_delay_ms(&record_both, record_both.published_at_wall_us, 150);
+    let ttl_both = Compositor::publication_fade_delay_ms(
+        record_both.expires_at_wall_us,
+        record_both.published_at_wall_us,
+        150,
+    );
     assert_eq!(
         ttl_both,
         Some(14_850),
@@ -842,35 +845,35 @@ fn test_publication_ttl_ms_uses_expires_at_wall_us() {
         content_classification: None,
         breakpoints: Vec::new(),
     };
-    let ttl_info = Compositor::publication_fade_delay_ms(&record_info, 0, 150);
+    let ttl_info = Compositor::publication_fade_delay_ms(record_info.expires_at_wall_us, 0, 150);
     assert_eq!(
         ttl_info, None,
         "a record with no expiry is held and has no fade delay"
     );
     for span in [0, 120, 275] {
         assert_eq!(
-            Compositor::publication_fade_delay_ms(&record_warning, 0, span),
+            Compositor::publication_fade_delay_ms(record_warning.expires_at_wall_us, 0, span),
             Some(15_000 - u64::from(span))
         );
         assert_eq!(
-            Compositor::publication_fade_delay_ms(&record_critical, 0, span),
+            Compositor::publication_fade_delay_ms(record_critical.expires_at_wall_us, 0, span),
             Some(30_000 - u64::from(span))
         );
         assert_eq!(
-            Compositor::publication_fade_delay_ms(&record_info, 0, span),
+            Compositor::publication_fade_delay_ms(record_info.expires_at_wall_us, 0, span),
             None
         );
     }
     let mut short = record_warning.clone();
     short.expires_at_wall_us = Some(50_000);
     assert_eq!(
-        Compositor::publication_fade_delay_ms(&short, 0, 120),
+        Compositor::publication_fade_delay_ms(short.expires_at_wall_us, 0, 120),
         Some(0),
         "short TTL starts fading immediately, without extending expiry"
     );
     short.expires_at_wall_us = Some(50_001);
     assert_eq!(
-        Compositor::publication_fade_delay_ms(&short, 0, 0),
+        Compositor::publication_fade_delay_ms(short.expires_at_wall_us, 0, 0),
         Some(51),
         "zero span must not schedule an early sub-millisecond removal"
     );

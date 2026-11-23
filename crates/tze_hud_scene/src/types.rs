@@ -2400,7 +2400,8 @@ pub struct ZonePublishRecord {
     /// generic MergeByKey contention for other zone content.
     pub merge_key: Option<String>,
     /// Optional wall-clock expiry timestamp (microseconds since epoch).
-    /// When present, the runtime MUST clear this publication at or before this time.
+    /// Removal is due at this time. A focused, nonempty notification reply
+    /// can defer removal until the owner leaves the field.
     /// None = no expiry (publication lives until explicitly cleared or zone cleared).
     pub expires_at_wall_us: Option<u64>,
     /// Optional content classification tag (e.g., "public", "private", "pii").

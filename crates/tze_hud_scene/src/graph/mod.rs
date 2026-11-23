@@ -216,6 +216,7 @@ pub mod budget;
 pub mod holdings;
 pub mod leases;
 pub mod node_tree;
+mod notification_reply;
 pub mod publish;
 pub use publish::{Publication, Publisher};
 pub mod queries;
