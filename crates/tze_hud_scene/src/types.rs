@@ -2110,6 +2110,8 @@ pub enum ZoneInteractionKind {
     Dismiss,
     /// Zero-based action index, scoped by the region's exact publication.
     Action { index: usize },
+    /// The owner-only Go to control in a notification card's caption row.
+    GoTo,
     /// Runtime chrome drag handle for a movable element.
     DragHandle {
         /// Element identity in scene-id wire format.
@@ -2374,6 +2376,9 @@ pub struct ZonePublishRecord {
     /// Runtime-only, like the session itself: not part of snapshots.
     #[serde(skip)]
     pub caption: Option<String>,
+    /// Runtime-only, unsuffixed and untruncated caption token for Go to.
+    #[serde(skip)]
+    pub window_token: Option<String>,
     /// The display a question card was placed on when it was presented
     /// (normalized OS name, e.g. `DISPLAY2`). `None` draws it on the zone's
     /// own display. Set once; a same-key replacement keeps it.

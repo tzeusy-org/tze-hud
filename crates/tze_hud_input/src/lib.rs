@@ -1637,7 +1637,10 @@ impl InputProcessor {
             } => Some(iid.clone()),
             HitResult::ZoneInteraction {
                 interaction_id: iid,
-                kind: ZoneInteractionKind::Dismiss | ZoneInteractionKind::Action { .. },
+                kind:
+                    ZoneInteractionKind::Dismiss
+                    | ZoneInteractionKind::GoTo
+                    | ZoneInteractionKind::Action { .. },
                 ..
             } if self.notification_actions_enabled => Some(iid.clone()),
             _ => None,
@@ -1648,7 +1651,9 @@ impl InputProcessor {
                     &region.interaction_id == id
                         && matches!(
                             region.kind,
-                            ZoneInteractionKind::Dismiss | ZoneInteractionKind::Action { .. }
+                            ZoneInteractionKind::Dismiss
+                                | ZoneInteractionKind::GoTo
+                                | ZoneInteractionKind::Action { .. }
                         )
                 })
             })

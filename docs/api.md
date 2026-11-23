@@ -215,16 +215,18 @@ with the same cancellation and idle semantics as a `hud_input` wait.
   answered card's exit. Waiting cards add no timer, countdown or periodic
   reshape/repaint; existing Stack TTL fade is the only waiting time cue.
   Bare Tab/Shift+Tab joins visible notification controls at the content focus
-  cycle's wrap boundary, in dismiss-then-publication-action order. Cards
+  cycle's wrap boundary in the order ×, Go to when shown, then publisher
+  actions. Cards
   placed on several displays are visited in the one stack order they would
   draw in on a single display (unanswered questions first, newest first);
   stepping onto a card on another display moves keyboard focus to that
   display's overlay window. HUD keyboard
   focus loss to another app clears card focus even when the pointer is over
   another overlay; moving keyboard focus between HUD monitors preserves it.
-  Enter/Space uses the same exact-publication activation as pointer release. Publication
-  never activates an OS window or steals editor focus; Escape, completion and
-  removal release local card focus. Panel and shell routing retain precedence.
+  Enter/Space uses the same exact-publication activation as pointer release.
+  Publication never activates an OS window or steals editor focus. Only the
+  owner's press on Go to may activate one matching window. Escape, completion
+  and removal release local card focus. Panel and shell routing retain precedence.
   Link actions use that same pointer/keyboard operation and exact live
   publication plus zero-based action index. A link leaves the card, lifetime,
   hold and controls in place (ordinary Tab focus also stays): no callback, readiness event, human-X or
@@ -252,6 +254,28 @@ with the same cancellation and idle semantics as a `hud_input` wait.
   feedback, removing the card clears it, and keyboard activation (Enter,
   Space, an answer-chord digit) shows the same states. Nothing reaches the
   agent.
+- **Go to session (Windows).** A card's caption row gains **Go to** if a
+  one-shot lookup at presentation finds exactly one visible, unowned,
+  uncloaked, non-tool top-level window from `[runtime].go_to_apps`. The
+  caption uses the scoped session's `display_name` or folder label at publish
+  time. Matching ignores case and HUD-added duplicate suffixes and requires
+  the full label or phrase in the window title, bounded by title ends or
+  characters outside `[A-Za-z0-9._-]`. Unscoped or gRPC cards, alert banners
+  without a caption row and labels cut at 32 bytes have no Go to control.
+  The card presents immediately and the result stays fixed until replacement.
+  A click or Enter/Space on the focused control repeats the lookup. One
+  matched window can be foregrounded and restored from minimized to its own
+  placement. The card, its TTL and its actions stay, and success clears any
+  saved foreground for the card keyboard visit. Digits still pick publisher
+  actions. A missing or ambiguous target or a refused switch shows a local
+  cue for `notification.goto.feedback.ms` (default 1200), with one attempt
+  per card every two monotonic seconds. Activation sends no `hud_input` event.
+  Windows Terminal exposes the active tab's title. A tmux session can raise
+  its matching terminal window and cannot select a pane. A session with no
+  visible window on the HUD machine has no match. A local SSH terminal can
+  match when its title carries the label. Set
+  `CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1` to keep a shell's folder-based
+  title, which also turns off Claude Code's conversation titles and status glyph.
 - `zone:ambient-background` draws its fill or image at most
   `opacity.ambient.max` (0.9 by default) opaque, so the desktop under the
   overlay always shows through.
@@ -774,7 +798,8 @@ agents until one is paired.
   A notification entry has `s` (`zone:<name>`), `key` (or `null`), `rect`,
   `display` (index into `displays` of the monitor the card is drawn on,
   which for a placed question is its placement), `actions` (`{label, kind, rect}`, with `kind` `callback` or `url`),
-  `close` rect, `focus` (action index, `"close"`, or `null`), `chosen` (action
+  `close` rect, `goto` (Go to rect or `null`), `focus` (action index,
+  `"close"`, `"goto"` or `null`), `chosen` (action
   index or `null`), `state` (`entering`, `shown`, `exiting`) and `guarded`
   (presses on it are ignored by the fresh-card press guard). Entries follow
   drawn stack order; chosen cards retain their bounds during their exit even
@@ -793,7 +818,9 @@ agents until one is paired.
   `link_launches` monotonically counts accepted runtime browser handoffs after
   the per-publication/action (card) or per-link (portal OUTPUT) 2 s limit. A failed worker spawn does not count;
   a browser navigation failure does. The non-Windows no-op counts too. Scene
-  contention leaves this counter readable. These diagnostics are admin-only;
+  contention leaves this counter readable. `window_activations` counts
+  successful owner-pressed Go to switches and remains readable during scene
+  contention. These diagnostics are admin-only;
   MCP/gRPC responses and their token budgets are unchanged.
   `clipboard_writes` monotonically counts HUD clipboard writes (pairing code,
   OUTPUT copy); the non-Windows stub counts too.
@@ -1088,7 +1115,12 @@ the two different; `fps` (1-240, default 60); `log_level` for the log file
 (zone outlines, default false). `answer_window_ms` is the live saved default
 for action notifications (integer milliseconds, 1–300000 inclusive, default
 60000); invalid values fail configuration validation. It has no flag or
-variable override. `question_placement` (live, saved from the Layout card
+variable override. `go_to_apps` is a startup-only array of eligible Windows
+process executable names for Go to session. The default list is
+`WindowsTerminal.exe`, `Code.exe`, `Code - Insiders.exe`, `Cursor.exe`,
+`OpenConsole.exe`, `conhost.exe`, `wezterm-gui.exe`, `alacritty.exe` and
+`mintty.exe`. An explicit array replaces the defaults and `[]` disables
+lookup. `question_placement` (live, saved from the Layout card
 row "New questions appear on"; no flag or variable) chooses where a new
 question card (a notification with a callback action) appears: `focused`
 (default) is the monitor of the foreground window, or the pointer's monitor

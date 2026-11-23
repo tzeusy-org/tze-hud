@@ -574,7 +574,7 @@ impl McpServer {
             .scopes
             .open(agent, label, |s| !held.contains(&s.namespace));
         // Its cards carry its label as a caption.
-        scene.set_session_label(&scope.namespace, scope.label());
+        scene.set_scoped_session_label(&scope.namespace, scope.session_label());
         drop(scene);
         if let Some(evicted) = evicted {
             self.release_scope(&evicted, "session limit").await;

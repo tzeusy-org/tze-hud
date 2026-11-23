@@ -12,6 +12,13 @@ use std::sync::Arc;
 /// An accepted notification outcome, delivered only after unlocking the scene.
 pub enum NotificationActivation {
     Callback(RenderWakeNotifier),
+    /// A real owner input requested a match recheck and window activation.
+    GoTo {
+        publication_id: SceneId,
+        token: String,
+        attempted_at_mono_us: u64,
+        bounds: Rect,
+    },
     /// Open `url`, the encoded target of action `index` of `publication_id`.
     OpenUrl {
         url: String,
@@ -134,7 +141,7 @@ pub struct SceneGraph {
     pending_action_notifiers: HashMap<String, RenderWakeNotifier>,
     /// Caption for each labeled MCP session's new publications, by namespace.
     #[serde(skip, default)]
-    session_labels: HashMap<String, String>,
+    session_labels: HashMap<String, crate::scope::SessionLabel>,
     #[serde(skip, default)]
     notification_waits: HashMap<SceneId, notification_wait::NotificationWait>,
     /// Readiness owed for displaced receipts; drained with the wait debt.
@@ -295,6 +302,21 @@ impl SceneGraph {
     /// Caption `namespace`'s later publications with `label` (`None`: none).
     /// Publications already shown keep theirs.
     pub fn set_session_label(&mut self, namespace: &str, label: Option<String>) {
+        self.set_scoped_session_label(
+            namespace,
+            label.map(|caption| crate::scope::SessionLabel {
+                caption,
+                window_token: None,
+            }),
+        );
+    }
+
+    /// Retain the unsuffixed, untruncated window token with the caption.
+    pub fn set_scoped_session_label(
+        &mut self,
+        namespace: &str,
+        label: Option<crate::scope::SessionLabel>,
+    ) {
         match label {
             Some(label) => self.session_labels.insert(namespace.to_owned(), label),
             None => self.session_labels.remove(namespace),

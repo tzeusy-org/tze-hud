@@ -12,6 +12,8 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
+use tze_hud_scene::scope::SessionLabel;
+
 /// Live scopes one agent may hold; opening one more releases the
 /// least-recently-called, preferring one with nothing on screen.
 pub const MAX_SCOPES_PER_AGENT: usize = 64;
@@ -26,7 +28,7 @@ pub struct Scope {
     pub agent: String,
     /// The namespace this session owns content under.
     pub namespace: String,
-    label: Mutex<Option<String>>,
+    label: Mutex<Option<SessionLabel>>,
     last_call: AtomicU64,
     released: AtomicBool,
 }
@@ -34,10 +36,18 @@ pub struct Scope {
 impl Scope {
     /// The caption for this session's content, if it has one.
     pub fn label(&self) -> Option<String> {
+        self.label
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .as_ref()
+            .map(|label| label.caption.clone())
+    }
+
+    pub(crate) fn session_label(&self) -> Option<SessionLabel> {
         self.label.lock().unwrap_or_else(|p| p.into_inner()).clone()
     }
 
-    pub(crate) fn set_label(&self, label: String) {
+    pub(crate) fn set_label(&self, label: SessionLabel) {
         *self.label.lock().unwrap_or_else(|p| p.into_inner()) = Some(label);
     }
 
@@ -111,9 +121,10 @@ impl Scopes {
             .filter(|s| s.agent == agent)
             .filter_map(|s| s.label())
             .collect();
-        let label = label
-            .and_then(sanitize_label)
-            .map(|base| unique_label(&base, &taken));
+        let label = label.and_then(sanitize_label).map(|mut label| {
+            label.caption = unique_label(&label.caption, &taken);
+            label
+        });
         let id = new_session_id();
         let scope = Arc::new(Scope {
             namespace: tze_hud_scene::scope::scoped_namespace(agent, &id),
@@ -165,16 +176,21 @@ impl Scopes {
 
 /// Strip control characters and cut to [`MAX_LABEL_BYTES`] on a character
 /// boundary; nothing left means no label.
-pub fn sanitize_label(raw: &str) -> Option<String> {
-    let mut label = String::new();
+pub(crate) fn sanitize_label(raw: &str) -> Option<SessionLabel> {
+    let mut caption = String::new();
+    let mut complete = true;
     for c in raw.chars().filter(|c| !c.is_control()) {
-        if label.len() + c.len_utf8() > MAX_LABEL_BYTES {
+        if caption.len() + c.len_utf8() > MAX_LABEL_BYTES {
+            complete = false;
             break;
         }
-        label.push(c);
+        caption.push(c);
     }
-    let label = label.trim();
-    (!label.is_empty()).then(|| label.to_owned())
+    let caption = caption.trim();
+    (!caption.is_empty()).then(|| SessionLabel {
+        caption: caption.to_owned(),
+        window_token: complete.then(|| caption.to_owned()),
+    })
 }
 
 /// `base`, or `base (n)` with the lowest free n >= 2 among `taken`.
@@ -201,13 +217,25 @@ mod tests {
 
     #[test]
     fn labels_are_sanitized_and_bounded() {
-        assert_eq!(sanitize_label("tze-hud").as_deref(), Some("tze-hud"));
-        assert_eq!(sanitize_label("a\u{7}b\nc").as_deref(), Some("abc"));
-        assert_eq!(sanitize_label("\u{1b}\t "), None);
+        assert_eq!(
+            sanitize_label("tze-hud")
+                .map(|label| label.caption)
+                .as_deref(),
+            Some("tze-hud")
+        );
+        assert_eq!(
+            sanitize_label("a\u{7}b\nc")
+                .map(|label| label.caption)
+                .as_deref(),
+            Some("abc")
+        );
+        assert!(sanitize_label("\u{1b}\t ").is_none());
         // 31 ASCII bytes then a 2-byte character would end at 33 bytes.
         let raw = format!("{}é{}", "x".repeat(31), "y".repeat(27));
         assert_eq!(raw.len(), 60);
-        assert_eq!(sanitize_label(&raw).unwrap(), "x".repeat(31));
+        let truncated = sanitize_label(&raw).unwrap();
+        assert_eq!(truncated.caption, "x".repeat(31));
+        assert_eq!(truncated.window_token, None);
     }
 
     #[test]
@@ -215,7 +243,17 @@ mod tests {
         let scopes = Scopes::default();
         let open = |label| scopes.open("claude", Some(label), |_| true).0;
         let first = open("tze-hud");
-        assert_eq!(open("tze-hud").label().as_deref(), Some("tze-hud (2)"));
+        let duplicate = open("tze-hud");
+        assert_eq!(duplicate.label().as_deref(), Some("tze-hud (2)"));
+        assert_eq!(
+            duplicate.session_label().unwrap().window_token.as_deref(),
+            Some("tze-hud")
+        );
+        let literal = open("tze-hud (2)");
+        assert_eq!(
+            literal.session_label().unwrap().window_token.as_deref(),
+            Some("tze-hud (2)")
+        );
         assert_eq!(open("tze-hud").label().as_deref(), Some("tze-hud (3)"));
         scopes.close("claude", &first.id).unwrap();
         assert_eq!(open("tze-hud").label().as_deref(), Some("tze-hud"));

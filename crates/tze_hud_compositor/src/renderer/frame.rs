@@ -122,8 +122,54 @@ pub struct WindowedFrameBuild {
     secondary_panel: Option<SecondaryPanel>,
     /// Precomputed per-instance widget draw quads.
     widget_quads: Vec<crate::widget::WidgetDrawQuad>,
+    /// Card identities correlated with the completed per-display texture.
+    notification_candidates: Vec<NotificationPresentation>,
     /// Wall-clock start of the frame, for the total frame-time telemetry.
     frame_start: std::time::Instant,
+}
+
+struct NotificationPresentation {
+    id: tze_hud_scene::SceneId,
+    bounds: Rect,
+    needs_lookup: bool,
+}
+
+impl WindowedFrameBuild {
+    /// Bind the compositor's just-built card geometry to this frame before
+    /// releasing the scene lock. Only candidates with a caption can match.
+    pub fn bind_notification_candidates(&mut self, scene: &SceneGraph) {
+        self.notification_candidates = scene
+            .overlay
+            .notification_geometry
+            .iter()
+            .filter(|card| {
+                card.has_window_caption && card.chosen.is_none() && card.state != "exiting"
+            })
+            .map(|card| NotificationPresentation {
+                id: card.publication_id,
+                bounds: card.bounds,
+                needs_lookup: !scene
+                    .overlay
+                    .notification_go_to
+                    .contains_key(&card.publication_id),
+            })
+            .collect();
+    }
+
+    fn notifications_in(
+        &self,
+        target: &FrameTarget,
+    ) -> impl Iterator<Item = &NotificationPresentation> {
+        let viewport = Rect::new(
+            target.x,
+            target.y,
+            target.width as f32,
+            target.height as f32,
+        );
+        self.notification_candidates
+            .iter()
+            .filter(move |card| card.bounds.intersects(&viewport))
+    }
 }
 
 /// Exact GPU-operation outcome for one windowed present attempt.
@@ -712,6 +758,7 @@ impl Compositor {
             panel_on_primary,
             secondary_panel,
             widget_quads,
+            notification_candidates: Vec::new(),
             frame_start,
         }
     }
@@ -802,6 +849,15 @@ impl Compositor {
                 self.device.poll(wgpu::Maintain::Wait);
             }))
         });
+        if present_result.is_ok() && !build.notification_candidates.is_empty() {
+            frame.record_notification_candidates(
+                build
+                    .notifications_in(target)
+                    .filter(|card| card.needs_lookup)
+                    .map(|card| card.id)
+                    .collect(),
+            );
+        }
         drop(frame);
         telemetry.stage7_gpu_submit_us = submit_start.elapsed().as_micros().max(1) as u64;
 
@@ -1142,6 +1198,11 @@ impl Compositor {
         let tv = self.target_view(build, target);
         let (w, h) = (tv.width as f32, tv.height as f32);
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        // Pixel-identical replacements on this display still have a new card
+        // to present. The pending lookup state itself does not change pixels.
+        for card in build.notifications_in(target) {
+            card.id.hash(&mut hasher);
+        }
         (tv.width, tv.height, self.overlay_mode).hash(&mut hasher);
         (self.degradation_level as u8).hash(&mut hasher);
         let bg = build.bg_vertex_count.min(tv.vertices.len());

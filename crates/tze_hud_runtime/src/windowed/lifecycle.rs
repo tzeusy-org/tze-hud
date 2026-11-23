@@ -33,10 +33,11 @@ use super::portal::{
     apply_drag_handle_pointer_event, apply_portal_resize_pointer_event, drag_feedback_target,
     reconcile_drag_feedback,
 };
+use super::window_go_to::GoToOrigin;
 use super::{WindowedQuiescentEfficiencyConfig, WinitApp};
 
 #[cfg(target_os = "windows")]
-fn hwnd_for_window(window: &Window) -> Option<windows::Win32::Foundation::HWND> {
+pub(super) fn hwnd_for_window(window: &Window) -> Option<windows::Win32::Foundation::HWND> {
     use std::ffi::c_void;
     use windows::Win32::Foundation::HWND;
     use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -1330,15 +1331,19 @@ fn owns_foreground(owner: &ChromeNativeOwner, foreground: Option<isize>) -> bool
         })
 }
 
+#[cfg(target_os = "windows")]
+pub(super) fn hud_owned_foreground(foreground: Option<isize>) -> bool {
+    CHROME_NATIVE_OWNER.with(|owner| {
+        owner
+            .try_borrow()
+            .is_ok_and(|owner| owns_foreground(&owner, foreground))
+    })
+}
+
 pub(super) fn hud_owns_foreground() -> bool {
     #[cfg(target_os = "windows")]
     {
-        let foreground = foreground_window();
-        CHROME_NATIVE_OWNER.with(|owner| {
-            owner
-                .try_borrow()
-                .is_ok_and(|owner| owns_foreground(&owner, foreground))
-        })
+        hud_owned_foreground(foreground_window())
     }
     #[cfg(not(target_os = "windows"))]
     {
@@ -1424,98 +1429,117 @@ pub(super) fn focus_window_for_text_input(window: &Window) {
     window.set_ime_allowed(true);
 
     #[cfg(target_os = "windows")]
-    {
-        use windows::Win32::Foundation::{FALSE, TRUE};
-        use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
+    if let Some(hwnd) = hwnd_for_window(window) {
         use windows::Win32::UI::Input::KeyboardAndMouse::SetFocus;
-        use windows::Win32::UI::WindowsAndMessaging::{
-            BringWindowToTop, GetForegroundWindow, GetWindowThreadProcessId, SetForegroundWindow,
+        acquire_window_foreground(
+            hwnd,
+            |_, _| true,
+            || {
+                // SAFETY: This is the overlay's live HWND on the winit thread.
+                let _ = unsafe { SetFocus(hwnd) };
+            },
+        );
+    }
+}
+
+/// Foreground acquisition shared by text focus and the card's native handoff.
+/// Text-only focus and IME steps belong to the caller. The guard can allow
+/// this HWND after the first raise attempt.
+#[cfg(target_os = "windows")]
+pub(super) fn acquire_window_foreground(
+    hwnd: windows::Win32::Foundation::HWND,
+    may_continue: impl Fn(bool, windows::Win32::Foundation::HWND) -> bool,
+    after_raise: impl FnOnce(),
+) -> bool {
+    use windows::Win32::Foundation::{FALSE, TRUE};
+    use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        BringWindowToTop, GetForegroundWindow, GetWindowThreadProcessId, SetForegroundWindow,
+    };
+
+    // This topmost, taskbar-hidden overlay can be denied foreground activation
+    // even following an input gesture. Attach to the current foreground thread
+    // and temporarily clear the lock timeout without saving or broadcasting it.
+    // SAFETY: The caller supplies an overlay HWND owned by this winit thread.
+    // AttachThreadInput is paired and never attaches to the destination app.
+    unsafe {
+        if !may_continue(false, GetForegroundWindow()) {
+            return false;
+        }
+        let _ = BringWindowToTop(hwnd);
+        let fg = GetForegroundWindow();
+        let our_thread = GetCurrentThreadId();
+        let fg_thread = if fg.0.is_null() {
+            0
+        } else {
+            GetWindowThreadProcessId(fg, None)
+        };
+        let attach_required = fg_thread != 0 && fg_thread != our_thread;
+        let attached = attach_required && {
+            let current = GetForegroundWindow();
+            may_continue(true, current)
+                && current == fg
+                && AttachThreadInput(our_thread, fg_thread, TRUE).as_bool()
         };
 
-        if let Some(hwnd) = hwnd_for_window(window) {
-            // Acquiring OS keyboard focus for a topmost, taskbar-hidden,
-            // WS_EX_NOREDIRECTIONBITMAP overlay is subject to the Windows
-            // foreground-activation lock: a bare SetForegroundWindow() from a
-            // process that is not already the foreground process silently fails
-            // (returns FALSE and does nothing).  When it fails the overlay
-            // receives mouse input (mouse is routed via SetCapture, which does
-            // not require keyboard focus) but NO WindowEvent::KeyboardInput —
-            // typing and focus-scoped hotkeys (Ctrl+/-) are dead even though the
-            // composer is focused at the scene level.
-            //
-            // The standard Win32 workaround is to temporarily attach this
-            // thread's input queue to the current foreground window's thread.
-            // On the reference overlay, AttachThreadInput alone was insufficient
-            // when SPI_GETFOREGROUNDLOCKTIMEOUT was effectively infinite. Save
-            // the timeout, temporarily clear it with zero SPI flags (therefore
-            // no persisted setting or WM_SETTINGCHANGE broadcast), then restore
-            // it around SetForegroundWindow + SetFocus.
-            //
-            // SAFETY: The HWND is owned by this winit window on the event-loop
-            // thread; all calls are standard user32 focus APIs invoked on that
-            // thread. AttachThreadInput is always paired (TRUE then FALSE).
-            unsafe {
-                let _ = BringWindowToTop(hwnd);
-
-                let fg = GetForegroundWindow();
-                let our_thread = GetCurrentThreadId();
-                // Thread that owns the current foreground window (0 if none).
-                let fg_thread = if fg.0.is_null() {
-                    0
-                } else {
-                    GetWindowThreadProcessId(fg, None)
-                };
-
-                let attach_required = fg_thread != 0 && fg_thread != our_thread;
-                let attached =
-                    attach_required && { AttachThreadInput(our_thread, fg_thread, TRUE).as_bool() };
-
-                let (sfw, timeout_attempt) = with_temporary_foreground_lock_timeout(
-                    read_foreground_lock_timeout,
-                    set_foreground_lock_timeout,
-                    || {
-                        let sfw = SetForegroundWindow(hwnd).as_bool();
-                        // SetFocus targets the keyboard-focus window within the
-                        // (now) foreground thread's input queue; needed in
-                        // addition to SetForegroundWindow so WM_KEY* messages
-                        // route to our HWND.
-                        let _ = SetFocus(hwnd);
-                        sfw
-                    },
-                );
-
-                if attached {
-                    let _ = AttachThreadInput(our_thread, fg_thread, FALSE);
+        // The first write attempts the temporary change. Once attempted, its
+        // matching cleanup still runs if the owner has moved focus meanwhile.
+        let mut timeout_write_attempted = false;
+        let (sfw, timeout_attempt) = with_temporary_foreground_lock_timeout(
+            read_foreground_lock_timeout,
+            |timeout| {
+                if !timeout_write_attempted && !may_continue(true, GetForegroundWindow()) {
+                    return false;
                 }
-
-                // The scheduled-task overlay has no stdout/stderr capture, so
-                // durable diagnostics are useful when this fragile Windows path
-                // fails. Success remains silent to avoid per-click log noise.
-                let timeout_may_be_left_altered = timeout_attempt.setting_may_be_left_altered();
-                if !sfw || (attach_required && !attached) || timeout_may_be_left_altered {
-                    let fg_after = GetForegroundWindow();
-                    crate::diag::diag_write(&format!(
-                        "FOCUS-WARN: foreground focus repair incomplete for overlay \
-                         hwnd={:?} fg_before={:?} attached={} attach_required={} \
-                         prev_lock_timeout={:?} lock_cleared={} lock_restored={:?} \
-                         timeout_may_be_left_altered={} set_foreground_window={} \
-                         fg_after={:?} fg_after_is_ours={}",
-                        hwnd.0,
-                        fg.0,
-                        attached,
-                        attach_required,
-                        timeout_attempt.previous_timeout,
-                        timeout_attempt.lock_cleared,
-                        timeout_attempt.lock_restored,
-                        timeout_may_be_left_altered,
-                        sfw,
-                        fg_after.0,
-                        fg_after.0 == hwnd.0,
-                    ));
+                timeout_write_attempted = true;
+                set_foreground_lock_timeout(timeout)
+            },
+            || {
+                if !may_continue(true, GetForegroundWindow()) {
+                    return false;
                 }
-            }
+                let sfw = SetForegroundWindow(hwnd).as_bool();
+                after_raise();
+                sfw
+            },
+        );
+        if attached {
+            let _ = AttachThreadInput(our_thread, fg_thread, FALSE);
         }
+
+        let timeout_may_be_left_altered = timeout_attempt.setting_may_be_left_altered();
+        let fg_after = GetForegroundWindow();
+        if !sfw || (attach_required && !attached) || timeout_may_be_left_altered {
+            crate::diag::diag_write(&format!(
+                "FOCUS-WARN: foreground focus repair incomplete for overlay \
+                 hwnd={:?} fg_before={:?} attached={} attach_required={} \
+                 prev_lock_timeout={:?} lock_cleared={} lock_restored={:?} \
+                 timeout_may_be_left_altered={} set_foreground_window={} \
+                 fg_after={:?} fg_after_is_ours={}",
+                hwnd.0,
+                fg.0,
+                attached,
+                attach_required,
+                timeout_attempt.previous_timeout,
+                timeout_attempt.lock_cleared,
+                timeout_attempt.lock_restored,
+                timeout_may_be_left_altered,
+                sfw,
+                fg_after.0,
+                fg_after == hwnd,
+            ));
+        }
+        may_continue(true, fg_after) && fg_after == hwnd
     }
+}
+
+pub(super) fn discard_foreground_origin() {
+    #[cfg(target_os = "windows")]
+    CHROME_NATIVE_OWNER.with(|owner| {
+        if let Ok(mut owner) = owner.try_borrow_mut() {
+            owner.focus_origin.redirect(None);
+        }
+    });
 }
 
 pub(super) fn begin_os_mouse_capture(window: &Window) {
@@ -2314,6 +2338,7 @@ impl WinitApp {
             reading: self.reading_ui(),
             cursor: self.applied_cursor_name(),
             link_feedback: self.link_feedback_name(),
+            window_activations: self.state.window_go_to.activations,
             hover_targets: self
                 .state
                 .widget_hover_trackers
@@ -2400,6 +2425,7 @@ impl WinitApp {
     pub(super) fn deliver_notification_activation(
         &mut self,
         outcome: tze_hud_scene::graph::NotificationActivation,
+        go_to_origin: GoToOrigin,
     ) {
         match outcome {
             tze_hud_scene::graph::NotificationActivation::Callback(wake) => wake.notify(),
@@ -2413,6 +2439,18 @@ impl WinitApp {
                     publication_id,
                     index,
                 },
+            ),
+            tze_hud_scene::graph::NotificationActivation::GoTo {
+                publication_id,
+                token,
+                attempted_at_mono_us,
+                bounds,
+            } => self.press_go_to(
+                publication_id,
+                token,
+                attempted_at_mono_us,
+                bounds,
+                go_to_origin,
             ),
         }
     }
@@ -2911,7 +2949,11 @@ impl WinitApp {
                 self.state.pending_pointer_move = true;
                 self.schedule_shared_scene_availability_wake();
             } else {
-                self.retain_pointer_button(kind, Instant::now());
+                self.retain_pointer_button(
+                    kind,
+                    Instant::now(),
+                    self.pointer_notification_observation(),
+                );
             }
             return;
         }
@@ -2922,14 +2964,19 @@ impl WinitApp {
     /// with everything it arrived with: cursor position, pressed window and
     /// time. Bounded: under pathological contention the oldest entry is
     /// dropped rather than growing memory.
-    fn retain_pointer_button(&mut self, kind: PointerEventKind, at: Instant) {
+    fn retain_pointer_button(
+        &mut self,
+        kind: PointerEventKind,
+        at: Instant,
+        notification: PointerNotificationObservation,
+    ) {
         let event = RetainedPointerEvent::Button {
             kind,
             x: self.state.cursor_x,
             y: self.state.cursor_y,
             press_window: self.state.press_window,
             at,
-            notification_permitted: self.notification_pointer_permitted(),
+            notification,
         };
         self.retain_pointer(event);
     }
@@ -2964,14 +3011,24 @@ impl WinitApp {
     /// Run one pointer event through hit-testing and the scene. Returns false
     /// when a press or release could not reach the scene; with `retain` it is
     /// then queued, while a replay leaves it at the queue's front.
+    fn pointer_notification_observation(&self) -> PointerNotificationObservation {
+        PointerNotificationObservation {
+            permitted: self.notification_pointer_permitted(),
+            foreground: self.state.window_go_to.foreground(),
+        }
+    }
+
     fn process_pointer_event(
         &mut self,
         kind: PointerEventKind,
         retain: bool,
         at: Instant,
-        notification_permitted: Option<bool>,
+        notification: Option<PointerNotificationObservation>,
     ) -> bool {
+        let notification = (kind != PointerEventKind::Move)
+            .then(|| notification.unwrap_or_else(|| self.pointer_notification_observation()));
         if kind == PointerEventKind::Down && self.state.answer_keyboard.focus.take().is_some() {
+            self.state.answer_keyboard.invalidate_visit();
             self.state.input_processor.chrome_feedback_cancel_pending = true;
         }
         if self.state.context_menu_press.is_some() {
@@ -3007,7 +3064,7 @@ impl WinitApp {
                     return true;
                 }
                 if retain {
-                    self.retain_pointer_button(kind, at);
+                    self.retain_pointer_button(kind, at, notification.expect("button observation"));
                 }
                 return false;
             }
@@ -3043,7 +3100,7 @@ impl WinitApp {
         self.state.input_processor.notification_actions_enabled = self
             .notification_feedback_permitted(pointer_event.kind == PointerEventKind::Down)
             && (pointer_event.kind != PointerEventKind::Down
-                || notification_permitted.unwrap_or(true));
+                || notification.is_some_and(|observed| observed.permitted));
         // Acquire the scene lock directly (without going through SharedState) so that
         // the main-thread input path does not contend with session handlers that hold
         // both the SharedState lock and the scene lock.
@@ -3401,7 +3458,10 @@ impl WinitApp {
                     && match &result.hit {
                         HitResult::ZoneInteraction {
                             interaction_id,
-                            kind: ZoneInteractionKind::Dismiss | ZoneInteractionKind::Action { .. },
+                            kind:
+                                ZoneInteractionKind::Dismiss
+                                | ZoneInteractionKind::GoTo
+                                | ZoneInteractionKind::Action { .. },
                             ..
                         } => scene
                             .overlay
@@ -3432,16 +3492,29 @@ impl WinitApp {
                             kind,
                             ..
                         } => {
-                            let notification = matches!(
+                            let is_notification = matches!(
                                 kind,
-                                ZoneInteractionKind::Dismiss | ZoneInteractionKind::Action { .. }
+                                ZoneInteractionKind::Dismiss
+                                    | ZoneInteractionKind::GoTo
+                                    | ZoneInteractionKind::Action { .. }
                             );
                             let allowed = self.notification_pointer_permitted()
-                                && notification_permitted.unwrap_or(true);
-                            (!notification || allowed).then(|| interaction_id.clone())
+                                && notification.is_some_and(|observed| observed.permitted);
+                            (!is_notification || allowed).then(|| interaction_id.clone())
                         }
                         _ => None,
                     };
+                    self.state.window_go_to.pointer_foreground = self
+                        .state
+                        .zone_press
+                        .as_ref()
+                        .filter(|id| {
+                            scene.overlay.zone_hit_regions.iter().any(|region| {
+                                region.interaction_id == **id
+                                    && region.kind == ZoneInteractionKind::GoTo
+                            })
+                        })
+                        .map(|_| notification.expect("down observation").foreground);
                     // A destructive action starts a hold instead of firing on Up.
                     let held = self.state.zone_press.as_ref().and_then(|id| {
                         scene
@@ -3464,6 +3537,11 @@ impl WinitApp {
                 }
                 if pointer_event.kind == PointerEventKind::Up {
                     let pressed = self.state.zone_press.take();
+                    let go_to_origin = self.state.window_go_to.pointer_foreground.take();
+                    let current_go_to = go_to_origin.is_some_and(|foreground| {
+                        notification.is_some_and(|up| up.foreground == foreground)
+                            && self.state.window_go_to.foreground() == foreground
+                    });
                     // Releasing before the hold completes fires nothing.
                     if scene
                         .overlay
@@ -3484,14 +3562,19 @@ impl WinitApp {
                         ref interaction_id,
                     } = result.hit
                         && pressed.as_deref() == Some(interaction_id.as_str())
+                        && (*kind != ZoneInteractionKind::GoTo || current_go_to)
                         && (!matches!(
                             kind,
-                            ZoneInteractionKind::Dismiss | ZoneInteractionKind::Action { .. }
+                            ZoneInteractionKind::Dismiss
+                                | ZoneInteractionKind::GoTo
+                                | ZoneInteractionKind::Action { .. }
                         ) || (self.notification_pointer_permitted()
-                            && notification_permitted.unwrap_or(true)))
+                            && notification.is_some_and(|observed| observed.permitted)))
                     {
                         match kind {
-                            ZoneInteractionKind::Dismiss | ZoneInteractionKind::Action { .. } => {
+                            ZoneInteractionKind::Dismiss
+                            | ZoneInteractionKind::GoTo
+                            | ZoneInteractionKind::Action { .. } => {
                                 let region = scene
                                     .overlay
                                     .zone_hit_regions
@@ -3707,7 +3790,8 @@ impl WinitApp {
             }
         }
         for outcome in pending_notification_outcomes {
-            self.deliver_notification_activation(outcome);
+            let foreground = notification.and_then(|observed| observed.foreground);
+            self.deliver_notification_activation(outcome, GoToOrigin::Pointer(foreground));
         }
         if let Some(effect) = reading_effect {
             self.perform_reading_effect(effect);
@@ -3796,7 +3880,7 @@ impl WinitApp {
         if let Some(kind) = retain_button
             && retain
         {
-            self.retain_pointer_button(kind, at);
+            self.retain_pointer_button(kind, at, notification.expect("button observation"));
         }
         reached
     }
@@ -3941,7 +4025,7 @@ impl WinitApp {
                     y,
                     press_window,
                     at,
-                    notification_permitted,
+                    notification,
                 } => {
                     let live = (
                         self.state.cursor_x,
@@ -3957,12 +4041,7 @@ impl WinitApp {
                     // press-drag whose moves were deferred still travels.
                     let reached = (kind != PointerEventKind::Up
                         || self.process_pointer_event(PointerEventKind::Move, false, at, None))
-                        && self.process_pointer_event(
-                            kind,
-                            false,
-                            at,
-                            Some(notification_permitted),
-                        );
+                        && self.process_pointer_event(kind, false, at, Some(notification));
                     (
                         self.state.cursor_x,
                         self.state.cursor_y,
@@ -4004,6 +4083,14 @@ pub(super) struct RetainedButton {
     pub(super) event: RetainedPointerEvent,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct PointerNotificationObservation {
+    /// A denied edge cannot inherit a later native press's authorization.
+    permitted: bool,
+    /// An old Go to press cannot adopt a foreground observed during replay.
+    foreground: Option<isize>,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub(super) enum RetainedPointerEvent {
     Button {
@@ -4012,9 +4099,7 @@ pub(super) enum RetainedPointerEvent {
         y: f32,
         press_window: Option<winit::window::WindowId>,
         at: Instant,
-        /// A denied edge cannot inherit a later native press's authorization.
-        /// Replay still checks current permission, so faults remain fail-closed.
-        notification_permitted: bool,
+        notification: PointerNotificationObservation,
     },
     /// Wheel deltas that arrived behind a retained press or release,
     /// coalesced as `pending_scroll` coalesces them.
@@ -4088,14 +4173,18 @@ impl WinitApp {
     /// texture the compositor actually rendered into.
     pub(super) fn maybe_present_frame(&mut self) {
         let surface = self.state.window_surface.clone();
-        self.maybe_present_frame_with(|| {
-            use tze_hud_compositor::surface::PendingPresent;
-            surface.and_then(|surface| match surface.present_pending_texture_status() {
-                PendingPresent::Presented => Some(true),
-                PendingPresent::Empty => None,
-                PendingPresent::DeferredEncoding => Some(false),
-            })
-        });
+        self.maybe_present_frame_with_secondaries(
+            || {
+                use tze_hud_compositor::surface::PendingPresent;
+                let (status, cards) = surface?.present_pending_texture_with_cards();
+                match status {
+                    PendingPresent::Presented => Some((true, cards)),
+                    PendingPresent::Empty => None,
+                    PendingPresent::DeferredEncoding => Some((false, Vec::new())),
+                }
+            },
+            Self::present_secondaries,
+        );
     }
 
     pub(super) fn defer_present_until_available(
@@ -4113,11 +4202,15 @@ impl WinitApp {
     /// path while the headless harness substitutes only the swapchain operation.
     /// `Some(false)` means deferred encoding; `None` means no pending image.
     /// A newer ready generation arriving during this attempt remains unread.
+    #[cfg(test)]
     pub(super) fn maybe_present_frame_with(
         &mut self,
         present_primary: impl FnOnce() -> Option<bool>,
     ) {
-        self.maybe_present_frame_with_secondaries(present_primary, Self::present_secondaries);
+        self.maybe_present_frame_with_secondaries(
+            || present_primary().map(|presented| (presented, Vec::new())),
+            Self::present_secondaries,
+        );
     }
 
     /// Substitute only final swapchain operations in the headless harness.
@@ -4125,7 +4218,7 @@ impl WinitApp {
     /// a new secondary submission during a slow present must remain unread.
     pub(super) fn maybe_present_frame_with_secondaries(
         &mut self,
-        present_primary: impl FnOnce() -> Option<bool>,
+        present_primary: impl FnOnce() -> Option<(bool, Vec<tze_hud_scene::SceneId>)>,
         present_secondaries: impl FnOnce(&Self) -> super::displays::SecondaryPresentation,
     ) {
         let ready = self.state.frame_ready_rx.has_changed().unwrap_or(false);
@@ -4135,15 +4228,16 @@ impl WinitApp {
             if ready {
                 let _ = self.state.frame_ready_rx.borrow_and_update();
             }
-            let (secondary_presented, mut deferred) = present_secondaries(self);
+            let (secondary_presented, mut deferred, mut cards) = present_secondaries(self);
             self.state.deferred_present = false;
             let mut primary_presented = false;
-            if let Some(presented) = present_primary() {
+            if let Some((presented, primary_cards)) = present_primary() {
                 // Present under the same mutex that guards pending swapchain
                 // ownership so acquire/present cannot interleave into a
                 // double-acquire validation error on some backends.
                 if presented {
                     primary_presented = true;
+                    cards.extend(primary_cards);
                     self.state.wake.counters().record_present();
                     if let Some(measurement) = self.state.quiescent_efficiency.as_mut() {
                         measurement.record_first_present(Instant::now());
@@ -4154,6 +4248,9 @@ impl WinitApp {
                         deferred.push(surface.present_availability());
                     }
                 }
+            }
+            if !cards.is_empty() {
+                self.go_to_presented(cards);
             }
             self.state.deferred_present |= !deferred.is_empty();
             for availability in deferred {

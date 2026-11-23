@@ -66,6 +66,16 @@ its cards and titles its portals with its folder name, and releases them on a
 clean exit. The adapter
 runs on Linux/WSL; native Windows/macOS client lifetime support is not claimed.
 
+On Windows, a notification card offers **Go to** when its scoped label
+(the folder or `display_name`) matches exactly one eligible top-level window
+title as a whole token. An explicit owner press raises that window. Windows
+Terminal exposes only the active tab's title, and a matching tmux terminal can
+only be raised as a whole window. A session without a window on the HUD
+machine has no match. A local terminal showing SSH can match when its title
+carries the label. Set `CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1` to preserve a
+shell's folder-based title at the cost of Claude Code's conversation titles
+and status glyph.
+
 For sessions outside this repository, use the managed user-scope installation
 in [ai-bootstrap PR63](https://github.com/tzeusy-org/ai-bootstrap/pull/63).
 After the owner merges that PR, run

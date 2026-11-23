@@ -858,12 +858,12 @@ async fn publish_zone<'a>(
     };
     // The new label captions this card too; a refused publish restores it.
     let previous_label = relabel.as_ref().map(|(scope, label)| {
-        scene.set_session_label(&ns, Some(label.clone()));
-        scope.label()
+        scene.set_scoped_session_label(&ns, Some(label.clone()));
+        scope.session_label()
     });
     let refused = |scene: &mut SceneGraph, error: &ValidationError| {
         if let Some(previous) = previous_label.clone() {
-            scene.set_session_label(&ns, previous);
+            scene.set_scoped_session_label(&ns, previous);
         }
         scene_error(error)
     };

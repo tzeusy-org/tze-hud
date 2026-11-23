@@ -78,6 +78,7 @@ impl WinitApp {
                         if matches!(activation, Some(NotificationActivation::Callback(_))) {
                             scene.focus_notification(None);
                             self.state.answer_keyboard.focus = None;
+                            self.state.answer_keyboard.invalidate_visit();
                             self.state.notification_keydowns.insert(key.clone());
                             self.state.answer_keyboard.return_key = Some(key);
                         }
@@ -90,7 +91,10 @@ impl WinitApp {
             scene.geometry_epoch != before
         };
         if let Some(activation) = activation {
-            self.deliver_notification_activation(activation);
+            self.deliver_notification_activation(
+                activation,
+                super::window_go_to::GoToOrigin::Keyboard(None),
+            );
         }
         changed
     }

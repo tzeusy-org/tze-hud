@@ -7,6 +7,14 @@
 //! Clear, stack publisher caps, the control panel roster) read the owning
 //! agent through [`owner_agent`].
 
+/// Runtime-only caption and its original title token. A deduplicated
+/// caption can have a suffix that the window's title never had.
+#[derive(Clone, Debug)]
+pub struct SessionLabel {
+    pub caption: String,
+    pub window_token: Option<String>,
+}
+
 /// Joins agent and session; no agent id or session id contains it.
 pub const SCOPE_SEPARATOR: char = '\u{1f}';
 

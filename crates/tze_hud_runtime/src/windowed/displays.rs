@@ -660,8 +660,11 @@ pub(super) fn scale_change_target<'a>(
 }
 
 /// Final swapchain outcomes: successful secondary present and deferred encodes.
-pub(super) type SecondaryPresentation =
-    (bool, Vec<tze_hud_compositor::surface::PresentAvailability>);
+pub(super) type SecondaryPresentation = (
+    bool,
+    Vec<tze_hud_compositor::surface::PresentAvailability>,
+    Vec<tze_hud_scene::SceneId>,
+);
 
 /// One of the overlay windows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1655,22 +1658,25 @@ impl super::WinitApp {
     }
 
     /// Present every secondary's pending frame (main thread).
-    pub(super) fn present_secondaries(
-        &self,
-    ) -> (bool, Vec<tze_hud_compositor::surface::PresentAvailability>) {
+    pub(super) fn present_secondaries(&self) -> SecondaryPresentation {
         use tze_hud_compositor::surface::PendingPresent;
         let mut presented = false;
         let mut deferred = Vec::new();
+        let mut cards = Vec::new();
         for display in &self.state.secondaries {
-            match display.surface.present_pending_texture_status() {
-                PendingPresent::Presented => presented = true,
+            let (status, ids) = display.surface.present_pending_texture_with_cards();
+            match status {
+                PendingPresent::Presented => {
+                    presented = true;
+                    cards.extend(ids);
+                }
                 PendingPresent::Empty => {}
                 PendingPresent::DeferredEncoding => {
                     deferred.push(display.surface.present_availability())
                 }
             }
         }
-        (presented, deferred)
+        (presented, deferred, cards)
     }
 
     /// Apply the overlay capture decision per window (see [`capture_window`]).

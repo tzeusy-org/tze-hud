@@ -521,6 +521,22 @@ impl super::Compositor {
                                 opacity,
                             ));
                         }
+                        if let Some((bounds, _)) =
+                            super::notification_style::go_to_control(scene, record, &style, slot)
+                        {
+                            let state = chrome_state(
+                                super::hit_regions::notification_go_to_interaction_id(
+                                    zone_name, record,
+                                ),
+                            );
+                            out.extend(self.card_control_cmd(
+                                bounds,
+                                state,
+                                style.control_fill(state, None),
+                                &style,
+                                opacity,
+                            ));
+                        }
                         // Action buttons: at exactly the bounds
                         // `populate_notification_hit_regions` registers; labels
                         // are drawn by `collect_text_items`. A destructive one

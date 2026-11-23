@@ -50,6 +50,8 @@ struct SwapchainSlot {
     /// presentation on the main thread. `None` between present and the next
     /// acquire, or after a reconfigure cleared it.
     pending: Option<wgpu::SurfaceTexture>,
+    /// The matching candidates rendered into this exact pending texture.
+    notification_candidates: Vec<tze_hud_scene::SceneId>,
     /// `true` from the start of `acquire_frame()` until the `CompositorFrame`
     /// guard is dropped (after `queue.submit()`). While set, the compositor
     /// holds a `TextureView` referencing `pending`, so the texture MUST NOT be
@@ -100,6 +102,17 @@ pub struct CompositorFrame {
     pub(crate) _guard: Box<dyn Any + Send>,
     /// Whether this build acquired a new surface texture or reused a pending one.
     pub(crate) acquisition: SurfaceFrameAcquisition,
+}
+
+impl CompositorFrame {
+    pub(crate) fn record_notification_candidates(&self, ids: Vec<tze_hud_scene::SceneId>) {
+        if !ids.is_empty()
+            && let Some(guard) = self._guard.downcast_ref::<EncodingGuard>()
+        {
+            let mut slot = guard.slot.lock().expect("swapchain lock poisoned");
+            slot.notification_candidates = ids;
+        }
+    }
 }
 
 /// How a compositor build obtained its renderable surface texture.
@@ -501,6 +514,7 @@ impl WindowSurface {
             height: std::sync::atomic::AtomicU32::new(height),
             swapchain: std::sync::Arc::new(std::sync::Mutex::new(SwapchainSlot {
                 pending: None,
+                notification_candidates: Vec::new(),
                 encoding: false,
             })),
             swapchain_done: std::sync::Arc::new(std::sync::Condvar::new()),
@@ -695,6 +709,14 @@ impl WindowSurface {
     /// Preserve the distinction between no owed image and an image whose
     /// encode is still in flight. A deferred owner must retry on availability.
     pub fn present_pending_texture_status(&self) -> PendingPresent {
+        self.present_pending_texture_with_cards().0
+    }
+
+    /// Return card IDs from the texture we actually presented, atomically
+    /// with taking it. An absent or deferred image carries no receipt.
+    pub fn present_pending_texture_with_cards(
+        &self,
+    ) -> (PendingPresent, Vec<tze_hud_scene::SceneId>) {
         let mut slot = self.swapchain.lock().expect("swapchain lock poisoned");
 
         // Wait for the compositor thread to finish encoding + submitting before
@@ -726,7 +748,7 @@ impl WindowSurface {
                     "present_pending_texture: encoding still in progress after timeout; \
                      skipping present this tick (compositor may be stalled)"
                 );
-                return PendingPresent::DeferredEncoding;
+                return (PendingPresent::DeferredEncoding, Vec::new());
             }
         }
 
@@ -735,9 +757,12 @@ impl WindowSurface {
             texture.present();
             self.presented_frame_count
                 .fetch_add(1, std::sync::atomic::Ordering::Release);
-            PendingPresent::Presented
+            (
+                PendingPresent::Presented,
+                std::mem::take(&mut slot.notification_candidates),
+            )
         } else {
-            PendingPresent::Empty
+            (PendingPresent::Empty, Vec::new())
         }
     }
 
@@ -758,6 +783,7 @@ impl WindowSurface {
     pub fn pending_encoding_for_test() -> (PresentAvailability, impl Send) {
         let slot = std::sync::Arc::new(std::sync::Mutex::new(SwapchainSlot {
             pending: None,
+            notification_candidates: Vec::new(),
             encoding: true,
         }));
         let done = std::sync::Arc::new(std::sync::Condvar::new());
@@ -993,6 +1019,9 @@ impl CompositorSurface for WindowSurface {
         // reconfigure() both check `encoding` under this same lock and wait on
         // the condvar, so neither can destroy the SurfaceTexture while the
         // compositor holds a TextureView referencing it.
+        // A reused image takes its receipt from the newest successful
+        // encode. An incomplete encode cannot acknowledge the old receipt.
+        slot.notification_candidates.clear();
         slot.encoding = true;
         let acquisition = SurfaceFrameAcquisition::from_pending_surface(slot.pending.is_some());
 

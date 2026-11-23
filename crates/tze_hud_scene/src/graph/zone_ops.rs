@@ -377,6 +377,7 @@ impl SceneGraph {
                     .then_some(*id)
             })
             .collect();
+        let label = self.session_labels.get(publisher_namespace);
         let record = ZonePublishRecord {
             publication_id,
             zone_name: zone_name.to_string(),
@@ -389,7 +390,8 @@ impl SceneGraph {
             breakpoints,
             lease_id,
             publication_origin: publication_origin.filter(|_| lease_id.is_none()),
-            caption: self.session_labels.get(publisher_namespace).cloned(),
+            caption: label.map(|label| label.caption.clone()),
+            window_token: label.and_then(|label| label.window_token.clone()),
             display: None,
         };
         let mut record = record;
@@ -1356,6 +1358,27 @@ impl SceneGraph {
             return None;
         };
         let kind = match &region.kind {
+            ZoneInteractionKind::GoTo => {
+                let token = record.window_token.clone()?;
+                let mono = self.now_monotonic_us();
+                let state = self.overlay.notification_go_to.get_mut(&key)?;
+                if !state.available
+                    || state
+                        .attempted_at_mono_us
+                        .is_some_and(|last| mono.saturating_sub(last) < 2_000_000)
+                {
+                    return None;
+                }
+                state.attempted_at_mono_us = Some(mono);
+                state.cue = Some(super::overlay::GoToCue::Switching);
+                self.bump_geometry_epoch();
+                return Some(super::NotificationActivation::GoTo {
+                    publication_id: key,
+                    token,
+                    attempted_at_mono_us: mono,
+                    bounds: region.bounds,
+                });
+            }
             ZoneInteractionKind::Dismiss => super::PendingActionKind::Dismiss,
             ZoneInteractionKind::Action { index } => {
                 let action = payload.actions.get(*index)?;
@@ -1478,7 +1501,9 @@ impl SceneGraph {
                 // Native chrome shares this list but has no notification publication.
                 !matches!(
                     r.kind,
-                    ZoneInteractionKind::Dismiss | ZoneInteractionKind::Action { .. }
+                    ZoneInteractionKind::Dismiss
+                        | ZoneInteractionKind::GoTo
+                        | ZoneInteractionKind::Action { .. }
                 ) || (!hidden && live(&r.zone_name, r.publication_id, &r.publisher_namespace))
             })
             .map(|r| r.interaction_id.clone())
@@ -1496,6 +1521,18 @@ impl SceneGraph {
                     })
                     && !keys.contains(id)
             });
+        self.overlay.notification_go_to.retain(|id, _| {
+            !keys.contains(id)
+                && self
+                    .zone_registry
+                    .active_publishes
+                    .values()
+                    .flatten()
+                    .any(|record| {
+                        record.publication_id == *id
+                            && record.expires_at_wall_us.is_none_or(|expiry| expiry > now)
+                    })
+        });
         self.overlay
             .notification_choices
             .retain(|key, _| keys.contains(key));

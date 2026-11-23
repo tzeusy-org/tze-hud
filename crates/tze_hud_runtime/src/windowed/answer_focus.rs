@@ -17,6 +17,7 @@ pub(super) struct AnswerKeyboardState {
     /// A tray click: questions only, and a stale click opens the panel.
     pub tray_requested: Arc<Mutex<Option<TrayVisit>>>,
     pub focus: Option<AnswerFocus>,
+    pub visit: u64,
     pub return_key: Option<String>,
     /// The key holding a destructive action; its release ends the hold.
     pub hold_key: Option<String>,
@@ -44,6 +45,7 @@ pub(super) fn route_answer_key(
     focus: AnswerFocus,
     raw: &tze_hud_input::RawKeyDownEvent,
     tokens: &std::collections::HashMap<String, String>,
+    authorize_go_to: impl FnOnce() -> bool,
 ) -> AnswerKeyOutcome {
     let mut outcome = AnswerKeyOutcome {
         activation: None,
@@ -67,14 +69,24 @@ pub(super) fn route_answer_key(
         .iter()
         .filter(|region| {
             region.publication_id == focus.publication_id
-                && matches!(region.kind, ZoneInteractionKind::Action { .. })
+                && matches!(
+                    region.kind,
+                    ZoneInteractionKind::Action { .. }
+                        | ZoneInteractionKind::GoTo
+                        | ZoneInteractionKind::Dismiss
+                )
         })
         .cloned()
         .collect();
-    controls.sort_by_key(|region| match region.kind {
-        ZoneInteractionKind::Action { index } => index,
-        _ => usize::MAX,
-    });
+    // Existing action-only navigation stays the same on cards without Go to.
+    // Cards with the caption control traverse the full visible control row.
+    if !controls
+        .iter()
+        .any(|region| region.kind == ZoneInteractionKind::GoTo)
+    {
+        controls.retain(|region| region.kind != ZoneInteractionKind::Dismiss);
+    }
+    controls.sort_by_key(|region| region.tab_order);
     if controls.is_empty() {
         return outcome;
     }
@@ -114,6 +126,9 @@ pub(super) fn route_answer_key(
         None
     };
     let Some(target) = target else { return outcome };
+    if target.kind == ZoneInteractionKind::GoTo && !authorize_go_to() {
+        return outcome;
+    }
     if super::notification_hold::needs_hold(scene, target, tokens) {
         let key = keyboard_key_identity(&raw.key_code, &raw.key);
         scene.begin_notification_hold(target.clone(), Some(key.clone()));
@@ -134,6 +149,12 @@ pub(super) fn route_answer_key(
                     if payload.actions.get(*index).is_some_and(|action| action.url.is_some()))
         });
     outcome.activation = scene.activate_notification(target, duration);
+    if matches!(
+        outcome.activation,
+        Some(tze_hud_scene::graph::NotificationActivation::GoTo { .. })
+    ) {
+        return outcome;
+    }
     if outcome.activation.is_some() || url {
         scene.focus_notification(None);
         outcome.exit = true;
@@ -171,6 +192,10 @@ fn newest_waiting_portal(
 }
 
 impl AnswerKeyboardState {
+    pub(super) fn invalidate_visit(&mut self) {
+        self.visit = self.visit.wrapping_add(1);
+    }
+
     /// The tray's answer handoff: the chord's main-thread path, marked as a
     /// tray visit.
     #[cfg(any(target_os = "windows", test, feature = "test-harness"))]
@@ -423,6 +448,7 @@ impl WinitApp {
         // a key; it must not suppress this new answer or its characters.
         self.state.notification_keydowns.clear();
         self.state.answer_keyboard.return_key = None;
+        self.state.answer_keyboard.invalidate_visit();
         self.state.answer_keyboard.focus = Some(focus);
         self.focus_native_window_at(
             bounds.x + bounds.width * 0.5,

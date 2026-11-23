@@ -290,6 +290,26 @@ def _windows_of(pid: int) -> list[int]:
     return found
 
 
+
+def _window_snapshot(hwnd: int) -> dict | None:
+    pid, bounds = wintypes.DWORD(), wintypes.RECT()
+    title = ctypes.create_unicode_buffer(512)
+    if (not hwnd or not user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+            or not user32.GetWindowRect(hwnd, ctypes.byref(bounds))):
+        return None
+    user32.GetWindowTextW(hwnd, title, len(title))
+    return {"hwnd": hwnd, "pid": pid.value, "title": title.value,
+            "rect": [bounds.left, bounds.top, bounds.right, bounds.bottom]}
+
+
+def window_snapshot(pid: int) -> dict | None:
+    windows = _windows_of(pid)
+    return _window_snapshot(windows[0]) if windows else None
+
+
+def foreground_snapshot() -> dict | None:
+    return _window_snapshot(user32.GetForegroundWindow())
+
 def bring_to_front(pid: int) -> bool:
     """Ask Windows to foreground `pid`'s window (no input injected)."""
     windows = _windows_of(pid)

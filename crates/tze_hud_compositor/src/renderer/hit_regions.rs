@@ -429,6 +429,14 @@ fn populate_notification_hit_regions_in(
                 record.caption.as_deref(),
             );
             let dismiss_id = notification_dismiss_interaction_id(zone_name, record);
+            let style = super::notification_style::NotificationStyle::for_zone(
+                zone_name,
+                &zone_tokens,
+                policy,
+            );
+            let goto = super::notification_style::go_to_control(scene, record, &style, card)
+                .map(|(rect, _)| rect);
+            let goto_id = goto.map(|_| notification_go_to_interaction_id(zone_name, record));
             let action_rects = layouts
                 .borrow_mut()
                 .resolve(&zone_tokens, zone_name, record, policy, card.width)
@@ -445,6 +453,11 @@ fn populate_notification_hit_regions_in(
             });
             let focus = if scene.overlay.notification_focus.as_ref() == Some(&dismiss_id) {
                 Some(NotificationControl::Close)
+            } else if goto_id
+                .as_ref()
+                .is_some_and(|id| Some(id) == scene.overlay.notification_focus.as_ref())
+            {
+                Some(NotificationControl::GoTo)
             } else {
                 (0..action_rects.len())
                     .find(|&index| {
@@ -464,6 +477,9 @@ fn populate_notification_hit_regions_in(
                     bounds: card,
                     actions: action_rects.clone(),
                     close: dismiss_bounds,
+                    goto,
+                    has_window_caption: record.window_token.is_some()
+                        && style.caption(record.caption.as_deref()).is_some(),
                     focus,
                     chosen,
                     state: "shown",
@@ -483,6 +499,19 @@ fn populate_notification_hit_regions_in(
                 tab_order,
             });
             tab_order += 1;
+            if let Some((bounds, interaction_id)) = goto.zip(goto_id) {
+                scene.overlay.zone_hit_regions.push(ZoneHitRegion {
+                    zone_name: zone_name.clone(),
+                    publication_id: record.publication_id,
+                    published_at_wall_us: record.published_at_wall_us,
+                    publisher_namespace: record.publisher_namespace.clone(),
+                    bounds,
+                    kind: ZoneInteractionKind::GoTo,
+                    interaction_id,
+                    tab_order,
+                });
+                tab_order += 1;
+            }
 
             // ── Action buttons ────────────────────────────────────────────
             let n_actions = n_payload.actions.len().min(MAX_NOTIFICATION_ACTIONS);
@@ -549,6 +578,16 @@ pub(super) fn notification_dismiss_interaction_id(
     format!(
         "zone:{}:dismiss:{}:{}",
         zone_name, record.publication_id, record.publisher_namespace,
+    )
+}
+
+pub(super) fn notification_go_to_interaction_id(
+    zone_name: &str,
+    record: &ZonePublishRecord,
+) -> String {
+    format!(
+        "zone:{}:goto:{}:{}",
+        zone_name, record.publication_id, record.publisher_namespace
     )
 }
 

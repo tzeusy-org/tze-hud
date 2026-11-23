@@ -590,6 +590,7 @@ impl StatusSource {
             "notifications": surfaces.notifications,
             "widgets": surfaces.widgets,
             "link_launches": surfaces.link_launches,
+            "window_activations": surfaces.window_activations,
             "cursor": surfaces.cursor,
             "link_feedback": surfaces.link_feedback,
             "clipboard_writes": crate::clipboard::writes(),
