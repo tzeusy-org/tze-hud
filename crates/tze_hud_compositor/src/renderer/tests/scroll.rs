@@ -1,560 +1,337 @@
 use super::*;
+use crate::test_pixels::pixel_at;
 
-// ─── ensure_icon_texture: token substitution unit tests ──────────────────
+fn scroll_text(content: &str, bounds: Rect, overflow: TextOverflow) -> Node {
+    leaf(NodeData::TextMarkdown(TextMarkdownNode {
+        font_family: FontFamily::SystemMonospace,
+        overflow,
+        ..markdown_text(content, bounds, 14.0)
+    }))
+}
 
-/// SVG icon with a `{{token.color.primary}}` placeholder loads successfully
-/// when the token is present in the compositor's token map.
-///
-/// Acceptance criterion: compositor-level token substitution is applied
-/// before SVG parsing so that token-driven icons render correctly.
 #[tokio::test]
-async fn test_ensure_icon_texture_resolves_token_placeholder() {
+async fn icon_texture_retries_missing_tokens_and_rasterizes_at_the_current_token_size() {
     let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(64, 64).await);
-
-    // Write a minimal SVG with a token placeholder to a temp file.
-    let svg_path = std::env::temp_dir().join("tze_hud_test_icon_token_ok.svg");
+    let path = std::env::temp_dir().join(format!("tze_hud_scroll_icon_{}.svg", std::process::id()));
     std::fs::write(
-        &svg_path,
+        &path,
         r#"<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32">
 <rect width="32" height="32" fill="{{token.color.primary}}"/>
 </svg>"#,
     )
-    .expect("write test SVG");
-    let path = svg_path.to_string_lossy().into_owned();
-
-    // Token map with the required key — icon must load.
-    compositor.set_token_map(
-        [("color.primary".to_string(), "#ff0000".to_string())]
-            .into_iter()
-            .collect(),
-    );
-    let loaded = compositor.ensure_icon_texture(&path);
-    assert!(
-        loaded,
-        "ensure_icon_texture must succeed when token is resolved"
-    );
-
-    // Texture should be in the cache.
-    let resource_id = tze_hud_scene::ResourceId::of(path.as_bytes());
-    assert!(
-        compositor.image_texture_cache.contains_key(&resource_id),
-        "resolved icon must be in image_texture_cache"
-    );
-
-    let id = ResourceId::of(path.as_bytes());
+    .unwrap();
+    let icon = path.to_str().unwrap();
+    let id = ResourceId::of(icon.as_bytes());
+    assert!(!compositor.ensure_icon_texture(icon));
+    assert!(compositor.failed_icon_paths.contains(&id));
+    compositor.set_token_map([("color.primary".into(), "#ff0000".into())].into());
+    assert!(!compositor.failed_icon_paths.contains(&id));
+    assert!(compositor.ensure_icon_texture(icon));
     assert_eq!(compositor.image_texture_cache[&id].width, 14);
-    compositor.set_token_map({
-        let mut tokens = compositor.token_map.clone();
-        tokens.insert("size.status.icon".into(), "20".into());
-        tokens
-    });
-    assert!(compositor.ensure_icon_texture(&path));
-    assert_eq!(
-        compositor.image_texture_cache[&id].width, 20,
-        "token resize refreshes the same path texture"
-    );
-    let _ = std::fs::remove_file(&svg_path);
+
+    let mut tokens = compositor.token_map.clone();
+    tokens.insert("size.status.icon".into(), "20".into());
+    compositor.set_token_map(tokens);
+    assert!(compositor.ensure_icon_texture(icon));
+    assert_eq!(compositor.image_texture_cache[&id].width, 20);
+    std::fs::remove_file(&path).unwrap();
 }
 
-/// SVG icon with an unresolved token placeholder causes `ensure_icon_texture`
-/// to return `false` and negative-cache the failure.  After `set_token_map`
-/// is called with the missing token, the negative cache is cleared and the
-/// icon can be loaded on the next call.
 #[tokio::test]
-async fn test_ensure_icon_texture_unresolved_token_cleared_after_set_token_map() {
-    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(64, 64).await);
+async fn scroll_viewports_and_truncation_cache_select_the_same_edge() {
+    use crate::overflow::TruncationViewport::{HeadAnchored, TailAnchored};
 
-    let svg_path = std::env::temp_dir().join("tze_hud_test_icon_token_missing.svg");
-    std::fs::write(
-        &svg_path,
-        r#"<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32">
-<rect width="32" height="32" fill="{{token.color.primary}}"/>
-</svg>"#,
-    )
-    .expect("write test SVG");
-    let path = svg_path.to_string_lossy().into_owned();
+    let (mut compositor, _surface) = require_gpu!(make_text_compositor(720, 360).await);
+    let content = "FIRST\nbbbb\ncccc\ndddd\neeee\nffff\ngggg\nLAST";
+    let mut observed = Vec::new();
+    for (zone, overflow, opt_in, viewport) in [
+        (false, TextOverflow::Ellipsis, Some(false), HeadAnchored),
+        (false, TextOverflow::Ellipsis, Some(true), TailAnchored),
+        (false, TextOverflow::Clip, Some(true), HeadAnchored),
+        (true, TextOverflow::Ellipsis, None, HeadAnchored),
+        (true, TextOverflow::Ellipsis, Some(true), TailAnchored),
+        (true, TextOverflow::Ellipsis, Some(false), HeadAnchored),
+        (true, TextOverflow::Clip, Some(true), TailAnchored),
+    ] {
+        let at_tail = opt_in == Some(true);
+        let scene = if zone {
+            make_stream_zone_scene(Some(overflow), opt_in, content)
+        } else {
+            let mut scene = SceneGraph::new(720.0, 360.0);
+            let bounds = Rect::new(0.0, 0.0, 200.0, 40.0);
+            let tile = scrollable_tile(&mut scene, "viewport-test", bounds, Some(200.0));
+            scene
+                .set_tile_root(tile, scroll_text(content, bounds, overflow))
+                .unwrap();
+            scene.set_tile_follow_tail_at_tail(tile, at_tail);
+            scene
+        };
+        compositor.prime_markdown_cache(&scene);
+        compositor.resize_reprime_last_at = None;
+        compositor.prime_truncation_cache(&scene);
+        let items = compositor.collect_text_items(&scene, 720.0, 360.0);
+        assert_eq!(items.len(), 1);
+        let item = &items[0];
+        assert_eq!((item.overflow, item.viewport), (overflow, viewport));
+        let key = crate::text::effective_truncation_key(item);
+        if overflow == TextOverflow::Clip {
+            assert!(key.is_none());
+            continue;
+        }
 
-    // Empty token map — token is missing, load must fail.
-    compositor.set_token_map(std::collections::HashMap::new());
-    let first = compositor.ensure_icon_texture(&path);
-    assert!(
-        !first,
-        "ensure_icon_texture must return false on unresolved token"
-    );
-
-    let resource_id = tze_hud_scene::ResourceId::of(path.as_bytes());
-    assert!(
-        compositor.failed_icon_paths.contains(&resource_id),
-        "failed path must be in negative cache after unresolved token"
-    );
-
-    // Now provide the missing token.  set_token_map must clear the negative
-    // cache so the icon can be retried.
-    compositor.set_token_map(
-        [("color.primary".to_string(), "#00ff00".to_string())]
-            .into_iter()
-            .collect(),
-    );
-    assert!(
-        !compositor.failed_icon_paths.contains(&resource_id),
-        "negative cache must be cleared after set_token_map"
-    );
-    let second = compositor.ensure_icon_texture(&path);
-    assert!(
-        second,
-        "ensure_icon_texture must succeed after token map is updated"
-    );
-
-    let _ = std::fs::remove_file(&svg_path);
+        let key = key.expect("ellipsis measures a truncated range");
+        let cached = compositor
+            .text_rasterizer
+            .as_ref()
+            .unwrap()
+            .truncation_cache
+            .get_by_key(&key)
+            .unwrap();
+        let (included, excluded) = if at_tail {
+            ("LAST", "FIRST")
+        } else {
+            ("FIRST", "LAST")
+        };
+        assert!(
+            cached.was_truncated
+                && cached.text.contains(included)
+                && !cached.text.contains(excluded),
+            "zone {zone}, {viewport:?}: {cached:?}"
+        );
+        observed.push(key);
+    }
+    for (owner, first) in [("tile", 0), ("zone", 2)] {
+        assert_ne!(
+            observed[first],
+            observed[first + 1],
+            "{owner}: head and tail cache keys"
+        );
+    }
 }
 
-// ─── Scroll-offset text rendering ────────────────────────────
-
-/// `collect_text_items` applies the tile scroll offset to `TextItem` pixel
-/// positions so text glyphs track the scrolled content.
-///
-/// Without the fix, `collect_text_items_from_node` passed bare
-/// `tile.bounds.x`/`tile.bounds.y` to `TextItem::from_text_markdown_node`,
-/// leaving text anchored at its original position while the geometry quads
-/// moved with the scroll. This test pins the contract: a text node at
-/// `(node_x, node_y)` in a tile scrolled by `(scroll_x, scroll_y)` must
-/// produce a `TextItem` whose `pixel_x`/`pixel_y` subtract the scroll offset.
-///
-/// Scrolling updates the bounded transcript viewport before agent dispatch.
 #[tokio::test]
-async fn test_collect_text_items_applies_tile_scroll_offset() {
-    // This test needs no GPU — `collect_text_items` is a pure CPU path.
-    // We construct a Compositor without a surface render call.
-    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(720, 360).await);
-
+async fn scrolling_moves_text_origin_without_moving_its_clip() {
+    let (compositor, _) = require_gpu!(make_compositor_and_surface(720, 360).await);
+    let tile_bounds = Rect::new(100.0, 50.0, 400.0, 200.0);
+    let node_bounds = Rect::new(10.0, 20.0, 300.0, 24.0);
     let mut scene = SceneGraph::new(720.0, 360.0);
-    let tab_id = scene.create_tab("test", 0).unwrap();
-    let lease_id = scene.grant_lease("scroll-test", 120_000);
-
-    // Place a tile at (100, 50).
-    let tile_x = 100.0_f32;
-    let tile_y = 50.0_f32;
-    let tile_w = 400.0_f32;
-    let tile_h = 200.0_f32;
-    let tile_id = scene
-        .create_tile(
-            tab_id,
-            "scroll-test",
-            lease_id,
-            Rect::new(tile_x, tile_y, tile_w, tile_h),
-            1,
-        )
+    let tab = scene.create_tab("test", 0).unwrap();
+    let lease = scene.grant_lease("scroll-test", 120_000);
+    let tile = scene
+        .create_tile(tab, "scroll-test", lease, tile_bounds, 1)
+        .unwrap();
+    let content = "scroll test line";
+    scene
+        .set_tile_root(tile, scroll_text(content, node_bounds, TextOverflow::Clip))
         .unwrap();
 
-    // Register a scroll config so scroll offsets are valid on this tile.
+    let original = compositor.collect_text_items(&scene, 720.0, 360.0);
+    let [original] = original.as_slice() else {
+        panic!("one unscrolled text item")
+    };
+    assert_eq!(original.text.as_ref(), content);
+    assert!(original.pixel_y >= tile_bounds.y + node_bounds.y);
+    assert!(!compositor.scroll_smoothing_enabled);
+
     scene
         .register_tile_scroll_config(
-            tile_id,
-            tze_hud_scene::types::TileScrollConfig {
-                scrollable_x: false,
-                scrollable_y: true,
-                content_width: None,
+            tile,
+            TileScrollConfig {
                 content_height: Some(600.0),
+                ..TileScrollConfig::vertical()
             },
         )
         .unwrap();
-
-    // Set a 80px vertical scroll offset (local-first, no agent roundtrip).
-    let scroll_y = 80.0_f32;
-    scene
-        .set_tile_scroll_offset_local(tile_id, 0.0, scroll_y)
-        .unwrap();
-
-    // Place a TextMarkdown node at tile-local (10, 20).
-    let node_x = 10.0_f32;
-    let node_y = 20.0_f32;
-    let node = Node {
-        layout: Default::default(),
-        id: SceneId::new(),
-        children: vec![],
-        data: NodeData::TextMarkdown(TextMarkdownNode {
-            content: "scroll test line".to_string(),
-            bounds: Rect::new(node_x, node_y, 300.0, 24.0),
-            font_size_px: 14.0,
-            font_family: FontFamily::SystemMonospace,
-            color: Rgba::new(1.0, 1.0, 1.0, 1.0),
-            background: None,
-            alignment: TextAlign::Start,
-            overflow: TextOverflow::Clip,
-            color_runs: Box::default(),
-        }),
+    scene.set_tile_scroll_offset_local(tile, 0.0, 80.0).unwrap();
+    assert_eq!(
+        compositor.display_tile_scroll_offset(&scene, tile),
+        (0.0, 80.0)
+    );
+    let scrolled = compositor.collect_text_items(&scene, 720.0, 360.0);
+    let [scrolled] = scrolled.as_slice() else {
+        panic!("one scrolled text item")
     };
-    scene.set_tile_root(tile_id, node).unwrap();
-
-    // Collect text items with scroll_y=80 applied — the path under test.
-    let items_scrolled = compositor.collect_text_items(&scene, 720.0, 360.0);
+    assert_eq!(scrolled.text.as_ref(), content);
+    assert_eq!(scrolled.pixel_x, original.pixel_x);
+    assert!((original.pixel_y - scrolled.pixel_y - 80.0).abs() < 0.01);
     assert_eq!(
-        items_scrolled.len(),
-        1,
-        "expected one TextItem for the scroll tile"
-    );
-    let scrolled_item = &items_scrolled[0];
-    assert_eq!(
-        &*scrolled_item.text, "scroll test line",
-        "TextItem content must match the node"
-    );
-
-    // Now create an identical scene WITHOUT scroll offset so we can
-    // compare pixel_y values directly. Both tiles have the same bounds and
-    // the same node bounds, so margin_y is identical in both — subtracting
-    // yields exactly scroll_y.
-    //
-    //   pixel_y_scrolled = (tile_y - scroll_y) + node_y + margin_y
-    //   pixel_y_baseline =  tile_y             + node_y + margin_y
-    //   diff             =  scroll_y  (margin cancels)
-    let mut scene_baseline = SceneGraph::new(720.0, 360.0);
-    let tab2 = scene_baseline.create_tab("test", 0).unwrap();
-    let lease2 = scene_baseline.grant_lease("baseline", 120_000);
-    let tile_id2 = scene_baseline
-        .create_tile(
-            tab2,
-            "baseline",
-            lease2,
-            Rect::new(tile_x, tile_y, tile_w, tile_h),
-            1,
-        )
-        .unwrap();
-    // No scroll offset registered — offset defaults to (0, 0).
-    let baseline_node = Node {
-        layout: Default::default(),
-        id: SceneId::new(),
-        children: vec![],
-        data: NodeData::TextMarkdown(TextMarkdownNode {
-            content: "scroll test line".to_string(),
-            bounds: Rect::new(node_x, node_y, 300.0, 24.0),
-            font_size_px: 14.0,
-            font_family: FontFamily::SystemMonospace,
-            color: Rgba::new(1.0, 1.0, 1.0, 1.0),
-            background: None,
-            alignment: TextAlign::Start,
-            overflow: TextOverflow::Clip,
-            color_runs: Box::default(),
-        }),
-    };
-    scene_baseline
-        .set_tile_root(tile_id2, baseline_node)
-        .unwrap();
-    let items_baseline = compositor.collect_text_items(&scene_baseline, 720.0, 360.0);
-    assert_eq!(
-        items_baseline.len(),
-        1,
-        "baseline must also produce one TextItem"
-    );
-    let baseline_item = &items_baseline[0];
-
-    // Verify that the scrolled item is positioned exactly scroll_y pixels
-    // above the baseline item (margin cancels between identical bounds).
-    // Use 0.01 tolerance — f32 precision at values ~80.0 is ~9.5e-6, larger
-    // than f32::EPSILON (1.19e-7), and intermediate margin arithmetic may
-    // accumulate sub-ULP error. 0.01px is tight enough to catch wrong offset
-    // but not fragile against f32 rounding. Matches existing renderer test
-    // convention (see position comparisons at < 0.5 and color deltas at <
-    // 0.01 throughout this module).
-    let actual_shift = baseline_item.pixel_y - scrolled_item.pixel_y;
-    assert!(
-        (actual_shift - scroll_y).abs() < 0.01,
-        "scroll shift ({actual_shift}) must equal scroll_y ({scroll_y}); \
-             baseline_y={}, scrolled_y={}",
-        baseline_item.pixel_y,
-        scrolled_item.pixel_y
-    );
-
-    // Directional sanity: scrolled item must be above baseline.
-    assert!(
-        scrolled_item.pixel_y < baseline_item.pixel_y,
-        "scrolled text ({}) must be above unscrolled text ({})",
-        scrolled_item.pixel_y,
-        baseline_item.pixel_y
-    );
-    assert!(
-        (scrolled_item.clip_pixel_y - baseline_item.clip_pixel_y).abs() < 0.01,
-        "scroll must not move the text clip rectangle with the glyph origin"
-    );
-    assert!(
-        (scrolled_item.clip_bounds_height - baseline_item.clip_bounds_height).abs() < 0.01,
-        "clip height must remain tied to the viewport, not the scrolled glyph origin"
+        (scrolled.clip_pixel_y, scrolled.clip_bounds_height),
+        (original.clip_pixel_y, original.clip_bounds_height)
     );
 }
 
-/// the jump-to-latest pill MAY carry the ambient unread count.
-/// `collect_jump_to_latest_badge_item` yields a centered, clipped count
-/// `TextItem` only when the pill would show (content overflows + scrolled away)
-/// AND the tile carries a nonzero, non-redacted unread count; it returns `None`
-/// at the tail or with nothing unread, so the badge appears and clears with the
-/// pill (local-first, no adapter round trip).
 #[tokio::test]
 async fn jump_to_latest_badge_gates_on_scroll_and_unread_count() {
-    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(480, 320).await);
-    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+    let (mut compositor, surface) = require_gpu!(make_text_compositor(480, 320).await);
 
     let mut scene = SceneGraph::new(480.0, 320.0);
-    let tab_id = scene.create_tab("test", 0).unwrap();
-    let lease_id = scene.grant_lease("badge-test", 120_000);
+    let bounds = Rect::new(0.0, 0.0, 400.0, 200.0);
+    let tile_id = scrollable_tile(&mut scene, "badge-test", bounds, Some(800.0));
+    let transcript = scroll_text(
+        &"The viewport has more content than it can show.\n".repeat(25),
+        bounds,
+        TextOverflow::Clip,
+    );
+    scene.set_tile_root(tile_id, transcript).unwrap();
+    compositor.set_token_map(token_overrides([("portal.transition.in_ms", "0")]));
+    let tab_id = scene.tiles[&tile_id].tab_id;
 
-    let tile_id = scene
-        .create_tile(
-            tab_id,
-            "badge-test",
-            lease_id,
-            Rect::new(0.0, 0.0, 400.0, 200.0),
-            1,
-        )
-        .unwrap();
-
-    // Content overflows the 200px viewport → the pill (and badge) may show.
-    scene
-        .register_tile_scroll_config(
-            tile_id,
-            tze_hud_scene::types::TileScrollConfig {
-                scrollable_x: false,
-                scrollable_y: true,
-                content_width: None,
-                content_height: Some(800.0),
-            },
-        )
-        .unwrap();
-
-    let jtl_tokens =
-        super::token_colors::resolve_jump_to_latest_tokens(&std::collections::HashMap::new());
-    let si_tokens =
-        super::token_colors::resolve_scroll_indicator_tokens(&std::collections::HashMap::new());
-    // The pill drawn and hit-tested below sits beside the indicator; both
-    // paths, and the input crate's geometry, read the one portal default.
-    assert_eq!(si_tokens, tze_hud_input::ScrollIndicatorTokens::default());
+    let indicator = super::token_colors::resolve_scroll_indicator_tokens(&HashMap::new());
+    assert_eq!(indicator, tze_hud_input::ScrollIndicatorTokens::default());
     assert_eq!(
-        si_tokens.width_px,
+        indicator.width_px,
         tze_hud_scene::portal_defaults::number(
             tze_hud_scene::portal_defaults::SCROLL_INDICATOR_WIDTH_PX
         )
     );
-
-    let badge = |c: &Compositor, s: &SceneGraph| {
-        let tile = s.tiles.get(&tile_id).unwrap();
-        c.collect_jump_to_latest_badge_item(tile, s, &jtl_tokens, &si_tokens)
-    };
-
-    // Scrolled away from the tail, with unread content → badge renders.
     scene.set_tile_follow_tail_at_tail(tile_id, false);
     scene.set_tile_unread_count(tile_id, 3);
-    let item =
-        badge(&compositor, &scene).expect("scrolled-away tile with unread must show a badge");
-    assert_eq!(&*item.text, "3 unread", "badge must carry the unread count");
+    let (_, items) = compositor.collect_scroll_affordances(&scene);
+    let [item] = items.as_slice() else {
+        panic!("expected one unread label, got {}", items.len());
+    };
     assert_eq!(
-        item.alignment,
-        tze_hud_scene::types::TextAlign::Center,
-        "count must be centered in the pill"
+        (item.text.as_ref(), item.alignment),
+        ("3 unread", TextAlign::Center)
     );
-    // Clip is confined to the pill (bottom-center of the tile), never the whole tile.
-    assert!(
-        item.clip_bounds_width <= 400.0 && item.clip_bounds_height <= 200.0,
-        "badge clip must stay within the pill"
+    let clip = Rect::new(
+        item.clip_pixel_x,
+        item.clip_pixel_y,
+        item.clip_bounds_width,
+        item.clip_bounds_height,
     );
-    assert!(
-        item.pixel_y >= 100.0,
-        "pill (and badge) sits in the lower half of the tile, got y={}",
-        item.pixel_y
-    );
+    assert!(clip.width <= 400.0 && clip.height <= 200.0 && item.pixel_y >= 100.0);
 
-    // A foreground pill must hide both the pane fill and glyphs beneath it.
-    let mut painted = Vec::new();
-    for (content, background) in [
-        ("".to_string(), Rgba::new(1.0, 0.0, 0.0, 1.0)),
+    let badge_interior = || {
+        let left = clip.x as u32 + 2;
+        let right = (clip.x + clip.width) as u32 - 2;
+        let top = clip.y as u32 + 2;
+        let bottom = (clip.y + clip.height) as u32 - 2;
+        (top..bottom).flat_map(move |y| (left..right).map(move |x| (x, y)))
+    };
+    let capture = |c: &mut Compositor, s: &mut SceneGraph| {
+        prime_text(c, s);
+        render_pixels(c, s, &surface)
+    };
+
+    // Change both OUTPUT fill and glyphs below the opaque badge.
+    let [red, blue] = [
+        (String::new(), Rgba::new(1.0, 0.0, 0.0, 1.0)),
         (
             "WWWWWWWWWWWWWWWWWWWWWWWWWWWW\n".repeat(15),
             Rgba::new(0.0, 0.0, 1.0, 1.0),
         ),
-    ] {
+    ]
+    .map(|(content, background)| {
+        let text = TextMarkdownNode {
+            background: Some(background),
+            font_family: FontFamily::SystemMonospace,
+            ..markdown_text(content, bounds, 14.0)
+        };
         scene
-            .set_tile_root(
-                tile_id,
-                Node {
-                    layout: Default::default(),
-                    id: SceneId::new(),
-                    children: vec![],
-                    data: NodeData::TextMarkdown(TextMarkdownNode {
-                        content,
-                        bounds: Rect::new(0.0, 0.0, 400.0, 200.0),
-                        font_size_px: 14.0,
-                        font_family: FontFamily::SystemMonospace,
-                        color: Rgba::new(1.0, 1.0, 1.0, 1.0),
-                        background: Some(background),
-                        alignment: TextAlign::Start,
-                        overflow: TextOverflow::Clip,
-                        color_runs: Box::default(),
-                    }),
-                },
-            )
+            .set_tile_root(tile_id, leaf(NodeData::TextMarkdown(text)))
             .unwrap();
-        compositor.prime_markdown_cache(&scene);
-        compositor.prime_truncation_cache(&scene);
-        compositor.render_frame_headless(&mut scene, &surface);
+        compositor.update_portal_tile_animations(&scene);
         compositor.portal_tile_anim_states.clear();
-        compositor.render_frame_headless(&mut scene, &surface);
-        painted.push(surface.read_pixels(&compositor.device));
-    }
-    assert_ne!(
-        crate::test_pixels::pixel_at(&painted[0], 480, 20, 20),
-        crate::test_pixels::pixel_at(&painted[1], 480, 20, 20),
-        "probe changes actual OUTPUT pixels"
-    );
-    for y in
-        (item.clip_pixel_y as u32 + 2)..((item.clip_pixel_y + item.clip_bounds_height) as u32 - 2)
-    {
-        for x in (item.clip_pixel_x as u32 + 2)
-            ..((item.clip_pixel_x + item.clip_bounds_width) as u32 - 2)
-        {
-            assert_eq!(
-                crate::test_pixels::pixel_at(&painted[0], 480, x, y),
-                crate::test_pixels::pixel_at(&painted[1], 480, x, y),
-                "opaque foreground pill masks OUTPUT fill and glyphs at {x},{y}"
-            );
-        }
+        capture(&mut compositor, &mut scene)
+    });
+    assert_ne!(pixel_at(&red, 480, 20, 20), pixel_at(&blue, 480, 20, 20));
+    for (x, y) in badge_interior() {
+        assert_eq!(
+            pixel_at(&red, 480, x, y),
+            pixel_at(&blue, 480, x, y),
+            "the badge masks changing OUTPUT pixels at {x},{y}"
+        );
     }
 
-    // A higher card covers the lower portal's pill, including its hit target.
-    let cover_lease = scene.grant_lease("badge-cover", 120_000);
+    let lease = scene.grant_lease("badge-cover", 120_000);
     let cover = scene
-        .create_tile(
-            tab_id,
-            "badge-cover",
-            cover_lease,
-            Rect::new(
-                item.clip_pixel_x,
-                item.clip_pixel_y,
-                item.clip_bounds_width,
-                item.clip_bounds_height,
-            ),
-            2,
-        )
+        .create_tile(tab_id, "badge-cover", lease, clip, 2)
         .unwrap();
     scene
         .set_tile_root(
             cover,
-            Node {
-                layout: Default::default(),
-                id: SceneId::new(),
-                children: vec![],
-                data: NodeData::SolidColor(SolidColorNode {
-                    color: Rgba::new(0.0, 1.0, 0.0, 1.0),
-                    radius: None,
-                    bounds: Rect::new(0.0, 0.0, item.clip_bounds_width, item.clip_bounds_height),
-                }),
-            },
+            solid_node(
+                Rect::new(0.0, 0.0, clip.width, clip.height),
+                Rgba::new(0.0, 1.0, 0.0, 1.0),
+                None,
+            ),
         )
         .unwrap();
-    let mut covered = Vec::new();
-    for at_tail in [false, true] {
-        scene.set_tile_follow_tail_at_tail(tile_id, at_tail);
-        compositor.prime_markdown_cache(&scene);
-        compositor.prime_truncation_cache(&scene);
-        compositor.render_frame_headless(&mut scene, &surface);
-        covered.push(surface.read_pixels(&compositor.device));
-    }
-    for y in
-        (item.clip_pixel_y as u32 + 2)..((item.clip_pixel_y + item.clip_bounds_height) as u32 - 2)
-    {
-        for x in (item.clip_pixel_x as u32 + 2)
-            ..((item.clip_pixel_x + item.clip_bounds_width) as u32 - 2)
-        {
-            assert_eq!(
-                crate::test_pixels::pixel_at(&covered[0], 480, x, y),
-                crate::test_pixels::pixel_at(&covered[1], 480, x, y),
-                "a covered lower pill must not paint over the higher tile at {x},{y}"
-            );
-        }
-    }
-    scene.set_tile_follow_tail_at_tail(tile_id, false);
-    scene.set_tile_unread_count(tile_id, 3);
-    let assert_regions = |c: &Compositor,
-                          s: &mut SceneGraph,
-                          expected: bool,
-                          covered_x: Option<f32>| {
-        let (rects, labels) = c.collect_scroll_affordances(s);
-        assert_eq!(!rects.is_empty(), expected);
-        assert_eq!(!labels.is_empty(), expected);
-        s.overlay.zone_hit_regions.clear();
-        c.populate_zone_hit_regions(s, 480.0, 320.0);
-        let hits: Vec<_> = s.overlay.zone_hit_regions.iter().filter(|h|
-            matches!(h.kind, tze_hud_scene::ZoneInteractionKind::JumpToLatest { tile_id: id } if id == tile_id)).collect();
-        assert_eq!(!hits.is_empty(), expected);
-        for label in labels {
-            assert_eq!(
-                label.pixel_x, item.pixel_x,
-                "partial clipping must not recenter the label"
-            );
-            if let Some(x) = covered_x {
-                assert!(label.clip_pixel_x + label.clip_bounds_width <= x);
-            }
-        }
-        for hit in hits {
-            if let Some(x) = covered_x {
-                assert!(hit.bounds.x + hit.bounds.width <= x);
-            }
-        }
+    let capture_with_and_without_badge = |c: &mut Compositor, s: &mut SceneGraph| {
+        assert!(!s.tile_follow_tail_at_tail(tile_id));
+        let visible = capture(c, s);
+        s.set_tile_follow_tail_at_tail(tile_id, true);
+        let hidden = capture(c, s);
+        s.set_tile_follow_tail_at_tail(tile_id, false);
+        (visible, hidden)
     };
-    assert_regions(&compositor, &mut scene, false, None);
-    scene.set_drag_active(tile_id);
-    assert_regions(&compositor, &mut scene, true, None);
-    scene.clear_drag_active(tile_id);
-    scene.set_drag_active(cover);
-    assert_regions(&compositor, &mut scene, false, None);
-    scene.clear_drag_active(cover);
+    let (covered, without_badge) = capture_with_and_without_badge(&mut compositor, &mut scene);
+    for (x, y) in badge_interior() {
+        assert_eq!(
+            pixel_at(&covered, 480, x, y),
+            pixel_at(&without_badge, 480, x, y),
+            "the higher tile masks the badge at {x},{y}"
+        );
+    }
+    let assert_regions = |c: &Compositor, scene: &mut SceneGraph, visible: bool, edge: f32| {
+        let (rects, labels) = c.collect_scroll_affordances(scene);
+        c.populate_zone_hit_regions(scene, 480.0, 320.0);
+        let hits: Vec<_> = scene
+            .overlay
+            .zone_hit_regions
+            .iter()
+            .filter(|r| r.kind == (ZoneInteractionKind::JumpToLatest { tile_id }))
+            .collect();
+        assert_eq!(
+            [!rects.is_empty(), !labels.is_empty(), !hits.is_empty()],
+            [visible; 3]
+        );
+        assert!(labels.iter().all(|label| label.pixel_x == item.pixel_x
+            && label.clip_pixel_x + label.clip_bounds_width <= edge));
+        assert!(
+            hits.iter()
+                .all(|hit| hit.bounds.x + hit.bounds.width <= edge)
+        );
+    };
+    assert_regions(&compositor, &mut scene, false, f32::INFINITY);
+    for (dragged, visible) in [(tile_id, true), (cover, false)] {
+        scene.set_drag_active(dragged);
+        assert_regions(&compositor, &mut scene, visible, f32::INFINITY);
+        scene.clear_drag_active(dragged);
+    }
     scene.tiles.get_mut(&cover).unwrap().opacity = 0.0;
-    assert_regions(&compositor, &mut scene, true, None);
+    assert_regions(&compositor, &mut scene, true, f32::INFINITY);
     scene.tiles.get_mut(&cover).unwrap().opacity = 1.0;
     scene.set_owner_hidden(tze_hud_scene::graph::visibility::SurfaceClasses {
         tiles: true,
         ..Default::default()
     });
-    assert_regions(&compositor, &mut scene, true, None);
+    assert_regions(&compositor, &mut scene, true, f32::INFINITY);
     scene.set_owner_hidden(Default::default());
     let split = item.clip_pixel_x + item.clip_bounds_width / 2.0;
     scene.tiles.get_mut(&cover).unwrap().bounds.x = split;
-    assert_regions(&compositor, &mut scene, true, Some(split));
-    compositor.prime_markdown_cache(&scene);
-    compositor.prime_truncation_cache(&scene);
-    compositor.render_frame_headless(&mut scene, &surface);
-    let partial = surface.read_pixels(&compositor.device);
-    scene.set_tile_follow_tail_at_tail(tile_id, true);
-    compositor.render_frame_headless(&mut scene, &surface);
-    let partial_without_pill = surface.read_pixels(&compositor.device);
-    scene.set_tile_follow_tail_at_tail(tile_id, false);
-    for y in
-        (item.clip_pixel_y as u32 + 2)..((item.clip_pixel_y + item.clip_bounds_height) as u32 - 2)
-    {
-        for x in (item.clip_pixel_x as u32 + 2)
-            ..((item.clip_pixel_x + item.clip_bounds_width) as u32 - 2)
-        {
-            let expected = if (x as f32) < split {
-                &painted[1]
-            } else {
-                &partial_without_pill
-            };
-            assert_eq!(
-                crate::test_pixels::pixel_at(&partial, 480, x, y),
-                crate::test_pixels::pixel_at(expected, 480, x, y),
-                "partial cover preserves the exposed pill and covers the rest at {x},{y}"
-            );
-        }
+    assert_regions(&compositor, &mut scene, true, split);
+    let (partial, without_badge) = capture_with_and_without_badge(&mut compositor, &mut scene);
+    for (x, y) in badge_interior() {
+        let expected = if (x as f32) < split {
+            &blue
+        } else {
+            &without_badge
+        };
+        assert_eq!(
+            pixel_at(&partial, 480, x, y),
+            pixel_at(expected, 480, x, y),
+            "partially covered badge at {x},{y}"
+        );
     }
     scene.delete_tile(cover, "badge-cover").unwrap();
 
-    // Nothing unread → plain pill, no badge (a presence engine renders nothing).
     scene.set_tile_unread_count(tile_id, 0);
-    assert!(
-        badge(&compositor, &scene).is_none(),
-        "no badge when there is nothing unread"
-    );
-
     let (rects, labels) = compositor.collect_scroll_affordances(&scene);
     assert!(
         !rects.is_empty() && labels.is_empty(),
-        "plain tiles keep their jump control"
+        "plain tile keeps its jump control"
     );
     scene
         .set_portal_surface(
@@ -562,7 +339,7 @@ async fn jump_to_latest_badge_gates_on_scroll_and_unread_count() {
             tze_hud_scene::types::PortalSurface {
                 parts: vec![tze_hud_scene::types::PortalPart {
                     kind: tze_hud_scene::types::PortalPartKind::Transcript,
-                    bounds: Rect::new(0.0, 0.0, 400.0, 200.0),
+                    bounds,
                     node: scene.tiles[&tile_id].root_node,
                 }],
                 ..Default::default()
@@ -570,680 +347,235 @@ async fn jump_to_latest_badge_gates_on_scroll_and_unread_count() {
             "badge-test",
         )
         .unwrap();
-    let (rects, labels) = compositor.collect_scroll_affordances(&scene);
-    assert!(
-        rects.is_empty() && labels.is_empty(),
-        "a read portal has no empty badge"
-    );
-    assert!(
-        compositor
-            .jump_to_latest_visible_regions(
-                scene.tiles.get(&tile_id).unwrap(),
-                &scene,
-                &jtl_tokens,
-                &si_tokens
-            )
-            .is_empty(),
-        "a read portal has no invisible jump target"
-    );
+    assert_regions(&compositor, &mut scene, false, f32::INFINITY);
 
     for unread in [1, 2] {
         scene.set_tile_unread_count(tile_id, unread);
         let (_, labels) = compositor.collect_scroll_affordances(&scene);
-        assert_eq!(labels.len(), 1);
-        assert_eq!(&*labels[0].text, format!("{unread} unread"));
-        compositor.prime_markdown_cache(&scene);
-        compositor.prime_truncation_cache(&scene);
-        compositor.render_frame_headless(&mut scene, &surface);
-        let pixels = surface.read_pixels(&compositor.device);
-        let label = &labels[0];
-        let left = label.clip_pixel_x as u32 + 2;
-        let top = label.clip_pixel_y as u32 + 2;
+        let [label] = labels.as_slice() else {
+            panic!("one unread label")
+        };
+        assert_eq!(label.text.as_ref(), format!("{unread} unread"));
+        let pixels = capture(&mut compositor, &mut scene);
+        let (left, top) = (label.clip_pixel_x as u32 + 2, label.clip_pixel_y as u32 + 2);
         let right = (label.clip_pixel_x + label.clip_bounds_width) as u32 - 2;
         let bottom = (label.clip_pixel_y + label.clip_bounds_height) as u32 - 2;
-        let fill = crate::test_pixels::pixel_at(&pixels, 480, left, top);
-        let mut contrasting_pixels = 0;
-        for y in top..bottom {
-            for x in left..right {
-                let pixel = crate::test_pixels::pixel_at(&pixels, 480, x, y);
-                if (0..3).any(|channel| pixel[channel].saturating_sub(fill[channel]) > 32) {
-                    contrasting_pixels += 1;
-                }
-            }
-        }
-        assert!(
-            contrasting_pixels > 12,
-            "{unread} unread must paint readable glyphs"
-        );
+        let fill = pixel_at(&pixels, 480, left, top);
+        let glyphs = (top..bottom)
+            .flat_map(|y| (left..right).map(move |x| (x, y)))
+            .filter(|&(x, y)| {
+                pixel_at(&pixels, 480, x, y)[..3]
+                    .iter()
+                    .zip(fill)
+                    .any(|(pixel, background)| pixel.saturating_sub(background) > 32)
+            })
+            .count();
+        assert!(glyphs > 12, "{unread} unread paints readable glyphs");
     }
-    scene.set_tile_follow_tail_at_tail(tile_id, true);
-    scene.set_tile_unread_count(tile_id, 0);
-    compositor.prime_markdown_cache(&scene);
-    compositor.prime_truncation_cache(&scene);
-    compositor.render_frame_headless(&mut scene, &surface);
-    let read_pixels = surface.read_pixels(&compositor.device);
-    scene.set_tile_follow_tail_at_tail(tile_id, false);
-    compositor.prime_markdown_cache(&scene);
-    compositor.prime_truncation_cache(&scene);
-    compositor.render_frame_headless(&mut scene, &surface);
-    assert!(
-        read_pixels == surface.read_pixels(&compositor.device),
-        "backscroll without new output must not repaint an empty badge"
-    );
 
-    // Back at the tail → the pill (and therefore the badge) is hidden, even with
-    // a stale nonzero count still recorded.
+    scene.set_tile_unread_count(tile_id, 0);
+    let (backscroll, at_tail) = capture_with_and_without_badge(&mut compositor, &mut scene);
+    assert_eq!(backscroll, at_tail, "no empty badge paints on backscroll");
+
     scene.set_tile_unread_count(tile_id, 5);
     scene.set_tile_follow_tail_at_tail(tile_id, true);
-    assert!(
-        badge(&compositor, &scene).is_none(),
-        "no badge at the tail — it clears with the pill when the viewer returns"
-    );
+    assert_regions(&compositor, &mut scene, false, f32::INFINITY);
 }
 
-// ─── Smooth scroll / animated follow-tail ─────────────────
-
-/// `display_tile_scroll_offset` snaps to the raw scene offset in headless mode
-/// so deterministic golden tests are unaffected, and a freshly-observed tile in
-/// windowed (smoothing-enabled) mode starts *settled* on its current offset
-/// (no initial jump) once `update_scroll_smoothing` has run.
-///
-/// This pins the wiring contract for the smooth-scroll path: the scene's offset
-/// remains the authoritative user-scroll target,
-/// and the smoother never introduces a jump on first sight. Easing dynamics are
-/// covered exhaustively by the pure `easing::ScrollSmoother` unit tests.
 #[tokio::test]
-async fn display_tile_scroll_offset_snaps_headless_and_settles_windowed() {
-    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(720, 360).await);
-
-    let mut scene = SceneGraph::new(720.0, 360.0);
-    let tab_id = scene.create_tab("test", 0).unwrap();
-    let lease_id = scene.grant_lease("smooth-scroll", 120_000);
-    let tile_id = scene
-        .create_tile(
-            tab_id,
-            "smooth-scroll",
-            lease_id,
-            Rect::new(0.0, 0.0, 400.0, 200.0),
-            1,
-        )
-        .unwrap();
-    scene
-        .register_tile_scroll_config(
-            tile_id,
-            tze_hud_scene::types::TileScrollConfig {
-                scrollable_x: false,
-                scrollable_y: true,
-                content_width: None,
-                content_height: Some(800.0),
-            },
-        )
-        .unwrap();
-    scene
-        .set_tile_scroll_offset_local(tile_id, 0.0, 120.0)
-        .unwrap();
-
-    // Headless default: smoothing disabled → exact raw offset (snap).
-    assert!(!compositor.scroll_smoothing_enabled);
-    let (hx, hy) = compositor.display_tile_scroll_offset(&scene, tile_id);
-    assert_eq!(
-        (hx, hy),
-        (0.0, 120.0),
-        "headless must return the raw offset"
-    );
-
-    // Enable smoothing and advance once: the tile is observed for the first
-    // time, so its smoother starts settled on the current target — no jump.
-    compositor.scroll_smoothing_enabled = true;
-    compositor.update_scroll_smoothing(&scene);
-    let (wx, wy) = compositor.display_tile_scroll_offset(&scene, tile_id);
-    assert!(
-        (wx - 0.0).abs() < 1e-4 && (wy - 120.0).abs() < 1e-4,
-        "freshly-observed tile must start settled on its offset (no jump); got ({wx}, {wy})"
-    );
-
-    // A non-scrollable / unknown tile has no smoother → falls back to raw.
-    let unknown = SceneId::new();
-    assert_eq!(
-        compositor.display_tile_scroll_offset(&scene, unknown),
-        (0.0, 0.0),
-        "tiles without a smoother fall back to the raw scene offset"
-    );
-}
-
-/// `publish_displayed_scroll_offsets` records exactly the offset the renderer
-/// draws with (`display_tile_scroll_offset`) into the scene so the live
-/// hit-test path agrees with the rendered rows during a smoothed scroll.
-/// When smoothing is disabled (headless/snap) it clears any
-/// published overrides so hit-testing falls back to the authoritative offset.
-#[tokio::test]
-async fn publish_displayed_scroll_offsets_mirrors_smoother_and_clears_headless() {
-    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(720, 360).await);
-
-    let mut scene = SceneGraph::new(720.0, 360.0);
-    let tab_id = scene.create_tab("test", 0).unwrap();
-    let lease_id = scene.grant_lease("smooth-scroll", 120_000);
-    let tile_id = scene
-        .create_tile(
-            tab_id,
-            "smooth-scroll",
-            lease_id,
-            Rect::new(0.0, 0.0, 400.0, 200.0),
-            1,
-        )
-        .unwrap();
-    scene
-        .register_tile_scroll_config(
-            tile_id,
-            tze_hud_scene::types::TileScrollConfig {
-                scrollable_x: false,
-                scrollable_y: true,
-                content_width: None,
-                content_height: Some(800.0),
-            },
-        )
-        .unwrap();
-    scene
-        .set_tile_scroll_offset_local(tile_id, 0.0, 120.0)
-        .unwrap();
-
-    // Windowed: advance the smoother, then publish. The published displayed
-    // offset must equal display_tile_scroll_offset (the value the renderer drew)
-    // and become the effective offset the hit-test path consults.
-    compositor.scroll_smoothing_enabled = true;
-    compositor.update_scroll_smoothing(&scene);
-    let drawn = compositor.display_tile_scroll_offset(&scene, tile_id);
-    compositor.publish_displayed_scroll_offsets(&mut scene);
-    assert_eq!(
-        scene.effective_tile_scroll_offset_local(tile_id),
-        drawn,
-        "hit-test path must see the same displayed offset the renderer drew with"
-    );
-
-    // Headless/snap: publishing clears the override so hit-testing falls back to
-    // the authoritative offset (deterministic golden tests unaffected).
-    compositor.scroll_smoothing_enabled = false;
-    compositor.publish_displayed_scroll_offsets(&mut scene);
-    assert_eq!(
-        scene.effective_tile_scroll_offset_local(tile_id),
-        (0.0, 120.0),
-        "with smoothing disabled the effective offset falls back to authoritative"
-    );
-}
-
-/// Headless readback regression for the text-stream portal output pane.
-///
-/// The live exemplar mounts the OUTPUT transcript body as a scrollable tile
-/// inside a larger portal frame. Scrolled node geometry must be clipped to that
-/// output tile viewport: root/background fills must not bleed above it, and
-/// scrolled child fills must not bleed below it.
-#[tokio::test]
-async fn scrolled_portal_output_tile_clips_geometry_outside_viewport() {
+async fn scrolled_portal_output_clips_flat_and_rounded_geometry() {
     let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(220, 180).await);
-
     let mut scene = SceneGraph::new(220.0, 180.0);
-    let tab_id = scene.create_tab("portal-output-clip", 0).unwrap();
-    let lease_id = scene.grant_lease("portal-output-clip", 120_000);
-
-    let frame_id = scene
+    let viewport = Rect::new(90.0, 60.0, 80.0, 60.0);
+    let owner = "portal-output-clip";
+    let output = scrollable_tile(&mut scene, owner, viewport, Some(240.0));
+    let frame = scene
         .create_tile(
-            tab_id,
-            "portal-output-clip",
-            lease_id,
+            scene.tiles[&output].tab_id,
+            owner,
+            scene.tiles[&output].lease_id,
             Rect::new(40.0, 20.0, 160.0, 140.0),
-            1,
+            0,
         )
         .unwrap();
+    let frame_color = Rgba::new(0.28, 0.34, 0.50, 1.0);
     scene
         .set_tile_root(
-            frame_id,
-            Node {
-                layout: Default::default(),
-                id: SceneId::new(),
-                children: vec![],
-                data: NodeData::SolidColor(SolidColorNode {
-                    color: Rgba::new(0.28, 0.34, 0.50, 1.0),
-                    radius: None,
-                    bounds: Rect::new(0.0, 0.0, 160.0, 140.0),
-                }),
-            },
+            frame,
+            solid_node(Rect::new(0.0, 0.0, 160.0, 140.0), frame_color, None),
         )
         .unwrap();
-
-    let output_id = scene
-        .create_tile(
-            tab_id,
-            "portal-output-clip",
-            lease_id,
-            Rect::new(90.0, 60.0, 80.0, 60.0),
-            2,
-        )
-        .unwrap();
+    let root = solid_node(Rect::new(0.0, 0.0, 80.0, 60.0), Rgba::BLACK, None);
+    let root_id = root.id;
+    scene.set_tile_root(output, root).unwrap();
+    let child = Rect::new(0.0, 92.0, 80.0, 80.0);
+    let child_node = solid_node(child, Rgba::BLACK, None);
+    let child_id = child_node.id;
     scene
-        .register_tile_scroll_config(
-            output_id,
-            TileScrollConfig {
-                scrollable_x: false,
-                scrollable_y: true,
-                content_width: None,
-                content_height: Some(240.0),
-            },
-        )
+        .add_node_to_tile(output, Some(root_id), child_node)
         .unwrap();
-
-    let root_id = SceneId::new();
-    scene
-        .set_tile_root(
-            output_id,
-            Node {
-                layout: Default::default(),
-                id: root_id,
-                children: vec![],
-                data: NodeData::SolidColor(SolidColorNode {
-                    color: Rgba::new(0.0, 0.0, 0.0, 1.0),
-                    radius: None,
-                    bounds: Rect::new(0.0, 0.0, 80.0, 60.0),
-                }),
-            },
-        )
-        .unwrap();
-    scene
-        .add_node_to_tile(
-            output_id,
-            Some(root_id),
-            Node {
-                layout: Default::default(),
-                id: SceneId::new(),
-                children: vec![],
-                data: NodeData::SolidColor(SolidColorNode {
-                    color: Rgba::new(0.0, 0.0, 0.0, 1.0),
-                    radius: None,
-                    bounds: Rect::new(0.0, 92.0, 80.0, 80.0),
-                }),
-            },
-        )
-        .unwrap();
-
-    // Settle the portal fade-in before probing. A freshly-created scrollable
-    // tile begins a fade-in animation, and since every node fill (incl.
-    // this SolidColor pane) honours the tile fade — so at t=0 the pane fill renders
-    // translucent and composites toward the frame behind it. This test is about
-    // geometry clipping, not the transition, so warm one frame to register the
-    // appear, then clear the animation state so the probes below observe the
-    // steady-state (fully opaque) fills.
-    compositor.prime_markdown_cache(&scene);
-    compositor.prime_truncation_cache(&scene);
-    compositor.render_frame_headless(&mut scene, &surface);
-    compositor.portal_tile_anim_states.clear();
-
-    for scroll_y in [0.0_f32, 48.0, 96.0] {
-        scene
-            .set_tile_scroll_offset_local(output_id, 0.0, scroll_y)
-            .unwrap();
-        compositor.prime_markdown_cache(&scene);
-        compositor.prime_truncation_cache(&scene);
-        compositor.render_frame_headless(&mut scene, &surface);
-
-        let pixels = surface.read_pixels(&compositor.device);
-        let frame_control = crate::test_pixels::pixel_at(&pixels, 220, 55, 45);
-        let above_output = crate::test_pixels::pixel_at(&pixels, 220, 110, 45);
-        let below_output = crate::test_pixels::pixel_at(&pixels, 220, 110, 135);
-        let inside_output = crate::test_pixels::pixel_at(&pixels, 220, 110, 70);
-
-        assert_eq!(
-            above_output, frame_control,
-            "scroll_y={scroll_y}: output root fill leaked above the output viewport; \
-             above={above_output:?}, frame={frame_control:?}"
-        );
-        assert_eq!(
-            below_output, frame_control,
-            "scroll_y={scroll_y}: scrolled output content leaked below the output viewport; \
-             below={below_output:?}, frame={frame_control:?}"
-        );
-        assert_ne!(
-            inside_output, frame_control,
-            "scroll_y={scroll_y}: output viewport should still render its black pane fill"
-        );
-    }
-}
-
-#[tokio::test]
-async fn scrolled_rounded_solid_preserves_original_shape_with_viewport_clip() {
-    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(220, 180).await);
-
-    let mut scene = SceneGraph::new(220.0, 180.0);
-    let tab_id = scene.create_tab("portal-rounded-clip", 0).unwrap();
-    let lease_id = scene.grant_lease("portal-rounded-clip", 120_000);
-    let output_id = scene
-        .create_tile(
-            tab_id,
-            "portal-rounded-clip",
-            lease_id,
-            Rect::new(90.0, 60.0, 80.0, 60.0),
-            2,
-        )
-        .unwrap();
-    scene
-        .register_tile_scroll_config(
-            output_id,
-            TileScrollConfig {
-                scrollable_x: false,
-                scrollable_y: true,
-                content_width: None,
-                content_height: Some(240.0),
-            },
-        )
-        .unwrap();
-
-    let root_id = SceneId::new();
-    scene
-        .set_tile_root(
-            output_id,
-            Node {
-                layout: Default::default(),
-                id: root_id,
-                children: vec![],
-                data: NodeData::SolidColor(SolidColorNode {
-                    color: Rgba::new(0.0, 0.0, 0.0, 1.0),
-                    radius: None,
-                    bounds: Rect::new(0.0, 0.0, 80.0, 60.0),
-                }),
-            },
-        )
-        .unwrap();
-    scene
-        .add_node_to_tile(
-            output_id,
-            Some(root_id),
-            Node {
-                layout: Default::default(),
-                id: SceneId::new(),
-                children: vec![],
-                data: NodeData::SolidColor(SolidColorNode {
-                    color: Rgba::new(0.0, 0.0, 0.0, 1.0),
-                    radius: Some(16.0),
-                    bounds: Rect::new(0.0, 92.0, 80.0, 80.0),
-                }),
-            },
-        )
-        .unwrap();
-
-    scene
-        .set_tile_scroll_offset_local(output_id, 0.0, 96.0)
-        .unwrap();
-
-    let cmds = compositor.collect_tile_rounded_rect_cmds(&scene);
-    assert_eq!(cmds.len(), 1, "expected exactly one rounded child command");
-    let cmd = &cmds[0];
-    assert_eq!(cmd.x, 90.0);
-    assert_eq!(cmd.y, 56.0);
-    assert_eq!(cmd.width, 80.0);
-    assert_eq!(cmd.height, 80.0);
-    assert_eq!(cmd.radius, 16.0);
-
-    let clip = cmd
-        .clip
-        .expect("scrolled rounded child must carry a viewport clip");
-    assert_eq!(clip.x, 90.0);
-    assert_eq!(clip.y, 60.0);
-    assert_eq!(clip.width, 80.0);
-    assert_eq!(clip.height, 60.0);
-}
-
-/// A first-class expanded portal is one movable/resizable surface: wheel scroll
-/// translates its document rows, never its frame, pane fills, header, or INPUT /
-/// OUTPUT labels. This reproduces the live post-resize failure where the
-/// `PortalSurface` carries geometry-only parts because its regenerated inline
-/// subtree has no stable node IDs.
-///
-/// The draw-list assertions exercise the rounded frame/pane path; the text-item
-/// assertions exercise the glyph path. Keeping both in one post-resize scene
-/// prevents the two passes from silently applying different scroll policies.
-#[tokio::test]
-async fn expanded_portal_chrome_stays_fixed_while_document_content_scrolls_after_resize() {
-    use tze_hud_scene::types::{
-        FontFamily, PortalDisplayState, PortalPart, PortalPartKind, PortalSurface, SolidColorNode,
-        TextAlign, TextMarkdownNode,
+    let render = |compositor: &mut Compositor, scene: &mut SceneGraph| {
+        prime_text(compositor, scene);
+        compositor.render_frame_headless(scene, &surface);
     };
-
-    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(800, 520).await);
-    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
-
-    let mut scene = SceneGraph::new(800.0, 520.0);
-    let tab = scene.create_tab("expanded-portal", 0).unwrap();
-    let lease = scene.grant_lease("expanded-portal", 120_000);
-    // Deliberately not the attach-time size: this is the operator's resized
-    // portal. Every declared part is already re-resolved to this whole-unit
-    // geometry before the wheel scroll happens.
-    let tile_bounds = Rect::new(80.0, 40.0, 600.0, 360.0);
-    let tile_id = scene
-        .create_tile(tab, "expanded-portal", lease, tile_bounds, 1)
-        .unwrap();
+    // Commit the initial appearance so readback checks steady full opacity.
+    render(&mut compositor, &mut scene);
+    compositor.portal_tile_anim_states.clear();
+    for scroll_y in [0.0, 48.0, 96.0] {
+        scene
+            .set_tile_scroll_offset_local(output, 0.0, scroll_y)
+            .unwrap();
+        render(&mut compositor, &mut scene);
+        let pixels = surface.read_pixels(&compositor.device);
+        let px = |x, y| pixel_at(&pixels, 220, x, y);
+        let frame = px(55, 45);
+        assert_eq!(px(110, 45), frame, "above viewport at {scroll_y}");
+        assert_eq!(px(110, 135), frame, "below viewport at {scroll_y}");
+        assert_ne!(px(110, 70), frame, "inside viewport at {scroll_y}");
+    }
     scene
-        .register_tile_scroll_config(
-            tile_id,
-            TileScrollConfig {
-                scrollable_x: false,
-                scrollable_y: true,
-                content_width: None,
-                content_height: Some(1_200.0),
-            },
+        .update_node_content_checked(
+            output,
+            child_id,
+            NodeData::SolidColor(SolidColorNode {
+                bounds: child,
+                color: Rgba::BLACK,
+                radius: Some(16.0),
+            }),
+            owner,
         )
         .unwrap();
-
-    let header_h = 48.0;
-    let divider_w = 12.0;
-    let pane_w = (tile_bounds.width - divider_w) * 0.5;
-    let input_pane = Rect::new(0.0, header_h, pane_w, tile_bounds.height - header_h);
-    let output_pane = Rect::new(
-        pane_w + divider_w,
-        header_h,
-        pane_w,
-        tile_bounds.height - header_h,
+    let commands = compositor.collect_tile_rounded_rect_cmds(&scene);
+    let [rounded] = commands.as_slice() else {
+        panic!("expected exactly one rounded child")
+    };
+    assert_eq!(
+        Rect::new(rounded.x, rounded.y, rounded.width, rounded.height),
+        Rect::new(90.0, 56.0, 80.0, 80.0)
     );
-    let root_id = SceneId::new();
-    scene
-        .set_tile_root(
-            tile_id,
-            Node {
-                layout: Default::default(),
-                id: root_id,
-                children: vec![],
-                data: NodeData::SolidColor(SolidColorNode {
-                    color: Rgba::new(0.12, 0.12, 0.14, 1.0),
-                    bounds: Rect::new(0.0, 0.0, tile_bounds.width, tile_bounds.height),
-                    radius: Some(14.0),
-                }),
-            },
-        )
-        .unwrap();
+    assert_eq!(rounded.radius, 16.0);
+    let clip = rounded.clip.unwrap();
+    assert_eq!(Rect::new(clip.x, clip.y, clip.width, clip.height), viewport);
+}
 
-    let add_child = |scene: &mut SceneGraph, data: NodeData| {
+#[tokio::test]
+async fn legacy_portal_part_geometry_keeps_chrome_fixed_during_scroll() {
+    use PortalPartKind::{Composer, Divider, Frame, Header, Transcript};
+    let (mut compositor, _) = require_gpu!(make_text_compositor(800, 520).await);
+    let mut scene = SceneGraph::new(800.0, 520.0);
+    let tile_bounds = Rect::new(80.0, 40.0, 600.0, 360.0);
+    let tile = scrollable_tile(&mut scene, "legacy-portal", tile_bounds, Some(1_200.0));
+    let frame = Rect::new(0.0, 0.0, 600.0, 360.0);
+    let header = Rect::new(0.0, 0.0, 600.0, 48.0);
+    let input = Rect::new(0.0, 48.0, 294.0, 312.0);
+    let output = Rect::new(306.0, 48.0, 294.0, 312.0);
+    let divider = Rect::new(294.0, 48.0, 12.0, 312.0);
+    let root = solid_node(frame, Rgba::BLACK, Some(14.0));
+    let root_id = root.id;
+    scene.set_tile_root(tile, root).unwrap();
+    for pane in [input, output] {
         scene
             .add_node_to_tile(
-                tile_id,
+                tile,
                 Some(root_id),
-                Node {
-                    layout: Default::default(),
-                    id: SceneId::new(),
-                    children: vec![],
-                    data,
-                },
+                solid_node(pane, Rgba::BLACK, Some(12.0)),
             )
             .unwrap();
-    };
-    add_child(
-        &mut scene,
-        NodeData::SolidColor(SolidColorNode {
-            color: Rgba::new(0.16, 0.16, 0.18, 1.0),
-            bounds: input_pane,
-            radius: Some(12.0),
-        }),
-    );
-    add_child(
-        &mut scene,
-        NodeData::SolidColor(SolidColorNode {
-            color: Rgba::new(0.03, 0.03, 0.04, 1.0),
-            bounds: output_pane,
-            radius: Some(12.0),
-        }),
-    );
-
-    let markdown = |content: &str, bounds: Rect| {
-        NodeData::TextMarkdown(TextMarkdownNode {
-            content: content.to_owned(),
+    }
+    let labels = ["Portal header", "INPUT", "OUTPUT", "output document"];
+    for (index, bounds) in [
+        Rect::new(12.0, 0.0, 576.0, 48.0),
+        Rect::new(12.0, 48.0, 270.0, 24.0),
+        Rect::new(318.0, 48.0, 270.0, 24.0),
+        Rect::new(318.0, 76.0, 270.0, 272.0),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let node = leaf(NodeData::TextMarkdown(markdown_text(
+            labels[index],
             bounds,
-            font_size_px: 16.0,
-            font_family: FontFamily::SystemSansSerif,
-            color: Rgba::new(0.9, 0.9, 0.9, 1.0),
-            background: None,
-            alignment: TextAlign::Start,
-            overflow: TextOverflow::Clip,
-            color_runs: Box::default(),
-        })
-    };
-    add_child(
-        &mut scene,
-        markdown("Portal header", Rect::new(12.0, 0.0, 576.0, header_h)),
-    );
-    add_child(
-        &mut scene,
-        markdown(
-            "INPUT",
-            Rect::new(12.0, input_pane.y, input_pane.width - 24.0, 24.0),
-        ),
-    );
-    add_child(
-        &mut scene,
-        markdown(
-            "OUTPUT",
-            Rect::new(
-                output_pane.x + 12.0,
-                output_pane.y,
-                output_pane.width - 24.0,
-                24.0,
-            ),
-        ),
-    );
-    add_child(
-        &mut scene,
-        markdown(
-            "output document",
-            Rect::new(
-                output_pane.x + 12.0,
-                output_pane.y + 28.0,
-                output_pane.width - 24.0,
-                output_pane.height - 40.0,
-            ),
-        ),
-    );
+            16.0,
+        )));
+        scene.add_node_to_tile(tile, Some(root_id), node).unwrap();
+    }
 
-    // This matches ResidentGrpcPortalAdapter::portal_surface_proto: it gives
-    // first-class part geometry but no stable node IDs, because each publish
-    // regenerates the inline subtree.
+    // Resident gRPC publishes part geometry without stable materialized nodes.
     scene.overlay.portal_surfaces.insert(
-        tile_id,
+        tile,
         PortalSurface {
             display_state: PortalDisplayState::Expanded,
-            parts: vec![
-                PortalPart {
-                    kind: PortalPartKind::Frame,
-                    bounds: Rect::new(0.0, 0.0, tile_bounds.width, tile_bounds.height),
-                    node: None,
-                },
-                PortalPart {
-                    kind: PortalPartKind::Header,
-                    bounds: Rect::new(0.0, 0.0, tile_bounds.width, header_h),
-                    node: None,
-                },
-                PortalPart {
-                    kind: PortalPartKind::Composer,
-                    bounds: input_pane,
-                    node: None,
-                },
-                PortalPart {
-                    kind: PortalPartKind::Transcript,
-                    bounds: output_pane,
-                    node: None,
-                },
-                PortalPart {
-                    kind: PortalPartKind::Divider,
-                    bounds: Rect::new(pane_w, header_h, divider_w, tile_bounds.height - header_h),
-                    node: None,
-                },
-            ],
+            parts: [
+                (Frame, frame),
+                (Header, header),
+                (Composer, input),
+                (Transcript, output),
+                (Divider, divider),
+            ]
+            .into_iter()
+            .map(|(kind, bounds)| PortalPart {
+                kind,
+                bounds,
+                node: None,
+            })
+            .collect(),
             ..Default::default()
         },
     );
     compositor.prime_markdown_cache(&scene);
-
-    let item_y = |items: &[crate::text::TextItem], content: &str| {
-        items
-            .iter()
-            .find(|item| item.text.as_ref() == content)
-            .unwrap_or_else(|| panic!("expected {content:?} TextItem"))
-            .pixel_y
+    let rows = |scene: &SceneGraph| {
+        let items = compositor.collect_text_items(scene, 800.0, 520.0);
+        labels.map(|label| {
+            items
+                .iter()
+                .find(|item| item.text.as_ref() == label)
+                .unwrap()
+                .pixel_y
+        })
     };
-    let before = compositor.collect_text_items(&scene, 800.0, 520.0);
-    let header_before = item_y(&before, "Portal header");
-    let input_label_before = item_y(&before, "INPUT");
-    let output_label_before = item_y(&before, "OUTPUT");
-    let document_before = item_y(&before, "output document");
+    let [header_y, input_y, output_y, document_y] = rows(&scene);
+    scene.set_tile_scroll_offset_local(tile, 0.0, 72.0).unwrap();
+    let [
+        scrolled_header,
+        scrolled_input,
+        scrolled_output,
+        scrolled_document,
+    ] = rows(&scene);
+    assert_eq!(
+        [scrolled_header, scrolled_input, scrolled_output],
+        [header_y, input_y, output_y]
+    );
+    assert!((document_y - scrolled_document - 72.0).abs() < 0.5);
 
-    let scroll_y = 72.0;
-    scene
-        .set_tile_scroll_offset_local(tile_id, 0.0, scroll_y)
-        .unwrap();
-    let cmds = compositor.collect_tile_rounded_rect_cmds(&scene);
-    let frame = cmds
-        .iter()
-        .find(|cmd| cmd.width == tile_bounds.width && cmd.height == tile_bounds.height)
-        .expect("rounded frame draw command");
-    assert_eq!(frame.x, tile_bounds.x, "frame x must remain tile-anchored");
-    assert_eq!(
-        frame.y, tile_bounds.y,
-        "resized rounded frame must not translate with document scroll"
-    );
-    let panes: Vec<_> = cmds
-        .iter()
-        .filter(|cmd| cmd.width == pane_w && cmd.height == input_pane.height)
+    let drawn: Vec<_> = compositor
+        .collect_tile_rounded_rect_cmds(&scene)
+        .into_iter()
+        .map(|cmd| Rect::new(cmd.x, cmd.y, cmd.width, cmd.height))
         .collect();
-    assert_eq!(
-        panes.len(),
-        2,
-        "both resized rounded pane backdrops must reach the draw list"
-    );
-    for pane in panes {
-        assert_eq!(
-            pane.y,
-            tile_bounds.y + header_h,
-            "pane backdrop must remain whole-portal chrome under scroll"
+    for part in [frame, input, output] {
+        let bounds = Rect::new(
+            tile_bounds.x + part.x,
+            tile_bounds.y + part.y,
+            part.width,
+            part.height,
+        );
+        assert!(
+            drawn.contains(&bounds),
+            "legacy chrome must stay fixed at {bounds:?}"
         );
     }
+}
 
-    let after = compositor.collect_text_items(&scene, 800.0, 520.0);
-    assert_eq!(
-        item_y(&after, "Portal header"),
-        header_before,
-        "header text must remain fixed with the frame"
-    );
-    assert_eq!(
-        item_y(&after, "INPUT"),
-        input_label_before,
-        "INPUT label must remain chrome"
-    );
-    assert_eq!(
-        item_y(&after, "OUTPUT"),
-        output_label_before,
-        "OUTPUT label must remain chrome"
-    );
-    assert!(
-        (document_before - item_y(&after, "output document") - scroll_y).abs() < 0.5,
-        "document content must translate by the display scroll offset"
-    );
+#[tokio::test]
+async fn expanded_portal_chrome_stays_fixed_while_document_content_scrolls_after_resize() {
+    let (mut compositor, _surface) = require_gpu!(make_text_compositor(800, 520).await);
 
-    // Use the real portal renderer: the old synthetic Clip node above could
-    // not expose the native tail-snapshot → head-snapshot switch on append.
+    let mut scene = SceneGraph::new(800.0, 520.0);
+    // Use the operator's already-resolved post-resize geometry.
+    let tile_bounds = Rect::new(80.0, 40.0, 600.0, 360.0);
+    let tile_id = scrollable_tile(&mut scene, "expanded-portal", tile_bounds, Some(1_200.0));
+
+    use tze_hud_input::{InputProcessor, ScrollEvent};
     use tze_hud_portal::{
         OutputKind, TranscriptUnit,
         render::{Size, render},
@@ -1251,54 +583,69 @@ async fn expanded_portal_chrome_stays_fixed_while_document_content_scrolls_after
     };
     let mut view = empty_portal_view("scroll-anchor", "Reading anchor");
     view.unread_output_count = Some(3);
-    view.visible_transcript.push(TranscriptUnit {
-        sequence: 1,
-        output_text: (1..=60)
+    let unit = |sequence, output_text, output_kind| TranscriptUnit {
+        sequence,
+        output_text,
+        output_kind,
+        expects_reply: false,
+        appended_at_wall_us: 0,
+    };
+    let retained_lines = |first| {
+        (first..first + 60)
             .map(|i| format!("Line {i:02} — stable reading marker.\n\n"))
-            .collect(),
-        output_kind: OutputKind::Assistant,
-        expects_reply: false,
-        appended_at_wall_us: 0,
-    });
-    view.input_history.push(TranscriptUnit {
-        sequence: 100,
-        output_text: (1..=40)
-            .map(|i| format!("Input {i:02} — retained reply.\n\n"))
-            .collect(),
-        output_kind: OutputKind::Viewer,
-        expects_reply: false,
-        appended_at_wall_us: 0,
-    });
-    let mut processor = tze_hud_input::InputProcessor::new();
-    let mut reading: Option<(f32, (f32, f32))> = None;
+            .collect()
+    };
+    view.visible_transcript
+        .push(unit(1, retained_lines(1), OutputKind::Assistant));
+    let replies = (1..=40)
+        .map(|i| format!("Input {i:02} — retained reply.\n\n"))
+        .collect();
+    view.input_history
+        .push(unit(100, replies, OutputKind::Viewer));
+    let mut processor = InputProcessor::new();
+    let mut reading = None;
     let smooth_time = std::time::Instant::now();
+    let delay = std::time::Duration::from_millis;
     let viewport = Size {
         width: tile_bounds.width,
         height: tile_bounds.height,
     };
     let tokens = PortalVisualTokens::default();
+    let chrome = |compositor: &Compositor, scene: &SceneGraph, items: &[crate::text::TextItem]| {
+        let labels = ["Reading anchor", "INPUT", "OUTPUT"].map(|label| {
+            let item = items
+                .iter()
+                .find(|item| item.text.starts_with(label))
+                .unwrap();
+            (
+                item.pixel_x,
+                item.pixel_y,
+                item.clip_pixel_y,
+                item.clip_bounds_height,
+            )
+        });
+        let rounded: Vec<_> = compositor
+            .collect_tile_rounded_rect_cmds(scene)
+            .iter()
+            .map(|cmd| Rect::new(cmd.x, cmd.y, cmd.width, cmd.height))
+            .collect();
+        for part in &scene.portal_surface(tile_id).unwrap().parts {
+            let mut expected = part.bounds;
+            expected.x += tile_bounds.x;
+            expected.y += tile_bounds.y;
+            assert!(rounded.contains(&expected), "missing chrome: {expected:?}");
+        }
+        (labels, rounded)
+    };
+    let mut fixed_chrome = None;
     for step in 0..4 {
-        let append = step > 0;
-        if step == 1 {
-            view.visible_transcript.push(TranscriptUnit {
-                sequence: 2,
-                output_text: "NEW MARKER".into(),
-                output_kind: OutputKind::Assistant,
-                expects_reply: false,
-                appended_at_wall_us: 0,
-            });
-        }
-        if step == 2 {
-            // Same-size rolling retention window: height delta cannot identify
-            // the removed prefix. Keep the visible marker at the same screen y.
-            view.visible_transcript[0].output_text = (21..=80)
-                .map(|i| format!("Line {i:02} — stable reading marker.\n\n"))
-                .collect();
-        }
-        if step == 3 {
-            view.visible_transcript[0].output_text = (31..=90)
-                .map(|i| format!("Line {i:02} — stable reading marker.\n\n"))
-                .collect();
+        match step {
+            1 => view
+                .visible_transcript
+                .push(unit(2, "NEW MARKER".into(), OutputKind::Assistant)),
+            // The same-size retention window cannot be rebased from height delta.
+            2 | 3 => view.visible_transcript[0].output_text = retained_lines(step * 10 + 1),
+            _ => {}
         }
         let rendered = render(&view, &tokens, viewport, 3_000_000);
         scene.set_tile_unread_count(tile_id, rendered.unread);
@@ -1308,65 +655,65 @@ async fn expanded_portal_chrome_stays_fixed_while_document_content_scrolls_after
         scene
             .set_tile_root_tree(tile_id, rendered.root, rendered.children)
             .unwrap();
-        compositor.prime_markdown_cache(&scene);
         compositor.resize_reprime_last_at = None; // A settled native commit, outside resize cadence.
-        compositor.prime_truncation_cache(&scene);
+        prime_text(&mut compositor, &scene);
         compositor.publish_portal_document_layouts(&mut scene);
-        let layout =
-            scene.overlay.portal_document_layouts[&(tile_id, PortalPartKind::Transcript)].clone();
-        let input =
-            scene.overlay.portal_document_layouts[&(tile_id, PortalPartKind::Composer)].clone();
-        assert!(
-            layout.height > layout.viewport.height * 4.0,
-            "full output is shaped behind the fixed scissor"
-        );
-        assert!(
-            input.height > input.viewport.height * 2.0,
-            "INPUT has its own full wrapped layout"
-        );
+        for (kind, factor) in [
+            (PortalPartKind::Transcript, 4.0),
+            (PortalPartKind::Composer, 2.0),
+        ] {
+            let document = &scene.overlay.portal_document_layouts[&(tile_id, kind)];
+            assert!(
+                document.height > document.viewport.height * factor,
+                "{kind:?} at {step}"
+            );
+        }
         processor.reconcile_portal_document_layouts(&mut scene);
         if step == 0 {
-            let output_tail = scene.tile_scroll_offset_local(tile_id);
-            let input_tail = scene.portal_input_scroll_offset(tile_id);
-            let surface = scene.portal_surface(tile_id).unwrap();
-            let point = |kind| {
-                let part = surface.parts.iter().find(|p| p.kind == kind).unwrap();
-                (
-                    tile_bounds.x + part.bounds.x + part.bounds.width / 2.0,
-                    tile_bounds.y + part.bounds.y + part.bounds.height / 2.0,
-                )
+            let offsets = |scene: &SceneGraph| {
+                [
+                    scene.tile_scroll_offset_local(tile_id).1,
+                    scene.portal_input_scroll_offset(tile_id).1,
+                ]
             };
-            let output_point = point(PortalPartKind::Transcript);
-            let input_point = point(PortalPartKind::Composer);
-            let wheel = |(x, y), delta_y| tze_hud_input::ScrollEvent {
-                x,
-                y,
-                delta_x: 0.0,
-                delta_y,
-            };
-            assert!(
-                processor
-                    .process_scroll_event(&wheel(output_point, -130.0), &mut scene)
-                    .is_some()
-            );
+            for (index, (kind, delta_y)) in [
+                (PortalPartKind::Transcript, -130.0),
+                (PortalPartKind::Composer, -70.0),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let part = scene
+                    .portal_surface(tile_id)
+                    .unwrap()
+                    .parts
+                    .iter()
+                    .find(|part| part.kind == kind)
+                    .unwrap()
+                    .bounds;
+                let wheel = ScrollEvent {
+                    x: tile_bounds.x + part.x + part.width / 2.0,
+                    y: tile_bounds.y + part.y + part.height / 2.0,
+                    delta_x: 0.0,
+                    delta_y,
+                };
+                let before = offsets(&scene);
+                let dispatched = processor.process_scroll_event(&wheel, &mut scene);
+                let after = offsets(&scene);
+                assert_eq!(
+                    dispatched.is_some(),
+                    index == 0,
+                    "only OUTPUT reports to the agent"
+                );
+                assert!(
+                    after[index] < before[index],
+                    "{kind:?} scrolls on its own wheel"
+                );
+                assert_eq!(after[1 - index], before[1 - index]);
+            }
             assert_eq!(
-                scene.portal_input_scroll_offset(tile_id),
-                input_tail,
-                "OUTPUT wheel cannot move INPUT"
-            );
-            let output_reading = scene.tile_scroll_offset_local(tile_id);
-            assert!(output_reading.1 < output_tail.1);
-            assert!(
-                processor
-                    .process_scroll_event(&wheel(input_point, -70.0), &mut scene)
-                    .is_none(),
-                "INPUT feedback stays local rather than emitting an OUTPUT offset"
-            );
-            assert!(scene.portal_input_scroll_offset(tile_id).1 < input_tail.1);
-            assert_eq!(
-                scene.tile_scroll_offset_local(tile_id),
-                output_reading,
-                "INPUT wheel cannot move OUTPUT"
+                compositor.display_tile_scroll_offset(&scene, tile_id),
+                scene.tile_scroll_offset_local(tile_id)
             );
         }
         if step == 3 {
@@ -1377,11 +724,23 @@ async fn expanded_portal_chrome_stays_fixed_while_document_content_scrolls_after
         // Exercise the native displayed coordinate, with a deterministic 1 ms
         // frame delta. Headless raw-target assertions cannot catch origin easing.
         compositor.scroll_smoothing_enabled = true;
-        compositor.update_scroll_smoothing_at(
-            &scene,
-            smooth_time + std::time::Duration::from_millis(step),
-        );
+        compositor.update_scroll_smoothing_at(&scene, smooth_time + delay(step));
         compositor.publish_displayed_scroll_offsets(&mut scene);
+        let displayed = compositor.display_tile_scroll_offset(&scene, tile_id);
+        assert_eq!(scene.effective_tile_scroll_offset_local(tile_id), displayed);
+        if step == 0 {
+            assert_eq!(
+                displayed,
+                scene.tile_scroll_offset_local(tile_id),
+                "first frame starts settled"
+            );
+            assert_eq!(
+                compositor.display_tile_scroll_offset(&scene, SceneId::new()),
+                (0.0, 0.0),
+                "without a smoother, the displayed offset falls back to raw"
+            );
+        }
+        let layout = &scene.overlay.portal_document_layouts[&(tile_id, PortalPartKind::Transcript)];
         let marker_byte = layout.content.find("Line 55").unwrap();
         let marker_y = layout
             .rows
@@ -1390,48 +749,48 @@ async fn expanded_portal_chrome_stays_fixed_while_document_content_scrolls_after
             .find(|(byte, _)| *byte <= marker_byte)
             .unwrap()
             .1
-            - compositor.display_tile_scroll_offset(&scene, tile_id).1;
+            - displayed.1;
         let input_offset = scene.portal_input_scroll_offset(tile_id);
         if let Some((previous_y, previous_input)) = reading {
+            let scroll = if step == 3 {
+                40.0 * super::easing::exp_smooth_factor(1.0, 90.0)
+            } else {
+                0.0
+            };
+            let delta: f32 = marker_y - previous_y - scroll;
             assert!(
-                (marker_y
-                    - previous_y
-                    - if step == 3 {
-                        40.0 * super::easing::exp_smooth_factor(1.0, 90.0)
-                    } else {
-                        0.0
-                    })
-                .abs()
-                    < 0.01,
-                "retain the reading line and ease only any intervening user scroll"
+                delta.abs() < 0.01,
+                "only the intervening wheel eases at step {step}"
             );
             assert_eq!(
                 input_offset, previous_input,
-                "OUTPUT updates cannot move INPUT"
+                "OUTPUT changes preserve INPUT"
             );
         }
         reading = Some((marker_y, input_offset));
-        let jtl = super::token_colors::resolve_jump_to_latest_tokens(&compositor.token_map);
-        let si = super::token_colors::resolve_scroll_indicator_tokens(&compositor.token_map);
-        let badge = compositor
-            .collect_jump_to_latest_badge_item(&scene.tiles[&tile_id], &scene, &jtl, &si)
-            .expect("actual native OUTPUT overflow exposes jump/unread badge");
-        assert_eq!(&*badge.text, "3 unread");
-        assert!(badge.pixel_x >= tile_bounds.x + layout.viewport.x);
+        let (viewport, document_height) = (layout.viewport, layout.height);
+        let output_left = tile_bounds.x + viewport.x;
+        let (_, labels) = compositor.collect_scroll_affordances(&scene);
+        let [badge] = labels.as_slice() else {
+            panic!("native OUTPUT should have one unread badge at step {step}");
+        };
+        assert_eq!(badge.text.as_ref(), "3 unread", "step {step}");
+        assert!(
+            badge.pixel_x >= output_left,
+            "badge is in OUTPUT at step {step}"
+        );
         compositor.populate_zone_hit_regions(&mut scene, 800.0, 520.0);
         let jump = scene
             .overlay
             .zone_hit_regions
             .iter()
-            .find(|region| {
-                matches!(region.kind,
-            tze_hud_scene::ZoneInteractionKind::JumpToLatest { tile_id: id } if id == tile_id)
-            })
-            .unwrap();
+            .find(|region| region.kind == (ZoneInteractionKind::JumpToLatest { tile_id }))
+            .expect("native OUTPUT should have a jump-to-latest hit target");
         assert!(
-            jump.bounds.x >= tile_bounds.x + layout.viewport.x,
-            "click target is in OUTPUT"
+            jump.bounds.x >= output_left,
+            "jump target is in OUTPUT at step {step}"
         );
+
         let epoch = scene.geometry_epoch;
         processor.reconcile_portal_document_layouts(&mut scene);
         assert_eq!(
@@ -1439,6 +798,12 @@ async fn expanded_portal_chrome_stays_fixed_while_document_content_scrolls_after
             "unchanged measured layout is quiescent"
         );
         let items = compositor.collect_text_items(&scene, 800.0, 520.0);
+        let actual = chrome(&compositor, &scene, &items);
+        assert_eq!(
+            &actual,
+            fixed_chrome.get_or_insert_with(|| actual.clone()),
+            "pane chrome stays fixed through wheel, append and trim"
+        );
         let item = items
             .iter()
             .find(|item| item.text.contains("Line 55"))
@@ -1455,11 +820,11 @@ async fn expanded_portal_chrome_stays_fixed_while_document_content_scrolls_after
             .unwrap_or(&item.text);
         assert!(
             display.contains("Line 55"),
-            "a retained reading marker must survive append and the tail-to-scrollback transition; append={append}, display={display}"
+            "a retained reading marker must survive append and the tail-to-scrollback transition; step={step}, display={display}"
         );
-        assert_eq!(item.clip_bounds_height, layout.viewport.height);
+        assert_eq!(item.clip_bounds_height, viewport.height);
         assert!(
-            item.bounds_height > layout.height,
+            item.bounds_height > document_height,
             "paint buffer must not be viewport bounded"
         );
     }
@@ -1467,13 +832,18 @@ async fn expanded_portal_chrome_stays_fixed_while_document_content_scrolls_after
     // scroll must still animate rather than snapping with the layout correction.
     let displayed_before_wheel = compositor.display_tile_scroll_offset(&scene, tile_id).1;
     processor.process_keyboard_scroll(tile_id, -40.0, &mut scene);
-    compositor
-        .update_scroll_smoothing_at(&scene, smooth_time + std::time::Duration::from_millis(4));
+    compositor.update_scroll_smoothing_at(&scene, smooth_time + delay(4));
     let displayed_after_wheel = compositor.display_tile_scroll_offset(&scene, tile_id).1;
     assert!(displayed_after_wheel < displayed_before_wheel);
     assert!(
         displayed_after_wheel > scene.tile_scroll_offset_local(tile_id).1,
         "ordinary wheel still eases; only measured origin changes snap"
+    );
+    compositor.scroll_smoothing_enabled = false;
+    compositor.publish_displayed_scroll_offsets(&mut scene);
+    assert_eq!(
+        scene.effective_tile_scroll_offset_local(tile_id),
+        scene.tile_scroll_offset_local(tile_id)
     );
     let output_reading = scene.tile_scroll_offset_local(tile_id);
     assert!(processor.reset_portal_input_scroll_to_tail(tile_id, &mut scene));
@@ -1489,13 +859,9 @@ async fn expanded_portal_chrome_stays_fixed_while_document_content_scrolls_after
         .or_default()
         .latest = 5;
     assert!(processor.reset_tile_scroll_to_tail(tile_id, &mut scene));
-    assert!(
-        scene.tile_follow_tail_at_tail(tile_id),
-        "jump-to-latest returns OUTPUT to its measured tail"
-    );
+    assert!(scene.tile_follow_tail_at_tail(tile_id));
     assert_eq!(scene.overlay.portal_output_reads[&tile_id].read_through, 5);
-    // A capped repeated-text window can have a new output ordinal with the
-    // same shaped content. FrameReady must still reconcile its read state.
+    // Identical shaped text may carry a newer output ordinal.
     scene
         .overlay
         .portal_output_reads
@@ -1513,277 +879,6 @@ async fn expanded_portal_chrome_stays_fixed_while_document_content_scrolls_after
     );
 }
 
-/// `collect_text_items` does NOT shift text for tiles with zero scroll offset.
-///
-/// Regression guard: ensuring the fix is additive (non-scrolled tiles
-/// are unaffected).
-#[tokio::test]
-async fn test_collect_text_items_zero_scroll_unchanged() {
-    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(720, 360).await);
-
-    let mut scene = SceneGraph::new(720.0, 360.0);
-    let tab_id = scene.create_tab("test", 0).unwrap();
-    let lease_id = scene.grant_lease("no-scroll-test", 120_000);
-
-    let tile_x = 50.0_f32;
-    let tile_y = 30.0_f32;
-    let tile_id = scene
-        .create_tile(
-            tab_id,
-            "no-scroll-test",
-            lease_id,
-            Rect::new(tile_x, tile_y, 200.0, 100.0),
-            1,
-        )
-        .unwrap();
-
-    let node_x = 5.0_f32;
-    let node_y = 10.0_f32;
-    let node = Node {
-        layout: Default::default(),
-        id: SceneId::new(),
-        children: vec![],
-        data: NodeData::TextMarkdown(TextMarkdownNode {
-            content: "no-scroll baseline".to_string(),
-            bounds: Rect::new(node_x, node_y, 180.0, 20.0),
-            font_size_px: 12.0,
-            font_family: FontFamily::SystemSansSerif,
-            color: Rgba::new(1.0, 1.0, 1.0, 1.0),
-            background: None,
-            alignment: TextAlign::Start,
-            overflow: TextOverflow::Clip,
-            color_runs: Box::default(),
-        }),
-    };
-    scene.set_tile_root(tile_id, node).unwrap();
-    // No scroll offset registered or set — tile_scroll_offset_local returns (0, 0).
-
-    let items = compositor.collect_text_items(&scene, 720.0, 360.0);
-    assert_eq!(items.len(), 1, "one TextItem for the non-scrolled tile");
-
-    let item = &items[0];
-    // pixel_y must be >= tile_y + node_y (the raw sum before margin).
-    // The margin is positive, so pixel_y >= tile_y + node_y always holds.
-    assert!(
-        item.pixel_y >= tile_y + node_y,
-        "non-scrolled text pixel_y ({}) must be >= tile_y ({tile_y}) + node_y ({node_y})",
-        item.pixel_y
-    );
-}
-
-/// At-tail Ellipsis tiles: `collect_text_items` must produce `TailAnchored`
-/// viewport, and the truncation cache must hit (not miss) after priming.
-///
-/// **Bug context:** `prime_truncation_cache` primed
-/// `TailAnchored` entries for at-tail tiles, but `collect_text_items_from_node`
-/// always built items with the constructor-default `HeadAnchored` viewport.
-/// `prepare_text_items` keyed the cache lookup on `item.viewport`, so the
-/// per-frame key was `HeadAnchored` while the primed entry was `TailAnchored` —
-/// causing a cache miss on every frame and the inline fallback always
-/// running head-anchored truncation (showing oldest lines, not newest).
-///
-/// This test asserts:
-/// 1. For a tile with `at_tail = true` and `TextOverflow::Ellipsis`, the
-///    resulting `TextItem` has `viewport == TailAnchored`.
-/// 2. For the same tile with `at_tail = false` (scrolled-back), the
-///    `TextItem` retains `HeadAnchored`.
-/// 3. Non-Ellipsis (Clip) nodes are unaffected by `at_tail`.
-/// 4. After priming the truncation cache (`prime_truncation_cache`) with
-///    the at-tail scene, the TailAnchored key is present in the cache,
-///    confirming the per-frame item and the primed entry are aligned.
-#[tokio::test]
-async fn test_collect_text_items_at_tail_ellipsis_uses_tail_anchored_viewport() {
-    // collect_text_items is a CPU path; init_text_renderer + prime_truncation_cache
-    // require the GPU text rasterizer.
-    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(720, 360).await);
-    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
-
-    // Content with multiple distinct lines so head vs. tail truncation
-    // would show different text.
-    let content = "Line A\nLine B\nLine C\nLine D\nLine E\nLine F\nLine G\nLine H";
-
-    let tile_w = 200.0_f32;
-    // Narrow height so only a subset of lines fits — forces truncation.
-    let tile_h = 40.0_f32;
-
-    // ── Scene with at_tail = true ─────────────────────────────────────────
-    let mut scene_at_tail = SceneGraph::new(720.0, 360.0);
-    let tab_at = scene_at_tail.create_tab("test", 0).unwrap();
-    let lease_at = scene_at_tail.grant_lease("at-tail-test", 120_000);
-    let tile_at = scene_at_tail
-        .create_tile(
-            tab_at,
-            "at-tail-test",
-            lease_at,
-            Rect::new(0.0, 0.0, tile_w, tile_h),
-            1,
-        )
-        .unwrap();
-    let node_ellipsis = Node {
-        layout: Default::default(),
-        id: SceneId::new(),
-        children: vec![],
-        data: NodeData::TextMarkdown(TextMarkdownNode {
-            content: content.to_owned(),
-            bounds: Rect::new(0.0, 0.0, tile_w, tile_h),
-            font_size_px: 14.0,
-            font_family: FontFamily::SystemMonospace,
-            color: Rgba::new(1.0, 1.0, 1.0, 1.0),
-            background: None,
-            alignment: TextAlign::Start,
-            overflow: TextOverflow::Ellipsis,
-            color_runs: Box::default(),
-        }),
-    };
-    scene_at_tail.set_tile_root(tile_at, node_ellipsis).unwrap();
-    // Mark tile as at-tail (follow-tail active, user has not scrolled back).
-    scene_at_tail.set_tile_follow_tail_at_tail(tile_at, true);
-
-    compositor.prime_markdown_cache(&scene_at_tail);
-
-    // 1. per-frame viewport must be TailAnchored.
-    let items_at_tail = compositor.collect_text_items(&scene_at_tail, 720.0, 360.0);
-    assert_eq!(
-        items_at_tail.len(),
-        1,
-        "expected one TextItem for the at-tail tile"
-    );
-    let at_tail_item = &items_at_tail[0];
-    assert_eq!(
-        at_tail_item.overflow,
-        TextOverflow::Ellipsis,
-        "item must carry Ellipsis overflow"
-    );
-    assert_eq!(
-        at_tail_item.viewport,
-        crate::overflow::TruncationViewport::TailAnchored,
-        "at-tail Ellipsis tile must produce TailAnchored viewport \
-             so the per-frame key matches the primed cache entry"
-    );
-
-    // 2. Prime the truncation cache and verify TailAnchored key is present.
-    //    `prime_truncation_cache` primes TailAnchored for at-tail tiles.
-    //    If the per-frame item.viewport also matches TailAnchored, the
-    //    cache lookup in `prepare_text_items` will hit — confirming alignment.
-    compositor.prime_truncation_cache(&scene_at_tail);
-    // Access the rasterizer's truncation cache to confirm the TailAnchored
-    // entry was primed.  `prime_truncation_cache` calls
-    // `rasterizer.prime_truncation_cache(items)` which stores entries keyed
-    // on viewport_mode=1 (TailAnchored).  The cache must be non-empty after
-    // priming an Ellipsis tile.
-    let cache_len_after_prime = compositor
-        .text_rasterizer
-        .as_ref()
-        .expect("text rasterizer must be initialised")
-        .truncation_cache
-        .len();
-    assert!(
-        cache_len_after_prime > 0,
-        "truncation cache must be non-empty after priming an Ellipsis at-tail tile"
-    );
-
-    // ── Scene with at_tail = false (scrolled back) ────────────────────────
-    let mut scene_head = SceneGraph::new(720.0, 360.0);
-    let tab_head = scene_head.create_tab("test", 0).unwrap();
-    let lease_head = scene_head.grant_lease("head-test", 120_000);
-    let tile_head = scene_head
-        .create_tile(
-            tab_head,
-            "head-test",
-            lease_head,
-            Rect::new(0.0, 0.0, tile_w, tile_h),
-            1,
-        )
-        .unwrap();
-    let node_ellipsis_head = Node {
-        layout: Default::default(),
-        id: SceneId::new(),
-        children: vec![],
-        data: NodeData::TextMarkdown(TextMarkdownNode {
-            content: content.to_owned(),
-            bounds: Rect::new(0.0, 0.0, tile_w, tile_h),
-            font_size_px: 14.0,
-            font_family: FontFamily::SystemMonospace,
-            color: Rgba::new(1.0, 1.0, 1.0, 1.0),
-            background: None,
-            alignment: TextAlign::Start,
-            overflow: TextOverflow::Ellipsis,
-            color_runs: Box::default(),
-        }),
-    };
-    scene_head
-        .set_tile_root(tile_head, node_ellipsis_head)
-        .unwrap();
-    // at_tail = false: tile is scrolled back (or no follow-tail active).
-    // tile_follow_tail_at_tail defaults to false when not set.
-
-    compositor.prime_markdown_cache(&scene_head);
-
-    let items_head = compositor.collect_text_items(&scene_head, 720.0, 360.0);
-    assert_eq!(
-        items_head.len(),
-        1,
-        "expected one TextItem for the head tile"
-    );
-    assert_eq!(
-        items_head[0].viewport,
-        crate::overflow::TruncationViewport::HeadAnchored,
-        "non-at-tail Ellipsis tile must retain HeadAnchored viewport"
-    );
-
-    // ── Clip overflow is unaffected by at_tail ────────────────────────────
-    let mut scene_clip = SceneGraph::new(720.0, 360.0);
-    let tab_clip = scene_clip.create_tab("test", 0).unwrap();
-    let lease_clip = scene_clip.grant_lease("clip-test", 120_000);
-    let tile_clip = scene_clip
-        .create_tile(
-            tab_clip,
-            "clip-test",
-            lease_clip,
-            Rect::new(0.0, 0.0, tile_w, tile_h),
-            1,
-        )
-        .unwrap();
-    let node_clip = Node {
-        layout: Default::default(),
-        id: SceneId::new(),
-        children: vec![],
-        data: NodeData::TextMarkdown(TextMarkdownNode {
-            content: content.to_owned(),
-            bounds: Rect::new(0.0, 0.0, tile_w, tile_h),
-            font_size_px: 14.0,
-            font_family: FontFamily::SystemMonospace,
-            color: Rgba::new(1.0, 1.0, 1.0, 1.0),
-            background: None,
-            alignment: TextAlign::Start,
-            overflow: TextOverflow::Clip,
-            color_runs: Box::default(),
-        }),
-    };
-    scene_clip.set_tile_root(tile_clip, node_clip).unwrap();
-    scene_clip.set_tile_follow_tail_at_tail(tile_clip, true);
-
-    compositor.prime_markdown_cache(&scene_clip);
-
-    let items_clip = compositor.collect_text_items(&scene_clip, 720.0, 360.0);
-    assert_eq!(
-        items_clip.len(),
-        1,
-        "expected one TextItem for the clip tile"
-    );
-    assert_eq!(
-        items_clip[0].viewport,
-        crate::overflow::TruncationViewport::HeadAnchored,
-        "Clip overflow at-tail tile must remain HeadAnchored (at_tail only overrides Ellipsis)"
-    );
-}
-
-// ── Zone StreamText tail-anchored truncation ──────────────────
-
-/// Helper: register a `LatestWins` StreamText zone covering the whole display
-/// with the given `overflow` / `stream_tail_anchored` policy, publish `content`,
-/// and return the scene.  The zone uses a monospace font and small geometry so
-/// multi-line content overflows and is forced to truncate.
 fn make_stream_zone_scene(
     overflow: Option<TextOverflow>,
     stream_tail_anchored: Option<bool>,
@@ -1791,17 +886,6 @@ fn make_stream_zone_scene(
 ) -> SceneGraph {
     let mut scene = SceneGraph::new(720.0, 360.0);
     scene.register_zone(ZoneDefinition {
-        id: SceneId::new(),
-        name: "stream".to_owned(),
-        description: "streaming zone".to_owned(),
-        // Relative geometry: narrow + short so several lines overflow.
-        geometry_policy: GeometryPolicy::Relative {
-            x_pct: 0.0,
-            y_pct: 0.0,
-            width_pct: 200.0 / 720.0,
-            height_pct: 40.0 / 360.0,
-        },
-        accepted_media_types: vec![ZoneMediaType::StreamText],
         rendering_policy: RenderingPolicy {
             font_size_px: Some(14.0),
             font_family: Some(FontFamily::SystemMonospace),
@@ -1809,155 +893,50 @@ fn make_stream_zone_scene(
             stream_tail_anchored,
             ..Default::default()
         },
-        contention_policy: ContentionPolicy::LatestWins,
-        max_publishers: 1,
-        auto_clear_ms: None,
-        ephemeral: false,
-        layer_attachment: LayerAttachment::Content,
-    });
-    scene
-        .publish_to_zone(
+        ..zone_fixture(
             "stream",
-            ZoneContent::StreamText(content.to_owned()),
-            "test",
-            None,
-            None,
-            None,
+            relative(0.0, 0.0, 200.0 / 720.0, 40.0 / 360.0),
+            ZoneMediaType::StreamText,
+            LayerAttachment::Content,
         )
-        .unwrap();
+    });
+    publish_zone(
+        &mut scene,
+        "stream",
+        "test",
+        ZoneContent::StreamText(content.to_owned()),
+    );
     scene
 }
 
-/// A streaming zone that opts into `stream_tail_anchored` produces a
-/// `TailAnchored` `TextItem` so the newest content (tail) is shown; the default
-/// (None) stays `HeadAnchored`, and `Clip` overflow is unaffected.
-///
-/// Exercises the CPU `collect_text_items` path; the `Compositor` itself needs a
-/// GPU device to construct, so the test is GPU-gated like its tile sibling
-/// `test_collect_text_items_at_tail_ellipsis_uses_tail_anchored_viewport`.
-#[tokio::test]
-async fn test_zone_stream_text_tail_anchored_opt_in_viewport() {
-    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(720, 360).await);
-
+#[test]
+fn test_zone_stream_text_tail_anchored_opt_in_viewport() {
+    use crate::overflow::TruncationViewport::{HeadAnchored, TailAnchored};
     let content = "Line A\nLine B\nLine C\nLine D\nLine E\nLine F\nLine G\nLine H";
-
-    // Opt-in: Ellipsis overflow + stream_tail_anchored = Some(true) → TailAnchored.
-    let scene_tail = make_stream_zone_scene(Some(TextOverflow::Ellipsis), Some(true), content);
-    let items_tail = compositor.collect_text_items(&scene_tail, 720.0, 360.0);
-    assert_eq!(items_tail.len(), 1, "expected one StreamText TextItem");
-    assert_eq!(
-        items_tail[0].overflow,
-        TextOverflow::Ellipsis,
-        "policy overflow must propagate to the item"
-    );
-    assert_eq!(
-        items_tail[0].viewport,
-        crate::overflow::TruncationViewport::TailAnchored,
-        "stream_tail_anchored = Some(true) must produce TailAnchored viewport \
-         so the streaming zone shows the newest content"
-    );
-
-    // Default: Ellipsis overflow, stream_tail_anchored = None → HeadAnchored.
-    let scene_head = make_stream_zone_scene(Some(TextOverflow::Ellipsis), None, content);
-    let items_head = compositor.collect_text_items(&scene_head, 720.0, 360.0);
-    assert_eq!(items_head.len(), 1);
-    assert_eq!(
-        items_head[0].viewport,
-        crate::overflow::TruncationViewport::HeadAnchored,
-        "default (no opt-in) zone StreamText must remain HeadAnchored \
-         (no regression for existing zone users)"
-    );
-
-    // Explicit Some(false) is also head-anchored.
-    let scene_false = make_stream_zone_scene(Some(TextOverflow::Ellipsis), Some(false), content);
-    let items_false = compositor.collect_text_items(&scene_false, 720.0, 360.0);
-    assert_eq!(
-        items_false[0].viewport,
-        crate::overflow::TruncationViewport::HeadAnchored,
-        "stream_tail_anchored = Some(false) must remain HeadAnchored"
-    );
-
-    // Clip overflow ignores the opt-in (no truncation, head always shown).
-    let scene_clip = make_stream_zone_scene(Some(TextOverflow::Clip), Some(true), content);
-    let items_clip = compositor.collect_text_items(&scene_clip, 720.0, 360.0);
-    assert_eq!(
-        items_clip[0].viewport,
-        crate::overflow::TruncationViewport::TailAnchored,
-        "viewport field still reflects the opt-in even for Clip; truncation key \
-         gating (effective_truncation_key) is what makes it inert for Clip"
-    );
-    // For Clip overflow, effective_truncation_key returns None → no truncation.
-    assert!(
-        crate::text::effective_truncation_key(&items_clip[0]).is_none(),
-        "Clip overflow must not produce a truncation key (anchoring is inert)"
-    );
-}
-
-/// End-to-end: priming the truncation cache for a tail-anchored streaming zone
-/// stores a truncation that shows the **newest** content (the tail), while the
-/// head-anchored default stores the **oldest**.  Proves the zone StreamText
-/// frame path resolves through the shared tail-anchored helpers.
-///
-/// GPU-gated: `prime_truncation_cache` requires the text rasterizer.
-#[tokio::test]
-async fn test_zone_stream_text_tail_anchored_primes_newest_content() {
-    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(720, 360).await);
-    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
-
-    // Distinct first/last lines so head vs tail truncation differ observably.
-    let content = "FIRST\nbbbb\ncccc\ndddd\neeee\nffff\ngggg\nLAST";
-
-    // ── Tail-anchored zone: cache must show the newest line (LAST) ────────
-    let scene_tail = make_stream_zone_scene(Some(TextOverflow::Ellipsis), Some(true), content);
-    compositor.prime_markdown_cache(&scene_tail);
-    compositor.prime_truncation_cache(&scene_tail);
-
-    let items_tail = compositor.collect_text_items(&scene_tail, 720.0, 360.0);
-    assert_eq!(items_tail.len(), 1);
-    let key_tail = crate::text::effective_truncation_key(&items_tail[0])
-        .expect("Ellipsis item must yield a truncation key");
-    let cached_tail = compositor
-        .text_rasterizer
-        .as_ref()
-        .expect("rasterizer initialised")
-        .truncation_cache
-        .get_by_key(&key_tail)
-        .expect("tail-anchored zone StreamText must be primed");
-    assert!(
-        cached_tail.was_truncated,
-        "content must overflow the zone and be truncated"
-    );
-    assert!(
-        cached_tail.text.contains("LAST"),
-        "tail-anchored truncation must show the newest content (LAST); got {:?}",
-        cached_tail.text
-    );
-    assert!(
-        !cached_tail.text.contains("FIRST"),
-        "tail-anchored truncation must NOT pin the oldest content (FIRST); got {:?}",
-        cached_tail.text
-    );
-
-    // ── Head-anchored default: cache must show the oldest line (FIRST) ────
-    let mut compositor2 = require_gpu!(make_compositor_and_surface(720, 360).await).0;
-    compositor2.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
-    let scene_head = make_stream_zone_scene(Some(TextOverflow::Ellipsis), None, content);
-    compositor2.prime_markdown_cache(&scene_head);
-    compositor2.prime_truncation_cache(&scene_head);
-
-    let items_head = compositor2.collect_text_items(&scene_head, 720.0, 360.0);
-    let key_head = crate::text::effective_truncation_key(&items_head[0])
-        .expect("Ellipsis item must yield a truncation key");
-    let cached_head = compositor2
-        .text_rasterizer
-        .as_ref()
-        .expect("rasterizer initialised")
-        .truncation_cache
-        .get_by_key(&key_head)
-        .expect("head-anchored zone StreamText must be primed");
-    assert!(
-        cached_head.text.contains("FIRST"),
-        "head-anchored truncation must show the oldest content (FIRST); got {:?}",
-        cached_head.text
-    );
+    for (overflow, opt_in, viewport, keyed) in [
+        (TextOverflow::Ellipsis, Some(true), TailAnchored, true),
+        (TextOverflow::Ellipsis, None, HeadAnchored, true),
+        (TextOverflow::Ellipsis, Some(false), HeadAnchored, true),
+        (TextOverflow::Clip, Some(true), TailAnchored, false),
+    ] {
+        let policy = RenderingPolicy {
+            font_size_px: Some(16.0),
+            overflow: Some(overflow),
+            stream_tail_anchored: opt_in,
+            ..Default::default()
+        };
+        let item =
+            Compositor::zone_stream_text_item(content, 0.0, 0.0, 720.0, 40.0, &policy, 1.0, 1.0);
+        let case = format!("{overflow:?} {opt_in:?}");
+        assert_eq!(
+            item.overflow, overflow,
+            "{case}: policy overflow propagates"
+        );
+        assert_eq!(item.viewport, viewport, "{case}");
+        assert_eq!(
+            crate::text::effective_truncation_key(&item).is_some(),
+            keyed,
+            "{case}: only Ellipsis truncates"
+        );
+    }
 }

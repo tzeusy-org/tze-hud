@@ -872,13 +872,6 @@ fn assert_default_composer_resize(compositor: &mut Compositor) {
     assert!(height > base_height && lines > base_lines);
 }
 
-fn token_overrides<const N: usize>(pairs: [(&str, &str); N]) -> HashMap<String, String> {
-    pairs
-        .into_iter()
-        .map(|(key, value)| (key.into(), value.into()))
-        .collect()
-}
-
 fn composer_draft(node_id: SceneId, text: &str, cursor_byte: usize) -> LocalComposerState {
     LocalComposerState {
         text: text.into(),
@@ -889,37 +882,6 @@ fn composer_draft(node_id: SceneId, text: &str, cursor_byte: usize) -> LocalComp
         placeholder: None,
         preedit: None,
         preedit_range: None,
-    }
-}
-
-fn leaf(data: NodeData) -> Node {
-    Node {
-        id: SceneId::new(),
-        children: Vec::new(),
-        layout: Default::default(),
-        data,
-    }
-}
-
-fn solid_node(bounds: Rect, color: Rgba, radius: Option<f32>) -> Node {
-    leaf(NodeData::SolidColor(SolidColorNode {
-        bounds,
-        color,
-        radius,
-    }))
-}
-
-fn markdown_text(content: impl Into<String>, bounds: Rect, font_size_px: f32) -> TextMarkdownNode {
-    TextMarkdownNode {
-        content: content.into(),
-        bounds,
-        font_size_px,
-        font_family: FontFamily::SystemSansSerif,
-        color: Rgba::WHITE,
-        background: None,
-        alignment: TextAlign::Start,
-        overflow: TextOverflow::Clip,
-        color_runs: Box::default(),
     }
 }
 
@@ -958,24 +920,4 @@ fn assert_rect_close(actual: Rect, expected: Rect, message: &str) {
             && (actual.height - expected.height).abs() < 0.5,
         "{message}: actual={actual:?}, expected={expected:?}"
     );
-}
-
-async fn make_text_compositor(width: u32, height: u32) -> Option<(Compositor, HeadlessSurface)> {
-    let (mut compositor, surface) = make_compositor_and_surface(width, height).await?;
-    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
-    Some((compositor, surface))
-}
-
-fn prime_text(compositor: &mut Compositor, scene: &SceneGraph) {
-    compositor.prime_markdown_cache(scene);
-    compositor.prime_truncation_cache(scene);
-}
-
-fn render_pixels(
-    compositor: &mut Compositor,
-    scene: &mut SceneGraph,
-    surface: &HeadlessSurface,
-) -> Vec<u8> {
-    compositor.render_frame_headless(scene, surface);
-    surface.read_pixels(&compositor.device)
 }
