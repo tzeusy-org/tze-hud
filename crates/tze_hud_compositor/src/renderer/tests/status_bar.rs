@@ -265,6 +265,7 @@ async fn status_bar_draw_paths_share_the_card_rect() {
         assert_eq!(Rect::new(cmd.x, cmd.y, cmd.width, cmd.height), card);
         assert!(cmd.border.is_some());
         assert_eq!(cmd.radius, radius);
+        assert_eq!(handles[0].element_kind, DragHandleElementKind::Zone);
         assert_eq!(handles[0].element_bounds, card);
         if radius == 0.0 {
             let (left, top, right, bottom) = vertices[..6].iter().fold(
