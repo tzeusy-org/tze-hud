@@ -365,7 +365,7 @@ impl InputProcessor {
 
     /// While an OUTPUT selection exists the view stops following the tail
     /// (new output counts as unread); returns whether it was following.
-    pub fn hold_output_for_selection(&mut self, tile: SceneId, scene: &mut SceneGraph) -> bool {
+    fn hold_output_for_selection(&mut self, tile: SceneId, scene: &mut SceneGraph) -> bool {
         let was = self.scroll_state.hold_reading(tile);
         if was {
             scene.set_tile_follow_tail_at_tail(tile, false);
@@ -374,7 +374,7 @@ impl InputProcessor {
     }
 
     /// A cleared selection resumes following only if it began at the tail.
-    pub fn release_output_selection(
+    fn release_output_selection(
         &mut self,
         selection: portal_reading::Selection,
         scene: &mut SceneGraph,
