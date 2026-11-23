@@ -148,8 +148,10 @@ only admitted resident provenance into a separate GPU cache; generic tile, icon
 and MCP lookups cannot use it. Pixels stay in the resource store with one CPU
 charge, while GPU admission, degradation and eviction retain the renderer's
 existing policies. Pairing removal/replacement wakes rendering, and revoked
-rasters are excluded before zone selection. The signed canonical-binary and
-Windows pixel proof remain pending.
+rasters are excluded before zone selection. The
+[resident raster witness](../scripts/ci/resident_raster_witness.py) captures
+configured-zone pixels through the paired canonical binary on private Xvfb and
+in hosted Windows CI, binding the running build identity to its checkout.
 
 
 Network listeners bind loopback and local Tailscale-interface addresses
