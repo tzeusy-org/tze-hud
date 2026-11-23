@@ -147,7 +147,7 @@ fn sync_parent_dir(_path: &Path) -> io::Result<()> {
 
 /// Result of element-store startup bootstrap.
 #[derive(Clone, Debug)]
-pub struct ElementStoreBootstrap {
+pub(crate) struct ElementStoreBootstrap {
     pub path: PathBuf,
     pub store: ElementStore,
 }
@@ -163,7 +163,7 @@ enum StorePlatform {
 ///
 /// Environment override:
 /// - `TZE_HUD_ELEMENT_STORE_PATH`
-pub fn resolve_element_store_path() -> PathBuf {
+fn resolve_element_store_path() -> PathBuf {
     if let Some(override_path) = env_var("TZE_HUD_ELEMENT_STORE_PATH") {
         return PathBuf::from(override_path);
     }
@@ -180,12 +180,12 @@ pub fn resolve_element_store_path() -> PathBuf {
 }
 
 /// Load, reconcile, and persist the element store for the given scene.
-pub fn bootstrap_scene_element_store(scene: &mut SceneGraph) -> ElementStoreBootstrap {
+pub(crate) fn bootstrap_scene_element_store(scene: &mut SceneGraph) -> ElementStoreBootstrap {
     bootstrap_scene_element_store_with_path(scene, resolve_element_store_path())
 }
 
 /// Same as [`bootstrap_scene_element_store`], but with an explicit path.
-pub fn bootstrap_scene_element_store_with_path(
+fn bootstrap_scene_element_store_with_path(
     scene: &mut SceneGraph,
     path: PathBuf,
 ) -> ElementStoreBootstrap {

@@ -60,7 +60,7 @@ impl ShutdownToken {
     }
 
     /// Returns `true` if shutdown has been triggered.
-    pub fn is_triggered(&self) -> bool {
+    pub(crate) fn is_triggered(&self) -> bool {
         self.triggered.load(Ordering::Acquire)
     }
 }
@@ -70,7 +70,7 @@ impl ShutdownToken {
 /// How long window, GPU and process teardown may take once every runtime
 /// thread has stopped. Well inside the installer's 15 s wait for the old
 /// instance to exit.
-pub const EXIT_DEADLINE: std::time::Duration = std::time::Duration::from_secs(5);
+pub(crate) const EXIT_DEADLINE: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// End the process if it is still alive `deadline` from now.
 ///
@@ -79,7 +79,7 @@ pub const EXIT_DEADLINE: std::time::Duration = std::time::Duration::from_secs(5)
 /// owner's host one hung for minutes, holding the single-instance mutex that an
 /// update or installer waits on. Terminating then is safe: no
 /// runtime work is left, and the OS reclaims the windows and GPU resources.
-pub fn arm_exit_deadline(deadline: std::time::Duration) {
+pub(crate) fn arm_exit_deadline(deadline: std::time::Duration) {
     let spawned = std::thread::Builder::new()
         .name("tze-exit-deadline".into())
         .spawn(move || {
@@ -122,7 +122,7 @@ impl Default for ShutdownToken {
 /// event loop starts.
 ///
 /// Failure is non-fatal — the function logs a warning and returns `false`.
-pub fn elevate_main_thread_priority() -> bool {
+pub(crate) fn elevate_main_thread_priority() -> bool {
     #[cfg(target_os = "linux")]
     {
         elevate_linux()
@@ -184,7 +184,7 @@ fn elevate_windows() -> bool {
 // ─── Compositor thread ────────────────────────────────────────────────────────
 
 /// Signal sent by the compositor thread when it has finished initialising.
-pub struct CompositorReady {
+pub(crate) struct CompositorReady {
     /// The compositor is ready to accept work.
     pub ok: bool,
 }
@@ -194,7 +194,7 @@ pub struct CompositorReady {
 /// The closure `f` receives a `ShutdownToken` receiver and should run the
 /// compositor event loop. It is responsible for owning `wgpu::Device` and
 /// `wgpu::Queue` exclusively.
-pub fn spawn_compositor_thread<F>(
+pub(crate) fn spawn_compositor_thread<F>(
     shutdown: ShutdownToken,
     ready_tx: oneshot::Sender<CompositorReady>,
     f: F,
@@ -217,7 +217,7 @@ where
 /// Tokio multi-thread runtime used for network threads (gRPC, MCP, sessions).
 ///
 /// Created once at startup. All network async tasks are spawned onto this runtime.
-pub struct NetworkRuntime {
+pub(crate) struct NetworkRuntime {
     pub rt: Runtime,
 }
 
@@ -229,7 +229,7 @@ const NETWORK_WORKER_THREADS: usize = 2;
 
 impl NetworkRuntime {
     /// Build a multi-thread Tokio runtime for network tasks.
-    pub fn new() -> Result<Self, std::io::Error> {
+    pub(crate) fn new() -> Result<Self, std::io::Error> {
         let rt = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(NETWORK_WORKER_THREADS)
             .thread_name("tze-network")

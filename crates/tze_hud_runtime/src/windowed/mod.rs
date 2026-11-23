@@ -2769,10 +2769,9 @@ impl WindowedRuntime {
     /// "The main thread MUST
     /// run the winit event loop."
     ///
-    /// Once its threads have stopped, this arms
-    /// [`crate::threads::arm_exit_deadline`]: the caller must exit the process
-    /// within [`crate::threads::EXIT_DEADLINE`] of the return, or it is
-    /// terminated.
+    /// After the runtime shuts down the compositor and network runtimes, it
+    /// gives the process five seconds to finish teardown before terminating it.
+    /// Callers should exit promptly after this method returns.
     ///
     /// # Errors
     ///
