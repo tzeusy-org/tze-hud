@@ -148,8 +148,9 @@ python3 $CLIENT clear   --id my-session
 
 ## Optional Claude Code mirroring
 
-[Claude Code hooks](references/claude-code-hooks.md) provides a complete opt-in
-settings block for the main conversation on a POSIX Claude host. It uses the
+[Claude Code hooks](references/claude-code-hooks.md) provides a session-state
+settings block for Linux and WSL2. Set `TZE_HUD_MIRROR=1` to mirror the
+main conversation in that workspace. It uses the
 same paired client and portal; it installs nothing automatically. Progress
 contains fixed tool labels, never tool inputs/results. Final replies are the
 owner's explicit privacy opt-in. The reference describes finite quiet holds,

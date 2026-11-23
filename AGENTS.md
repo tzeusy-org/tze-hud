@@ -133,8 +133,9 @@ status entry, notification stream or portal.
   pairing/permissions or authorize publishing secrets.
 
 Use **`th-hud-publish`** for zones/widgets and **`hud-projection`** for portal
-interactions; their scripts work without a client-specific hook. Follow
-`docs/api.md` and the running build, rather than assuming a planned feature
+interactions. Their scripts work without a client-specific hook.
+`TZE_HUD_MIRROR=1` opts a Claude workspace into its automatic portal mirror.
+Follow `docs/api.md` and the running build, rather than assuming a planned feature
 has shipped. Record dogfooding defects against existing beads where possible;
 an accepted publish or runtime screenshot is not owner visual acceptance.
 

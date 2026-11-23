@@ -908,6 +908,12 @@ mod tests {
         let plain: serde_json::Value = serde_json::from_str(&plain).unwrap();
         let opened_body: serde_json::Value = serde_json::from_str(&body_of(&opened)).unwrap();
         assert_eq!(opened_body, plain, "the initialize body is unchanged");
+        let state = r#"{"jsonrpc":"2.0","method":"notifications/tze/session_state","params":{"state":"working"}}"#;
+        for session in [None, Some(id.as_str())] {
+            let response = http_raw(addr, &request("POST", session, state)).await;
+            assert!(response.starts_with("HTTP/1.1 200 "), "{response}");
+            assert!(body_of(&response).is_empty());
+        }
 
         let card = r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"hud_publish","arguments":{"surface":"zone:notification-area","content":{"type":"notification","title":"hi"}}}}"#;
         {
@@ -942,6 +948,11 @@ mod tests {
             assert!(!r.contains("jsonrpc"));
         }
         assert_eq!(shown().await, 0, "a 404 had no effect");
+        assert!(
+            http_raw(addr, &request("POST", Some(&id), state))
+                .await
+                .starts_with("HTTP/1.1 404 ")
+        );
         let r = http_raw(addr, "DELETE /mcp HTTP/1.1\r\nMcp-Session-Id: x\r\n\r\n").await;
         assert!(r.starts_with("HTTP/1.1 401 "), "{r}");
         shutdown.trigger(crate::threads::ShutdownReason::Clean);
@@ -1305,13 +1316,20 @@ mod tests {
         )
         .await;
         let v: serde_json::Value = serde_json::from_slice(&r.body).unwrap();
-        assert_eq!(
-            v["sessions"],
-            serde_json::json!([
-                {"agent": "claude", "label": "tze-hud", "holdings": 1},
-                {"agent": "claude", "label": "tze-hud (2)", "holdings": 0},
-            ])
-        );
+        let sessions = v["sessions"].as_array().unwrap();
+        assert_eq!(sessions.len(), 2);
+        for (session, label, holdings) in [
+            (&sessions[0], "tze-hud", 1),
+            (&sessions[1], "tze-hud (2)", 0),
+        ] {
+            assert_eq!(session["agent"], "claude");
+            assert_eq!(session["label"], label);
+            assert_eq!(session["holdings"], holdings);
+            assert!(session["last_call_ms"].as_u64().unwrap() > 0);
+            assert!(session["state"].is_null());
+            assert!(session["reason"].is_null());
+            assert!(session["since_ms"].is_null());
+        }
     }
 
     /// `?cpu=0` answers without the CPU sample window, for polling harnesses.

@@ -32,6 +32,38 @@ def config_dir() -> Path:
     return Path.home() / ".config" / "tze-hud"
 
 
+def runtime_socket(pid: int, *, create: bool = False) -> Path | None:
+    """Resolve the private hook socket without looking up a HUD or pairing key."""
+    if sys.platform != "linux" or type(pid) is not int or pid <= 0:
+        return None
+    directory = Path.home() / ".cache" / "tze-hud" / "run"
+    xdg = os.environ.get("XDG_RUNTIME_DIR")
+    if xdg:
+        candidate = Path(xdg)
+        try:
+            info = candidate.lstat() if candidate.is_absolute() else None
+            if info and stat.S_ISDIR(info.st_mode) and info.st_uid == os.getuid():
+                directory = candidate / "tze-hud"
+        except OSError:
+            pass
+    path = directory / f"claude-{pid}.sock"
+    if len(os.fsencode(path)) >= 108:
+        return None
+    try:
+        if create:
+            directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        info = directory.lstat()
+        if (
+            stat.S_ISDIR(info.st_mode)
+            and info.st_uid == os.getuid()
+            and stat.S_IMODE(info.st_mode) == 0o700
+        ):
+            return path
+    except OSError:
+        pass
+    return None
+
+
 def _split(raw: str | None) -> tuple[str, int | None]:
     raw = raw or os.environ.get("HUD_HOST", "")
     if not raw:
