@@ -1916,11 +1916,7 @@ fn test_notification_expiry_follows_held_flag() {
     ] {
         let (mut scene, clock) = scene_with_test_clock();
         scene.register_zone(make_alert_banner_zone());
-        let publisher = crate::Publisher {
-            namespace: "agent".to_string(),
-            lease_id: None,
-            origin: Some(origin),
-        };
+        let publisher = crate::Publisher::namespace("agent");
         let publication = crate::Publication::Zone {
             zone_name: "alert-banner".to_string(),
             content: ZoneContent::Notification(NotificationPayload {

@@ -426,6 +426,8 @@ mod behavior_tests;
 #[cfg(test)]
 mod limits_tests;
 #[cfg(test)]
+mod portal_tests;
+#[cfg(test)]
 mod stack_trim_tests;
 #[cfg(test)]
 mod test_helpers;

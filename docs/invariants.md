@@ -387,7 +387,7 @@ one composer node across root replacements. Regression owners:
 [`composer_focus_lost_on_blur_preserves_keyed_draft`](../crates/tze_hud_input/src/lib.rs),
 [`removing_focused_composer_tile_clears_local_echo`](../crates/tze_hud_runtime/src/windowed/lifecycle.rs),
 [`streamed_output_keeps_the_focused_draft`](../crates/tze_hud_runtime/src/windowed/keyboard.rs),
-and [`composer_interaction_hit_region_survives_consecutive_transcript_republishes`](../crates/tze_hud_scene/src/mutation.rs).
+and [`composer_interaction_hit_region_survives_consecutive_transcript_republishes`](../crates/tze_hud_scene/src/graph/portal_tests.rs).
 No wire message carries a node, so no agent can mark a hit region as a
 composer: [`removed_client_request_numbers_decode_to_empty_payload`](../crates/tze_hud_protocol/src/session_server/tests/session_handshake.rs).
 
