@@ -48,7 +48,7 @@ impl fmt::Display for WindowMode {
 /// Pointer events within the union of all `HitRegion` bounds are captured by
 /// the runtime. Events outside any hit-region are passed through to the desktop.
 #[derive(Debug, Clone, PartialEq)]
-pub struct HitRegion {
+pub(crate) struct HitRegion {
     pub x: f32,
     pub y: f32,
     pub width: f32,
@@ -56,7 +56,7 @@ pub struct HitRegion {
 }
 
 impl HitRegion {
-    pub fn new(x: f32, y: f32, width: f32, height: f32) -> Self {
+    pub(crate) fn new(x: f32, y: f32, width: f32, height: f32) -> Self {
         Self {
             x,
             y,
@@ -66,7 +66,7 @@ impl HitRegion {
     }
 
     /// Returns `true` if the point (px, py) is inside this region.
-    pub fn contains(&self, px: f32, py: f32) -> bool {
+    pub(crate) fn contains(&self, px: f32, py: f32) -> bool {
         px >= self.x && px < self.x + self.width && py >= self.y && py < self.y + self.height
     }
 }
@@ -104,7 +104,7 @@ impl Default for WindowConfig {
 /// desktop."
 ///
 /// In fullscreen mode, all events are always captured.
-pub fn should_capture_pointer_event(
+pub(crate) fn should_capture_pointer_event(
     mode: WindowMode,
     px: f32,
     py: f32,

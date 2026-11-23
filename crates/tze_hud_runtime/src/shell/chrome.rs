@@ -173,7 +173,7 @@ pub(crate) fn handle_shortcut(state: &mut ChromeState, shortcut: ChromeShortcut)
 /// Dismiss is unconditional: local execution, frame-bounded, no agent veto.
 /// Works even if the agent is disconnected or in the reconnect grace period.
 #[derive(Clone, Debug)]
-pub struct DismissTileResult {
+pub(crate) struct DismissTileResult {
     /// The terminal lease transition. `Some` when the tile's lease was
     /// reclaimed. `None` when the tile or lease was already gone.
     pub expiry: Option<tze_hud_scene::types::LeaseExpiry>,
