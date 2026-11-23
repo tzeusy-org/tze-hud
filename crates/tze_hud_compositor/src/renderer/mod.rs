@@ -733,7 +733,10 @@ enum GeometryPass<'a> {
         vertices: std::ops::Range<usize>,
         clear: bool,
     },
-    RoundedRects(&'a [RoundedRectDrawCmd]),
+    RoundedRects {
+        cmds: &'a [RoundedRectDrawCmd],
+        layer: LayerAttachment,
+    },
 }
 
 fn geometry_pass_plan(
@@ -749,17 +752,26 @@ fn geometry_pass_plan(
             vertices: 0..bg_end,
             clear: true,
         },
-        GeometryPass::RoundedRects(&inputs.rr_background),
+        GeometryPass::RoundedRects {
+            cmds: &inputs.rr_background,
+            layer: LayerAttachment::Background,
+        },
         GeometryPass::Flat {
             vertices: bg_end..chrome_start,
             clear: false,
         },
-        GeometryPass::RoundedRects(&inputs.rr_content),
+        GeometryPass::RoundedRects {
+            cmds: &inputs.rr_content,
+            layer: LayerAttachment::Content,
+        },
         GeometryPass::Flat {
             vertices: chrome_start..vertex_count,
             clear: false,
         },
-        GeometryPass::RoundedRects(&inputs.rr_post),
+        GeometryPass::RoundedRects {
+            cmds: &inputs.rr_post,
+            layer: LayerAttachment::Chrome,
+        },
     ]
 }
 
@@ -3017,20 +3029,11 @@ impl Compositor {
         // transparent quad that zeros out every pixel's alpha. Subsequent
         // content overwrites specific regions with their own alpha.
 
-        for (pass_index, pass) in
-            geometry_pass_plan(inputs, vertices.len(), bg_vertex_count, chrome_vertex_start)
-                .into_iter()
-                .enumerate()
+        for pass in geometry_pass_plan(inputs, vertices.len(), bg_vertex_count, chrome_vertex_start)
         {
             match pass {
-                GeometryPass::RoundedRects(cmds) => {
+                GeometryPass::RoundedRects { cmds, layer } => {
                     self.encode_rounded_rect_pass(&mut encoder, frame_view, cmds, sw, sh);
-                    let layer = match pass_index {
-                        1 => LayerAttachment::Background,
-                        3 => LayerAttachment::Content,
-                        5 => LayerAttachment::Chrome,
-                        _ => unreachable!("rounded rect band"),
-                    };
                     signature_current &= self.encode_image_pass(
                         &mut encoder,
                         frame_view,

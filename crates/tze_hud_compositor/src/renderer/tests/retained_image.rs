@@ -44,6 +44,15 @@ async fn test_static_image_node_composited_with_other_nodes() {
     }
 }
 
+fn render_resident_pixels(
+    compositor: &mut Compositor,
+    scene: &mut SceneGraph,
+    surface: &HeadlessSurface,
+) -> Vec<u8> {
+    prime_text(compositor, scene);
+    render_pixels(compositor, scene, surface)
+}
+
 struct RasterAuthority(tze_hud_scene::config::agents::PairingAuthorization);
 
 impl tze_hud_resource::upload::RasterUploadAuthority for RasterAuthority {
@@ -175,7 +184,7 @@ async fn resident_raster_uses_store_pixels_without_generic_image_authority() {
     compositor.set_resident_ledger(ledger.clone());
     // Upload-before-publication and zero compositor registrations: the sole CPU
     // charge is the store's 8 bytes; the renderer reserves only 8 GPU bytes.
-    let pixels = render_pixels(&mut compositor, &mut scene, &surface);
+    let pixels = render_resident_pixels(&mut compositor, &mut scene, &surface);
     assert_pixel_color(
         &pixels,
         128,
@@ -218,7 +227,7 @@ async fn resident_raster_uses_store_pixels_without_generic_image_authority() {
     scene
         .clear_zone_and_cancel_pending("resident", "raster-a")
         .unwrap();
-    render_pixels(&mut compositor, &mut scene, &surface);
+    render_resident_pixels(&mut compositor, &mut scene, &surface);
     assert!(compositor.resident_image_texture_cache.is_empty());
     assert_eq!(ledger.snapshot().resource_bytes, 8);
     // Preserve an independently owned eligible peer behind the newer raster.
@@ -255,10 +264,10 @@ async fn resident_raster_uses_store_pixels_without_generic_image_authority() {
             },
         )
         .unwrap();
-    let republished = render_pixels(&mut compositor, &mut scene, &surface);
+    let republished = render_resident_pixels(&mut compositor, &mut scene, &surface);
     assert_pixel_color(&republished, 128, 8, 32, [255, 0, 0, 255], 8, "republished").unwrap();
     directory.with_agents_of(Default::default());
-    let revoked = render_pixels(&mut compositor, &mut scene, &surface);
+    let revoked = render_resident_pixels(&mut compositor, &mut scene, &surface);
     assert_pixel_color(
         &revoked,
         128,
@@ -287,7 +296,7 @@ async fn resident_raster_gpu_budget_and_degradation_keep_store_cpu_charge() {
     let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(128, 64).await);
     let (mut scene, _store, ledger, _directory, source) = resident_raster_scene(12).await;
     compositor.set_resident_ledger(ledger.clone());
-    render_pixels(&mut compositor, &mut scene, &surface);
+    render_resident_pixels(&mut compositor, &mut scene, &surface);
     assert!(
         compositor.resident_image_texture_cache.is_empty(),
         "8 CPU + 8 GPU exceeds cap"
@@ -298,7 +307,7 @@ async fn resident_raster_gpu_budget_and_degradation_keep_store_cpu_charge() {
         texture_quality_threshold_px: 1,
         texture_scale_factor: 0.5,
     });
-    render_pixels(&mut compositor, &mut scene, &surface);
+    render_resident_pixels(&mut compositor, &mut scene, &surface);
     let entry = &compositor.resident_image_texture_cache[&source.resource_id()];
     assert_eq!((entry.width, entry.height), (1, 1));
     assert_eq!(ledger.snapshot().resource_bytes, 12);
@@ -356,12 +365,13 @@ async fn resident_raster_stale_draw_denies_revoked_source_with_live_same_hash_pe
     // keeps the shared GPU cache entry after A is revoked before encoding.
     directory.with_agents_of(Default::default());
     let frame = surface.acquire_frame().unwrap();
-    let (encoder, _, _, signature_current) =
+    let (mut encoder, _, _, signature_current) =
         compositor.encode_frame(&[], &frame.view, &scene, &commands, 128, 64, false, 0, 0);
     assert!(
         !signature_current,
         "denied stale draw invalidates predicted presentation signature"
     );
+    surface.copy_to_buffer(&mut encoder);
     compositor.queue.submit(std::iter::once(encoder.finish()));
     let pixels = surface.read_pixels(&compositor.device);
     assert_ne!(
@@ -428,7 +438,7 @@ async fn resident_raster_respects_background_and_content_bands() {
                 ),
             )
             .unwrap();
-        let pixels = render_pixels(&mut compositor, &mut scene, &surface);
+        let pixels = render_resident_pixels(&mut compositor, &mut scene, &surface);
         assert_pixel_color(
             &pixels,
             128,
@@ -457,7 +467,7 @@ async fn resident_raster_respects_background_and_content_bands() {
         assert_pixel_color(
             &pixels,
             128,
-            24,
+            13,
             32,
             expected,
             8,

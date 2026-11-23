@@ -657,18 +657,18 @@ async fn test_three_pass_ordering_independent_of_registration_order() {
     assert!(
         matches!(&passes[0], GeometryPass::Flat { vertices, clear: true } if vertices == &(0..6))
     );
-    assert!(matches!(&passes[1], GeometryPass::RoundedRects(cmds) if cmds.is_empty()));
+    assert!(matches!(&passes[1], GeometryPass::RoundedRects { cmds, .. } if cmds.is_empty()));
     assert!(
         matches!(&passes[2], GeometryPass::Flat { vertices, clear: false } if vertices == &(6..12))
     );
     assert!(
-        matches!(&passes[3], GeometryPass::RoundedRects(cmds) if std::ptr::eq(*cmds, inputs.rr_content.as_slice()))
+        matches!(&passes[3], GeometryPass::RoundedRects { cmds, .. } if std::ptr::eq(*cmds, inputs.rr_content.as_slice()))
     );
     assert!(
         matches!(&passes[4], GeometryPass::Flat { vertices, clear: false } if vertices == &(12..18))
     );
     assert!(
-        matches!(&passes[5], GeometryPass::RoundedRects(cmds) if std::ptr::eq(*cmds, inputs.rr_post.as_slice()))
+        matches!(&passes[5], GeometryPass::RoundedRects { cmds, .. } if std::ptr::eq(*cmds, inputs.rr_post.as_slice()))
     );
 
     compositor.render_frame_headless(&mut layered, &surface);
