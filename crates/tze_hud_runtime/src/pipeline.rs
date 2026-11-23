@@ -450,11 +450,10 @@ impl Default for FramePipeline {
 /// (windowed compositor, headless runtime, GPU-free harness) so none of them
 /// can skip a step.
 ///
-/// Applies batches whose `present_at` has arrived (invariant 1), removes
-/// expired tiles and zone and widget publications, and expires leases whose
-/// TTL or orphan grace has elapsed (invariant 4). Returns the terminal lease
-/// expiries; the caller forwards them to sessions after releasing the scene
-/// lock.
+/// Applies publications whose `present_at` has arrived (invariant 1), removes
+/// expired zone and widget content, and expires leases whose TTL or orphan
+/// grace has elapsed (invariant 4). The caller forwards the returned terminal
+/// lease expiries to sessions after releasing the scene lock.
 pub(crate) fn sweep_timed_scene_state(
     scene: &mut SceneGraph,
 ) -> Vec<tze_hud_scene::types::LeaseExpiry> {

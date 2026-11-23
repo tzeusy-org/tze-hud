@@ -1,15 +1,11 @@
-//! Timed content: publications held until `present_at`, tiles swept at
-//! `expires_at`.
+//! Schedule zone and widget publications for `present_at`.
 //!
 //! Arrival time is not presentation time (invariant 1). A publication whose
 //! `present_at` is in the future waits in
 //! [`SceneGraph::scheduled_publications`] and is applied by
-//! [`SceneGraph::apply_due_publications`] once due. A batch with
-//! `expires_at` stamps that deadline on the tiles it creates or targets, and
-//! [`SceneGraph::drain_expired_tiles`] removes them once it passes. Both run
-//! in the compositor's per-frame commit stage, and
-//! [`SceneGraph::next_timed_content_wall_us`] gives the scheduler one exact
-//! wake for the earliest deadline.
+//! [`SceneGraph::apply_due_publications`] in the frame commit stage once due.
+//! [`SceneGraph::next_timed_content_wall_us`] gives the scheduler the earliest
+//! eligible publication time.
 
 use super::SceneGraph;
 use super::publish::{Publication, Publisher};
