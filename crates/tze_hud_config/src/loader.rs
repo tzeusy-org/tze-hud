@@ -11,7 +11,6 @@ use tze_hud_scene::config::{
 };
 
 use crate::raw::RawConfig;
-use crate::resolver;
 use crate::runtime_widget_assets;
 use crate::themes;
 use crate::tokens;
@@ -21,12 +20,12 @@ use crate::widgets;
 
 /// Current config schema version. An absent `schema_version` field is treated as
 /// this value, so existing (unversioned) v1 configs load unchanged.
-pub const CURRENT_CONFIG_SCHEMA_VERSION: u32 = 1;
+const CURRENT_CONFIG_SCHEMA_VERSION: u32 = 1;
 
 /// Maximum config schema version this runtime can load. A config declaring a
 /// `schema_version` greater than this fails closed with
 /// `CONFIG_SCHEMA_VERSION_UNSUPPORTED`.
-pub const MAX_SUPPORTED_CONFIG_SCHEMA_VERSION: u32 = 1;
+const MAX_SUPPORTED_CONFIG_SCHEMA_VERSION: u32 = 1;
 
 // ─── TzeHudConfig ─────────────────────────────────────────────────────────────
 
@@ -268,14 +267,6 @@ impl TzeHudConfig {
             source_path,
         })
     }
-
-    // ── resolve_config_path ───────────────────────────────────────────────────
-
-    /// Resolve the config file path: (1) `cli_path`, (2) `$TZE_HUD_CONFIG`,
-    /// (3) `./tze_hud.toml`, (4) XDG config. `Err` lists the paths tried.
-    pub fn resolve_config_path(cli_path: Option<&str>) -> Result<String, Vec<String>> {
-        resolver::resolve_config_path(cli_path)
-    }
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -410,7 +401,7 @@ pub const DEFAULT_MCP_PORT: u16 = 9090;
 /// The gRPC port when nothing sets one.
 pub const DEFAULT_GRPC_PORT: u16 = 50051;
 /// Highest `[runtime] fps`.
-pub const MAX_FPS: u32 = 240;
+const MAX_FPS: u32 = 240;
 
 /// The frame rate cap when nothing sets one.
 pub const DEFAULT_FPS: u32 = 60;

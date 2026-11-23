@@ -121,10 +121,10 @@ in the scene and publishes the new token map in `LiveTokens`, which the
 compositor and main thread take on their next turn. The windows report each
 monitor's scale factor to `Appearance::set_display_scales`; the token map
 carries `runtime.px_scale` (monitor scale × Windows text size × `ui.scale`,
-the last two held to 0.5–3.0 by `tokens::effective_scale`), and every size read
-multiplies by it (`tze_hud_config::tokens::token_px`, the policy builder,
-the compositor's token resolvers). MCP and
-gRPC share [`SharedAgents`](../crates/tze_hud_scene/src/config/agents.rs).
+the last two held to 0.5–3.0 by `tokens::effective_scale`). The policy builder
+and compositor token resolvers use that factor to convert logical sizes to
+physical pixels. MCP and gRPC share
+[`SharedAgents`](../crates/tze_hud_scene/src/config/agents.rs).
 Network listeners bind loopback and local Tailscale-interface addresses
 ([`net_addrs`](../crates/tze_hud_runtime/src/net_addrs.rs)).
 [`http::route`](../crates/tze_hud_runtime/src/http.rs) keeps `/pair` and

@@ -41,21 +41,6 @@ fn parse_error_includes_line_column() {
     }
 }
 
-// ── Configuration File Resolution Order ─────────────────────────────────
-
-/// WHEN no config file found at any location THEN Err lists searched paths.
-#[test]
-fn no_config_found_lists_searched_paths() {
-    let result =
-        TzeHudConfig::resolve_config_path(Some("/tmp/tze_hud_no_such_file_j90m_test.toml"));
-    match result {
-        Err(paths) => {
-            assert!(!paths.is_empty(), "searched paths must be listed");
-        }
-        Ok(_) => panic!("should not have found a non-existent file"),
-    }
-}
-
 // ── Minimal Valid Configuration ─────────────────────────────────────────
 
 /// WHEN minimal config (runtime + one tab) THEN freeze succeeds.

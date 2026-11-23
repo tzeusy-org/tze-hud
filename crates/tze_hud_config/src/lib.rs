@@ -15,65 +15,38 @@ pub mod config_write;
 pub mod displays;
 pub mod loader;
 pub mod policy_builder;
-// Inside the T7 portal boundary; narrowed when the T7 epic lands.
-#[allow(unreachable_pub)]
 pub mod portal_tokens;
 pub mod raw;
-pub mod resolver;
+mod resolver;
 pub mod runtime_widget_assets;
 #[cfg(test)]
 mod tests;
 pub mod themes;
 pub mod tokens;
-pub mod validate;
+mod validate;
 pub mod widgets;
 
 pub use agents_file::{
-    AGENTS_FILE_NAME, AgentChange, AgentRecord, AgentsFile, AgentsFileError, Edited,
-    agents_path_for,
+    AgentChange, AgentRecord, AgentsFile, AgentsFileError, Edited, agents_path_for,
 };
-pub use allow::{Grant, allow_to_permissions, validate_allow_entry, with_grant};
+pub use allow::Grant;
 pub use config_write::{
     ConfigWriteError, RuntimeUpdate, TokenUpdate, WidgetUpdate, check_token_update,
-    is_writable_token, set_design_tokens, set_runtime, set_widget, set_zone_display,
+    set_design_tokens, set_runtime, set_widget, set_zone_display,
 };
 pub use loader::{
-    DEFAULT_FPS, DEFAULT_GRPC_PORT, DEFAULT_LOG_LEVEL, DEFAULT_MCP_PORT, LOG_LEVELS, MAX_FPS,
-    TzeHudConfig, runtime_section,
+    DEFAULT_FPS, DEFAULT_GRPC_PORT, DEFAULT_LOG_LEVEL, DEFAULT_MCP_PORT, LOG_LEVELS, TzeHudConfig,
+    runtime_section,
 };
 pub use policy_builder::{apply_token_defaults_for_zone, build_effective_policy};
 pub use portal_tokens::{
-    PORTAL_TOKEN_COLLAPSED_BACKGROUND, PORTAL_TOKEN_COLLAPSED_FONT_SIZE,
-    PORTAL_TOKEN_COLLAPSED_TEXT_COLOR, PORTAL_TOKEN_COMPOSER_AT_CAPACITY_COLOR,
-    PORTAL_TOKEN_COMPOSER_BACKGROUND, PORTAL_TOKEN_COMPOSER_CARET_COLOR,
-    PORTAL_TOKEN_COMPOSER_FONT_SIZE, PORTAL_TOKEN_COMPOSER_PLACEHOLDER_COLOR,
-    PORTAL_TOKEN_COMPOSER_SELECTION_COLOR, PORTAL_TOKEN_COMPOSER_TEXT_COLOR,
-    PORTAL_TOKEN_DIVIDER_COLOR, PORTAL_TOKEN_FOCUS_RING_COLOR, PORTAL_TOKEN_FOCUS_RING_WIDTH_PX,
-    PORTAL_TOKEN_FRAME_BACKGROUND, PORTAL_TOKEN_FRAME_BORDER_COLOR, PORTAL_TOKEN_FRAME_OPACITY,
-    PORTAL_TOKEN_HEADER_FONT_SIZE, PORTAL_TOKEN_HEADER_TEXT_COLOR,
-    PORTAL_TOKEN_LIFECYCLE_ACTIVE_COLOR, PORTAL_TOKEN_LIFECYCLE_ATTACHED_COLOR,
-    PORTAL_TOKEN_LIFECYCLE_ATTENTION_COLOR, PORTAL_TOKEN_LIFECYCLE_INACTIVE_COLOR,
-    PORTAL_TOKEN_SCROLL_INDICATOR_COLOR, PORTAL_TOKEN_SCROLL_INDICATOR_MIN_HEIGHT_PX,
-    PORTAL_TOKEN_SCROLL_INDICATOR_WIDTH_PX, PORTAL_TOKEN_SPACING_CONTENT_INSET_PX,
-    PORTAL_TOKEN_SPACING_HEADER_HEIGHT_PX, PORTAL_TOKEN_SPACING_SECTION_GAP_PX,
-    PORTAL_TOKEN_TIMESTAMP_COLOR, PORTAL_TOKEN_TIMESTAMP_GRANULARITY,
-    PORTAL_TOKEN_TRANSCRIPT_BACKGROUND, PORTAL_TOKEN_TRANSCRIPT_FONT_SIZE,
-    PORTAL_TOKEN_TRANSCRIPT_MAX_MEASURE_PX, PORTAL_TOKEN_TRANSCRIPT_TEXT_COLOR,
-    PORTAL_TOKEN_TRANSITION_IN_MS, PORTAL_TOKEN_TRANSITION_OUT_MS,
-    PORTAL_TOKEN_WINDOW_MIN_HEIGHT_PX, PORTAL_TOKEN_WINDOW_MIN_WIDTH_PX,
-    PORTAL_TOKEN_WINDOW_RESIZE_AFFORDANCE_PX, PORTAL_TOKEN_WINDOW_RESIZE_GRIP_COLOR,
-    PORTAL_TOKEN_WINDOW_RESIZE_GRIP_HOVER_COLOR, PORTAL_TOKEN_WINDOW_RESIZE_GRIP_SIZE_PX,
-    PORTAL_TOKEN_WINDOW_RESIZE_STEP_PX, PortalPartTokens, TimestampGranularity,
-    resolve_portal_tokens,
+    PORTAL_TOKEN_COLLAPSED_FONT_SIZE, PORTAL_TOKEN_TRANSCRIPT_TEXT_COLOR, PortalPartTokens,
+    TimestampGranularity, resolve_portal_tokens,
 };
 pub use resolver::resolve_config_path;
 pub use runtime_widget_assets::{
-    DEFAULT_MAX_AGENT_BYTES as DEFAULT_WIDGET_RUNTIME_MAX_AGENT_BYTES,
-    DEFAULT_MAX_TOTAL_BYTES as DEFAULT_WIDGET_RUNTIME_MAX_TOTAL_BYTES,
-    RuntimeWidgetAssetStoreConfig, resolve_runtime_widget_asset_store, resolve_store_path,
+    RuntimeWidgetAssetStoreConfig, resolve_runtime_widget_asset_store,
 };
 pub use tze_hud_scene::{DEFAULT_ANSWER_WINDOW_MS, MAX_ANSWER_WINDOW_MS};
 pub use validate::validate_config;
-pub use widgets::{
-    LoadedWidgetType, build_widget_instance, validate_widget_bundles, validate_widget_instances,
-};
+pub use widgets::{LoadedWidgetType, build_widget_instance};

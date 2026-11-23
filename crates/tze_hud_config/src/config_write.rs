@@ -20,7 +20,7 @@ use crate::themes::{THEME_KEY, validate_theme};
 /// Whether the control panel may write `[design_tokens] key`: the theme,
 /// the font roles (`font.serif` is a role without a canonical default) and
 /// every canonical token.
-pub fn is_writable_token(key: &str) -> bool {
+fn is_writable_token(key: &str) -> bool {
     key == THEME_KEY || key == FONT_SERIF || crate::tokens::canonical_token(key).is_some()
 }
 
@@ -93,7 +93,7 @@ fn validate(updates: &[(&str, TokenUpdate)]) -> Result<(), ConfigWriteError> {
 
 /// Check one update without touching the file. Any key may be removed (so
 /// "Reset all" also clears hand-written overrides such as `portal.*`
-/// colors); only [`is_writable_token`] keys may be set, and only to a value
+/// colors); only writable keys may be set, and only to a value
 /// of their kind.
 pub fn check_token_update(key: &str, update: &TokenUpdate) -> Result<(), ConfigWriteError> {
     let TokenUpdate::Set(value) = update else {
@@ -346,7 +346,7 @@ pub enum RuntimeUpdate {
 
 impl RuntimeUpdate {
     /// The `[runtime]` key this writes.
-    pub fn key(&self) -> &'static str {
+    fn key(&self) -> &'static str {
         match self {
             Self::McpPort(_) => "mcp_port",
             Self::GrpcPort(_) => "grpc_port",
