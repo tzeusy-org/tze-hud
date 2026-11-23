@@ -69,8 +69,7 @@ pub use command::{
 };
 pub use composer_draft::{
     ComposerDraft, ComposerDraftManager, ComposerInputBoxGeometry, ComposerOutcome,
-    ComposerVisualLayout, ComposerVisualLine, DEFAULT_DRAFT_CAP, EditOutcome, MAX_DRAFT_BYTES,
-    Selection,
+    ComposerVisualLayout, ComposerVisualLine, EditOutcome, MAX_DRAFT_BYTES, Selection,
 };
 pub use focus::{
     FocusGainedEvent, FocusLostEvent, FocusLostReason, FocusManager, FocusRequest, FocusResult,
