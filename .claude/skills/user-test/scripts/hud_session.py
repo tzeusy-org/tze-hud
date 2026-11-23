@@ -3,13 +3,120 @@
 from collections import deque
 from dataclasses import dataclass
 import hashlib
+import math
 
-from hud_hook_socket import TOOL_EVENTS
+from hud_hook_socket import CARD_TTL_MS, TOOL_EVENTS
 
 STATE_METHOD = "notifications/tze/session_state"
 HOLD_MS = 600000
 HOLD_REFRESH_SECONDS = 60
 PENDING_LIMIT = 64
+CARD_SURFACE = "zone:notification-area"
+CARD_DEADLINE_GRACE = 0.25
+
+
+@dataclass
+class CardWait:
+    request: dict
+    peer: object
+    nonce: str
+    admission_deadline: float
+    deadline: float | None = None
+
+    @property
+    def kind(self):
+        return self.request["kind"]
+
+    def publish_arguments(self):
+        return {
+            "surface": CARD_SURFACE,
+            "key": self.kind,
+            "ttl_ms": self.request.get("ttl_ms", CARD_TTL_MS),
+            "content": {
+                "title": self.request["title"],
+                "body": self.request["body"],
+                "actions": [
+                    {"label": label, "callback_id": f"{self.nonce}.{index}"}
+                    for index, label in enumerate(self.request["actions"])
+                ],
+            },
+        }
+
+    def rearm(self, now, expires_ms):
+        self.deadline = now + expires_ms / 1000 + CARD_DEADLINE_GRACE
+
+
+class HookCards:
+    """The bounded live-card table and choice routing; no transport decisions."""
+
+    def __init__(self):
+        self.live = {}
+
+    def admit(self, waiter, now, expires_ms):
+        prior = self.live.get(waiter.kind)
+        self.live[waiter.kind] = waiter
+        waiter.rearm(now, expires_ms)
+        return prior
+
+    def pop(self, waiter):
+        if self.live.get(waiter.kind) is waiter:
+            del self.live[waiter.kind]
+            return True
+        return False
+
+    def wait_ms(self, now):
+        if self.live:
+            first = min(waiter.deadline for waiter in self.live.values())
+            return max(0, min(30_000, math.floor((first - now) * 1000)))
+        return 0
+
+    def due(self, now):
+        return [waiter for waiter in self.live.values() if waiter.deadline <= now]
+
+    def input(self, items):
+        ack, finished = [], []
+        for item in items:
+            if not isinstance(item, dict) or not isinstance(item.get("id"), str):
+                continue
+            ack.append(item["id"])
+            kind = item.get("key")
+            if item.get("s") != CARD_SURFACE or not isinstance(kind, str):
+                continue
+            waiter = self.live.get(kind)
+            if waiter is None:
+                continue
+            event = item.get("kind")
+            if event == "dismiss":
+                # Option D: a prior generation's X carries only its reusable key.
+                reply = {"end": "dismissed"}
+            elif event == "displaced":
+                reply = {"end": "expired"}
+            elif event is None:
+                index = next(
+                    (i for i in range(len(waiter.request["actions"]))
+                     if item.get("action") == f"{waiter.nonce}.{i}"),
+                    None,
+                )
+                if index is None:
+                    continue
+                reply = {"end": "answer", "index": index}
+            else:
+                continue
+            self.pop(waiter)
+            finished.append((waiter, reply))
+        return list(dict.fromkeys(ack)), finished
+
+    def observe_zone(self, waiters, now, held, expires_ms):
+        finished = []
+        for waiter in waiters:
+            if self.live.get(waiter.kind) is not waiter:
+                continue
+            if held:
+                waiter.rearm(now, expires_ms)
+            else:
+                self.pop(waiter)
+                finished.append(waiter)
+        return finished
 
 
 @dataclass(frozen=True)

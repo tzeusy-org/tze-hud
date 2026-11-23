@@ -80,13 +80,66 @@ def normalize_event(payload, transport):
     return event if transport.valid_event(event) else None
 
 
+def hook_transport():
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "user-test" / "scripts"))
+    import hud_hook_socket
+
+    return hud_hook_socket
+
+
+def request_card(kind, title, body, actions, *, timeout_ms, ttl_ms=None):
+    """Request a local hook card and return its terminal IPC result."""
+    import socket
+    import time
+
+    error = {"end": "error"}
+    if sys.platform != "linux" or type(timeout_ms) is not int or timeout_ms <= 0:
+        return error
+    try:
+        transport = hook_transport()
+        request = {"v": 1, "op": "card", "kind": kind, "title": title,
+                   "body": body, "actions": actions}
+        if ttl_ms is not None:
+            request["ttl_ms"] = ttl_ms
+        if not transport.valid_card(request):
+            return error
+        start = time.monotonic()
+        deadline = start + timeout_ms / 1_000
+        with socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET) as peer:
+            if not transport.send_packet(peer, transport.packet_bytes(request)):
+                return error
+            peer.settimeout(max(0.001, min(start + 1, deadline) - time.monotonic()))
+            reply = json.loads(peer.recv(transport.MAX_PACKET))
+            if (not isinstance(reply, dict) or reply.get("ok") is not True
+                    or type(reply.get("expires_in_ms")) is not int or reply["expires_in_ms"] < 0):
+                return error
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return {"end": "expired"}
+            peer.settimeout(remaining)
+            try:
+                result = json.loads(peer.recv(transport.MAX_PACKET))
+            except TimeoutError:
+                return {"end": "expired"}
+        if not isinstance(result, dict):
+            return error
+        end = result.get("end")
+        if end == "answer":
+            index = result.get("index")
+            if type(index) is int and 0 <= index < len(actions):
+                return {"end": end, "index": index}
+        elif end in ("dismissed", "expired", "cancelled", "superseded", "error"):
+            return {"end": end}
+    except (ImportError, OSError, ValueError, TypeError, OverflowError, RecursionError):
+        pass
+    return error
+
+
 def main():
     if not sys.platform.startswith("linux") or sys.argv[1:]:
         return
     try:
-        sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "user-test" / "scripts"))
-        import hud_hook_socket
-
+        hud_hook_socket = hook_transport()
         raw = sys.stdin.buffer.read(INPUT_LIMIT + 1)
         if len(raw) <= INPUT_LIMIT:
             event = normalize_event(json.loads(raw), hud_hook_socket)
