@@ -58,6 +58,8 @@ windows = { workspace = true }
 sha2 = { workspace = true }
 
 [dev-dependencies]
+# Deterministic post-validation barrier for real resident upload/revocation tests.
+tze_hud_resource = { path = "../tze_hud_resource", version = "0.1.0", features = ["test-support"] }
 prost = { workspace = true }
 tze_hud_scene = { path = "../tze_hud_scene", version = "0.1.0" , features = ["test-support"] }
 # Unit tests compile runtime with cfg(test), but its compositor dependency needs

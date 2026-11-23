@@ -51,8 +51,9 @@ Surfaces on that lifecycle, in priority order:
   nothing else.
 - **Two planes, chosen by traffic shape.** MCP for discoverable one-shot calls
   (zones, widgets, portal); the resident gRPC stream handles zone and widget
-  publication, resource upload, and session lifecycle. Native input and
-  input-to-present measurements stay runtime-owned. Future high-rate content
+  publication, resource upload (including validated rasters for configured image
+  zones), and session lifecycle. Native input and input-to-present measurements
+  stay runtime-owned. Future high-rate content
   may use a dedicated stream brokered through MCP; a concrete v2 consumer will
   define that discovery and stream contract. Message classes stay distinct: transactional (acked),
   state-stream (coalesced), ephemeral (droppable).

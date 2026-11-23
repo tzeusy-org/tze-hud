@@ -1262,6 +1262,8 @@ mod tests {
             let publisher = tze_hud_scene::Publisher {
                 namespace: "publication-only".into(),
                 lease_id: None,
+                resident_raster: None,
+                resident_authorization: None,
                 origin: Some(publication_origin),
             };
             let publication = tze_hud_scene::Publication::Zone {

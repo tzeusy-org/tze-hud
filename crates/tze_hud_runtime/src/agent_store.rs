@@ -22,6 +22,7 @@ pub(crate) struct AgentStore {
     live: SharedAgents,
     /// The file as last read or written. The mutex also serializes writers.
     cached: Mutex<Cached>,
+    render_wake: tze_hud_scene::render_wake::RenderWakeNotifier,
 }
 
 struct Cached {
@@ -57,7 +58,18 @@ impl AgentStore {
             path,
             live,
             cached: Mutex::new(Cached { file, stamp }),
+            render_wake: Default::default(),
         }
+    }
+
+    /// Pairing transitions must redraw revoked resident content even when no
+    /// toast or control-panel card is visible. Allow-only edits do not wake.
+    pub(crate) fn with_render_wake(
+        mut self,
+        wake: tze_hud_scene::render_wake::RenderWakeNotifier,
+    ) -> Self {
+        self.render_wake = wake;
+        self
     }
 
     /// The paired agents, reloaded (into the live directory too) when the
@@ -78,7 +90,11 @@ impl AgentStore {
                         );
                         self.live
                             .store(Arc::new(self.live.load().with_agents_of(paired)));
+                        let changed = pairing_changed(&cached.file, &file);
                         cached.file = file;
+                        if changed {
+                            self.render_wake.notify();
+                        }
                     }
                     Err(error) => {
                         tracing::warn!(%error, "agents.toml changed on disk but does not load; keeping the last good store");
@@ -109,14 +125,36 @@ impl AgentStore {
         let mut cached = self.cached.lock().unwrap_or_else(|e| e.into_inner());
         let edited = agents_file::edit(path, change).map_err(|e| e.to_string())?;
         let paired = edited.after.directory().map_err(|e| e.to_string())?;
-        self.live
-            .store(Arc::new(self.live.load().with_agents_of(paired)));
+        let replaced = match change {
+            AgentChange::Pair { agent, .. } | AgentChange::Unpair(agent) => Some(agent.as_str()),
+            _ => None,
+        };
+        // Persist/validate first, then revoke old identities before the live
+        // directory can authenticate a replacement. The writer lock serializes
+        // Pair, Unpair, allow edits and hand-edit reconciliation.
+        self.live.store(Arc::new(
+            self.live.load().with_agent_change(paired, replaced),
+        ));
+        let changed = replaced.is_some() || pairing_changed(&cached.file, &edited.after);
         *cached = Cached {
             file: edited.after.clone(),
             stamp: modified(path),
         };
+        if changed {
+            self.render_wake.notify();
+        }
         Ok(edited)
     }
+}
+
+fn pairing_changed(before: &AgentsFile, after: &AgentsFile) -> bool {
+    before.agents.len() != after.agents.len()
+        || before.agents.iter().any(|(id, old)| {
+            after
+                .agents
+                .get(id)
+                .is_none_or(|new| old.psk_sha256 != new.psk_sha256)
+        })
 }
 
 /// What tells a hand edit apart: modification time and length.
@@ -209,7 +247,37 @@ mod tests {
             "the dev PSK survives"
         );
 
+        let old_pairing = live
+            .load()
+            .resolve("psk-3", "agent-3")
+            .unwrap()
+            .authorization;
+        // Explicit re-pair is a new authority even when the synthetic key is
+        // reused; an allow edit, in contrast, preserves the same authority.
+        store.apply(&pair("agent-3", "psk-3")).unwrap();
+        let replaced = live
+            .load()
+            .resolve("psk-3", "agent-3")
+            .unwrap()
+            .authorization;
+        assert_ne!(old_pairing, replaced);
+        assert!(old_pairing.with_live_grants(|_| ()).is_none());
+        store
+            .apply(&AgentChange::Grant {
+                agent: "agent-3".into(),
+                grant: Grant::Portal,
+                on: false,
+            })
+            .unwrap();
+        assert_eq!(
+            replaced,
+            live.load()
+                .resolve("psk-3", "agent-3")
+                .unwrap()
+                .authorization
+        );
         store.apply(&AgentChange::Unpair("agent-3".into())).unwrap();
+        assert!(replaced.with_live_grants(|_| ()).is_none());
         assert!(
             live.load().resolve("psk-3", "").is_err(),
             "an unpaired key stops working"
@@ -327,6 +395,36 @@ mod tests {
         assert!(rekeyed.allows("publish_zone:subtitle"));
         assert!(!rekeyed.allows("publish_zone:pip"));
         assert_eq!(live.load().resolve("control-key", "").unwrap(), control);
+    }
+
+    #[test]
+    fn pairing_transitions_wake_render_but_allow_edits_do_not() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("agents.toml");
+        std::fs::write(&path, "").unwrap();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let seen = calls.clone();
+        let store = AgentStore::open(Some(path), SharedAgents::default()).with_render_wake(
+            tze_hud_scene::render_wake::RenderWakeNotifier::new(move || {
+                seen.fetch_add(1, Ordering::Relaxed);
+            }),
+        );
+        store.apply(&pair("a", "key-a")).unwrap();
+        let after_pair = calls.load(Ordering::Relaxed);
+        assert_eq!(after_pair, 1);
+        store
+            .apply(&AgentChange::Grant {
+                agent: "a".into(),
+                grant: Grant::Zones,
+                on: false,
+            })
+            .unwrap();
+        assert_eq!(calls.load(Ordering::Relaxed), after_pair);
+        store.apply(&pair("a", "key-a")).unwrap();
+        assert_eq!(calls.load(Ordering::Relaxed), after_pair + 1);
+        store.apply(&AgentChange::Unpair("a".into())).unwrap();
+        assert_eq!(calls.load(Ordering::Relaxed), after_pair + 2);
     }
 
     #[test]

@@ -132,6 +132,28 @@ Reconnects use fresh authenticated `SessionInit`; connected safe-mode
 `SessionSuspended` / `SessionResumed` notices remain. Local portal and internal
 lease orphan grace stay with their existing scene/runtime owners.
 
+Resident raster uploads capture the pairing's opaque authorization during
+registration. Allow-list edits keep that identity; a successful Unpair or
+re-pair revokes it before the live directory changes. Full-byte validation
+runs outside locks. Store capacity, one immutable decoded raster and the
+pairing's first grant commit under resource admission and the short live-pairing
+guard. Equal validated uploads share the retained allocation and CPU charge;
+digest-only reuse requires that pairing's matching grant. SVG/font behavior
+retains its existing path. Resident static-image admission checks the live grant
+and static-image zone allowlist before immediate commit or future scheduling.
+Scheduled application rechecks the grant. Active and scheduled records retain
+the store's immutable pixel allocation and pairing as runtime-only provenance;
+serialized and typed snapshots convey no raster authority. The compositor reads
+only admitted resident provenance into a separate GPU cache; generic tile, icon
+and MCP lookups cannot use it. Pixels stay in the resource store with one CPU
+charge, while GPU admission, degradation and eviction retain the renderer's
+existing policies. Pairing removal/replacement wakes rendering, and revoked
+rasters are excluded before zone selection. The
+[resident raster witness](../scripts/ci/resident_raster_witness.py) captures
+configured-zone pixels through the paired canonical binary on private Xvfb and
+in hosted Windows CI, binding the running build identity to its checkout.
+
+
 Network listeners bind loopback and local Tailscale-interface addresses
 ([`net_addrs`](../crates/tze_hud_runtime/src/net_addrs.rs)).
 [`http::route`](../crates/tze_hud_runtime/src/http.rs) keeps `/pair` and

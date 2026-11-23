@@ -185,6 +185,14 @@ fn not_allowed(seq: u64, agent: &str, entry: &str) -> RequestResult {
     )
 }
 
+fn revoked(seq: u64) -> RequestResult {
+    fail(
+        seq,
+        "NOT_ALLOWED",
+        "pairing was revoked; pair again and reconnect with a fresh SessionInit",
+    )
+}
+
 fn safe_mode(seq: u64) -> RequestResult {
     fail(
         seq,
@@ -224,6 +232,7 @@ pub(super) async fn handle_publish(
                 .safe_mode_atomic
                 .load(std::sync::atomic::Ordering::Acquire);
         let mut scene = st.scene.lock().await;
+        scene.drain_revoked_resident_rasters();
         let (result, ephemeral, touched) = match &surface {
             Surface::Zone(zone) => {
                 let ephemeral = scene
@@ -233,7 +242,7 @@ pub(super) async fn handle_publish(
                 let r = if paused {
                     safe_mode(seq)
                 } else {
-                    publish_zone(&mut scene, session, seq, zone, &publish)
+                    publish_zone(&mut scene, &st.resource_store, session, seq, zone, &publish)
                 };
                 (r, ephemeral, Some((ElementType::Zone, zone.clone())))
             }
@@ -276,6 +285,7 @@ pub(super) async fn handle_publish(
 
 fn publish_zone(
     scene: &mut tze_hud_scene::graph::SceneGraph,
+    resource_store: &tze_hud_resource::ResourceStore,
     session: &StreamSession,
     seq: u64,
     zone: &str,
@@ -321,6 +331,24 @@ fn publish_zone(
                 )
             })
     });
+    let resident_raster = if let tze_hud_scene::ZoneContent::StaticImage(id) = &content {
+        let stored_id = tze_hud_resource::ResourceId::from_bytes(*id.as_bytes());
+        let Some(raster) = resource_store.validated_raster(&stored_id) else {
+            let error = tze_hud_scene::SceneGraph::raster_unavailable();
+            return fail(seq, validation_error_code(&error), error.to_string());
+        };
+        Some(std::sync::Arc::new(
+            tze_hud_scene::ResidentRasterSource::new(
+                *id,
+                raster.width,
+                raster.height,
+                std::sync::Arc::clone(&raster.pixels),
+                session.authorization.clone(),
+            ),
+        ))
+    } else {
+        None
+    };
     let publication = tze_hud_scene::Publication::Zone {
         zone_name: zone.to_string(),
         content,
@@ -333,7 +361,15 @@ fn publish_zone(
         held: false,
     };
     // present_at in the future: hold the publish until due (invariant 1).
-    present_or_schedule(scene, session, seq, publish.present_at_us, now, publication)
+    present_or_schedule(
+        scene,
+        session,
+        seq,
+        publish.present_at_us,
+        now,
+        publication,
+        resident_raster,
+    )
 }
 
 /// Commit now, or hold until `present_at_us` (invariant 1).
@@ -344,15 +380,20 @@ fn present_or_schedule(
     present_at_us: u64,
     now: u64,
     publication: tze_hud_scene::Publication,
+    resident_raster: Option<std::sync::Arc<tze_hud_scene::ResidentRasterSource>>,
 ) -> RequestResult {
     let publisher = tze_hud_scene::Publisher {
         namespace: session.namespace.clone(),
         lease_id: None,
+        resident_raster,
+        resident_authorization: Some(session.authorization.clone()),
         origin: Some(session.publication_origin),
     };
     if present_at_us > now {
-        scene.schedule_publication(present_at_us, publisher, publication);
-        return ok(seq);
+        return match scene.schedule_resident_publication(present_at_us, publisher, publication) {
+            Ok(_) => ok(seq),
+            Err(e) => fail(seq, validation_error_code(&e), e.to_string()),
+        };
     }
     match scene.publish(&publisher, &publication) {
         Ok(_) => ok(seq),
@@ -431,7 +472,15 @@ fn publish_widget(
         ttl_us: (publish.ttl_ms > 0).then(|| publish.ttl_ms.saturating_mul(1_000)),
         expires_at_wall_us: (publish.expires_at_us > 0).then_some(publish.expires_at_us),
     };
-    present_or_schedule(scene, session, seq, publish.present_at_us, now, publication)
+    present_or_schedule(
+        scene,
+        session,
+        seq,
+        publish.present_at_us,
+        now,
+        publication,
+        None,
+    )
 }
 
 /// Absolute content expiry: `expires_at_us` if set, else `ttl_ms` counted
@@ -497,7 +546,7 @@ pub(super) async fn handle_clear(
     let (result, question_wakes) = {
         let st = state.lock().await;
         let mut scene = st.scene.lock().await;
-        let r = match &surface {
+        let r = session.authorization.with_live_grants(|_| match &surface {
             Surface::Zone(zone) if !clear.key.is_empty() => {
                 scene.clear_notification_key(zone, &session.namespace, &clear.key)
             }
@@ -507,10 +556,11 @@ pub(super) async fn handle_clear(
                 reason: "keyed clear requires a notification zone".into(),
             }),
             Surface::Widget(widget) => scene.clear_widget_for_publisher(widget, &session.namespace),
-        };
+        });
         let result = match r {
-            Ok(()) => ok(seq),
-            Err(e) => fail(seq, validation_error_code(&e), e.to_string()),
+            None => revoked(seq),
+            Some(Ok(())) => ok(seq),
+            Some(Err(e)) => fail(seq, validation_error_code(&e), e.to_string()),
         };
         (result, scene.take_notification_wait_notifiers())
     };
@@ -553,32 +603,38 @@ pub(super) async fn handle_hold(
         {
             safe_mode(seq)
         } else {
-            let expires = (hold.ttl_ms > 0).then(|| {
-                scene
-                    .now_wall_us()
-                    .saturating_add(hold.ttl_ms.saturating_mul(1_000))
-            });
-            let held_ttl = RequestResult {
-                ttl_ms: hold.ttl_ms,
-                ..ok(seq)
-            };
-            match &surface {
-                Surface::Zone(zone) => {
-                    let ttl_us = (hold.ttl_ms > 0).then(|| hold.ttl_ms.saturating_mul(1_000));
-                    if scene.hold_zone_publications(zone, &session.namespace, ttl_us) {
-                        held_ttl
-                    } else {
-                        not_held(seq, &hold.surface)
+            session
+                .authorization
+                .with_live_grants(|_| {
+                    let expires = (hold.ttl_ms > 0).then(|| {
+                        scene
+                            .now_wall_us()
+                            .saturating_add(hold.ttl_ms.saturating_mul(1_000))
+                    });
+                    let held_ttl = RequestResult {
+                        ttl_ms: hold.ttl_ms,
+                        ..ok(seq)
+                    };
+                    match &surface {
+                        Surface::Zone(zone) => {
+                            let ttl_us =
+                                (hold.ttl_ms > 0).then(|| hold.ttl_ms.saturating_mul(1_000));
+                            if scene.hold_zone_publications(zone, &session.namespace, ttl_us) {
+                                held_ttl
+                            } else {
+                                not_held(seq, &hold.surface)
+                            }
+                        }
+                        Surface::Widget(widget) => {
+                            if scene.hold_widget_publications(widget, &session.namespace, expires) {
+                                held_ttl
+                            } else {
+                                not_held(seq, &hold.surface)
+                            }
+                        }
                     }
-                }
-                Surface::Widget(widget) => {
-                    if scene.hold_widget_publications(widget, &session.namespace, expires) {
-                        held_ttl
-                    } else {
-                        not_held(seq, &hold.surface)
-                    }
-                }
-            }
+                })
+                .unwrap_or_else(|| revoked(seq))
         }
     };
     if result.ok {

@@ -627,6 +627,17 @@ Zone admission honors the configured contention, publisher caps, and stack depth
 
 Resident resource upload enforces runtime-wide texture memory and resource count, per-resource raw and decoded size, concurrent upload slots, and the upload byte rate. A rejected resource adds no stored object, and its upload reservation is released on failed completion or abort. The upload lane applies byte-rate backpressure while the resident session can still acknowledge heartbeats.
 
+Resident raster first grants validate bytes, type and dimensions and commit under
+current pairing authority with storage and CPU admission. Equal validated images
+share one retained pixel allocation and CPU charge. Immediate and scheduled image
+admission require that pairing's grant and the zone's static-image allowlist; due
+application and retained draw encoding recheck current authority. Unpair or re-pair
+revokes only that incarnation, and old resident operations cannot grant or mutate its replacement's
+content. Typed/wire snapshots retain hashes, not raster authority. GPU textures use
+the existing budget/degradation policy in the configured layer and stay isolated
+from generic tile, icon and MCP lookup.
+
+
 At capacity, MCP releases the least recently called idle scope first. If each
 scope owns state, it releases the least recently called scope overall.
 
@@ -654,6 +665,13 @@ scope owns state, it releases the least recently called scope overall.
   and [`chunked_upload_rejected_at_complete_frees_its_slot_and_stores_nothing`](../crates/tze_hud_resource/tests/store_behavior.rs).
   [`test_resource_upload_backpressure_keeps_heartbeat_responsive`](../crates/tze_hud_protocol/src/session_server/tests/resource_upload.rs)
   covers transport throttling.
+- Current-pairing raster admission, independent grants, revocation races and
+  disconnect-before-worker-join are covered through real resident streams in
+  [`raster_tests`](../crates/tze_hud_runtime/src/shell/control_panel/raster_tests.rs).
+  Store-allocation reuse, isolated lookup, stale draw denial and foreground
+  layering have GPU readback witnesses in
+  [`retained_image`](../crates/tze_hud_compositor/src/renderer/tests/retained_image.rs).
+
 
 Internal scene tiles keep their structural guards, covered by
 [`tile_limit_1024_per_tab_enforced`](../crates/tze_hud_scene/src/graph/limits_tests.rs)

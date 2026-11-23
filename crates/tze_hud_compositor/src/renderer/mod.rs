@@ -393,6 +393,8 @@ pub struct Compositor {
     /// are kept alive by including their ResourceIds in the eviction-guard set
     /// (see `ensure_scene_icon_textures`).
     image_texture_cache: HashMap<ResourceId, ImageTextureEntry>,
+    /// GPU-only resident cache; CPU pixels/charge remain in ResourceStore.
+    resident_image_texture_cache: HashMap<ResourceId, ImageTextureEntry>,
     /// Negative cache for SVG paths that failed to load/parse.
     ///
     /// Paths are inserted on the first failed `ensure_icon_texture` call.
@@ -731,7 +733,10 @@ enum GeometryPass<'a> {
         vertices: std::ops::Range<usize>,
         clear: bool,
     },
-    RoundedRects(&'a [RoundedRectDrawCmd]),
+    RoundedRects {
+        cmds: &'a [RoundedRectDrawCmd],
+        layer: LayerAttachment,
+    },
 }
 
 fn geometry_pass_plan(
@@ -747,17 +752,26 @@ fn geometry_pass_plan(
             vertices: 0..bg_end,
             clear: true,
         },
-        GeometryPass::RoundedRects(&inputs.rr_background),
+        GeometryPass::RoundedRects {
+            cmds: &inputs.rr_background,
+            layer: LayerAttachment::Background,
+        },
         GeometryPass::Flat {
             vertices: bg_end..chrome_start,
             clear: false,
         },
-        GeometryPass::RoundedRects(&inputs.rr_content),
+        GeometryPass::RoundedRects {
+            cmds: &inputs.rr_content,
+            layer: LayerAttachment::Content,
+        },
         GeometryPass::Flat {
             vertices: chrome_start..vertex_count,
             clear: false,
         },
-        GeometryPass::RoundedRects(&inputs.rr_post),
+        GeometryPass::RoundedRects {
+            cmds: &inputs.rr_post,
+            layer: LayerAttachment::Chrome,
+        },
     ]
 }
 
@@ -910,6 +924,27 @@ pub(crate) fn zone_stacks_for<'a>(
     name: &'a String,
     publishes: &'a Vec<ZonePublishRecord>,
 ) -> Vec<ZoneStack<'a>> {
+    let eligible = |record: &&ZonePublishRecord| {
+        record
+            .resident_raster
+            .as_ref()
+            .is_none_or(|source| source.is_authorized())
+    };
+    if publishes.iter().any(|record| !eligible(&record)) {
+        let retained: Vec<_> = publishes.iter().filter(eligible).cloned().collect();
+        if retained.is_empty() {
+            return Vec::new();
+        }
+        // Reuse the same placement/sort path and promote its temporary borrows.
+        return zone_stacks_for(layout, name, &retained)
+            .into_iter()
+            .map(|stack| ZoneStack {
+                name,
+                publishes: std::borrow::Cow::Owned(stack.publishes.into_owned()),
+                display: stack.display,
+            })
+            .collect();
+    }
     let own = ZoneStack::zone_display(layout, name);
     let elsewhere = |record: &ZonePublishRecord| {
         ZoneStack::placed_display(layout, own, record.display.as_deref())
@@ -1154,6 +1189,7 @@ impl Compositor {
             image_bytes: HashMap::new(),
             image_dims: HashMap::new(),
             image_texture_cache: HashMap::new(),
+            resident_image_texture_cache: HashMap::new(),
             failed_icon_paths: HashSet::new(),
             local_composer_state: Arc::new(StdMutex::new(None)),
             composer_visual_layout: Arc::new(StdMutex::new(None)),
@@ -1510,6 +1546,7 @@ impl Compositor {
             image_bytes: HashMap::new(),
             image_dims: HashMap::new(),
             image_texture_cache: HashMap::new(),
+            resident_image_texture_cache: HashMap::new(),
             failed_icon_paths: HashSet::new(),
             local_composer_state: Arc::new(StdMutex::new(None)),
             composer_visual_layout: Arc::new(StdMutex::new(None)),
@@ -2547,7 +2584,7 @@ impl Compositor {
         for publishes in scene.zone_registry.active_publishes.values() {
             for record in publishes {
                 match &record.content {
-                    ZoneContent::StaticImage(resource_id) => {
+                    ZoneContent::StaticImage(resource_id) if record.resident_raster.is_none() => {
                         referenced.insert(*resource_id);
                     }
                     ZoneContent::Notification(payload) if !payload.icon.is_empty() => {
@@ -2560,6 +2597,18 @@ impl Compositor {
             }
         }
         referenced
+    }
+
+    fn scene_resident_image_resource_ids(scene: &SceneGraph) -> HashSet<ResourceId> {
+        scene
+            .zone_registry
+            .active_publishes
+            .values()
+            .flatten()
+            .filter_map(|record| record.resident_raster.as_ref())
+            .filter(|source| source.is_authorized())
+            .map(|source| source.resource_id())
+            .collect()
     }
 
     /// Every node under a tile the owner has not hidden.
@@ -2608,6 +2657,17 @@ impl Compositor {
             for record in publishes {
                 match &record.content {
                     ZoneContent::StaticImage(resource_id) => {
+                        if let Some(source) = &record.resident_raster {
+                            if let Some((pixels, width, height)) = source.pixels_if_authorized() {
+                                self.ensure_resident_image_texture(
+                                    *resource_id,
+                                    pixels,
+                                    width,
+                                    height,
+                                );
+                            }
+                            continue;
+                        }
                         referenced.insert(*resource_id);
                         // Use the explicit dimensions stored by `register_image_bytes`.
                         // This correctly handles non-square images (e.g. 640×360) that
@@ -2704,8 +2764,9 @@ impl Compositor {
     ///
     /// # Returns
     ///
-    /// `(encoder, encode_us)` — the ready-to-submit encoder and the wall-clock
-    /// microseconds spent encoding (for `FrameTelemetry::stage6_render_encode_us`).
+    /// `(encoder, encode_us, signature_current)` — the ready-to-submit encoder,
+    /// whether raster authority still matches prediction, and encoding wall-clock
+    /// microseconds (for `FrameTelemetry::stage6_render_encode_us`).
     /// `bg_vertex_count`: number of vertices at the start of `vertices` that
     /// make up the initial Background slice.  This includes any overlay-mode
     /// clear quad prepended before Background zone vertices, so in overlay
@@ -2928,13 +2989,15 @@ impl Compositor {
         vertices: &[RectVertex],
         frame_view: &wgpu::TextureView,
         inputs: &EncodeInputs,
+        textured_cmds: &[TexturedDrawCmd],
         surf_w: u32,
         surf_h: u32,
         use_overlay_pipeline: bool,
         bg_vertex_count: usize,
         chrome_vertex_start: usize,
-    ) -> (wgpu::CommandEncoder, u64) {
+    ) -> (wgpu::CommandEncoder, u64, bool) {
         let encode_start = std::time::Instant::now();
+        let mut signature_current = true;
 
         // Upload the full vertex buffer once — individual passes render
         // different vertex sub-ranges from it using draw ranges.
@@ -2969,8 +3032,16 @@ impl Compositor {
         for pass in geometry_pass_plan(inputs, vertices.len(), bg_vertex_count, chrome_vertex_start)
         {
             match pass {
-                GeometryPass::RoundedRects(cmds) => {
+                GeometryPass::RoundedRects { cmds, layer } => {
                     self.encode_rounded_rect_pass(&mut encoder, frame_view, cmds, sw, sh);
+                    signature_current &= self.encode_image_pass(
+                        &mut encoder,
+                        frame_view,
+                        textured_cmds,
+                        sw,
+                        sh,
+                        Some(layer),
+                    );
                 }
                 GeometryPass::Flat { vertices, clear } => {
                     // The initial Clear pass always runs, including an empty frame.
@@ -3106,7 +3177,7 @@ impl Compositor {
             }
         }
         let encode_us = encode_start.elapsed().as_micros() as u64;
-        (encoder, encode_us)
+        (encoder, encode_us, signature_current)
     }
 
     /// Final pass of every frame: the system card (or, while open, the control
@@ -3166,24 +3237,26 @@ impl Compositor {
         vertices: &[RectVertex],
         frame_view: &wgpu::TextureView,
         scene: &SceneGraph,
+        textured_cmds: &[TexturedDrawCmd],
         surf_w: u32,
         surf_h: u32,
         use_overlay_pipeline: bool,
         bg_vertex_count: usize,
         chrome_vertex_start: usize,
-    ) -> (wgpu::CommandEncoder, u64, EncodeInputs) {
+    ) -> (wgpu::CommandEncoder, u64, EncodeInputs, bool) {
         let inputs = self.collect_encode_inputs(scene, surf_w, surf_h);
-        let (encoder, encode_us) = self.encode_from_inputs(
+        let (encoder, encode_us, signature_current) = self.encode_from_inputs(
             vertices,
             frame_view,
             &inputs,
+            textured_cmds,
             surf_w,
             surf_h,
             use_overlay_pipeline,
             bg_vertex_count,
             chrome_vertex_start,
         );
-        (encoder, encode_us, inputs)
+        (encoder, encode_us, inputs, signature_current)
     }
 }
 

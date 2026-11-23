@@ -5,6 +5,16 @@ use tze_hud_scene::types::*;
 
 // ─── Image fit mode UV calculations ─────────────────────────────────────────
 
+/// Resident textures never enter the generic tile/icon/MCP image cache.
+#[derive(Clone)]
+pub(super) enum ImageSource {
+    Generic,
+    Resident {
+        proof: std::sync::Arc<ResidentRasterSource>,
+        layer: LayerAttachment,
+    },
+}
+
 /// A textured draw command collected during scene traversal.
 ///
 /// These are collected separately from color quads because they use a
@@ -12,6 +22,7 @@ use tze_hud_scene::types::*;
 #[derive(Clone)]
 pub(super) struct TexturedDrawCmd {
     pub(super) resource_id: ResourceId,
+    pub(super) source: ImageSource,
     /// Pixel-space position and size of the destination rectangle.
     pub(super) x: f32,
     pub(super) y: f32,

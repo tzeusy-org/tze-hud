@@ -907,6 +907,7 @@ fn zone_occupancy_query_returns_correct_state() {
         .push(tze_hud_scene::types::ZonePublishRecord {
             publication_id: SceneId::new(),
             lease_id: None,
+            resident_raster: None,
             publication_origin: None,
             caption: None,
             window_token: None,

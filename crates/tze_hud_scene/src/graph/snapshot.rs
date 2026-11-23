@@ -91,6 +91,9 @@ impl SceneGraph {
             .iter()
             .map(|(zone_name, records)| {
                 let mut sorted = records.clone();
+                for record in &mut sorted {
+                    record.resident_raster = None;
+                }
                 sorted.sort_by(|a, b| {
                     a.published_at_wall_us
                         .cmp(&b.published_at_wall_us)

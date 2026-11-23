@@ -8,8 +8,9 @@
 //! ## Contents
 //!
 //! - **BLAKE3 content addressing**: `ResourceId` = 32-byte BLAKE3 digest of raw bytes.
-//! - **Deduplication**: `ResourceStore` checks `expected_hash` on upload start; returns
-//!   existing resource with `was_deduplicated = true` if found.
+//! - **Deduplication**: resident raster first grants validate full bytes even
+//!   when the store already retains the hash; digest reuse needs a live grant.
+//!   Fonts and SVG retain their existing global deduplication behavior.
 //! - **Inline fast path**: resources ≤ 64 KiB upload in a single message.
 //! - **Chunked upload**: three-phase flow for resources > 64 KiB.
 //! - **Validation**: `ResourceStore` applies capability, size, type, hash,

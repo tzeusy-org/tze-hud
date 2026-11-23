@@ -23,6 +23,7 @@ use tze_hud_scene::types::*;
 pub(super) struct ResidentUploadState {
     pub(super) request_sequence: u64,
     pub(super) metadata: ResourceMetadata,
+    pub(super) resource_type: StoreResourceType,
     pub(super) total_size_bytes: u64,
 }
 
@@ -125,9 +126,23 @@ pub(super) enum UploadWorkerEvent {
     },
 }
 
+/// The pairing token owns its grant set across transports and permission edits.
+/// Its synchronous guard also excludes the runtime's revocation transition.
+struct ResidentRasterAuthority(tze_hud_scene::config::agents::PairingAuthorization);
+
+impl tze_hud_resource::upload::RasterUploadAuthority for ResidentRasterAuthority {
+    fn with_live_grants(
+        &self,
+        commit: &mut dyn FnMut(&mut std::collections::HashSet<[u8; 32]>),
+    ) -> bool {
+        self.0.with_live_grants(commit).is_some()
+    }
+}
+
 pub(super) async fn run_upload_worker(
     state: Arc<Mutex<SharedState>>,
     namespace: String,
+    authorization: tze_hud_scene::config::agents::PairingAuthorization,
     mut command_rx: tokio::sync::mpsc::Receiver<UploadWorkerCommand>,
     event_tx: tokio::sync::mpsc::Sender<UploadWorkerEvent>,
     upload_rate_limit_bytes_per_sec: usize,
@@ -137,6 +152,8 @@ pub(super) async fn run_upload_worker(
         let st = state.lock().await;
         st.resource_store.clone()
     };
+    let authority: Arc<dyn tze_hud_resource::upload::RasterUploadAuthority> =
+        Arc::new(ResidentRasterAuthority(authorization));
     let mut in_flight_uploads: HashMap<[u8; 16], ResidentUploadState> = HashMap::new();
     let mut upload_rate_limiter =
         UploadByteRateLimiter::with_limit(upload_rate_limit_bytes_per_sec);
@@ -267,8 +284,13 @@ pub(super) async fn run_upload_worker(
                     }
                 }
 
-                match store.handle_upload_start(request).await {
+                match store
+                    .handle_resident_upload_start(request, Arc::clone(&authority))
+                    .await
+                {
                     Ok(Some(stored)) => {
+                        let metadata =
+                            canonical_raster_metadata(&store, &stored, resource_type, metadata);
                         register_uploaded_scene_resource(&state, &stored.resource_id, &render_wake)
                             .await;
                         if event_tx
@@ -291,6 +313,7 @@ pub(super) async fn run_upload_worker(
                             ResidentUploadState {
                                 request_sequence,
                                 metadata,
+                                resource_type,
                                 total_size_bytes: start.total_size_bytes,
                             },
                         );
@@ -456,6 +479,12 @@ pub(super) async fn run_upload_worker(
                     .await
                 {
                     Ok(stored) => {
+                        let metadata = canonical_raster_metadata(
+                            &store,
+                            &stored,
+                            tracked.resource_type,
+                            tracked.metadata,
+                        );
                         in_flight_uploads.remove(&upload_id_bytes);
                         register_uploaded_scene_resource(&state, &stored.resource_id, &render_wake)
                             .await;
@@ -464,7 +493,7 @@ pub(super) async fn run_upload_worker(
                                 request_sequence: tracked.request_sequence,
                                 stored,
                                 stored_bytes: tracked.total_size_bytes,
-                                metadata: tracked.metadata,
+                                metadata,
                                 upload_id: Some(upload_id_bytes),
                             })
                             .await
@@ -496,6 +525,19 @@ pub(super) async fn run_upload_worker(
             .abort_upload(&namespace, UploadId::from_bytes(upload_id))
             .await;
     }
+}
+
+fn canonical_raster_metadata(
+    store: &tze_hud_resource::ResourceStore,
+    stored: &StoreResourceStored,
+    resource_type: StoreResourceType,
+    mut metadata: ResourceMetadata,
+) -> ResourceMetadata {
+    if let Some((width, height)) = store.raster_dimensions(&stored.resource_id, resource_type) {
+        metadata.width = width;
+        metadata.height = height;
+    }
+    metadata
 }
 
 // ─── Upload helper functions ──────────────────────────────────────────────────

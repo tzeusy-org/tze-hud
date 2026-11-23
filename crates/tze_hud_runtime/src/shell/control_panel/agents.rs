@@ -251,3 +251,7 @@ impl AgentControl {
             .map_err(|e| format!("agents.toml write failed: {e}"))?
     }
 }
+
+#[cfg(test)]
+#[path = "raster_tests.rs"]
+mod raster_tests;

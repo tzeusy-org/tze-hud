@@ -174,11 +174,42 @@ pub fn decode_and_validate(
 ) -> Result<DecodedMeta, ResourceError> {
     match resource_type {
         ResourceType::ImageRgba8 => validate_raw_rgba8(data, config, width, height),
-        ResourceType::ImagePng => decode_image(data, resource_type, config),
-        ResourceType::ImageJpeg => decode_image(data, resource_type, config),
+        ResourceType::ImagePng => decode_image(data, resource_type, config).map(|(meta, _)| meta),
+        ResourceType::ImageJpeg => decode_image(data, resource_type, config).map(|(meta, _)| meta),
         ResourceType::FontTtf | ResourceType::FontOtf => validate_font(data),
         ResourceType::ImageSvg => validate_svg(data),
     }
+}
+
+/// Validate once and retain the same RGBA allocation for resident rendering.
+pub(crate) fn decode_raster(
+    data: Vec<u8>,
+    resource_type: ResourceType,
+    config: &ResourceStoreConfig,
+    width: u32,
+    height: u32,
+) -> Result<crate::dedup::ValidatedRaster, ResourceError> {
+    let (meta, pixels) = match resource_type {
+        ResourceType::ImageRgba8 => {
+            let meta = validate_raw_rgba8(&data, config, width, height)?;
+            (meta, data)
+        }
+        ResourceType::ImagePng | ResourceType::ImageJpeg => {
+            decode_image(&data, resource_type, config)?
+        }
+        _ => unreachable!("only raster upload types are decoded here"),
+    };
+    if (width != 0 && meta.width_px != width) || (height != 0 && meta.height_px != height) {
+        return Err(ResourceError::DecodeError(
+            "declared dimensions do not match the validated raster".into(),
+        ));
+    }
+    Ok(crate::dedup::ValidatedRaster {
+        resource_type,
+        width: meta.width_px,
+        height: meta.height_px,
+        pixels: pixels.into(),
+    })
 }
 
 fn validate_raw_rgba8(
@@ -238,7 +269,7 @@ fn decode_image(
     data: &[u8],
     resource_type: ResourceType,
     config: &ResourceStoreConfig,
-) -> Result<DecodedMeta, ResourceError> {
+) -> Result<(DecodedMeta, Vec<u8>), ResourceError> {
     use std::io::Cursor;
 
     use image::{
@@ -311,13 +342,19 @@ fn decode_image(
         .reserve(decoder.total_bytes())
         .map_err(decode_error)?;
     decoder.set_limits(limits).map_err(decode_error)?;
-    image::DynamicImage::from_decoder(decoder).map_err(decode_error)?;
+    let pixels = image::DynamicImage::from_decoder(decoder)
+        .map_err(decode_error)?
+        .into_rgba8()
+        .into_raw();
 
-    Ok(DecodedMeta {
-        decoded_bytes,
-        width_px,
-        height_px,
-    })
+    Ok((
+        DecodedMeta {
+            decoded_bytes,
+            width_px,
+            height_px,
+        },
+        pixels,
+    ))
 }
 
 /// Validate an IMAGE_SVG upload.

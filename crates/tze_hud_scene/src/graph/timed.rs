@@ -66,6 +66,25 @@ impl SceneGraph {
         id
     }
 
+    /// Admit a resident action before enqueue and recheck its pairing when due.
+    /// Generic schedules retain their existing policy.
+    pub fn schedule_resident_publication(
+        &mut self,
+        at: u64,
+        publisher: Publisher,
+        publication: Publication,
+    ) -> Result<SceneId, ValidationError> {
+        let rejected = Self::resident_unavailable(&publisher);
+        publisher
+            .with_authorized(|| {
+                if let Some(source) = &publisher.resident_raster {
+                    self.validate_resident_raster(&publication, source)?;
+                }
+                Ok(self.schedule_publication(at, publisher.clone(), publication))
+            })
+            .unwrap_or(Err(rejected))
+    }
+
     /// Reserve identity only for one notification publication. It never
     /// enters the resident protocol's origin identity.
     pub fn schedule_notification(

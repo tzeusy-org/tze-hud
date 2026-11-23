@@ -82,12 +82,13 @@ jobs:
         run: |
           set -euo pipefail
           if [[ "$GITHUB_EVENT_NAME" != pull_request ]]; then
-            { echo rendered=true; echo gestures=true; } >> "$GITHUB_OUTPUT"; exit 0
+            { echo rendered=true; echo gestures=true; echo resident_raster=true; } >> "$GITHUB_OUTPUT"; exit 0
           fi
           git diff --name-only HEAD^1 HEAD | tee "$RUNNER_TEMP/changed-files.txt"
           rendered='^(crates/tze_hud_(compositor|widget|scene|config|runtime)/|app/tze_hud_app/|assets/|\.claude/skills/user-test/scripts/[^/]+\.json$|scripts/ci/windows_smoke\.py$|Cargo\.lock$|\.github/workflows/windows\.yml$)'
           # Gestures also follow input, portal and the harness itself.
           gestures="$rendered|^(crates/tze_hud_(input|portal|mcp)/|scripts/ci/hud_(gestures|sendinput)\.py$)"
+          resident_raster="$rendered|^(crates/tze_hud_(protocol|resource|mcp)/|scripts/ci/(resident_raster_witness|hud_gestures|hud_sendinput)\.py$|scripts/requirements-dev\.txt$|\.claude/skills/user-test-performance/scripts/proto_gen/)"
           if grep -Eq "$rendered" "$RUNNER_TEMP/changed-files.txt"; then
             echo rendered=true >> "$GITHUB_OUTPUT"
           else
@@ -97,6 +98,11 @@ jobs:
             echo gestures=true >> "$GITHUB_OUTPUT"
           else
             echo gestures=false >> "$GITHUB_OUTPUT"
+          fi
+          if grep -Eq "$resident_raster" "$RUNNER_TEMP/changed-files.txt"; then
+            echo resident_raster=true >> "$GITHUB_OUTPUT"
+          else
+            echo resident_raster=false >> "$GITHUB_OUTPUT"
           fi
 
       - uses: dtolnay/rust-toolchain@stable
@@ -287,6 +293,31 @@ jobs:
         with:
           name: gestures
           path: ${{ runner.temp }}/gestures/
+          if-no-files-found: warn
+
+      - name: Resident raster upload and compositor capture (informational)
+        id: resident-raster
+        if: steps.changes.outputs.resident_raster == 'true' && env.HUD_BUILD_PROFILE != 'release'
+        continue-on-error: true
+        timeout-minutes: 5
+        shell: pwsh
+        run: |
+          $artifact = Join-Path $env:RUNNER_TEMP "resident-raster"
+          New-Item -ItemType Directory -Path $artifact | Out-Null
+          $requirements = @(Get-Content scripts/requirements-dev.txt | Where-Object { $_ -match '^(grpcio|protobuf|blake3)>=' })
+          if ($requirements.Count -ne 3) { throw 'Missing resident raster Python dependencies' }
+          python -m pip install --quiet --only-binary=:all: @requirements 2>&1 | Tee-Object -FilePath (Join-Path $artifact "dependencies.log")
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/ci/resident_raster_witness.py --exe "target/$env:HUD_BUILD_PROFILE/tze_hud.exe" --out $artifact
+          exit $LASTEXITCODE
+
+      - name: Upload resident raster evidence
+        if: always() && steps.resident-raster.outcome != 'skipped'
+        continue-on-error: true
+        uses: actions/upload-artifact@v6
+        with:
+          name: resident-raster
+          path: ${{ runner.temp }}/resident-raster/
           if-no-files-found: warn
 
       # Own-frame WARP comparisons are informational, not owner signoff or a

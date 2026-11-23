@@ -181,11 +181,25 @@ impl Compositor {
                             ZoneContent::StaticImage(resource_id) => {
                                 // If a GPU texture is cached, emit a textured draw command
                                 // filling this publication's slot.
-                                if self.image_texture_cache.contains_key(resource_id) {
+                                let source = if let Some(proof) = &record.resident_raster {
+                                    super::draw_cmds::ImageSource::Resident {
+                                        proof: proof.clone(),
+                                        layer: zone_def.layer_attachment,
+                                    }
+                                } else {
+                                    super::draw_cmds::ImageSource::Generic
+                                };
+                                let cache = if record.resident_raster.is_some() {
+                                    &self.resident_image_texture_cache
+                                } else {
+                                    &self.image_texture_cache
+                                };
+                                if cache.contains_key(resource_id) {
                                     let combined_opacity = (anim_opacity
                                         * self.pub_opacity_at(zone_name, record, now))
                                     .clamp(0.0, ceiling);
                                     textured_cmds.push(TexturedDrawCmd {
+                                        source,
                                         resource_id: *resource_id,
                                         x,
                                         y: slot_y,
@@ -267,6 +281,7 @@ impl Compositor {
                                             );
                                     let (icon_x, icon_y, size) = (icon.x, icon.y, icon.width);
                                     textured_cmds.push(TexturedDrawCmd {
+                                        source: super::draw_cmds::ImageSource::Generic,
                                         resource_id: icon_id,
                                         x: icon_x,
                                         y: icon_y,
@@ -320,8 +335,22 @@ impl Compositor {
                         ZoneContent::StaticImage(resource_id) => {
                             // If a GPU texture is cached, emit a textured draw command
                             // filling the zone.
-                            if self.image_texture_cache.contains_key(resource_id) {
+                            let source = if let Some(proof) = &latest.resident_raster {
+                                super::draw_cmds::ImageSource::Resident {
+                                    proof: proof.clone(),
+                                    layer: zone_def.layer_attachment,
+                                }
+                            } else {
+                                super::draw_cmds::ImageSource::Generic
+                            };
+                            let cache = if latest.resident_raster.is_some() {
+                                &self.resident_image_texture_cache
+                            } else {
+                                &self.image_texture_cache
+                            };
+                            if cache.contains_key(resource_id) {
                                 textured_cmds.push(TexturedDrawCmd {
+                                    source,
                                     resource_id: *resource_id,
                                     x,
                                     y,
@@ -418,6 +447,7 @@ impl Compositor {
                                 let size = style.icon_size;
                                 let eff_opacity = anim_opacity.clamp(0.0, 1.0);
                                 textured_cmds.push(TexturedDrawCmd {
+                                    source: super::draw_cmds::ImageSource::Generic,
                                     resource_id: icon_id,
                                     x: x + style.padding_h,
                                     y: y + (h - size) * 0.5,
@@ -442,6 +472,7 @@ impl Compositor {
                                 continue;
                             }
                             textured_cmds.push(TexturedDrawCmd {
+                                source: super::draw_cmds::ImageSource::Generic,
                                 resource_id,
                                 x: card.rect.x + entry.x,
                                 y: card.rect.y + (card.rect.height - icon) * 0.5,

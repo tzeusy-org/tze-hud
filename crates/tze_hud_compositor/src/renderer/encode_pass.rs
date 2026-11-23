@@ -281,10 +281,16 @@ impl super::Compositor {
         cmds: &[TexturedDrawCmd],
         sw: f32,
         sh: f32,
-    ) {
-        if cmds.is_empty() {
-            return;
+        resident_layer: Option<LayerAttachment>,
+    ) -> bool {
+        let selected = |cmd: &&TexturedDrawCmd| match &cmd.source {
+            super::draw_cmds::ImageSource::Generic => resident_layer.is_none(),
+            super::draw_cmds::ImageSource::Resident { layer, .. } => resident_layer == Some(*layer),
+        };
+        if !cmds.iter().any(|cmd| selected(&cmd)) {
+            return true;
         }
+        let mut signature_current = true;
 
         use wgpu::util::DeviceExt;
 
@@ -305,10 +311,26 @@ impl super::Compositor {
 
         image_pass.set_pipeline(&self.texture_rect_pipeline);
 
-        for cmd in cmds {
-            let entry = match self.image_texture_cache.get(&cmd.resource_id) {
+        for cmd in cmds.iter().filter(selected) {
+            let cache = match &cmd.source {
+                super::draw_cmds::ImageSource::Generic if resident_layer.is_none() => {
+                    &self.image_texture_cache
+                }
+                super::draw_cmds::ImageSource::Resident { proof, layer }
+                    if resident_layer == Some(*layer) && proof.resource_id() == cmd.resource_id =>
+                {
+                    &self.resident_image_texture_cache
+                }
+                _ => continue,
+            };
+            let entry = match cache.get(&cmd.resource_id) {
                 Some(e) => e,
-                None => continue, // shouldn't happen if ensure was called
+                None => {
+                    if matches!(&cmd.source, super::draw_cmds::ImageSource::Resident { .. }) {
+                        signature_current = false;
+                    }
+                    continue;
+                }
             };
 
             let verts =
@@ -321,10 +343,24 @@ impl super::Compositor {
                     usage: wgpu::BufferUsages::VERTEX,
                 });
 
-            image_pass.set_bind_group(0, &entry.bind_group, &[]);
-            image_pass.set_vertex_buffer(0, vertex_buf.slice(..));
-            image_pass.draw(0..6, 0..1);
+            let mut draw = || {
+                image_pass.set_bind_group(0, &entry.bind_group, &[]);
+                image_pass.set_vertex_buffer(0, vertex_buf.slice(..));
+                image_pass.draw(0..6, 0..1);
+            };
+            if let super::draw_cmds::ImageSource::Resident { proof, .. } = &cmd.source {
+                // Linearize this draw's synchronous command encoding against
+                // pairing revocation. Already encoded/submitted GPU work may
+                // finish; the transition wake builds the next frame without it.
+                // No lock survives this call, an await, or a GPU wait.
+                if proof.with_authorized(draw).is_none() {
+                    signature_current = false;
+                }
+            } else {
+                draw();
+            }
         }
+        signature_current
     }
 
     /// A card control (dismiss or action): `fill` (if any) in `shape.s`

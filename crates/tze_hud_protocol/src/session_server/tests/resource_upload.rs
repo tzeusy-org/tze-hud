@@ -977,6 +977,7 @@ async fn test_resource_upload_chunk_error_aborts_inflight_tracking() {
         run_upload_worker(
             shared_state.clone(),
             "resource-chunk-error".to_string(),
+            Default::default(),
             command_rx,
             events,
             0,
@@ -1063,6 +1064,7 @@ async fn test_resource_upload_chunk_error_aborts_inflight_tracking() {
     let worker = tokio::spawn(run_upload_worker(
         shared_state.clone(),
         "resource-chunk-error".to_string(),
+        Default::default(),
         command_rx,
         events,
         0,

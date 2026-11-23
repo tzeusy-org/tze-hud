@@ -2891,12 +2891,15 @@ impl WindowedRuntime {
             crate::os_prefs::read,
         ));
         let cfg_agents_empty = cfg.agents.load().is_empty();
-        let agent_store = Arc::new(crate::agent_store::AgentStore::open(
-            tze_hud_config::agents_path_for(
-                cfg.config_file_path.as_deref().map(std::path::Path::new),
-            ),
-            Arc::clone(&cfg.agents),
-        ));
+        let agent_store = Arc::new(
+            crate::agent_store::AgentStore::open(
+                tze_hud_config::agents_path_for(
+                    cfg.config_file_path.as_deref().map(std::path::Path::new),
+                ),
+                Arc::clone(&cfg.agents),
+            )
+            .with_render_wake(render_wake.clone()),
+        );
         let pairing = (cfg.mcp_port > 0).then(|| {
             Arc::new(crate::pairing::Pairing::system(
                 Arc::clone(&agent_store),

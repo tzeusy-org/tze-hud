@@ -13,30 +13,58 @@
 //!
 //! ## Deduplication
 //!
-//! On `handle_upload_start`, the runtime checks `expected_hash` against the
-//! dedup index.  If found, `ResourceStored { was_deduplicated: true }` is
-//! returned immediately and no chunk sequence follows.
+//! Resident raster first grants require validated bytes even for an existing
+//! hash. Digest-only reuse requires a matching grant on the live pairing.
+//! Non-raster uploads and direct store callers retain global deduplication.
 //!
 //! ## Concurrency limits
 //!
 //! Each agent may have at most `MAX_CONCURRENT_UPLOADS_PER_AGENT` (= 4)
 //! uploads in flight simultaneously.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use tokio::sync::Mutex;
 
 use crate::FontBytesStore;
-use crate::dedup::{DedupIndex, ResourceRecord};
+use crate::dedup::{DedupIndex, ResourceRecord, ValidatedRaster};
 use crate::types::{
     CHUNK_SIZE_LIMIT, INLINE_SIZE_LIMIT, MAX_CONCURRENT_UPLOADS_PER_AGENT, ResourceError,
     ResourceId, ResourceStoreConfig, ResourceStored, ResourceType,
 };
 use crate::validation::{
     AgentBudget, check_budget, check_capability, check_hash, check_raw_size, check_resource_type,
-    decode_and_validate,
+    decode_and_validate, decode_raster,
 };
+
+/// The protocol supplies a short live pairing guard. The callback runs once,
+/// synchronously, or not at all if that pairing has been revoked.
+pub trait RasterUploadAuthority: Send + Sync {
+    fn with_live_grants(&self, commit: &mut dyn FnMut(&mut HashSet<[u8; 32]>)) -> bool;
+    fn is_live(&self) -> bool {
+        self.with_live_grants(&mut |_| {})
+    }
+}
+
+fn authorized<T>(
+    authority: &dyn RasterUploadAuthority,
+    commit: impl FnOnce(&mut HashSet<[u8; 32]>) -> Result<T, ResourceError>,
+) -> Result<T, ResourceError> {
+    let mut commit = Some(commit);
+    let mut result = Err(ResourceError::CapabilityDenied);
+    authority.with_live_grants(&mut |grants| {
+        result = commit.take().expect("pairing commit runs once")(grants);
+    });
+    result
+}
+
+fn is_raster(resource_type: ResourceType) -> bool {
+    matches!(
+        resource_type,
+        ResourceType::ImageRgba8 | ResourceType::ImagePng | ResourceType::ImageJpeg
+    )
+}
 
 // ─── Upload session ───────────────────────────────────────────────────────────
 
@@ -74,6 +102,8 @@ struct InflightUpload {
     width: u32,
     /// Height in pixels (for IMAGE_RGBA8 dimension validation).
     height: u32,
+    /// The original raster pairing owns every chunk and the final commit.
+    authority: Option<Arc<dyn RasterUploadAuthority>>,
 }
 
 impl InflightUpload {
@@ -131,6 +161,8 @@ pub struct ResourceStore {
     /// admitted atomically against the resident font ledger.
     font_bytes: FontBytesStore,
     resident_ledger: Option<crate::ResidentLedger>,
+    #[cfg(any(test, feature = "test-support"))]
+    before_raster_commit: Arc<std::sync::Mutex<Option<RasterCommitBarrier>>>,
 }
 
 impl ResourceStore {
@@ -143,6 +175,8 @@ impl ResourceStore {
             agent_uploads: Arc::new(Mutex::new(HashMap::new())),
             font_bytes: FontBytesStore::new(),
             resident_ledger: None,
+            #[cfg(any(test, feature = "test-support"))]
+            before_raster_commit: Default::default(),
         }
     }
 
@@ -157,6 +191,8 @@ impl ResourceStore {
             agent_uploads: Arc::new(Mutex::new(HashMap::new())),
             font_bytes: FontBytesStore::new_with_resident_ledger(resident_ledger.clone()),
             resident_ledger: Some(resident_ledger),
+            #[cfg(any(test, feature = "test-support"))]
+            before_raster_commit: Default::default(),
         }
     }
 
@@ -175,6 +211,20 @@ impl ResourceStore {
     }
 
     // ─── Handle upload start ─────────────────────────────────────────────────
+
+    /// Read-only shared allocation; only admitted resident provenance may pass
+    /// this into the compositor. A digest lookup by itself grants no access.
+    pub fn validated_raster(&self, id: &ResourceId) -> Option<Arc<ValidatedRaster>> {
+        self.dedup.get(id)?.raster.clone()
+    }
+
+    /// Canonical dimensions only for a matching retained raster type. Legacy
+    /// font/SVG collisions must never borrow raster metadata.
+    pub fn raster_dimensions(&self, id: &ResourceId, kind: ResourceType) -> Option<(u32, u32)> {
+        let record = self.dedup.get(id)?;
+        let raster = record.raster.as_ref().filter(|r| r.resource_type == kind)?;
+        Some((raster.width, raster.height))
+    }
 
     /// Process a `ResourceUploadStart` message.
     ///
@@ -207,37 +257,51 @@ impl ResourceStore {
         &self,
         req: UploadStartRequest,
     ) -> Result<Option<ResourceStored>, ResourceError> {
-        // 1. Capability gate.
+        self.start_upload(req, None).await
+    }
+
+    /// Resident raster uploads must prove a live pairing at their commit.
+    /// Font/SVG handling is unchanged and does not create raster grants.
+    pub async fn handle_resident_upload_start(
+        &self,
+        req: UploadStartRequest,
+        authority: Arc<dyn RasterUploadAuthority>,
+    ) -> Result<Option<ResourceStored>, ResourceError> {
+        self.start_upload(req, Some(authority)).await
+    }
+
+    async fn start_upload(
+        &self,
+        req: UploadStartRequest,
+        authority: Option<Arc<dyn RasterUploadAuthority>>,
+    ) -> Result<Option<ResourceStored>, ResourceError> {
         check_capability(&req.agent_capabilities)?;
-
-        // 5. Type check (cheap; do early to short-circuit).
         check_resource_type(req.resource_type)?;
-
-        // Dedup fast path: check expected_hash against known resources.
-        // Latency contract: < 100 µs.
-        // Only treat as a dedup hit if the stored resource_type matches the
-        // requested type — different types with the same hash bytes are a
-        // conflict (e.g. an IMAGE_RGBA8 that happens to be also valid PNG bytes).
+        let raster_authority = authority
+            .as_deref()
+            .filter(|_| is_raster(req.resource_type));
+        if let Some(authority) = raster_authority {
+            authorized(authority, |_| Ok(()))?;
+        }
         let resource_id = ResourceId::from_bytes(req.expected_hash);
         if let Some(record) = self.dedup.get(&resource_id) {
-            if record.resource_type == req.resource_type {
-                tracing::debug!(
-                    resource_id = %resource_id,
-                    agent = %req.agent_namespace,
-                    "dedup hit — skipping upload"
-                );
-                return Ok(Some(ResourceStored {
-                    resource_id,
-                    was_deduplicated: true,
-                    decoded_bytes: record.decoded_bytes,
-                }));
+            if let Some(authority) = raster_authority {
+                if req.inline_data.is_empty() {
+                    let reused = authorized(authority, |grants| {
+                        if !grants.contains(&req.expected_hash) {
+                            return Ok(None);
+                        }
+                        self.matching_raster(&record, req.resource_type, req.width, req.height)?;
+                        Ok(Some(stored_record(&record, true)))
+                    })?;
+                    if reused.is_some() {
+                        return Ok(reused);
+                    }
+                }
+            } else if record.resource_type == req.resource_type {
+                return Ok(Some(stored_record(&record, true)));
             }
-            // Mismatched type for the same hash: fall through to re-upload/validate.
-            // The content-addressed identity is the bytes, not the type; if the
-            // hash matches but the type differs, re-validate as the new type.
         }
-
-        // ── Inline fast path ───────────────────────────────────────────────
         if !req.inline_data.is_empty() {
             if req.inline_data.len() > INLINE_SIZE_LIMIT {
                 return Err(ResourceError::SizeExceeded {
@@ -257,55 +321,55 @@ impl ResourceStore {
                     &req.agent_namespace,
                     req.width,
                     req.height,
+                    raster_authority,
                 )
                 .await
                 .map(Some);
         }
-
-        // ── Chunked path: register in-flight upload ────────────────────────
-        // Only pre-check total_size when it's declared (non-zero).
         if req.total_size > 0 {
             check_raw_size(req.total_size, &self.config)?;
         }
-
-        let upload_id = req.upload_id;
         let mut guard = self.agent_uploads.lock().await;
         let entry = guard
             .entry(req.agent_namespace.clone())
             .or_insert_with(AgentUploads::new);
-
-        if entry.count() >= MAX_CONCURRENT_UPLOADS_PER_AGENT {
-            return Err(ResourceError::TooManyUploads);
+        // Retired raster pairings cannot occupy the new pairing's namespace
+        // slots. Never prune another live stream or the unchanged font/SVG path.
+        entry
+            .inflight
+            .retain(|_, u| u.authority.as_ref().is_none_or(|a| a.is_live()));
+        let mut register = || {
+            if entry.count() >= MAX_CONCURRENT_UPLOADS_PER_AGENT {
+                return Err(ResourceError::TooManyUploads);
+            }
+            if entry.inflight.contains_key(&req.upload_id) {
+                return Err(ResourceError::InvalidChunk(format!(
+                    "upload_id {:?} already in flight for agent {}",
+                    req.upload_id, req.agent_namespace
+                )));
+            }
+            entry.inflight.insert(
+                req.upload_id,
+                InflightUpload {
+                    resource_type: req.resource_type,
+                    expected_hash: req.expected_hash,
+                    total_size: req.total_size,
+                    chunks: Vec::new(),
+                    accumulated_bytes: 0,
+                    next_chunk_index: 0,
+                    width: req.width,
+                    height: req.height,
+                    authority: authority.clone().filter(|_| is_raster(req.resource_type)),
+                },
+            );
+            Ok(())
+        };
+        if let Some(authority) = raster_authority {
+            authorized(authority, |_| register())?;
+        } else {
+            register()?;
         }
-
-        if entry.inflight.contains_key(&upload_id) {
-            return Err(ResourceError::InvalidChunk(format!(
-                "upload_id {:?} already in flight for agent {}",
-                upload_id, req.agent_namespace
-            )));
-        }
-
-        entry.inflight.insert(
-            upload_id,
-            InflightUpload {
-                resource_type: req.resource_type,
-                expected_hash: req.expected_hash,
-                total_size: req.total_size,
-                chunks: Vec::new(),
-                accumulated_bytes: 0,
-                next_chunk_index: 0,
-                width: req.width,
-                height: req.height,
-            },
-        );
-
-        tracing::debug!(
-            agent = %req.agent_namespace,
-            upload_id = ?upload_id,
-            total_size = req.total_size,
-            "chunked upload registered"
-        );
-
+        tracing::debug!(agent = %req.agent_namespace, upload_id = ?req.upload_id, total_size = req.total_size, "chunked upload registered");
         Ok(None)
     }
 
@@ -340,31 +404,38 @@ impl ResourceStore {
             ResourceError::UploadNotFound(format!("unknown upload_id {upload_id:?}"))
         })?;
 
-        if chunk_index != inflight.next_chunk_index {
-            return Err(ResourceError::InvalidChunk(format!(
-                "expected chunk index {} but got {}",
-                inflight.next_chunk_index, chunk_index
-            )));
+        let authority = inflight.authority.clone();
+        let append = || {
+            if chunk_index != inflight.next_chunk_index {
+                return Err(ResourceError::InvalidChunk(format!(
+                    "expected chunk index {} but got {}",
+                    inflight.next_chunk_index, chunk_index
+                )));
+            }
+
+            // Guard against exceeding declared total size (if declared) or the
+            // max_resource_bytes limit (always).  Use the running counter to avoid
+            // O(n²) work summing all prior chunks on each call.
+            let new_accumulated = inflight.accumulated_bytes + data.len();
+            if inflight.total_size > 0 && new_accumulated > inflight.total_size {
+                return Err(ResourceError::SizeExceeded {
+                    detail: format!(
+                        "accumulated chunk bytes {} exceed declared total_size {}",
+                        new_accumulated, inflight.total_size
+                    ),
+                });
+            }
+
+            inflight.chunks.push(data);
+            inflight.accumulated_bytes = new_accumulated;
+            inflight.next_chunk_index += 1;
+            Ok(())
+        };
+        if let Some(authority) = authority {
+            authorized(authority.as_ref(), |_| append())
+        } else {
+            append()
         }
-
-        // Guard against exceeding declared total size (if declared) or the
-        // max_resource_bytes limit (always).  Use the running counter to avoid
-        // O(n²) work summing all prior chunks on each call.
-        let new_accumulated = inflight.accumulated_bytes + data.len();
-        if inflight.total_size > 0 && new_accumulated > inflight.total_size {
-            return Err(ResourceError::SizeExceeded {
-                detail: format!(
-                    "accumulated chunk bytes {} exceed declared total_size {}",
-                    new_accumulated, inflight.total_size
-                ),
-            });
-        }
-
-        inflight.chunks.push(data);
-        inflight.accumulated_bytes = new_accumulated;
-        inflight.next_chunk_index += 1;
-
-        Ok(())
     }
 
     // ─── Handle upload complete ───────────────────────────────────────────────
@@ -385,36 +456,33 @@ impl ResourceStore {
         agent_capabilities: &[String],
         agent_budget: &AgentBudget,
     ) -> Result<ResourceStored, ResourceError> {
-        // Extract the inflight state.
-        let (resource_type, expected_hash, assembled, width, height) = {
+        let inflight = {
             let mut guard = self.agent_uploads.lock().await;
-            let uploads = guard.get_mut(agent_namespace).ok_or_else(|| {
-                ResourceError::UploadNotFound("no uploads in flight for agent".into())
-            })?;
-
-            let inflight = uploads.inflight.remove(&upload_id).ok_or_else(|| {
-                ResourceError::UploadNotFound(format!("unknown upload_id {upload_id:?}"))
-            })?;
-
-            let assembled = inflight.assemble();
-            (
-                inflight.resource_type,
-                inflight.expected_hash,
-                assembled,
-                inflight.width,
-                inflight.height,
-            )
+            guard
+                .get_mut(agent_namespace)
+                .ok_or_else(|| {
+                    ResourceError::UploadNotFound("no uploads in flight for agent".into())
+                })?
+                .inflight
+                .remove(&upload_id)
+                .ok_or_else(|| {
+                    ResourceError::UploadNotFound(format!("unknown upload_id {upload_id:?}"))
+                })?
         };
-
+        if let Some(authority) = &inflight.authority {
+            authorized(authority.as_ref(), |_| Ok(()))?;
+        }
+        let assembled = inflight.assemble();
         self.complete_upload(
             assembled,
-            expected_hash,
-            resource_type,
+            inflight.expected_hash,
+            inflight.resource_type,
             agent_capabilities,
             agent_budget,
             agent_namespace,
-            width,
-            height,
+            inflight.width,
+            inflight.height,
+            inflight.authority.as_deref(),
         )
         .await
     }
@@ -456,6 +524,7 @@ impl ResourceStore {
         agent_namespace: &str,
         width: u32,
         height: u32,
+        authority: Option<&dyn RasterUploadAuthority>,
     ) -> Result<ResourceStored, ResourceError> {
         // Check capability (may already be checked but re-check for inline/complete paths).
         check_capability(agent_capabilities)?;
@@ -469,12 +538,18 @@ impl ResourceStore {
         // Hashing and decoding a large payload is CPU-bound, so it runs on the
         // blocking pool instead of the (deliberately small) network workers.
         let config = Arc::clone(&self.config);
-        let (data, meta) = tokio::task::spawn_blocking(move || {
+        let (data, meta, raster) = tokio::task::spawn_blocking(move || {
             // BLAKE3 hash integrity.
             check_hash(&data, &expected_hash)?;
             // Decode validation (also checks decoded size limits).
-            let meta = decode_and_validate(&data, resource_type, &config, width, height)?;
-            Ok::<_, ResourceError>((data, meta))
+            if is_raster(resource_type) {
+                let raster = decode_raster(data, resource_type, &config, width, height)?;
+                let meta = raster.metadata();
+                Ok::<_, ResourceError>((Vec::new(), meta, Some(raster)))
+            } else {
+                let meta = decode_and_validate(&data, resource_type, &config, width, height)?;
+                Ok((data, meta, None))
+            }
         })
         .await
         .map_err(|e| ResourceError::DecodeError(format!("validation task failed: {e}")))??;
@@ -483,26 +558,101 @@ impl ResourceStore {
         let resource_id = ResourceId::from_bytes(expected_hash);
         let font_data = matches!(resource_type, ResourceType::FontTtf | ResourceType::FontOtf)
             .then(|| Arc::<[u8]>::from(data));
-        let _admission = self.admission.lock().await;
-
-        // Another completion may have inserted this content while we validated it.
-        // Same-type dedup consumes no new capacity, including at the hard cap.
-        // Mismatched types retain the existing validated admission path.
-        if let Some(existing) = self.dedup.get(&resource_id)
-            && existing.resource_type == resource_type
-        {
-            return Ok(ResourceStored {
-                resource_id: existing.resource_id,
-                was_deduplicated: true,
-                decoded_bytes: existing.decoded_bytes,
-            });
+        #[cfg(any(test, feature = "test-support"))]
+        if raster.is_some() {
+            let barrier = {
+                let mut slot = self
+                    .before_raster_commit
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner());
+                if slot.as_ref().is_some_and(|b| b.resource_id == resource_id) {
+                    slot.take()
+                } else {
+                    None
+                }
+            };
+            if let Some(barrier) = barrier {
+                barrier.entered.notify_one();
+                barrier.release.notified().await;
+            }
         }
+        let _admission = self.admission.lock().await;
+        let commit = || {
+            self.commit_validated(
+                resource_id,
+                resource_type,
+                meta,
+                raster,
+                font_data,
+                agent_budget,
+                agent_namespace,
+                authority.is_some(),
+            )
+        };
+        if is_raster(resource_type)
+            && let Some(authority) = authority
+        {
+            authorized(authority, |grants| {
+                let stored = commit()?;
+                grants.insert(*stored.resource_id.as_bytes());
+                Ok(stored)
+            })
+        } else {
+            commit()
+        }
+    }
 
-        // Budget and count checks through insertion form one admission operation.
+    fn matching_raster<'a>(
+        &self,
+        record: &'a ResourceRecord,
+        resource_type: ResourceType,
+        width: u32,
+        height: u32,
+    ) -> Result<&'a Arc<ValidatedRaster>, ResourceError> {
+        let raster = record
+            .raster
+            .as_ref()
+            .filter(|r| {
+                r.resource_type == resource_type
+                    && (width == 0 || r.width == width)
+                    && (height == 0 || r.height == height)
+                    && (resource_type != ResourceType::ImageRgba8 || (width != 0 && height != 0))
+            })
+            .ok_or_else(|| {
+                ResourceError::DecodeError(
+                    "resource type or dimensions conflict with the retained raster".into(),
+                )
+            })?;
+        Ok(raster)
+    }
+
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "One synchronous storage/charge commit receives the already-validated upload."
+    )]
+    fn commit_validated(
+        &self,
+        resource_id: ResourceId,
+        resource_type: ResourceType,
+        meta: crate::DecodedMeta,
+        raster: Option<ValidatedRaster>,
+        font_data: Option<Arc<[u8]>>,
+        agent_budget: &AgentBudget,
+        agent_namespace: &str,
+        resident: bool,
+    ) -> Result<ResourceStored, ResourceError> {
+        // Called only under admission, and under the live pairing guard for a
+        // resident raster. No await or scene/session lock occurs in this span.
+        if let Some(existing) = self.dedup.get(&resource_id) {
+            if resident && let Some(raster) = &raster {
+                self.matching_raster(&existing, resource_type, raster.width, raster.height)?;
+            }
+            if existing.resource_type == resource_type {
+                return Ok(stored_record(&existing, true));
+            }
+        }
         let runtime_used = self.dedup.total_decoded_bytes();
         check_budget(meta.decoded_bytes, agent_budget, runtime_used, &self.config)?;
-
-        // Max concurrent resources check.
         if self.dedup.len() >= self.config.max_concurrent_resources {
             return Err(ResourceError::BudgetExceeded {
                 detail: format!(
@@ -511,8 +661,6 @@ impl ResourceStore {
                 ),
             });
         }
-
-        // Resident admission and insertion stay under the same guard.
         if !matches!(resource_type, ResourceType::FontTtf | ResourceType::FontOtf)
             && let Some(ledger) = &self.resident_ledger
         {
@@ -533,44 +681,51 @@ impl ResourceStore {
                     detail: format!("resident font admission denied: {error:?}"),
                 })?;
         }
-        let record = ResourceRecord::new(resource_id, resource_type, &meta);
-
-        let (resource_id, was_deduplicated) = match self.dedup.insert(resource_id, record) {
-            Ok(rec) => {
-                tracing::info!(
-                    resource_id = %rec.resource_id,
-                    agent = %agent_namespace,
-                    decoded_bytes = meta.decoded_bytes,
-                    "resource stored"
-                );
-                (rec.resource_id, false)
-            }
-            Err(existing) => {
-                // Preserve the immutable record for validated type collisions.
-                // Same-type production completions are caught by the recheck.
-                tracing::debug!(
-                    resource_id = %existing.resource_id,
-                    agent = %agent_namespace,
-                    "dedup race — returning existing record"
-                );
-                (existing.resource_id, true)
-            }
+        let mut record = ResourceRecord::new(resource_id, resource_type, &meta);
+        record.raster = raster.map(Arc::new);
+        let (stored, deduplicated) = match self.dedup.insert(resource_id, record) {
+            Ok(record) => (record, false),
+            Err(record) => (record, true),
         };
+        tracing::debug!(resource_id = %stored.resource_id, agent = %agent_namespace, "resource stored");
+        Ok(stored_record(&stored, deduplicated))
+    }
+}
 
-        // Retain raw bytes for font resources so the compositor can load them
-        // into glyphon's FontSystem.  Image resources do not need byte retention.
-        if matches!(resource_type, ResourceType::FontTtf | ResourceType::FontOtf) {
-            tracing::debug!(
-                resource_id = %resource_id,
-                "font bytes stored for compositor consumption"
-            );
-        }
+fn stored_record(record: &ResourceRecord, was_deduplicated: bool) -> ResourceStored {
+    ResourceStored {
+        resource_id: record.resource_id,
+        was_deduplicated,
+        decoded_bytes: record.decoded_bytes,
+    }
+}
 
-        Ok(ResourceStored {
+#[cfg(any(test, feature = "test-support"))]
+struct RasterCommitBarrier {
+    resource_id: ResourceId,
+    entered: Arc<tokio::sync::Notify>,
+    release: Arc<tokio::sync::Notify>,
+}
+
+#[cfg(any(test, feature = "test-support"))]
+impl ResourceStore {
+    /// Pause exactly one matching real raster completion after validation and
+    /// before acquiring admission/authorization. Never pauses with a lock held.
+    pub fn pause_before_raster_commit(
+        &self,
+        resource_id: ResourceId,
+    ) -> (Arc<tokio::sync::Notify>, Arc<tokio::sync::Notify>) {
+        let entered = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new(tokio::sync::Notify::new());
+        *self
+            .before_raster_commit
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = Some(RasterCommitBarrier {
             resource_id,
-            was_deduplicated,
-            decoded_bytes: meta.decoded_bytes,
-        })
+            entered: Arc::clone(&entered),
+            release: Arc::clone(&release),
+        });
+        (entered, release)
     }
 }
 

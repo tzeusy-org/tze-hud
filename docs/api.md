@@ -988,6 +988,20 @@ sequence-valid removed-only envelope on an active stream follows the existing
 `INVALID_ARGUMENT` request path. An old token field on a valid `SessionInit`
 is ignored by protobuf.
 
+A successful RGBA8, PNG or JPEG upload grants the current authenticated pairing
+use of that image through `StaticImageRef` in a zone allowing static images.
+A first grant requires the matching bytes, type and dimensions even when another
+namespace stored the same hash. PNG/JPEG dimensions may be omitted as zero;
+nonzero dimensions must match the decoded image. Digest-only reuse requires a
+current matching grant. Unknown, foreign or unusable image references return
+`INVALID_ARGUMENT` with the same resource hint on a non-ephemeral zone; an
+ephemeral zone keeps its fire-and-forget behavior. Rejected references add no
+active or scheduled content. Admission and due application both check the
+current pairing. Unpair or re-pair invalidates that pairing's grants; ordinary
+allow-list edits retain connected permissions and grants. A revoked stream
+cannot Clear, Hold or replace its fresh pairing's content. SVG and font uploads
+keep their existing behavior and do not grant resident static-image use.
+
 Resident input events, subscription confirmations, element reposition notices and
 frame-presented telemetry are removed. Their envelope and handshake tags and names
 stay reserved. Keyboard, pointer, focus, portal input/ACK and scroll remain local

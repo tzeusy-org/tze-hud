@@ -1823,6 +1823,7 @@ fn test_update_publication_animations_seeds_fresh_state() {
     let record_no_ttl = ZonePublishRecord {
         publication_id: SceneId::new(),
         lease_id: None,
+        resident_raster: None,
         publication_origin: None,
         caption: None,
         window_token: None,

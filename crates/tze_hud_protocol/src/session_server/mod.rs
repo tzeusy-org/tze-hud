@@ -344,6 +344,7 @@ impl HudSession for HudSessionImpl {
                 let upload_worker = tokio::spawn(run_upload_worker(
                     state.clone(),
                     session.namespace.clone(),
+                    session.authorization.clone(),
                     upload_command_rx,
                     upload_event_tx,
                     upload_rate_limit_bytes_per_sec,
@@ -453,18 +454,14 @@ struct SessionCleanup {
 
 impl SessionCleanup {
     async fn run(mut self) {
-        // Never hold SharedState while joining: the worker needs it to finish.
-        if let Some(worker) = self.upload_worker.take() {
-            if let Err(error) = worker.await {
-                tracing::error!(%error, "resource upload worker failed during session cleanup");
-            }
-        }
         let Some(mut session) = self.session.take() else {
+            if let Some(worker) = self.upload_worker.take() {
+                let _ = worker.await;
+            }
             return;
         };
         let (changed, question_wakes) = {
-            let mut st = self.state.lock().await;
-            st.sessions.remove_session(&session.session_id);
+            let st = self.state.lock().await;
             let mut scene = st.scene.lock().await;
             let changed = scene.clear_publications_for_origin(session.publication_origin);
             (changed, scene.take_notification_wait_notifiers())
@@ -475,6 +472,20 @@ impl SessionCleanup {
         if changed {
             self.render_wake.notify();
         }
+        // The stream verb loop has ended, so no verb can repopulate its origin.
+        // Clear retained/scheduled content before a possibly stalled decoder
+        // joins. Its pending upload can store/grant, but cannot publish.
+        // Never hold SharedState while joining: the worker needs it to finish.
+        if let Some(worker) = self.upload_worker.take() {
+            if let Err(error) = worker.await {
+                tracing::error!(%error, "resource upload worker failed during session cleanup");
+            }
+        }
+        self.state
+            .lock()
+            .await
+            .sessions
+            .remove_session(&session.session_id);
         // Release admission only after uploads and retained publications end.
         drop(session.budget_registration.take());
         #[cfg(test)]

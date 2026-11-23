@@ -504,6 +504,7 @@ mod tests {
 
         let id = |perms: &[&str]| AgentIdentity {
             agent_id: "a".into(),
+            authorization: Default::default(),
             permissions: perms.iter().map(|p| p.to_string()).collect(),
         };
         assert_eq!(admin_guard(None).unwrap_err().status, 401);

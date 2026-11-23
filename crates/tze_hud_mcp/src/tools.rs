@@ -861,6 +861,8 @@ async fn publish_zone<'a>(
         let publisher = Publisher {
             namespace: ns.clone(),
             lease_id: Some(lease_id),
+            resident_raster: None,
+            resident_authorization: None,
             origin: None,
         };
         let publication = Publication::Zone {
@@ -1084,6 +1086,8 @@ async fn publish_widget(ctx: &ToolCtx<'_>, widget: &str, p: PublishParams) -> Mc
             Publisher {
                 namespace: ns,
                 lease_id: Some(lease_id),
+                resident_raster: None,
+                resident_authorization: None,
                 origin: None,
             },
             Publication::Widget {

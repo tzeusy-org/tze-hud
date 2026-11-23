@@ -444,6 +444,24 @@ impl PresentLedger {
         false
     }
 
+    /// A stale denied raster draw submitted different pixels from prediction.
+    /// Forget that signature and owe one bounded retry, without reporting a
+    /// surface failure or allowing a same-pixel replacement to settle it.
+    fn record_current(
+        &mut self,
+        signature: u64,
+        submitted: bool,
+        current: bool,
+        now: Instant,
+    ) -> bool {
+        let first = self.record(signature, submitted, now);
+        if submitted && !current {
+            self.invalidate();
+            self.retry = Some((now + PRESENT_RETRY_MIN, PRESENT_RETRY_MIN));
+        }
+        first
+    }
+
     /// The window already shows the current frame: nothing is owed.
     pub(super) fn settle(&mut self) {
         self.retry = None;
@@ -556,7 +574,12 @@ pub(super) fn present_to_secondaries(
             counters.record_gpu_submission();
         }
         let submitted = outcome.telemetry.stage7_gpu_submit_us > 0;
-        if target.ledger.record(signature, submitted, Instant::now()) {
+        if target.ledger.record_current(
+            signature,
+            submitted,
+            outcome.signature_current,
+            Instant::now(),
+        ) {
             display_targets
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
@@ -2260,6 +2283,23 @@ mod tests {
             window_to_scene((0.0, 0.0), Some(&secondaries[1]), Some(&offset_primary)),
             (117.0, -2210.0)
         );
+    }
+
+    #[test]
+    fn stale_raster_prediction_cannot_settle_same_hash_replacement() {
+        let now = Instant::now();
+        let mut ledger = PresentLedger::default();
+        assert!(ledger.record_current(7, true, false, now));
+        assert!(
+            ledger.needs_present(7),
+            "an authorized same-hash replacement still needs rendering"
+        );
+        assert!(ledger.owed());
+        assert!(!ledger.ready(now));
+        assert!(ledger.ready(now + PRESENT_RETRY_MIN));
+        assert!(!ledger.record_current(7, true, true, now + PRESENT_RETRY_MIN));
+        assert!(!ledger.needs_present(7));
+        assert!(!ledger.owed());
     }
 
     #[test]

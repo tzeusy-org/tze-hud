@@ -4538,6 +4538,7 @@ mod tests {
             telemetry: failed_telemetry,
             surface_acquired: true,
             gpu_submitted: false,
+            signature_current: true,
         };
         // A duration must never substitute for the actual submission result.
         assert!(
@@ -4557,6 +4558,7 @@ mod tests {
             telemetry: tze_hud_telemetry::FrameTelemetry::new(2),
             surface_acquired: true,
             gpu_submitted: true,
+            signature_current: true,
         };
         let gpu_submitted = submitted_outcome.gpu_submitted;
         let skipped_stage_telemetry = submitted_outcome.telemetry;

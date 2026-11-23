@@ -2304,6 +2304,57 @@ pub enum ZoneContent {
     StaticImage(ResourceId),
 }
 
+/// Runtime-only proof linking a resident publication to its retained store
+/// pixels and current pairing. Never serialized or reconstructed from a hash.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResidentRasterSource {
+    resource_id: ResourceId,
+    width: u32,
+    height: u32,
+    pixels: std::sync::Arc<[u8]>,
+    authorization: crate::config::agents::PairingAuthorization,
+}
+
+impl ResidentRasterSource {
+    /// Called by the resident boundary with the store's validated allocation.
+    pub fn new(
+        resource_id: ResourceId,
+        width: u32,
+        height: u32,
+        pixels: std::sync::Arc<[u8]>,
+        authorization: crate::config::agents::PairingAuthorization,
+    ) -> Self {
+        Self {
+            resource_id,
+            width,
+            height,
+            pixels,
+            authorization,
+        }
+    }
+
+    pub fn resource_id(&self) -> ResourceId {
+        self.resource_id
+    }
+
+    /// Authorize one synchronous scene admission with the pairing's grant.
+    pub fn with_authorized<T>(&self, commit: impl FnOnce() -> T) -> Option<T> {
+        self.authorization
+            .with_live_grants(|grants| grants.contains(self.resource_id.as_bytes()).then(commit))
+            .flatten()
+    }
+
+    pub fn is_authorized(&self) -> bool {
+        self.with_authorized(|| ()).is_some()
+    }
+
+    /// Borrow the same immutable CPU allocation for this frame. The store
+    /// retains its lifetime/charge even when there is no scene publication.
+    pub fn pixels_if_authorized(&self) -> Option<(std::sync::Arc<[u8]>, u32, u32)> {
+        self.with_authorized(|| (std::sync::Arc::clone(&self.pixels), self.width, self.height))
+    }
+}
+
 // ─── Zone publish records ────────────────────────────────────────────────────
 
 /// Record of a single publish event into a zone.
@@ -2356,6 +2407,9 @@ pub struct ZonePublishRecord {
     /// Not part of snapshots or the wire; leased and MCP publications use None.
     #[serde(skip)]
     pub publication_origin: Option<SceneId>,
+    /// Admitted resident raster provenance; snapshots convey no authority.
+    #[serde(skip)]
+    pub resident_raster: Option<std::sync::Arc<ResidentRasterSource>>,
     /// The publishing MCP session's label, fixed when the publication is
     /// admitted; a card draws it as a caption. `None` (unscoped) draws none.
     /// Runtime-only, like the session itself: not part of snapshots.
@@ -3382,7 +3436,16 @@ impl ZoneRegistry {
         let pubs = self
             .active_publishes
             .get(zone_name)
-            .cloned()
+            .map(|records| {
+                records
+                    .iter()
+                    .cloned()
+                    .map(|mut record| {
+                        record.resident_raster = None;
+                        record
+                    })
+                    .collect::<Vec<_>>()
+            })
             .unwrap_or_default();
         let occupant_count = pubs.len() as u32;
         Some(ZoneOccupancy {
@@ -3401,6 +3464,10 @@ impl ZoneRegistry {
                 .active_publishes
                 .values()
                 .flat_map(|v| v.iter().cloned())
+                .map(|mut record| {
+                    record.resident_raster = None;
+                    record
+                })
                 .collect(),
         }
     }

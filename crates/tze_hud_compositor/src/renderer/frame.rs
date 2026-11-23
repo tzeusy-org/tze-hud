@@ -184,6 +184,8 @@ pub struct WindowedPresentOutcome {
     /// second surface acquisition.
     pub surface_acquired: bool,
     pub gpu_submitted: bool,
+    /// False when exact raster authority changed after signature prediction.
+    pub signature_current: bool,
 }
 
 impl WindowedFrameBuild {
@@ -301,6 +303,7 @@ impl Compositor {
         let mut image_refs = Self::scene_image_resource_ids(scene);
         image_refs.extend(Self::scene_icon_resource_ids(scene));
         self.evict_unused_image_textures(&image_refs);
+        self.evict_unused_resident_image_textures(&Self::scene_resident_image_resource_ids(scene));
 
         // Ensure current-frame image/icon textures only after the safe eviction
         // pass, so class/aggregate reserve sees all reclaimable headroom.
@@ -817,12 +820,14 @@ impl Compositor {
                     telemetry,
                     surface_acquired: false,
                     gpu_submitted: false,
+                    signature_current: false,
                 };
             }
         };
         let surface_acquired = frame.acquisition.is_fresh();
 
-        let (encoder, encode_us) = self.encode_windowed_passes(build, target, &frame.view, true);
+        let (encoder, encode_us, signature_current) =
+            self.encode_windowed_passes(build, target, &frame.view, true);
         let frame_start = build.frame_start;
         let mut telemetry = build.telemetry.clone();
         telemetry.stage6_render_encode_us = encode_us;
@@ -875,6 +880,7 @@ impl Compositor {
                 telemetry,
                 surface_acquired,
                 gpu_submitted,
+                signature_current,
             };
         }
 
@@ -883,6 +889,7 @@ impl Compositor {
             telemetry,
             surface_acquired,
             gpu_submitted,
+            signature_current,
         }
     }
 
@@ -899,7 +906,7 @@ impl Compositor {
         target: &FrameTarget,
         view: &wgpu::TextureView,
         include_panel: bool,
-    ) -> (wgpu::CommandEncoder, u64) {
+    ) -> (wgpu::CommandEncoder, u64, bool) {
         let mut tv = self.target_view(build, target);
         if tv.panel_here && !include_panel {
             tv.card_items = &[];
@@ -934,10 +941,11 @@ impl Compositor {
             (tv.width, tv.height),
         );
 
-        let (mut encoder, encode_us) = self.encode_from_inputs(
+        let (mut encoder, encode_us, signature_current) = self.encode_from_inputs(
             &tv.vertices,
             view,
             &inputs,
+            &tv.textured_cmds,
             tv.width,
             tv.height,
             self.overlay_mode,
@@ -946,7 +954,7 @@ impl Compositor {
         );
 
         // ── Image pass: draw textured quads on top of color geometry ─────────
-        self.encode_image_pass(&mut encoder, view, &tv.textured_cmds, sw, sh);
+        self.encode_image_pass(&mut encoder, view, &tv.textured_cmds, sw, sh, None);
 
         // ── Widget pass: composite pre-synced textures above zone content ────
         self.encode_widget_pass_prepared(&mut encoder, view, tv.widget_quads, sw, sh);
@@ -986,7 +994,7 @@ impl Compositor {
             (sw, sh),
         );
 
-        (encoder, encode_us)
+        (encoder, encode_us, signature_current)
     }
 
     /// Map a canvas-space build onto one display window (see
@@ -1229,6 +1237,7 @@ impl Compositor {
         for cmd in tv.textured_cmds.iter() {
             let TexturedDrawCmd {
                 resource_id,
+                source,
                 x,
                 y,
                 w: cw,
@@ -1240,6 +1249,10 @@ impl Compositor {
                 continue;
             }
             resource_id.hash(&mut hasher);
+            std::mem::discriminant(source).hash(&mut hasher);
+            if let super::draw_cmds::ImageSource::Resident { layer, .. } = source {
+                std::mem::discriminant(layer).hash(&mut hasher);
+            }
             hash_f32s(&mut hasher, &[*x, *y, *cw, *ch]);
             hash_f32s(&mut hasher, uv_rect);
             hash_f32s(&mut hasher, tint);
@@ -1458,10 +1471,11 @@ impl Compositor {
         let render_menu_text = self.prepare_menu_text(&context_menu_text, surf_w, surf_h);
 
         // Headless never uses overlay mode — pass false for the pipeline selector.
-        let (mut encoder, encode_us, encode_inputs) = self.encode_frame(
+        let (mut encoder, encode_us, encode_inputs, _) = self.encode_frame(
             &vertices,
             &frame.view,
             scene,
+            &textured_cmds,
             surf_w,
             surf_h,
             false,
@@ -1471,7 +1485,7 @@ impl Compositor {
         telemetry.stage6_render_encode_us = encode_us;
 
         // ── Image pass: draw textured quads on top of color geometry ─────────
-        self.encode_image_pass(&mut encoder, &frame.view, &textured_cmds, sw, sh);
+        self.encode_image_pass(&mut encoder, &frame.view, &textured_cmds, sw, sh, None);
 
         // ── Widget pass: composite pre-synced textures above zone content ────
         if scene.widgets_shown() {

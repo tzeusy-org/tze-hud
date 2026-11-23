@@ -283,6 +283,7 @@ mod tests {
                 Some(origin),
                 true,
                 None,
+                None,
             )
             .unwrap();
         assert!(scene.orphan_publications(origin, 1, 60_000));

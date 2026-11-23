@@ -345,6 +345,7 @@ proptest! {
                 vec![ZonePublishRecord {
                     publication_id: SceneId::new(),
                     lease_id: None,
+                    resident_raster: None,
                     publication_origin: None,
                     caption: None,
                     window_token: None,
