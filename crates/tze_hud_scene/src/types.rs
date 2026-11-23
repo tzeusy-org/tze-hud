@@ -2121,6 +2121,8 @@ pub enum ZoneInteractionKind {
     Action { index: usize },
     /// The owner-only Go to control in a notification card's caption row.
     GoTo,
+    /// Local editing surface for the notification's open reply.
+    ReplyField,
     /// Runtime chrome drag handle for a movable element.
     DragHandle {
         /// Element identity in scene-id wire format.

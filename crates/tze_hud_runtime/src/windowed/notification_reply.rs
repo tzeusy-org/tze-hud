@@ -8,7 +8,7 @@ use tze_hud_input::{
     keyboard::{RawCharacterEvent, RawKeyDownEvent},
 };
 use tze_hud_scene::{
-    SceneId, ZoneHitRegion, ZoneInteractionKind,
+    Rect, SceneId, ZoneHitRegion, ZoneInteractionKind,
     graph::{SceneGraph, overlay::NotificationReplyView},
     types::NOTIFICATION_REPLY_MAX_BYTES,
 };
@@ -20,6 +20,7 @@ pub(super) struct NotificationReplyState {
     pub(super) ignore_character_at: Option<tze_hud_scene::MonoUs>,
     blur_pending: bool,
     refresh_view: bool,
+    ime_anchor: Option<(winit::window::WindowId, Rect)>,
     drafts: HashMap<SceneId, ReplyDraft>,
 }
 
@@ -97,7 +98,7 @@ impl super::WinitApp {
         if reply.active.is_none() && reply.drafts.is_empty() {
             return;
         }
-        let (restore, waits) = {
+        let (restore, waits, caret) = {
             let Some(state) = spin_acquire(&self.state.shared_state, INTERACTION_LOCK_BUDGET)
             else {
                 return;
@@ -133,7 +134,15 @@ impl super::WinitApp {
             {
                 scene.set_notification_reply_view(Some(editor.view(region)));
             }
-            (stale, scene.take_notification_wait_notifiers())
+            let caret = reply.active.as_ref().and_then(|target| {
+                scene
+                    .overlay
+                    .notification_geometry
+                    .iter()
+                    .find(|card| card.publication_id == target.publication_id)
+                    .and_then(|card| card.reply_caret)
+            });
+            (stale, scene.take_notification_wait_notifiers(), caret)
         };
         for wake in waits {
             wake.notify();
@@ -141,6 +150,31 @@ impl super::WinitApp {
         if restore {
             super::lifecycle::restore_foreground();
         }
+        self.sync_notification_reply_ime(caret);
+    }
+
+    fn sync_notification_reply_ime(&mut self, caret: Option<Rect>) {
+        let Some(caret) = caret else {
+            self.state.notification_reply.ime_anchor = None;
+            return;
+        };
+        let secondary = self.display_window_at(caret.x, caret.y);
+        let window = secondary
+            .and_then(|index| self.state.secondaries.get(index))
+            .map(|display| &display.window)
+            .or(self.state.window.as_ref());
+        let Some(window) = window else { return };
+        let (x, y) = self.cursor_to_scene(secondary, (0.0, 0.0));
+        let local = Rect::new(caret.x - x, caret.y - y, caret.width, caret.height);
+        let anchor = (window.id(), local);
+        if self.state.notification_reply.ime_anchor == Some(anchor) {
+            return;
+        }
+        window.set_ime_cursor_area(
+            winit::dpi::PhysicalPosition::new(local.x, local.y),
+            winit::dpi::PhysicalSize::new(local.width, local.height),
+        );
+        self.state.notification_reply.ime_anchor = Some(anchor);
     }
 
     pub(super) fn route_notification_reply_key(

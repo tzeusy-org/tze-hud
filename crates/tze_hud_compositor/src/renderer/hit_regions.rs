@@ -438,10 +438,27 @@ fn populate_notification_hit_regions_in(
             let goto = super::notification_style::go_to_control(scene, record, &style, card)
                 .map(|(rect, _)| rect);
             let goto_id = goto.map(|_| notification_go_to_interaction_id(zone_name, record));
-            let action_rects = layouts
+            let action_layout = layouts
                 .borrow_mut()
                 .resolve(&zone_tokens, zone_name, record, policy, card.width)
-                .bounds(card.x, card.y, card.width, card.height);
+                .with_reply(scene, record, &zone_tokens);
+            let action_rects = action_layout.bounds(card.x, card.y, card.width, card.height);
+            let reply = action_layout.reply_bounds(card, &action_rects);
+            let reply_caret =
+                reply
+                    .zip(scene.overlay.notification_reply.as_ref())
+                    .map(|(field, draft)| {
+                        let style =
+                            super::token_colors::resolve_composer_overlay_tokens(&zone_tokens);
+                        super::notification_reply::line_geometry(
+                            &mut layouts.borrow_mut(),
+                            field,
+                            draft,
+                            &style,
+                            &zone_tokens,
+                        )
+                        .caret
+                    });
             let choice = scene
                 .overlay
                 .notification_choices
@@ -479,6 +496,8 @@ fn populate_notification_hit_regions_in(
                     actions: action_rects.clone(),
                     close: dismiss_bounds,
                     goto,
+                    reply,
+                    reply_caret,
                     has_window_caption: record.window_token.is_some()
                         && style.caption(record.caption.as_deref()).is_some(),
                     focus,
@@ -488,6 +507,19 @@ fn populate_notification_hit_regions_in(
             // Chosen cards still draw their finite exit, but take no input.
             if choice.is_some() {
                 continue;
+            }
+            if let Some(bounds) = reply {
+                scene.overlay.zone_hit_regions.push(ZoneHitRegion {
+                    zone_name: zone_name.clone(),
+                    publication_id: record.publication_id,
+                    published_at_wall_us: record.published_at_wall_us,
+                    publisher_namespace: record.publisher_namespace.clone(),
+                    bounds,
+                    kind: ZoneInteractionKind::ReplyField,
+                    interaction_id: format!("zone:{zone_name}:reply:{}", record.publication_id),
+                    tab_order,
+                });
+                tab_order += 1;
             }
             scene.overlay.zone_hit_regions.push(ZoneHitRegion {
                 zone_name: zone_name.clone(),

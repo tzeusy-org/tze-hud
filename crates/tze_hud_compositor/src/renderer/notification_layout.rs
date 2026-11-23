@@ -3,6 +3,7 @@
 //! publication's descriptor.
 use super::notification_style::NotificationStyle;
 use std::collections::HashMap;
+use tze_hud_scene::graph::SceneGraph;
 use tze_hud_scene::types::*;
 
 #[derive(Clone, Debug, Default)]
@@ -29,8 +30,34 @@ pub(super) struct NotificationActionLayout {
     /// Reserved in both idle and focused cards so digit hints never reflow labels.
     pub(super) hint_width: f32,
     pub(super) link_marks: Vec<Option<(String, f32)>>,
+    reply: Option<(usize, f32)>,
 }
 impl NotificationActionLayout {
+    pub(super) fn with_reply(
+        mut self,
+        scene: &SceneGraph,
+        record: &ZonePublishRecord,
+        tokens: &HashMap<String, String>,
+    ) -> Self {
+        if let Some(reply) = &scene.overlay.notification_reply
+            && reply.publication_id == record.publication_id
+            && reply.action_index < self.heights.len()
+        {
+            let composer = super::token_colors::resolve_composer_overlay_tokens(tokens);
+            let line_height =
+                (composer.font_size_px * crate::text::LINE_HEIGHT_MULTIPLIER).max(1.0);
+            self.reply = Some((
+                reply.action_index,
+                line_height + 2.0 * composer.content_inset_px,
+            ));
+        }
+        self
+    }
+
+    fn reply_reserve(&self) -> f32 {
+        self.reply.map_or(0.0, |(_, height)| height + self.gap)
+    }
+
     fn rows_height(&self) -> f32 {
         if self.stacked {
             self.heights.iter().sum::<f32>()
@@ -44,7 +71,7 @@ impl NotificationActionLayout {
         if self.heights.is_empty() {
             return 0.0;
         }
-        self.row_gap + self.rows_height()
+        self.row_gap + self.rows_height() + self.reply_reserve()
     }
     /// The label's clip width inside button `bound`: the button minus its
     /// padding, the reserved digit hint and any link mark.
@@ -75,7 +102,7 @@ impl NotificationActionLayout {
             ((available - self.row_spacing * (n - 1) as f32) / n as f32).max(1.0)
         };
         let bottom = self.inset_bottom;
-        let mut top = (y + h - bottom - self.rows_height()).max(y);
+        let mut top = (y + h - bottom - self.rows_height() - self.reply_reserve()).max(y);
         self.heights
             .iter()
             .enumerate()
@@ -93,10 +120,24 @@ impl NotificationActionLayout {
                 );
                 if self.stacked {
                     top += height + self.gap;
+                    if self.reply.is_some_and(|(index, _)| index == i) {
+                        top += self.reply_reserve();
+                    }
                 }
                 rect
             })
             .collect()
+    }
+
+    pub(super) fn reply_bounds(&self, card: Rect, buttons: &[Rect]) -> Option<Rect> {
+        let (index, height) = self.reply?;
+        let button = buttons.get(index)?;
+        Some(Rect::new(
+            card.x + self.inset,
+            button.y + button.height + self.gap,
+            (card.width - 2.0 * self.inset).max(1.0),
+            height,
+        ))
     }
 }
 
@@ -122,6 +163,7 @@ pub(super) struct NotificationLayoutCache {
     entries: HashMap<(String, SceneId), (LayoutInputs, NotificationActionLayout, bool)>,
     config: Option<crate::fonts::FontConfig>,
     fonts: Option<glyphon::FontSystem>,
+    reply_line: Option<(String, f32, tze_hud_input::ComposerVisualLayout)>,
     pub(super) shapes: u64,
 }
 impl NotificationLayoutCache {
@@ -135,10 +177,36 @@ impl NotificationLayoutCache {
         if self.config.as_ref() != Some(&config) {
             self.entries.clear();
             self.fonts = None;
+            self.reply_line = None;
             self.config = Some(config.clone());
         }
         self.fonts
             .get_or_insert_with(|| crate::fonts::build_font_system(&config).0)
+    }
+
+    pub(super) fn reply_line(
+        &mut self,
+        tokens: &HashMap<String, String>,
+        text: &str,
+        font_size: f32,
+    ) -> &tze_hud_input::ComposerVisualLayout {
+        self.fallback_fonts(tokens);
+        if self
+            .reply_line
+            .as_ref()
+            .is_none_or(|(content, size, _)| content != text || *size != font_size)
+        {
+            let layout = crate::text::measure_editor_line(
+                self.fonts
+                    .as_mut()
+                    .expect("notification font system initialized"),
+                text,
+                font_size,
+                crate::text::LINE_HEIGHT_MULTIPLIER,
+            );
+            self.reply_line = Some((text.to_owned(), font_size, layout));
+        }
+        &self.reply_line.as_ref().expect("reply layout primed").2
     }
     pub(super) fn resolve(
         &mut self,
@@ -169,6 +237,7 @@ impl NotificationLayoutCache {
         if self.config.as_ref() != Some(&config) {
             self.entries.clear();
             self.fonts = None;
+            self.reply_line = None;
             self.config = Some(config.clone());
         }
         let labels = payload
@@ -296,6 +365,7 @@ impl NotificationLayoutCache {
             label_height,
             label_line_multiplier: Some(inputs.line_height / inputs.size.max(1.0)),
             hint_width,
+            reply: None,
         };
         self.entries.insert(key, (inputs, layout.clone(), actual));
         layout
@@ -303,8 +373,12 @@ impl NotificationLayoutCache {
     /// Forget every layout (a font change alters label widths).
     pub(super) fn invalidate(&mut self) {
         self.entries.clear();
+        self.reply_line = None;
     }
     pub(super) fn retain(&mut self, scene: &tze_hud_scene::graph::SceneGraph) {
+        if scene.overlay.notification_reply.is_none() {
+            self.reply_line = None;
+        }
         self.entries.retain(|(zone, id), _| {
             scene
                 .zone_registry

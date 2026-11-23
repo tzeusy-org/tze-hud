@@ -571,19 +571,38 @@ impl super::Compositor {
                                 }
 
                                 let action_layout = self.notification_action_layout(
-                                    zone_name, record, policy, card.width,
+                                    scene, zone_name, record, policy, card.width,
                                 );
                                 let (label_size, label_weight) =
                                     (style.action_label.size, style.action_label.weight);
+                                let action_bounds =
+                                    action_layout.bounds(card.x, card.y, card.width, card.height);
+                                if let Some((field, draft)) = action_layout
+                                    .reply_bounds(card, &action_bounds)
+                                    .zip(scene.overlay.notification_reply.as_ref())
+                                    .filter(|(_, draft)| !draft.text.is_empty())
+                                {
+                                    let style =
+                                        super::token_colors::resolve_composer_overlay_tokens(
+                                            zone_tokens,
+                                        );
+                                    let geometry = super::notification_reply::line_geometry(
+                                        &mut self.notification_layouts.borrow_mut(),
+                                        field,
+                                        draft,
+                                        &style,
+                                        zone_tokens,
+                                    );
+                                    items.push(geometry.text_item(
+                                        draft,
+                                        &style,
+                                        effective_opacity,
+                                    ));
+                                }
                                 for (index, (action, b)) in payload
                                     .actions
                                     .iter()
-                                    .zip(action_layout.bounds(
-                                        card.x,
-                                        card.y,
-                                        card.width,
-                                        card.height,
-                                    ))
+                                    .zip(action_bounds.iter().copied())
                                     .enumerate()
                                 {
                                     // The label splits at the sweep edge: the swept

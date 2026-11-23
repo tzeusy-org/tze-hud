@@ -21,6 +21,8 @@ pub struct NotificationGeometry {
     pub actions: Vec<Rect>,
     pub close: Rect,
     pub goto: Option<Rect>,
+    pub reply: Option<Rect>,
+    pub reply_caret: Option<Rect>,
     pub has_window_caption: bool,
     pub focus: Option<NotificationControl>,
     pub chosen: Option<usize>,

@@ -3621,6 +3621,7 @@ impl WinitApp {
                             ZoneInteractionKind::DragHandle { .. } => {
                                 // Handled by the drag state machine below — not here.
                             }
+                            ZoneInteractionKind::ReplyField => {}
                             ZoneInteractionKind::DismissTile { tile_id } => {
                                 // Human override: reclaim the tile's lease on
                                 // this thread's own scene lock, so the tile is

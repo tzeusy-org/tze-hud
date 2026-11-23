@@ -1716,6 +1716,7 @@ impl SceneGraph {
                     r.kind,
                     ZoneInteractionKind::Dismiss
                         | ZoneInteractionKind::GoTo
+                        | ZoneInteractionKind::ReplyField
                         | ZoneInteractionKind::Action { .. }
                 ) || (!hidden && live(&r.zone_name, r.publication_id, &r.publisher_namespace))
             })

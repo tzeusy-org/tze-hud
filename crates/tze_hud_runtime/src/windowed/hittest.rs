@@ -177,6 +177,7 @@ pub(super) fn pressable_control_regions(scene: &SceneGraph, safe_mode: bool) -> 
                         .contains_key(&r.publication_id)
             }
             Kind::JumpToLatest { .. } | Kind::DismissTile { .. } => true,
+            Kind::ReplyField => !safe_mode,
             Kind::DragHandle { .. } => false,
         })
         .map(|r| HitRegion::new(r.bounds.x, r.bounds.y, r.bounds.width, r.bounds.height))
