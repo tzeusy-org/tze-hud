@@ -119,12 +119,20 @@ impl Scopes {
     /// The live scope `id` of `agent`, marked as just called. Another
     /// agent's id is unknown to this one.
     pub fn touch(&self, agent: &str, id: &str) -> Option<Arc<Scope>> {
-        let scope = self.live().get(id).filter(|s| s.agent == agent).cloned()?;
+        let scope = self.find(agent, id)?;
+        self.record_call(&scope);
+        Some(scope)
+    }
+
+    pub(crate) fn find(&self, agent: &str, id: &str) -> Option<Arc<Scope>> {
+        self.live().get(id).filter(|s| s.agent == agent).cloned()
+    }
+
+    pub(crate) fn record_call(&self, scope: &Scope) {
         scope.last_call.fetch_max(self.tick(), Ordering::Relaxed);
         scope
             .last_call_ms
             .fetch_max(self.clock.now_millis(), Ordering::Relaxed);
-        Some(scope)
     }
 
     pub(crate) fn report_presence(&self, scope: &Scope, params: &serde_json::Value) {

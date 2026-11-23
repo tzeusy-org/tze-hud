@@ -4,6 +4,8 @@ use serde_json::{Value, json};
 use std::time::Duration;
 use tze_hud_mcp::scopes::MAX_SCOPES_PER_AGENT;
 use tze_hud_mcp::server::{CallerContext, SessionReply};
+use tze_hud_portal::hub::{PortalHub, PortalLimits};
+use tze_hud_scene::TestClock;
 use tze_hud_scene::config::{AgentDirectory, DEFAULT_MCP_AGENT_ID, hash_psk};
 use tze_hud_scene::scope::scoped_namespace;
 use tze_hud_scene::types::{Rect, ZoneHitRegion, ZoneInteractionKind, ZoneRegistry};
@@ -96,9 +98,13 @@ async fn sibling_initialization_requires_one_live_same_agent_primary() {
         );
     }
     config.agents = agents.shared();
-    let (handle, addr) = start_mcp_http_server(Arc::clone(&scene), config, shutdown.clone(), None)
-        .await
-        .unwrap();
+    let clock = Arc::new(TestClock::new(1_000));
+    let portals =
+        tze_hud_mcp::PortalHandle::new(PortalHub::new(PortalLimits::default()), clock.clone());
+    let (handle, addr) =
+        start_mcp_http_server(Arc::clone(&scene), config, shutdown.clone(), Some(portals))
+            .await
+            .unwrap();
     let addr = addr[0];
     let parent = open(addr, "model", initialize(json!({"tze-hud/label":"Work"}))).await;
     let other = open(addr, "other", initialize(json!({}))).await;
@@ -128,6 +134,7 @@ async fn sibling_initialization_requires_one_live_same_agent_primary() {
         assert_eq!(record.caption.as_deref(), Some("Work"));
         assert_eq!(record.merge_key.as_deref(), Some("question"));
     }
+    clock.advance(10);
     post(addr, "model", Some(&sibling),
         json!({"jsonrpc":"2.0","method":"notifications/tze/session_state","params":{"state":"working"}})).await;
     let admin = request(addr, "GET", "/admin/status?cpu=0", "model", None, None).await;
@@ -140,6 +147,7 @@ async fn sibling_initialization_requires_one_live_same_agent_primary() {
     assert_eq!(row["sibling"]["label"], "Work");
     assert_eq!(row["sibling"]["holdings"], 1);
     assert!(row["sibling"]["state"].is_null());
+    assert_eq!(row["sibling"]["last_call_ms"], 1_000);
     let rows = admin_body["sessions"].to_string();
     assert!(!rows.contains(&parent) && !rows.contains(&sibling));
     shutdown.trigger(crate::threads::ShutdownReason::Clean);

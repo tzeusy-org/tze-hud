@@ -141,6 +141,7 @@ pub enum SessionEnd {
 /// The `initialize` metadata key carrying the session label.
 pub const LABEL_META_KEY: &str = "tze-hud/label";
 const PARENT_META_KEY: &str = "tze.hud/parent";
+const SESSION_STATE_METHOD: &str = "notifications/tze/session_state";
 
 /// A successful tool result: one text block of compact JSON.
 fn tool_result(value: &serde_json::Value) -> serde_json::Value {
@@ -644,7 +645,7 @@ impl McpServer {
     pub async fn dispatch_session(&self, body: &str, ctx: &CallerContext) -> SessionReply {
         let identity = self.identity(ctx);
         let scope = match (&identity, ctx.session_id.as_deref()) {
-            (Some(identity), Some(id)) => match self.scopes.touch(&identity.agent_id, id) {
+            (Some(identity), Some(id)) => match self.scopes.find(&identity.agent_id, id) {
                 Some(scope) => Some(scope),
                 None => return SessionReply::UnknownSession,
             },
@@ -665,7 +666,14 @@ impl McpServer {
         opened: &mut Option<String>,
     ) -> String {
         let respond = |resp: McpResponse| serde_json::to_string(&resp).unwrap_or_default();
-        let request: McpRequest = match serde_json::from_str(body) {
+        let parsed = serde_json::from_str::<McpRequest>(body);
+        if let Some(scope) = scope
+            && (scope.parent.is_none()
+                || !matches!(&parsed, Ok(r) if r.method == SESSION_STATE_METHOD))
+        {
+            self.scopes.record_call(scope);
+        }
+        let request = match parsed {
             Ok(r) => r,
             Err(e) => {
                 warn!(error = %e, "MCP: failed to parse JSON-RPC request");
@@ -709,7 +717,7 @@ impl McpServer {
                 }
                 respond(McpResponse::ok(id, crate::schema::initialize_result()))
             }
-            "notifications/tze/session_state" => {
+            SESSION_STATE_METHOD => {
                 if id.is_none()
                     && let Some(scope) = scope
                 {
