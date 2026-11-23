@@ -1270,6 +1270,83 @@ def scenario_card_dismiss(run: Run) -> None:
     take_card_answer(run, key, "dismiss", dismiss=True)
 
 
+def scenario_card_copy(run: Run) -> None:
+    """hud-ljhku.8 R8.2: a pointer press copies locally and leaves the card."""
+    key, text = "gesture-card-copy", "cargo test -p example — job-42"
+    open_card(run, key, actions=[{"label": "Copy cmd", "copy": text}])
+    writes = run.status()["clipboard_writes"]
+    run.click(f"zone:notification-area/{key}/0")
+    expected = "copied" if WINDOWS else "copy_failed"
+    run.expect("one local clipboard attempt and the card remains", lambda st: (
+        st["clipboard_writes"] == writes + 1
+        and (card := notification_entry(st, key))
+        and card["chosen"] is None
+        and card["actions"][0].get("feedback") == expected
+    ))
+    if WINDOWS and WIN.clipboard_text() != text:
+        raise ScenarioFailed("the real clipboard holds the published text", run.status())
+    if items := run.inputs(wait_ms=250):
+        raise ScenarioFailed("copy queues no agent input", {"items": items})
+
+
+def scenario_card_reveal(run: Run) -> None:
+    """hud-ljhku.8 R8.3: hover reveals a cut body, Tab reveals a cut label."""
+    key, zone = "gesture-card-reveal", "zone:notification-area"
+    portal = "portal:gesture-reveal-focus"
+    open_portal(run, portal, "Reveal focus", count=2)
+    run.click(f"{portal}/composer")
+    run.expect("composer focused", on(portal, lambda p: p["focus"] == "composer"))
+    run.glide(1, 1)
+    run.publish(zone, key=key, ttl_ms=0, content={
+        "body": "The full deployment result is visible on hover. " * 35,
+        "actions": [{"label": "Inspect the deployment details " * 18, "callback_id": "inspect"}],
+    })
+
+    def card(status: dict) -> dict:
+        return notification_entry(status, key) or {}
+
+    def reveal(status: dict) -> dict:
+        return card(status).get("reveal") or {}
+
+    ready = run.expect("the renderer marks the body and label as cut", lambda st: (
+        {source["field"] for source in card(st).get("reveal_sources", [])} == {"body", 0}
+    ))
+    original = card(ready)
+    body = next(source["rect"] for source in original["reveal_sources"] if source["field"] == "body")
+    run.glide(int(body["x"] + body["w"] / 2), int(body["y"] + body["h"] / 2))
+    hovered = run.expect("hover reveals the full body without moving the card", lambda st: (
+        reveal(st).get("field") == "body" and card(st)["rect"] == original["rect"]
+        and card(st)["actions"][0]["rect"] == original["actions"][0]["rect"]
+    ))
+    panel = reveal(hovered)["rect"]
+    run.glide(int(panel["x"] + panel["w"] / 2), int(panel["y"] + panel["h"] / 2))
+    run.inj.click(5, repeat=2)
+    run.expect("wheel scrolls inside the reveal panel", lambda st: reveal(st).get("scrolled"))
+    run.glide(1, 1)
+    run.expect("leaving closes the body reveal", lambda st: not reveal(st))
+
+    for _ in range(16):
+        run.key("Tab")
+        focused = run.settle()
+        if card(focused).get("focus") == 0:
+            break
+    else:
+        raise ScenarioFailed("Tab reaches the clipped action label", run.status())
+    run.expect("the focused action label reveals", lambda st: reveal(st).get("field") == 0)
+    run.key("Escape")
+    run.expect("the reveal closes", lambda st: not reveal(st))
+    run.observe_for("Esc closes the reveal while focus stays", lambda st: (
+        not reveal(st) and card(st).get("focus") == 0
+    ), 0.3)
+    run.key("Escape")
+
+    run.publish(zone, key=key, ttl_ms=0, content={"body": "Fits"})
+    fit = run.expect("the replacement fits", lambda st: card(st) and not card(st).get("reveal_sources"))
+    bounds = card(fit)["rect"]
+    run.glide(int(bounds["x"] + bounds["w"] / 2), int(bounds["y"] + bounds["h"] / 2))
+    run.observe_for("fitting text never opens a reveal", lambda st: not reveal(st), 0.35)
+
+
 def scenario_stack_trim(run: Run) -> None:
     """hud-ljhku.5 R5.2/R5.3: six cards, one an unanswered question; the question is kept.
 
@@ -2418,6 +2495,8 @@ SCENARIOS: dict[str, Callable[[Run], None]] = {
     "sessions": scenario_sessions,
     "held-press": scenario_held_press,
     "card-link": scenario_card_link,
+    "card-copy": scenario_card_copy,
+    "card-reveal": scenario_card_reveal,
     "stack-trim": scenario_stack_trim,
     "portal-reading": scenario_portal_reading,
     "widget-hover": scenario_widget_hover,

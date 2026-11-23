@@ -134,16 +134,25 @@ guarded card under the pointer arms a wake
 [`the_owners_own_relayout_starts_no_guard`](../crates/tze_hud_runtime/src/windowed/event_loop_harness/tests/press_guard.rs),
 [`press_guard_is_not_zeroed_by_os_motion`](../crates/tze_hud_config/src/tokens.rs)).
 
-A notification action has exactly one callback or HTTPS URL target, validated
-by the shared payload contract on both planes before mutation/scheduling. MCP
-member presence and gRPC empty-string defaults retain their documented
-difference: an MCP action with no target is a callback named by its label
-(refused when that repeats another callback id on the card, or is
-`dismiss`), while gRPC still rejects both targets empty; valid absent-URL
-callback payloads remain compatible. Invalid
-combinations use `action needs callback_id or url, not both`; URLs require a
-parsed HTTPS host and at most 2048 supplied UTF-8 bytes, otherwise
-`action url must be https`. All four mixed actions share one admission cap.
+A notification action has one resolved callback, HTTPS URL or local copy
+target. Both planes validate it before mutation or scheduling. A targetless
+action with a non-empty label is a callback named by that label. Admission
+rejects a defaulted callback id that repeats another callback id or is
+`dismiss`. MCP counts explicit empty strings as present. gRPC treats its
+plain empty callback and URL strings as absent. Multiple targets use hint
+`action needs one of callback_id, url or copy`. URLs require a parsed HTTPS
+host and at most 2048 supplied UTF-8 bytes. Copy text requires 1 through
+2048 UTF-8 bytes. All action kinds share the four-action admission cap.
+
+Optional notification progress is finite and within 0 through 1 on both
+planes. A same-key update retains its visual slot and enter timeline.
+Copy activation resolves the exact live card and button, then writes after
+releasing scene guards. It preserves the card and its expiry, queues no
+publisher input, and updates only finite owner-local feedback. Link and copy
+actions do not give a card question priority.
+Full-text reveal follows the painted ellipsis geometry. It preserves card
+and button bounds, exposes no text in admin geometry, and arms a single
+dwell deadline only for a hovered eligible field.
 
 Links resolve by exact publication/publisher/zone and action index, never by
 label or callback text. Permitted pointer and keyboard activation leaves the

@@ -61,15 +61,16 @@ timestamps. Holdings are the entries with `held: true`; `held` is omitted
 otherwise. Scheduled zone publications count as held before presentation;
 `expires_in_ms`, when present, includes their presentation delay.
 Single-occupant zones carry `one:true`; stacks carry `max:N`. A full
-notification stack trims its oldest card that is not an unanswered question
-(a live card with a callback action and no accepted answer; answered and
-URL-only cards are not questions). Only a stack of nothing but questions drops
-its oldest question, and an arriving non-question at such a stack is itself the
-card trimmed. The rule is the same on MCP and gRPC admission. Regular
+notification stack trims its oldest card that is not an unanswered question.
+An unanswered question is a live card with a callback action and no accepted
+answer. Only a stack of nothing but questions drops its oldest question. An
+arriving non-question at such a stack is itself the card trimmed. The rule
+is the same on MCP and gRPC admission. Regular
 notification stacks present unanswered questions first, newest-first within
 the question and other-card groups, so a retained question stays reachable
-during a burst. Answered, expired and URL-only cards have no question priority;
-alert banners keep their severity ordering. A portal entry carries
+during a burst. Answered cards, expired cards and cards with only link or copy
+actions have no question priority. Alert banners keep their severity ordering.
+A portal entry carries
 `unread:N` when the viewer has N output units it has not yet scrolled to; it
 is omitted at zero. Check it before re-notifying. `busy:true` appears only
 when another agent currently occupies a single-occupant zone.
@@ -119,49 +120,65 @@ with the same cancellation and idle semantics as a `hud_input` wait.
 
 - Zone: `content` is a string, or a typed object for structured zones
   (`notification` with optional `title`, `body`, integer `urgency` 0–3
-  (default 1), and optional `actions: [{label, callback_id?|url, role?}]`). Each
-  action has one target. MCP requires a non-empty label; an MCP action with
-  neither member is a callback whose id is its label, byte for byte, and its
-  answer is that label. A callback string must be non-empty when supplied.
-  Supplying both target members (even empty) rejects with `INVALID_ARGUMENT`
-  and hint `action needs callback_id or url, not both`. A label-only action
-  whose label equals another action's callback id on the same card rejects
+  (default 1), optional `progress` and optional
+  `actions: [{label, callback_id?|url|copy, role?}]`). Progress is a finite
+  number from 0 through 1. The card draws a thin track in `color.outline.variant`
+  and fills it in `color.primary`, independent of urgency. Omit progress to
+  leave the space available. A same-key update moves the fill in place.
+  An invalid value returns `INVALID_ARGUMENT` with
+  `notification.progress must be a number in 0..1` on either plane.
+  Each action can specify a callback, an HTTPS URL or local clipboard text.
+  An action with no target defaults to a callback whose id and answer are
+  its label, byte for byte. MCP requires a non-empty label. A supplied MCP
+  callback id must be non-empty. Supplying multiple targets rejects with
+  `INVALID_ARGUMENT` and hint `action needs one of callback_id, url or copy`.
+  In MCP, an explicitly empty target string still counts as present.
+  A label-only action whose label equals another action's callback id on the
+  same card rejects
   with hint `notification.actions[<i>] label repeats actions[<j>]; add a
   callback_id`; a label-only `dismiss` rejects with
   `notification.actions[<i>] label dismiss needs a callback_id`. Two explicit
-  equal ids stay accepted, and a label shared with a URL action is accepted.
+  equal ids stay accepted. A label shared with a link or copy action is accepted.
   `role` is optional and MCP-only: `"destructive"` marks an irreversible
   callback answer (explicit or label-only). Any other value rejects with
-  `notification.actions[<i>].role must be destructive`; on a `url` action,
-  `notification.actions[<i>].role needs a callback action`. A role is meaning,
-  not styling: the theme draws a destructive action's label and outline in
+  `notification.actions[<i>].role must be destructive`. A link or copy action
+  with a role rejects with `notification.actions[<i>].role needs a callback action`.
+  The theme draws a destructive action's label and outline in
   `color.error` (on caution and error cards the label keeps that tone's text
   color and the outline is the cue), never filled at rest. The **primary**
   action is the first action that is not destructive: it is the filled button
   and the answer chord's initial focus, so put the answer you recommend first.
   It is never taken automatically. A card whose actions are all destructive
   has no primary. gRPC actions carry no role.
-  An empty URL gets `action url must be https`; an empty callback retains
-  its existing non-empty argument error. gRPC plain-string defaults map empty
-  targets to absence: both empty or both non-empty reject; existing gRPC label
-  admission is unchanged. URLs must parse as HTTPS with a non-empty host and
+  An empty MCP URL gets `action url must be https`. On gRPC, plain-string
+  `callback_id` and `url` defaults count as absent. The label-only form needs a
+  non-empty label. The gRPC `progress` and `copy` fields preserve presence.
+  URLs must parse as HTTPS with a non-empty host and
   contain at most 2048 supplied UTF-8 bytes; every URL failure uses
   `action url must be https`. No network probe is performed. Both planes
   validate the whole payload before immediate admission or deferred scheduling.
-  Both MCP and gRPC accept at most 4 mixed callback/link actions
+  Clipboard text must contain 1 through 2048 UTF-8 bytes. An empty or
+  oversized value returns `action copy must contain 1 to 2048 UTF-8 bytes`.
+  Pressing a copy action writes the text locally and shows `Copied` or
+  `Copy failed` in the button for about 1.2 seconds. The card stays with its
+  current expiry and no item reaches `hud_input`. The answer chord's digit
+  performs the same copy and returns focus. A card with only copy or link
+  actions is eligible for ordinary stack trimming.
+  Both MCP and gRPC accept at most 4 mixed actions
   (`MAX_NOTIFICATION_ACTIONS`); excess actions reject the whole publish with
   `INVALID_ARGUMENT` and hint `notification allows at most 4 actions`, before
   admission or scheduling. Notification actions form a choice card: four equal
   cells when every shaped label fits; any overflow stacks all options at full
   width. Layout uses the owner's font, theme, scale and action metric tokens,
-  and unchanged frames reuse the publication's measured geometry. Long labels
-  retain the existing bounded Clip policy inside each full-width button; a
-  label longer than that width cannot displace the later options. Stacked
-  notification title and body each retain their bounded line: text that fits
-  is shown in full, while overflow ends with a visible ellipsis. The body does
-  not grow the card or displace actions; keep instructions longer than this
-  budget in chat or another reading surface. The zone's
-  existing whole-card visibility bounds still apply. `type` may be
+  and unchanged frames reuse the publication's measured geometry. The title,
+  body and action labels end in a visible ellipsis when they overflow their
+  bounds. Later controls keep their positions. Hover an ellipsized field for
+  180 ms by default or focus it with the keyboard to open the full text nearby. The
+  panel flips at the display edge and keeps the source button clear. It
+  scrolls within its own bounds and closes on pointer leave, focus loss or
+  Escape. Fitting text opens nothing. Keep long instructions in chat or
+  another reading surface. The zone's whole-card visibility bounds still apply.
+  `type` may be
   omitted; the runtime infers it from what the zone accepts. For notifications,
   a nonempty `key` addresses one card within that zone and authenticated
   publisher. Matching publishes replace that card in the same slot before
@@ -452,9 +469,10 @@ with the same cancellation and idle semantics as a `hud_input` wait.
   of the sent string that are drawn, not counting the ellipsis:
   `{"clipped":{"body":58},"expires_in_ms":60000,"ok":true}`. Notifications
   report any of `"title"`, `"body"` and `"actions"` (a label wider than its
-  button; the count is the smallest among the cut labels, and stops before a
-  label's first line break); widgets report the string parameters set in this
-  call whose drawn text overflows the widget; a status-bar publish reports
+  button). The action count is the shortest drawn prefix among the cut labels.
+  It stops before the ellipsis and before the original label's first line break.
+  Widgets report the string parameters set in this call whose drawn text
+  overflows the widget; a status-bar publish reports
   each entry it sets whose value is cut, by entry key, measured against the
   merged bar as it draws right after this publish (0 when the full bar does
   not draw that entry; removals and values that fit report nothing; a cut
@@ -803,13 +821,18 @@ agents until one is paired.
   from the compositor's last frame, with no diagnostic timer or redraw.
   A notification entry has `s` (`zone:<name>`), `key` (or `null`), `rect`,
   `display` (index into `displays` of the monitor the card is drawn on,
-  which for a placed question is its placement), `actions` (`{label, kind, rect}`, with `kind` `callback` or `url`),
+  which for a placed question is its placement), `actions` (`{label, kind, rect}`,
+  with `kind` `callback`, `url` or `copy`). A copy action can carry
+  `feedback` (`copied` or `copy_failed`). The entry also has the
   `close` rect, `goto` (Go to rect or `null`), `focus` (action index,
   `"close"`, `"goto"` or `null`), `chosen` (action
   index or `null`), `state` (`entering`, `shown`, `exiting`) and `guarded`
   (presses on it are ignored by the fresh-card press guard). Entries follow
   drawn stack order; chosen cards retain their bounds during their exit even
-  after their input targets disappear. Card bodies and link URLs are omitted.
+  after their input targets disappear. Ellipsized fields add `reveal_sources`
+  with the field name or action index and its painted rect. An open `reveal`
+  gives the field, panel rect and whether the text is scrollable or scrolled.
+  Card bodies, link URLs and clipboard values are omitted.
   A widget entry has `s` (`widget:<instance>`), its snapped drawn `rect`,
   `display`, `hover_target` (the runtime's declared trigger rect, or `null`)
   and `tooltip_visible` (the current runtime parameter is at least 0.5).
@@ -828,8 +851,8 @@ agents until one is paired.
   successful owner-pressed Go to switches and remains readable during scene
   contention. These diagnostics are admin-only;
   MCP/gRPC responses and their token budgets are unchanged.
-  `clipboard_writes` monotonically counts HUD clipboard writes (pairing code,
-  OUTPUT copy); the non-Windows stub counts too.
+  `clipboard_writes` monotonically counts HUD clipboard attempts for pairing
+  codes, OUTPUT text and copy actions. The non-Windows stub counts too.
   `/admin/status` `displays` lists the overlaid monitors, primary first:
   `{key, name, x, y, width, height, primary, zones, window_state}` in scene pixels (the primary's
   top-left is 0,0; others may be negative) and the zones configured onto each.

@@ -160,7 +160,12 @@ fn display_index(bounds: Rect, displays: &[Rect]) -> Option<usize> {
 }
 
 fn notifications_json(scene: &SceneGraph, displays: &[Rect]) -> Value {
-    use tze_hud_scene::graph::overlay::NotificationControl;
+    use tze_hud_scene::graph::overlay::{NotificationControl, NotificationRevealField};
+    let field = |field| match field {
+        NotificationRevealField::Title => json!("title"),
+        NotificationRevealField::Body => json!("body"),
+        NotificationRevealField::Action(index) => json!(index),
+    };
     let entries: Vec<Value> = scene
         .overlay
         .notification_geometry
@@ -210,7 +215,7 @@ fn notifications_json(scene: &SceneGraph, displays: &[Rect]) -> Value {
                 Some(NotificationControl::GoTo) => json!("goto"),
                 None => Value::Null,
             };
-            Some(json!({
+            let mut entry = json!({
                 "s": format!("zone:{}", card.zone_name),
                 "key": record.merge_key,
                 "rect": rect_json(card.bounds),
@@ -222,7 +227,36 @@ fn notifications_json(scene: &SceneGraph, displays: &[Rect]) -> Value {
                 "chosen": card.chosen,
                 "state": card.state,
                 "guarded": scene.overlay.notification_press_guard == Some(card.publication_id),
-            }))
+            });
+            let sources: Vec<_> = scene
+                .overlay
+                .notification_reveal_regions
+                .iter()
+                .filter(|region| region.target.publication_id == card.publication_id)
+                .map(|region| {
+                    json!({
+                        "field": field(region.target.field),
+                        "rect": rect_json(region.bounds),
+                    })
+                })
+                .collect();
+            if !sources.is_empty() {
+                entry["reveal_sources"] = json!(sources);
+            }
+            if let (Some(panel), Some(request)) = (
+                scene.overlay.notification_reveal_panel,
+                scene.overlay.notification_reveal,
+            ) && panel.target == request.target
+                && panel.target.publication_id == card.publication_id
+            {
+                entry["reveal"] = json!({
+                    "field": field(panel.target.field),
+                    "rect": rect_json(panel.bounds),
+                    "scrollable": panel.max_scroll > 0.0,
+                    "scrolled": request.scroll > 0.0,
+                });
+            }
+            Some(entry)
         })
         .collect();
     json!(entries)

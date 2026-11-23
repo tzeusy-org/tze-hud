@@ -25,6 +25,10 @@ use super::notification_layout::NotificationLayoutCache;
 use super::notification_text::notification_text_layout;
 use super::{Compositor, ZoneStack};
 use crate::display::DisplayLayout;
+use crate::overflow::{
+    DEFAULT_MAX_TRUNCATION_INPUT_BYTES, TRUNCATION_OVERSCAN_LINES, TruncationViewport,
+    viewport_adjacent_input,
+};
 
 /// The compositor's current drawing inputs, shared with MCP admission.
 #[derive(Default)]
@@ -70,7 +74,7 @@ impl TextFitMeasurer {
         self.state().layout = layout;
     }
 
-    /// The text byte budget the status bar measures within.
+    /// The profile's byte threshold for windowing ellipsis input.
     pub fn set_max_truncation_input_bytes(&self, bytes: usize) {
         self.state().max_input_bytes = Some(bytes);
     }
@@ -203,6 +207,10 @@ impl tze_hud_scene::TextFit for TextFitMeasurer {
             * actions
                 .label_line_multiplier
                 .unwrap_or(crate::text::LINE_HEIGHT_MULTIPLIER);
+        let label_height = actions.label_height.max(1.0);
+        let max_input_bytes = state
+            .max_input_bytes
+            .unwrap_or(DEFAULT_MAX_TRUNCATION_INPUT_BYTES);
         // Report the smallest drawn prefix among the ellipsized labels.
         let cut_label = payload
             .actions
@@ -210,11 +218,19 @@ impl tze_hud_scene::TextFit for TextFitMeasurer {
             .zip(actions.bounds(card.x, card.y, card.width, card.height))
             .enumerate()
             .filter_map(|(index, (action, bound))| {
-                let result = crate::overflow::truncate_for_ellipsis(
+                let input = viewport_adjacent_input(
                     &action.label,
+                    label_height,
+                    line_height,
+                    TruncationViewport::HeadAnchored,
+                    max_input_bytes,
+                    TRUNCATION_OVERSCAN_LINES,
+                );
+                let result = crate::overflow::truncate_for_ellipsis(
+                    input,
                     attrs,
                     actions.label_width(&bound, index),
-                    actions.label_height.max(1.0),
+                    label_height,
                     label.size,
                     line_height,
                     fonts,
@@ -357,7 +373,7 @@ impl tze_hud_scene::TextFit for TextFitMeasurer {
             cards.fallback_fonts(&zone_tokens),
             state
                 .max_input_bytes
-                .unwrap_or(crate::overflow::DEFAULT_MAX_TRUNCATION_INPUT_BYTES),
+                .unwrap_or(DEFAULT_MAX_TRUNCATION_INPUT_BYTES),
         )
     }
 }
