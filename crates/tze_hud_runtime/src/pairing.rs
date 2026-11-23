@@ -11,12 +11,12 @@
 //!
 //! Pairing is open at startup while no agent exists, and again after the owner
 //! asks for it (`tze_hud --pair`, the pairing chord). A code is single use and
-//! valid for [`CODE_TTL`]. After [`MAX_BAD_ATTEMPTS`] wrong guesses it is
-//! replaced by a new one; the [`MAX_REGENERATIONS`]th such replacement closes
-//! pairing for [`COOLDOWN`] instead. Only the SHA-256 of the PSK is stored
-//! (`agents.toml`); neither the code nor the PSK is ever logged.
+//! valid for five minutes. Five wrong guesses replace the code. The third
+//! such replacement closes pairing for 60 seconds instead. Only the SHA-256
+//! of the PSK is stored (`agents.toml`). Neither the code nor the PSK is ever
+//! logged.
 //!
-//! [`PairingState`] is the pure decision core: every method that depends on
+//! `PairingState` is the pure decision core: every method that depends on
 //! the clock takes `now` (docs/invariants.md section 9). [`Pairing`] wires it
 //! to the agent store, the system card, and the HTTP route.
 
@@ -35,14 +35,14 @@ use crate::http::{OperatorCode, OperatorError, Response};
 use crate::shell::system_card::{SystemCard, SystemCardHandle};
 
 /// How long a code stays valid.
-pub const CODE_TTL: Duration = Duration::from_secs(5 * 60);
+pub(crate) const CODE_TTL: Duration = Duration::from_secs(5 * 60);
 /// Wrong guesses a code survives; the next one replaces it.
-pub const MAX_BAD_ATTEMPTS: u32 = 5;
+pub(crate) const MAX_BAD_ATTEMPTS: u32 = 5;
 /// Forced replacements per opening before pairing cools down: the last one
 /// closes pairing instead of issuing a code.
-pub const MAX_REGENERATIONS: u32 = 3;
+const MAX_REGENERATIONS: u32 = 3;
 /// How long pairing stays closed after too many failed codes.
-pub const COOLDOWN: Duration = Duration::from_secs(60);
+const COOLDOWN: Duration = Duration::from_secs(60);
 
 const CODE_DIGITS: usize = 6;
 const CODE_SPACE: u32 = 1_000_000;
@@ -74,21 +74,21 @@ fn os_word() -> u32 {
 
 /// A code shown to the owner. Deliberately not `Debug`.
 #[derive(Clone, PartialEq, Eq)]
-pub struct IssuedCode {
+pub(crate) struct IssuedCode {
     pub code: String,
     pub expires_at: Instant,
 }
 
 /// Result of opening pairing.
 #[derive(Clone, PartialEq, Eq)]
-pub enum Opened {
+enum Opened {
     Code(IssuedCode),
     CoolingDown,
 }
 
 /// Result of one submitted code.
 #[derive(Clone, PartialEq, Eq)]
-pub enum Attempt {
+enum Attempt {
     /// Right code: it is spent and pairing is closed.
     Accepted,
     /// Wrong code. `next` says what the failure did to the open code.
@@ -99,7 +99,7 @@ pub enum Attempt {
 
 /// What a wrong guess did to the code.
 #[derive(Clone, PartialEq, Eq)]
-pub enum AfterWrong {
+enum AfterWrong {
     /// Same code, fewer attempts left.
     Unchanged,
     /// Too many guesses: the old code is dead and this one replaces it.
@@ -115,7 +115,7 @@ struct OpenCode {
 }
 
 /// The pairing decisions, with no I/O and no clock of its own.
-pub struct PairingState {
+pub(crate) struct PairingState {
     next_word: Box<dyn FnMut() -> u32 + Send>,
     open: Option<OpenCode>,
     regenerations: u32,
@@ -123,7 +123,7 @@ pub struct PairingState {
 }
 
 impl PairingState {
-    pub fn new(next_word: impl FnMut() -> u32 + Send + 'static) -> Self {
+    fn new(next_word: impl FnMut() -> u32 + Send + 'static) -> Self {
         Self {
             next_word: Box::new(next_word),
             open: None,
@@ -133,7 +133,7 @@ impl PairingState {
     }
 
     /// Pairing state fed by the OS random source.
-    pub fn system() -> Self {
+    fn system() -> Self {
         Self::new(os_word)
     }
 
@@ -157,7 +157,7 @@ impl PairingState {
 
     /// Open pairing with a fresh code, replacing any open one, unless cooling
     /// down.
-    pub fn open_at(&mut self, now: Instant) -> Opened {
+    fn open_at(&mut self, now: Instant) -> Opened {
         if self.cooling_down(now) {
             return Opened::CoolingDown;
         }
@@ -167,7 +167,7 @@ impl PairingState {
     }
 
     /// The code that can be redeemed now, if any.
-    pub fn current_at(&self, now: Instant) -> Option<IssuedCode> {
+    fn current_at(&self, now: Instant) -> Option<IssuedCode> {
         let open = self.open.as_ref().filter(|_| self.is_open_at(now))?;
         Some(IssuedCode {
             code: String::from_utf8_lossy(&open.digits).into_owned(),
@@ -176,17 +176,17 @@ impl PairingState {
     }
 
     /// Whether pairing is closed after too many wrong codes.
-    pub fn is_cooling_down_at(&self, now: Instant) -> bool {
+    fn is_cooling_down_at(&self, now: Instant) -> bool {
         self.cooling_down(now)
     }
 
     /// Whether a code can currently be redeemed.
-    pub fn is_open_at(&self, now: Instant) -> bool {
+    fn is_open_at(&self, now: Instant) -> bool {
         !self.cooling_down(now) && self.open.as_ref().is_some_and(|o| now <= o.expires_at)
     }
 
     /// Check a submitted code. The comparison is constant time.
-    pub fn attempt_at(&mut self, now: Instant, submitted: &str) -> Attempt {
+    fn attempt_at(&mut self, now: Instant, submitted: &str) -> Attempt {
         if !self.is_open_at(now) {
             self.open = None;
             return Attempt::Closed;
@@ -225,7 +225,7 @@ impl PairingState {
 }
 
 /// Time source for pairing: monotonic for expiry, wall for the card.
-pub trait PairClock: Send + Sync {
+pub(crate) trait PairClock: Send + Sync {
     fn now(&self) -> Instant;
     fn wall_us(&self) -> u64;
 }
