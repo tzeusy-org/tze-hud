@@ -5317,6 +5317,9 @@ mod tests {
         let token = "tzgo-7f3a";
         let clock = Arc::new(tze_hud_scene::TestClock::new(1000));
         let mut harness = approve_reject_notification_harness_on(clock.clone());
+        // The answer chord chooses by publication time, then by ID. Give the
+        // card under test a later timestamp than the unscoped fixture card.
+        clock.advance(1);
         let card = publish_go_to_card(&mut harness, "go-to", token);
         let (started_tx, started_rx) = std::sync::mpsc::channel();
         let (release_tx, release_rx) = std::sync::mpsc::channel();
