@@ -132,6 +132,18 @@ Reconnects use fresh authenticated `SessionInit`; connected safe-mode
 `SessionSuspended` / `SessionResumed` notices remain. Local portal and internal
 lease orphan grace stay with their existing scene/runtime owners.
 
+Resident raster uploads capture the pairing's opaque authorization during
+registration. Allow-list edits keep that identity; a successful Unpair or
+re-pair revokes it before the live directory changes. Full-byte validation
+runs outside locks. Store capacity, one immutable decoded raster and the
+pairing's first grant commit under resource admission and the short live-pairing
+guard. Equal validated uploads share the retained allocation and CPU charge;
+digest-only reuse requires that pairing's matching grant. SVG/font behavior
+retains its existing path. This storage checkpoint does not yet connect admitted
+resident static-image publications to an isolated renderer source; that signed
+publication and pixel-proof work remains pending.
+
+
 Network listeners bind loopback and local Tailscale-interface addresses
 ([`net_addrs`](../crates/tze_hud_runtime/src/net_addrs.rs)).
 [`http::route`](../crates/tze_hud_runtime/src/http.rs) keeps `/pair` and

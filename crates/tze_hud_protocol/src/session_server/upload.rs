@@ -125,9 +125,31 @@ pub(super) enum UploadWorkerEvent {
     },
 }
 
+/// The pairing token owns its grant set across transports and permission edits.
+/// Its synchronous guard also excludes the runtime's revocation transition.
+struct ResidentRasterAuthority(tze_hud_scene::config::agents::PairingAuthorization);
+
+impl tze_hud_resource::upload::RasterUploadAuthority for ResidentRasterAuthority {
+    fn has_live_grant(&self, id: &[u8; 32]) -> bool {
+        self.0
+            .with_live_grants(|grants| grants.contains(id))
+            .unwrap_or(false)
+    }
+
+    fn commit(
+        &self,
+        commit: tze_hud_resource::upload::RasterGrantCommit<'_>,
+    ) -> Result<tze_hud_resource::ResourceStored, StoreResourceError> {
+        self.0
+            .with_live_grants(commit)
+            .unwrap_or(Err(StoreResourceError::CapabilityDenied))
+    }
+}
+
 pub(super) async fn run_upload_worker(
     state: Arc<Mutex<SharedState>>,
     namespace: String,
+    authorization: tze_hud_scene::config::agents::PairingAuthorization,
     mut command_rx: tokio::sync::mpsc::Receiver<UploadWorkerCommand>,
     event_tx: tokio::sync::mpsc::Sender<UploadWorkerEvent>,
     upload_rate_limit_bytes_per_sec: usize,
@@ -137,6 +159,7 @@ pub(super) async fn run_upload_worker(
         let st = state.lock().await;
         st.resource_store.clone()
     };
+    let authority = ResidentRasterAuthority(authorization);
     let mut in_flight_uploads: HashMap<[u8; 16], ResidentUploadState> = HashMap::new();
     let mut upload_rate_limiter =
         UploadByteRateLimiter::with_limit(upload_rate_limit_bytes_per_sec);
@@ -267,7 +290,10 @@ pub(super) async fn run_upload_worker(
                     }
                 }
 
-                match store.handle_upload_start(request).await {
+                match store
+                    .handle_resident_upload_start(request, &authority)
+                    .await
+                {
                     Ok(Some(stored)) => {
                         register_uploaded_scene_resource(&state, &stored.resource_id, &render_wake)
                             .await;
@@ -444,7 +470,7 @@ pub(super) async fn run_upload_worker(
                 };
 
                 match store
-                    .handle_upload_complete(
+                    .handle_resident_upload_complete(
                         &namespace,
                         UploadId::from_bytes(upload_id_bytes),
                         &capabilities,
@@ -452,6 +478,7 @@ pub(super) async fn run_upload_worker(
                             texture_bytes_total_limit: 0,
                             texture_bytes_total_used: 0,
                         },
+                        &authority,
                     )
                     .await
                 {

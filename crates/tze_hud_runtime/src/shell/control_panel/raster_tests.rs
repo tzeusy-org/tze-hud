@@ -1,0 +1,499 @@
+//! Real resident streams crossing the runtime's existing pairing/Unpair seam.
+use super::*;
+use tokio::sync::mpsc;
+use tokio_stream::wrappers::{ReceiverStream, TcpListenerStream};
+use tze_hud_protocol::proto::session::{
+    self, ClientMessage, ResourceMetadata, ResourceUploadStart, ServerMessage, SessionInit,
+    client_message::Payload as ClientPayload, hud_session_client::HudSessionClient,
+    hud_session_server::HudSessionServer, server_message::Payload as ServerPayload,
+};
+use tze_hud_protocol::session_server::{HudSessionImpl, SessionDeps};
+use tze_hud_resource::{
+    ResidentLedger, ResidentLedgerLimits, ResourceId, ResourceStore, ResourceStoreConfig,
+};
+use tze_hud_scene::config::agents::PairingAuthorization;
+
+const WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+
+struct Resident {
+    tx: mpsc::Sender<ClientMessage>,
+    rx: tonic::Streaming<ServerMessage>,
+    sequence: u64,
+}
+
+impl Resident {
+    async fn connect(endpoint: &str, agent: &str, credential: &str) -> Self {
+        let mut client = HudSessionClient::connect(endpoint.to_owned())
+            .await
+            .unwrap();
+        let (tx, rx) = mpsc::channel(16);
+        tx.send(ClientMessage {
+            sequence: 1,
+            timestamp_wall_us: 0,
+            payload: Some(ClientPayload::SessionInit(SessionInit {
+                agent_id: agent.into(),
+                auth_credential: Some(tze_hud_protocol::auth::psk_credential(credential.into())),
+            })),
+        })
+        .await
+        .unwrap();
+        let rx = client
+            .session(ReceiverStream::new(rx))
+            .await
+            .unwrap()
+            .into_inner();
+        let mut resident = Self {
+            tx,
+            rx,
+            sequence: 1,
+        };
+        assert!(matches!(
+            resident.next().await,
+            ServerPayload::SessionEstablished(_)
+        ));
+        assert!(matches!(
+            resident.next().await,
+            ServerPayload::DegradationNotice(_)
+        ));
+        resident
+    }
+
+    async fn send(&mut self, payload: ClientPayload) {
+        self.sequence += 1;
+        self.tx
+            .send(ClientMessage {
+                sequence: self.sequence,
+                timestamp_wall_us: 0,
+                payload: Some(payload),
+            })
+            .await
+            .unwrap();
+    }
+
+    async fn next(&mut self) -> ServerPayload {
+        tokio::time::timeout(WAIT, self.rx.message())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap()
+            .payload
+            .unwrap()
+    }
+
+    async fn upload(&mut self, bytes: &[u8], kind: i32, width: u32, height: u32, inline: bool) {
+        let hash = ResourceId::from_content(bytes);
+        self.send(ClientPayload::ResourceUploadStart(ResourceUploadStart {
+            expected_hash: hash.as_bytes().to_vec(),
+            resource_type: kind,
+            total_size_bytes: bytes.len() as u64,
+            metadata: Some(ResourceMetadata {
+                width,
+                height,
+                ..Default::default()
+            }),
+            inline_data: if inline { bytes.to_vec() } else { Vec::new() },
+        }))
+        .await;
+        if !inline {
+            let ServerPayload::ResourceUploadAccepted(accepted) = self.next().await else {
+                panic!("chunk upload must be accepted")
+            };
+            self.send(ClientPayload::ResourceUploadChunk(
+                session::ResourceUploadChunk {
+                    upload_id: accepted.upload_id.clone(),
+                    chunk_index: 0,
+                    data: bytes.to_vec(),
+                },
+            ))
+            .await;
+            self.send(ClientPayload::ResourceUploadComplete(
+                session::ResourceUploadComplete {
+                    upload_id: accepted.upload_id,
+                },
+            ))
+            .await;
+        }
+    }
+
+    async fn digest(&mut self, bytes: &[u8], kind: i32, width: u32, height: u32) -> ServerPayload {
+        self.send(ClientPayload::ResourceUploadStart(ResourceUploadStart {
+            expected_hash: ResourceId::from_content(bytes).as_bytes().to_vec(),
+            resource_type: kind,
+            total_size_bytes: bytes.len() as u64,
+            metadata: Some(ResourceMetadata {
+                width,
+                height,
+                ..Default::default()
+            }),
+            inline_data: Vec::new(),
+        }))
+        .await;
+        self.next().await
+    }
+}
+
+struct RasterRig {
+    pairing: crate::pairing::tests::Rig,
+    control: AgentControl,
+    store: ResourceStore,
+    ledger: ResidentLedger,
+    endpoint: String,
+    server: tokio::task::JoinHandle<()>,
+}
+
+impl Drop for RasterRig {
+    fn drop(&mut self) {
+        self.server.abort();
+    }
+}
+
+impl RasterRig {
+    async fn new(capacity: u64) -> Self {
+        let pairing = crate::pairing::tests::rig();
+        let ledger = ResidentLedger::new(ResidentLedgerLimits {
+            aggregate_bytes: capacity,
+            resource_bytes: capacity,
+            widget_source_bytes: 0,
+            widget_raster_bytes: 0,
+            font_bytes: 0,
+        });
+        let store = ResourceStore::new_with_resident_ledger(
+            ResourceStoreConfig {
+                max_total_texture_bytes: capacity as usize,
+                ..Default::default()
+            },
+            ledger.clone(),
+        );
+        let base = HudSessionImpl::new(SceneGraph::new(800.0, 600.0), "");
+        let shared = base.state.clone();
+        shared.lock().await.resource_store = store.clone();
+        let scene = shared.lock().await.scene.clone();
+        let control = AgentControl {
+            store: pairing.store.clone(),
+            shared: shared.clone(),
+            scene,
+            portals: None,
+            pairing: Some(pairing.pairing.clone()),
+            render_wake: Default::default(),
+            main_wake: Default::default(),
+        };
+        let service = HudSessionImpl::from_deps(SessionDeps::new(shared, pairing.agents.clone()));
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            tonic::transport::Server::builder()
+                .add_service(HudSessionServer::new(service))
+                .serve_with_incoming(TcpListenerStream::new(listener))
+                .await
+                .unwrap();
+        });
+        Self {
+            pairing,
+            control,
+            store,
+            ledger,
+            endpoint,
+            server,
+        }
+    }
+
+    fn pair(&self, agent: &str) -> String {
+        self.pairing.pairing.open();
+        let (code, _) = self.pairing.pairing.code().unwrap();
+        let response = self
+            .pairing
+            .pairing
+            .pair(&serde_json::to_vec(&serde_json::json!({"agent":agent,"code":code})).unwrap());
+        assert_eq!(response.status, 200);
+        let body: serde_json::Value = serde_json::from_slice(&response.body).unwrap();
+        body["psk"].as_str().unwrap().to_owned()
+    }
+
+    fn authorization(&self, agent: &str, credential: &str) -> PairingAuthorization {
+        self.pairing
+            .agents
+            .load()
+            .resolve(credential, agent)
+            .unwrap()
+            .authorization
+    }
+}
+
+fn granted(authorization: &PairingAuthorization, bytes: &[u8]) -> bool {
+    authorization
+        .with_live_grants(|g| g.contains(ResourceId::from_content(bytes).as_bytes()))
+        .unwrap_or(false)
+}
+
+fn stored(payload: ServerPayload) -> session::ResourceStored {
+    let ServerPayload::ResourceStored(stored) = payload else {
+        panic!("expected ResourceStored")
+    };
+    stored
+}
+
+fn error(payload: ServerPayload, expected: session::ResourceErrorCode) {
+    let ServerPayload::ResourceErrorResponse(error) = payload else {
+        panic!("expected resource error")
+    };
+    assert_eq!(error.error_code, expected as i32);
+}
+
+#[tokio::test]
+async fn resident_raster_first_grants_validate_and_keep_one_store_charge() {
+    let rig = RasterRig::new(8).await;
+    let key_a = rig.pair("raster-a");
+    let key_b = rig.pair("raster-b");
+    let auth_a = rig.authorization("raster-a", &key_a);
+    let auth_b = rig.authorization("raster-b", &key_b);
+    let mut a = Resident::connect(&rig.endpoint, "raster-a", &key_a).await;
+    let mut b = Resident::connect(&rig.endpoint, "raster-b", &key_b).await;
+    let pixels = [255, 0, 0, 255, 0, 255, 0, 255];
+    let id = ResourceId::from_content(&pixels);
+    a.upload(&pixels, 1, 2, 1, true).await;
+    assert!(!stored(a.next().await).was_deduplicated);
+    let allocation = rig
+        .store
+        .dedup_index()
+        .get(&id)
+        .unwrap()
+        .raster
+        .as_ref()
+        .unwrap()
+        .clone();
+    assert_eq!(allocation.pixels.as_ref(), &pixels);
+    assert_eq!((allocation.width, allocation.height), (2, 1));
+    let charged = rig.ledger.snapshot();
+    assert_eq!(charged.resource_bytes, 8);
+    assert_eq!(charged.allocation_count, 1);
+
+    // Another authenticated namespace cannot get its first grant by hash alone.
+    assert!(matches!(
+        b.digest(&pixels, 1, 2, 1).await,
+        ServerPayload::ResourceUploadAccepted(_)
+    ));
+    assert!(!granted(&auth_b, &pixels));
+    // A dedup hit still validates full bytes and exact type/dimensions.
+    b.upload(&pixels, 1, 1, 2, true).await;
+    error(
+        b.next().await,
+        session::ResourceErrorCode::ResourceDecodeError,
+    );
+    b.upload(&pixels, 2, 0, 0, true).await;
+    error(
+        b.next().await,
+        session::ResourceErrorCode::ResourceDecodeError,
+    );
+    let mut corrupt = pixels;
+    corrupt[0] = 0;
+    b.send(ClientPayload::ResourceUploadStart(ResourceUploadStart {
+        expected_hash: id.as_bytes().to_vec(),
+        resource_type: 1,
+        total_size_bytes: 8,
+        metadata: Some(ResourceMetadata {
+            width: 2,
+            height: 1,
+            ..Default::default()
+        }),
+        inline_data: corrupt.to_vec(),
+    }))
+    .await;
+    error(
+        b.next().await,
+        session::ResourceErrorCode::ResourceHashMismatch,
+    );
+    assert!(!granted(&auth_b, &pixels));
+    b.upload(&pixels, 1, 2, 1, false).await;
+    assert!(stored(b.next().await).was_deduplicated);
+    assert!(granted(&auth_a, &pixels) && granted(&auth_b, &pixels));
+    assert!(Arc::ptr_eq(
+        &allocation,
+        rig.store
+            .dedup_index()
+            .get(&id)
+            .unwrap()
+            .raster
+            .as_ref()
+            .unwrap()
+    ));
+    assert_eq!(rig.ledger.snapshot(), charged);
+    assert!(stored(b.digest(&pixels, 1, 2, 1).await).was_deduplicated);
+
+    // Permission edits preserve both the pairing token and connected grants.
+    rig.control
+        .set_grant("raster-a", Grant::Zones, false)
+        .await
+        .unwrap();
+    let edited = rig.authorization("raster-a", &key_a);
+    assert_eq!(edited, auth_a);
+    assert!(stored(a.digest(&pixels, 1, 2, 1).await).was_deduplicated);
+    let mut fresh = Resident::connect(&rig.endpoint, "raster-a", &key_a).await;
+    fresh.upload(&pixels, 1, 2, 1, true).await;
+    error(
+        fresh.next().await,
+        session::ResourceErrorCode::ResourceCapabilityDenied,
+    );
+
+    // A new allocation is refused at capacity before record or grant appears.
+    let other = [0, 0, 255, 255];
+    a.upload(&other, 1, 1, 1, true).await;
+    error(
+        a.next().await,
+        session::ResourceErrorCode::ResourceBudgetExceeded,
+    );
+    assert!(!granted(&auth_a, &other));
+    assert!(
+        rig.store
+            .dedup_index()
+            .get(&ResourceId::from_content(&other))
+            .is_none()
+    );
+    assert_eq!(rig.store.dedup_index().len(), 1);
+    assert_eq!(rig.ledger.snapshot(), charged);
+    rig.control.unpair("raster-a").await.unwrap();
+    assert!(auth_a.with_live_grants(|_| ()).is_none());
+    assert!(granted(&auth_b, &pixels));
+    assert!(stored(b.digest(&pixels, 1, 2, 1).await).was_deduplicated);
+    assert_eq!(rig.ledger.snapshot(), charged);
+
+    // PNG/JPEG keep decoded RGBA and share that exact store allocation on a
+    // second authenticated first grant, just like the raw directional raster.
+    for (kind, format) in [(2, image::ImageFormat::Png), (3, image::ImageFormat::Jpeg)] {
+        let rig = RasterRig::new(8).await;
+        let key_a = rig.pair("raster-a");
+        let key_b = rig.pair("raster-b");
+        let mut a = Resident::connect(&rig.endpoint, "raster-a", &key_a).await;
+        let mut b = Resident::connect(&rig.endpoint, "raster-b", &key_b).await;
+        let image = image::DynamicImage::ImageRgb8(
+            image::RgbImage::from_raw(2, 1, vec![255, 0, 0, 0, 255, 0]).unwrap(),
+        );
+        let mut encoded = std::io::Cursor::new(Vec::new());
+        image.write_to(&mut encoded, format).unwrap();
+        let encoded = encoded.into_inner();
+        let id = ResourceId::from_content(&encoded);
+        a.upload(&encoded, kind, 0, 0, true).await;
+        assert!(!stored(a.next().await).was_deduplicated);
+        let raster = rig
+            .store
+            .dedup_index()
+            .get(&id)
+            .unwrap()
+            .raster
+            .as_ref()
+            .unwrap()
+            .clone();
+        assert_eq!(
+            (raster.width, raster.height, raster.pixels.len()),
+            (2, 1, 8)
+        );
+        if kind == 2 {
+            assert_eq!(raster.pixels.as_ref(), &pixels);
+        }
+        b.upload(&encoded, kind, 0, 0, false).await;
+        assert!(stored(b.next().await).was_deduplicated);
+        assert!(granted(&rig.authorization("raster-b", &key_b), &encoded));
+        assert!(Arc::ptr_eq(
+            &raster,
+            rig.store
+                .dedup_index()
+                .get(&id)
+                .unwrap()
+                .raster
+                .as_ref()
+                .unwrap()
+        ));
+        assert_eq!(rig.ledger.snapshot().resource_bytes, 8);
+        assert_eq!(rig.ledger.snapshot().allocation_count, 1);
+    }
+}
+
+#[tokio::test]
+async fn runtime_unpair_blocks_old_resident_raster_commit_across_repair() {
+    for inline in [true, false] {
+        for dedup in [true, false] {
+            let rig = RasterRig::new(64).await;
+            let key_a = rig.pair("raster-a");
+            let key_b = rig.pair("raster-b");
+            let auth_a = rig.authorization("raster-a", &key_a);
+            let auth_b = rig.authorization("raster-b", &key_b);
+            let mut a = Resident::connect(&rig.endpoint, "raster-a", &key_a).await;
+            let mut b = Resident::connect(&rig.endpoint, "raster-b", &key_b).await;
+            let peer_pixels = [255, 0, 0, 255];
+            let new_pixels = [0, 255, 0, 255];
+            b.upload(&peer_pixels, 1, 1, 1, true).await;
+            stored(b.next().await);
+            let peer_id = ResourceId::from_content(&peer_pixels);
+            let peer_allocation = rig
+                .store
+                .dedup_index()
+                .get(&peer_id)
+                .unwrap()
+                .raster
+                .as_ref()
+                .unwrap()
+                .clone();
+            let before = rig.ledger.snapshot();
+            let target = if dedup { &peer_pixels } else { &new_pixels };
+            let target_id = ResourceId::from_content(target);
+            let (entered, release) = rig.store.pause_before_raster_commit(target_id);
+            a.upload(target, 1, 1, 1, inline).await;
+            tokio::time::timeout(WAIT, entered.notified())
+                .await
+                .unwrap();
+            let control = rig.control.clone();
+            let unpair = tokio::spawn(async move { control.unpair("raster-a").await });
+            tokio::time::timeout(WAIT, async {
+                while auth_a.with_live_grants(|_| ()).is_some() {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .unwrap();
+            // Pair through the actual HTTP pairing implementation while old
+            // work is still paused, not by manufacturing a new scene identity.
+            let new_key_a = rig.pair("raster-a");
+            let new_auth_a = rig.authorization("raster-a", &new_key_a);
+            assert_ne!(new_auth_a, auth_a);
+            release.notify_one();
+            tokio::time::timeout(WAIT, unpair)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+            assert!(auth_a.with_live_grants(|_| ()).is_none());
+            assert!(!granted(&new_auth_a, target));
+            assert!(granted(&auth_b, &peer_pixels));
+            assert_eq!(rig.ledger.snapshot(), before);
+            assert_eq!(rig.store.dedup_index().len(), 1);
+            assert!(Arc::ptr_eq(
+                &peer_allocation,
+                rig.store
+                    .dedup_index()
+                    .get(&peer_id)
+                    .unwrap()
+                    .raster
+                    .as_ref()
+                    .unwrap()
+            ));
+            if !dedup {
+                assert!(rig.store.dedup_index().get(&target_id).is_none());
+            }
+            assert!(stored(b.digest(&peer_pixels, 1, 1, 1).await).was_deduplicated);
+            let mut repaired = Resident::connect(&rig.endpoint, "raster-a", &new_key_a).await;
+            assert!(matches!(
+                repaired.digest(target, 1, 1, 1).await,
+                ServerPayload::ResourceUploadAccepted(_)
+            ));
+            assert!(!granted(&new_auth_a, target));
+            repaired.upload(target, 1, 1, 1, true).await;
+            assert_eq!(stored(repaired.next().await).was_deduplicated, dedup);
+            assert!(granted(&new_auth_a, target));
+            assert_eq!(
+                rig.ledger.snapshot().resource_bytes,
+                if dedup { 4 } else { 8 }
+            );
+        }
+    }
+}

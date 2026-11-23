@@ -344,6 +344,7 @@ impl HudSession for HudSessionImpl {
                 let upload_worker = tokio::spawn(run_upload_worker(
                     state.clone(),
                     session.namespace.clone(),
+                    session.authorization.clone(),
                     upload_command_rx,
                     upload_event_tx,
                     upload_rate_limit_bytes_per_sec,

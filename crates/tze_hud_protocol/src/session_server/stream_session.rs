@@ -14,6 +14,7 @@ pub(super) struct StreamSession {
     pub(super) session_id: String,
     pub(super) publication_defaults: tze_hud_scene::PublicationDefaults,
     pub(super) namespace: String,
+    pub(super) authorization: tze_hud_scene::config::agents::PairingAuthorization,
     pub(super) agent_name: String,
     /// Permissions from the agent's `allow` list, fixed at handshake.
     pub(super) capabilities: Vec<String>,

@@ -109,8 +109,16 @@ impl AgentStore {
         let mut cached = self.cached.lock().unwrap_or_else(|e| e.into_inner());
         let edited = agents_file::edit(path, change).map_err(|e| e.to_string())?;
         let paired = edited.after.directory().map_err(|e| e.to_string())?;
-        self.live
-            .store(Arc::new(self.live.load().with_agents_of(paired)));
+        let replaced = match change {
+            AgentChange::Pair { agent, .. } => Some(agent.as_str()),
+            _ => None,
+        };
+        // Persist/validate first, then revoke old identities before the live
+        // directory can authenticate a replacement. The writer lock serializes
+        // Pair, Unpair, allow edits and hand-edit reconciliation.
+        self.live.store(Arc::new(
+            self.live.load().with_repaired_agent(paired, replaced),
+        ));
         *cached = Cached {
             file: edited.after.clone(),
             stamp: modified(path),
@@ -209,7 +217,37 @@ mod tests {
             "the dev PSK survives"
         );
 
+        let old_pairing = live
+            .load()
+            .resolve("psk-3", "agent-3")
+            .unwrap()
+            .authorization;
+        // Explicit re-pair is a new authority even when the synthetic key is
+        // reused; an allow edit, in contrast, preserves the same authority.
+        store.apply(&pair("agent-3", "psk-3")).unwrap();
+        let replaced = live
+            .load()
+            .resolve("psk-3", "agent-3")
+            .unwrap()
+            .authorization;
+        assert_ne!(old_pairing, replaced);
+        assert!(old_pairing.with_live_grants(|_| ()).is_none());
+        store
+            .apply(&AgentChange::Grant {
+                agent: "agent-3".into(),
+                grant: Grant::Portal,
+                on: false,
+            })
+            .unwrap();
+        assert_eq!(
+            replaced,
+            live.load()
+                .resolve("psk-3", "agent-3")
+                .unwrap()
+                .authorization
+        );
         store.apply(&AgentChange::Unpair("agent-3".into())).unwrap();
+        assert!(replaced.with_live_grants(|_| ()).is_none());
         assert!(
             live.load().resolve("psk-3", "").is_err(),
             "an unpaired key stops working"

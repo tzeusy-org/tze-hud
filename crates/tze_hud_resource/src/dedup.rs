@@ -24,6 +24,26 @@ use crate::types::{DecodedMeta, ResourceId, ResourceType};
 
 // ─── Resource record ─────────────────────────────────────────────────────────
 
+/// One validated, immutable decoded raster. The store owns its CPU charge;
+/// renderers may clone this allocation without creating a second CPU entry.
+#[derive(Debug)]
+pub struct ValidatedRaster {
+    pub resource_type: ResourceType,
+    pub width: u32,
+    pub height: u32,
+    pub pixels: Arc<[u8]>,
+}
+
+impl ValidatedRaster {
+    pub(crate) fn metadata(&self) -> DecodedMeta {
+        DecodedMeta {
+            decoded_bytes: self.pixels.len(),
+            width_px: self.width,
+            height_px: self.height,
+        }
+    }
+}
+
 /// A stored resource entry in the dedup index.
 #[derive(Debug)]
 pub struct ResourceRecord {
@@ -34,6 +54,7 @@ pub struct ResourceRecord {
     pub resource_type: ResourceType,
     /// Decoded in-memory size (bytes).  Used for budget accounting.
     pub decoded_bytes: usize,
+    pub raster: Option<Arc<ValidatedRaster>>,
 }
 
 impl ResourceRecord {
@@ -42,6 +63,7 @@ impl ResourceRecord {
             resource_id,
             resource_type,
             decoded_bytes: meta.decoded_bytes,
+            raster: None,
         }
     }
 }

@@ -13,30 +13,49 @@
 //!
 //! ## Deduplication
 //!
-//! On `handle_upload_start`, the runtime checks `expected_hash` against the
-//! dedup index.  If found, `ResourceStored { was_deduplicated: true }` is
-//! returned immediately and no chunk sequence follows.
+//! Resident raster first grants require validated bytes even for an existing
+//! hash. Digest-only reuse requires a matching grant on the live pairing.
+//! Non-raster uploads and direct store callers retain global deduplication.
 //!
 //! ## Concurrency limits
 //!
 //! Each agent may have at most `MAX_CONCURRENT_UPLOADS_PER_AGENT` (= 4)
 //! uploads in flight simultaneously.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use tokio::sync::Mutex;
 
 use crate::FontBytesStore;
-use crate::dedup::{DedupIndex, ResourceRecord};
+use crate::dedup::{DedupIndex, ResourceRecord, ValidatedRaster};
 use crate::types::{
     CHUNK_SIZE_LIMIT, INLINE_SIZE_LIMIT, MAX_CONCURRENT_UPLOADS_PER_AGENT, ResourceError,
     ResourceId, ResourceStoreConfig, ResourceStored, ResourceType,
 };
 use crate::validation::{
     AgentBudget, check_budget, check_capability, check_hash, check_raw_size, check_resource_type,
-    decode_and_validate,
+    decode_and_validate, decode_raster,
 };
+
+/// A synchronous raster commit, run while its pairing is still authorized.
+pub type RasterGrantCommit<'a> =
+    Box<dyn FnOnce(&mut HashSet<[u8; 32]>) -> Result<ResourceStored, ResourceError> + Send + 'a>;
+
+/// The protocol supplies the live pairing guard; the resource layer never sees
+/// credentials and does not depend on scene/session types. Revocation clears
+/// the pairing's grants under the same guard that runs `commit`.
+pub trait RasterUploadAuthority: Send + Sync {
+    fn has_live_grant(&self, id: &[u8; 32]) -> bool;
+    fn commit(&self, commit: RasterGrantCommit<'_>) -> Result<ResourceStored, ResourceError>;
+}
+
+fn is_raster(resource_type: ResourceType) -> bool {
+    matches!(
+        resource_type,
+        ResourceType::ImageRgba8 | ResourceType::ImagePng | ResourceType::ImageJpeg
+    )
+}
 
 // ─── Upload session ───────────────────────────────────────────────────────────
 
@@ -131,6 +150,8 @@ pub struct ResourceStore {
     /// admitted atomically against the resident font ledger.
     font_bytes: FontBytesStore,
     resident_ledger: Option<crate::ResidentLedger>,
+    #[cfg(any(test, feature = "test-support"))]
+    before_raster_commit: Arc<std::sync::Mutex<Option<RasterCommitBarrier>>>,
 }
 
 impl ResourceStore {
@@ -143,6 +164,8 @@ impl ResourceStore {
             agent_uploads: Arc::new(Mutex::new(HashMap::new())),
             font_bytes: FontBytesStore::new(),
             resident_ledger: None,
+            #[cfg(any(test, feature = "test-support"))]
+            before_raster_commit: Default::default(),
         }
     }
 
@@ -157,6 +180,8 @@ impl ResourceStore {
             agent_uploads: Arc::new(Mutex::new(HashMap::new())),
             font_bytes: FontBytesStore::new_with_resident_ledger(resident_ledger.clone()),
             resident_ledger: Some(resident_ledger),
+            #[cfg(any(test, feature = "test-support"))]
+            before_raster_commit: Default::default(),
         }
     }
 
@@ -207,34 +232,56 @@ impl ResourceStore {
         &self,
         req: UploadStartRequest,
     ) -> Result<Option<ResourceStored>, ResourceError> {
+        self.start_upload(req, None).await
+    }
+
+    /// Resident raster uploads must prove a live pairing at their commit.
+    /// Font/SVG handling is unchanged and does not create raster grants.
+    pub async fn handle_resident_upload_start(
+        &self,
+        req: UploadStartRequest,
+        authority: &dyn RasterUploadAuthority,
+    ) -> Result<Option<ResourceStored>, ResourceError> {
+        self.start_upload(req, Some(authority)).await
+    }
+
+    async fn start_upload(
+        &self,
+        req: UploadStartRequest,
+        authority: Option<&dyn RasterUploadAuthority>,
+    ) -> Result<Option<ResourceStored>, ResourceError> {
         // 1. Capability gate.
         check_capability(&req.agent_capabilities)?;
 
         // 5. Type check (cheap; do early to short-circuit).
         check_resource_type(req.resource_type)?;
 
-        // Dedup fast path: check expected_hash against known resources.
-        // Latency contract: < 100 µs.
-        // Only treat as a dedup hit if the stored resource_type matches the
-        // requested type — different types with the same hash bytes are a
-        // conflict (e.g. an IMAGE_RGBA8 that happens to be also valid PNG bytes).
         let resource_id = ResourceId::from_bytes(req.expected_hash);
         if let Some(record) = self.dedup.get(&resource_id) {
-            if record.resource_type == req.resource_type {
-                tracing::debug!(
-                    resource_id = %resource_id,
-                    agent = %req.agent_namespace,
-                    "dedup hit — skipping upload"
-                );
-                return Ok(Some(ResourceStored {
-                    resource_id,
-                    was_deduplicated: true,
-                    decoded_bytes: record.decoded_bytes,
-                }));
+            if is_raster(req.resource_type)
+                && let Some(authority) = authority
+            {
+                // Full bytes always validate on a first grant. Digest-only
+                // reuse cannot borrow another pairing's global dedup record.
+                if req.inline_data.is_empty() && authority.has_live_grant(&req.expected_hash) {
+                    return authority
+                        .commit(Box::new(|grants| {
+                            if !grants.contains(&req.expected_hash) {
+                                return Err(ResourceError::CapabilityDenied);
+                            }
+                            self.matching_raster(
+                                &record,
+                                req.resource_type,
+                                req.width,
+                                req.height,
+                            )?;
+                            Ok(stored_record(&record, true))
+                        }))
+                        .map(Some);
+                }
+            } else if record.resource_type == req.resource_type {
+                return Ok(Some(stored_record(&record, true)));
             }
-            // Mismatched type for the same hash: fall through to re-upload/validate.
-            // The content-addressed identity is the bytes, not the type; if the
-            // hash matches but the type differs, re-validate as the new type.
         }
 
         // ── Inline fast path ───────────────────────────────────────────────
@@ -257,6 +304,7 @@ impl ResourceStore {
                     &req.agent_namespace,
                     req.width,
                     req.height,
+                    authority,
                 )
                 .await
                 .map(Some);
@@ -385,6 +433,42 @@ impl ResourceStore {
         agent_capabilities: &[String],
         agent_budget: &AgentBudget,
     ) -> Result<ResourceStored, ResourceError> {
+        self.finish_upload(
+            agent_namespace,
+            upload_id,
+            agent_capabilities,
+            agent_budget,
+            None,
+        )
+        .await
+    }
+
+    pub async fn handle_resident_upload_complete(
+        &self,
+        agent_namespace: &str,
+        upload_id: UploadId,
+        agent_capabilities: &[String],
+        agent_budget: &AgentBudget,
+        authority: &dyn RasterUploadAuthority,
+    ) -> Result<ResourceStored, ResourceError> {
+        self.finish_upload(
+            agent_namespace,
+            upload_id,
+            agent_capabilities,
+            agent_budget,
+            Some(authority),
+        )
+        .await
+    }
+
+    async fn finish_upload(
+        &self,
+        agent_namespace: &str,
+        upload_id: UploadId,
+        agent_capabilities: &[String],
+        agent_budget: &AgentBudget,
+        authority: Option<&dyn RasterUploadAuthority>,
+    ) -> Result<ResourceStored, ResourceError> {
         // Extract the inflight state.
         let (resource_type, expected_hash, assembled, width, height) = {
             let mut guard = self.agent_uploads.lock().await;
@@ -415,6 +499,7 @@ impl ResourceStore {
             agent_namespace,
             width,
             height,
+            authority,
         )
         .await
     }
@@ -456,6 +541,7 @@ impl ResourceStore {
         agent_namespace: &str,
         width: u32,
         height: u32,
+        authority: Option<&dyn RasterUploadAuthority>,
     ) -> Result<ResourceStored, ResourceError> {
         // Check capability (may already be checked but re-check for inline/complete paths).
         check_capability(agent_capabilities)?;
@@ -469,12 +555,18 @@ impl ResourceStore {
         // Hashing and decoding a large payload is CPU-bound, so it runs on the
         // blocking pool instead of the (deliberately small) network workers.
         let config = Arc::clone(&self.config);
-        let (data, meta) = tokio::task::spawn_blocking(move || {
+        let (data, meta, raster) = tokio::task::spawn_blocking(move || {
             // BLAKE3 hash integrity.
             check_hash(&data, &expected_hash)?;
             // Decode validation (also checks decoded size limits).
-            let meta = decode_and_validate(&data, resource_type, &config, width, height)?;
-            Ok::<_, ResourceError>((data, meta))
+            if is_raster(resource_type) {
+                let raster = decode_raster(data, resource_type, &config, width, height)?;
+                let meta = raster.metadata();
+                Ok::<_, ResourceError>((Vec::new(), meta, Some(raster)))
+            } else {
+                let meta = decode_and_validate(&data, resource_type, &config, width, height)?;
+                Ok((data, meta, None))
+            }
         })
         .await
         .map_err(|e| ResourceError::DecodeError(format!("validation task failed: {e}")))??;
@@ -483,26 +575,100 @@ impl ResourceStore {
         let resource_id = ResourceId::from_bytes(expected_hash);
         let font_data = matches!(resource_type, ResourceType::FontTtf | ResourceType::FontOtf)
             .then(|| Arc::<[u8]>::from(data));
-        let _admission = self.admission.lock().await;
-
-        // Another completion may have inserted this content while we validated it.
-        // Same-type dedup consumes no new capacity, including at the hard cap.
-        // Mismatched types retain the existing validated admission path.
-        if let Some(existing) = self.dedup.get(&resource_id)
-            && existing.resource_type == resource_type
-        {
-            return Ok(ResourceStored {
-                resource_id: existing.resource_id,
-                was_deduplicated: true,
-                decoded_bytes: existing.decoded_bytes,
-            });
+        #[cfg(any(test, feature = "test-support"))]
+        if raster.is_some() {
+            let barrier = {
+                let mut slot = self
+                    .before_raster_commit
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner());
+                if slot.as_ref().is_some_and(|b| b.resource_id == resource_id) {
+                    slot.take()
+                } else {
+                    None
+                }
+            };
+            if let Some(barrier) = barrier {
+                barrier.entered.notify_one();
+                barrier.release.notified().await;
+            }
         }
+        let _admission = self.admission.lock().await;
+        let commit = || {
+            self.commit_validated(
+                resource_id,
+                resource_type,
+                meta,
+                raster,
+                font_data,
+                agent_budget,
+                agent_namespace,
+                authority.is_some(),
+            )
+        };
+        if is_raster(resource_type)
+            && let Some(authority) = authority
+        {
+            authority.commit(Box::new(|grants| {
+                let stored = commit()?;
+                grants.insert(*stored.resource_id.as_bytes());
+                Ok(stored)
+            }))
+        } else {
+            commit()
+        }
+    }
 
-        // Budget and count checks through insertion form one admission operation.
+    fn matching_raster<'a>(
+        &self,
+        record: &'a ResourceRecord,
+        resource_type: ResourceType,
+        width: u32,
+        height: u32,
+    ) -> Result<&'a Arc<ValidatedRaster>, ResourceError> {
+        let raster = record
+            .raster
+            .as_ref()
+            .filter(|r| {
+                r.resource_type == resource_type
+                    && (resource_type != ResourceType::ImageRgba8
+                        || (r.width == width && r.height == height))
+            })
+            .ok_or_else(|| {
+                ResourceError::DecodeError(
+                    "resource type or dimensions conflict with the retained raster".into(),
+                )
+            })?;
+        Ok(raster)
+    }
+
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "One synchronous storage/charge commit receives the already-validated upload."
+    )]
+    fn commit_validated(
+        &self,
+        resource_id: ResourceId,
+        resource_type: ResourceType,
+        meta: crate::DecodedMeta,
+        raster: Option<ValidatedRaster>,
+        font_data: Option<Arc<[u8]>>,
+        agent_budget: &AgentBudget,
+        agent_namespace: &str,
+        resident: bool,
+    ) -> Result<ResourceStored, ResourceError> {
+        // Called only under admission, and under the live pairing guard for a
+        // resident raster. No await or scene/session lock occurs in this span.
+        if let Some(existing) = self.dedup.get(&resource_id) {
+            if resident && let Some(raster) = &raster {
+                self.matching_raster(&existing, resource_type, raster.width, raster.height)?;
+            }
+            if existing.resource_type == resource_type {
+                return Ok(stored_record(&existing, true));
+            }
+        }
         let runtime_used = self.dedup.total_decoded_bytes();
         check_budget(meta.decoded_bytes, agent_budget, runtime_used, &self.config)?;
-
-        // Max concurrent resources check.
         if self.dedup.len() >= self.config.max_concurrent_resources {
             return Err(ResourceError::BudgetExceeded {
                 detail: format!(
@@ -511,8 +677,6 @@ impl ResourceStore {
                 ),
             });
         }
-
-        // Resident admission and insertion stay under the same guard.
         if !matches!(resource_type, ResourceType::FontTtf | ResourceType::FontOtf)
             && let Some(ledger) = &self.resident_ledger
         {
@@ -533,44 +697,51 @@ impl ResourceStore {
                     detail: format!("resident font admission denied: {error:?}"),
                 })?;
         }
-        let record = ResourceRecord::new(resource_id, resource_type, &meta);
-
-        let (resource_id, was_deduplicated) = match self.dedup.insert(resource_id, record) {
-            Ok(rec) => {
-                tracing::info!(
-                    resource_id = %rec.resource_id,
-                    agent = %agent_namespace,
-                    decoded_bytes = meta.decoded_bytes,
-                    "resource stored"
-                );
-                (rec.resource_id, false)
-            }
-            Err(existing) => {
-                // Preserve the immutable record for validated type collisions.
-                // Same-type production completions are caught by the recheck.
-                tracing::debug!(
-                    resource_id = %existing.resource_id,
-                    agent = %agent_namespace,
-                    "dedup race — returning existing record"
-                );
-                (existing.resource_id, true)
-            }
+        let mut record = ResourceRecord::new(resource_id, resource_type, &meta);
+        record.raster = raster.map(Arc::new);
+        let (stored, deduplicated) = match self.dedup.insert(resource_id, record) {
+            Ok(record) => (record, false),
+            Err(record) => (record, true),
         };
+        tracing::debug!(resource_id = %stored.resource_id, agent = %agent_namespace, "resource stored");
+        Ok(stored_record(&stored, deduplicated))
+    }
+}
 
-        // Retain raw bytes for font resources so the compositor can load them
-        // into glyphon's FontSystem.  Image resources do not need byte retention.
-        if matches!(resource_type, ResourceType::FontTtf | ResourceType::FontOtf) {
-            tracing::debug!(
-                resource_id = %resource_id,
-                "font bytes stored for compositor consumption"
-            );
-        }
+fn stored_record(record: &ResourceRecord, was_deduplicated: bool) -> ResourceStored {
+    ResourceStored {
+        resource_id: record.resource_id,
+        was_deduplicated,
+        decoded_bytes: record.decoded_bytes,
+    }
+}
 
-        Ok(ResourceStored {
+#[cfg(any(test, feature = "test-support"))]
+struct RasterCommitBarrier {
+    resource_id: ResourceId,
+    entered: Arc<tokio::sync::Notify>,
+    release: Arc<tokio::sync::Notify>,
+}
+
+#[cfg(any(test, feature = "test-support"))]
+impl ResourceStore {
+    /// Pause exactly one matching real raster completion after validation and
+    /// before acquiring admission/authorization. Never pauses with a lock held.
+    pub fn pause_before_raster_commit(
+        &self,
+        resource_id: ResourceId,
+    ) -> (Arc<tokio::sync::Notify>, Arc<tokio::sync::Notify>) {
+        let entered = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new(tokio::sync::Notify::new());
+        *self
+            .before_raster_commit
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = Some(RasterCommitBarrier {
             resource_id,
-            was_deduplicated,
-            decoded_bytes: meta.decoded_bytes,
-        })
+            entered: Arc::clone(&entered),
+            release: Arc::clone(&release),
+        });
+        (entered, release)
     }
 }
 

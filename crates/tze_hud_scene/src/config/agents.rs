@@ -7,8 +7,8 @@
 //! [`SharedAgents`], so swapping in a new directory takes effect on the next
 //! request or handshake without a restart.
 
-use std::collections::HashMap;
-use std::sync::Arc;
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex};
 
 use arc_swap::ArcSwap;
 use sha2::{Digest, Sha256};
@@ -35,6 +35,8 @@ pub fn hash_psk(psk: &str) -> PskDigest {
 pub struct AgentIdentity {
     pub agent_id: String,
     pub permissions: Vec<String>,
+    /// Runtime pairing identity; ordinary permission edits preserve it.
+    pub authorization: PairingAuthorization,
 }
 
 impl AgentIdentity {
@@ -69,10 +71,63 @@ pub struct AuthRejection {
     pub hint: String,
 }
 
+/// Opaque lifetime of one pairing, shared by all its resident sessions.
+///
+/// The guard linearizes raster admission with revocation. Grants belong to this
+/// pairing rather than a transport, and disappear when it is revoked. Callers
+/// must finish all awaits before entering the synchronous commit closure.
+#[derive(Clone, Default)]
+pub struct PairingAuthorization(Arc<Mutex<PairingState>>);
+
+struct PairingState {
+    live: bool,
+    raster_grants: HashSet<[u8; 32]>,
+}
+
+impl Default for PairingState {
+    fn default() -> Self {
+        Self {
+            live: true,
+            raster_grants: HashSet::new(),
+        }
+    }
+}
+
+impl std::fmt::Debug for PairingAuthorization {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("PairingAuthorization(..)")
+    }
+}
+
+impl PartialEq for PairingAuthorization {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+impl Eq for PairingAuthorization {}
+
+impl PairingAuthorization {
+    /// Execute one non-suspending grant check or commit unless revoked.
+    pub fn with_live_grants<T>(
+        &self,
+        commit: impl FnOnce(&mut HashSet<[u8; 32]>) -> T,
+    ) -> Option<T> {
+        let mut state = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        state.live.then(|| commit(&mut state.raster_grants))
+    }
+
+    fn revoke(&self) {
+        let mut state = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        state.live = false;
+        state.raster_grants.clear();
+    }
+}
+
 #[derive(Clone)]
 struct PairedAgent {
     psk_sha256: PskDigest,
     permissions: Vec<String>,
+    authorization: PairingAuthorization,
 }
 
 /// The runtime's trusted agents, keyed by agent id.
@@ -82,6 +137,7 @@ pub struct AgentDirectory {
     /// Plaintext dev/test PSK that may claim any agent id. Only
     /// [`AgentDirectory::unrestricted`] sets it.
     dev_psk: Option<String>,
+    dev_authorizations: Arc<Mutex<HashMap<String, PairingAuthorization>>>,
 }
 
 /// The live agent directory shared by MCP and gRPC. `store` a new directory
@@ -109,6 +165,7 @@ impl AgentDirectory {
         Self {
             agents: HashMap::new(),
             dev_psk: (!dev_psk.is_empty()).then_some(dev_psk),
+            dev_authorizations: Default::default(),
         }
     }
 
@@ -124,6 +181,7 @@ impl AgentDirectory {
             PairedAgent {
                 psk_sha256,
                 permissions,
+                authorization: PairingAuthorization::default(),
             },
         );
     }
@@ -131,9 +189,44 @@ impl AgentDirectory {
     /// This directory's dev PSK with `paired`'s agents: what the runtime
     /// authenticates against after `agents.toml` changes.
     pub fn with_agents_of(&self, paired: AgentDirectory) -> Self {
+        self.with_repaired_agent(paired, None)
+    }
+
+    /// Commit a validated directory transition before publishing its ArcSwap.
+    /// An explicit re-pair replaces the identity even if the key is unchanged.
+    pub fn with_repaired_agent(&self, mut paired: AgentDirectory, replaced: Option<&str>) -> Self {
+        for (id, old) in &self.agents {
+            match paired.agents.get_mut(id) {
+                Some(new) if replaced != Some(id.as_str()) && old.psk_sha256 == new.psk_sha256 => {
+                    new.authorization = old.authorization.clone();
+                }
+                _ => old.authorization.revoke(),
+            }
+        }
+        // Dev credentials remain unrestricted, but cannot revive an earlier
+        // grant when a claimed namespace is removed or explicitly re-paired.
+        let mut dev = self
+            .dev_authorizations
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        dev.retain(|id, authorization| {
+            let changed = replaced == Some(id.as_str())
+                || self.agents.get(id).is_some_and(|old| {
+                    paired
+                        .agents
+                        .get(id)
+                        .is_none_or(|new| old.psk_sha256 != new.psk_sha256)
+                });
+            if changed {
+                authorization.revoke();
+            }
+            !changed
+        });
+        drop(dev);
         Self {
             agents: paired.agents,
             dev_psk: self.dev_psk.clone(),
+            dev_authorizations: Arc::clone(&self.dev_authorizations),
         }
     }
 
@@ -207,6 +300,7 @@ impl AgentDirectory {
         Ok(AgentIdentity {
             agent_id: agent_id.clone(),
             permissions: agent.permissions.clone(),
+            authorization: agent.authorization.clone(),
         })
     }
 
@@ -220,9 +314,21 @@ impl AgentDirectory {
             .agents
             .get(agent_id)
             .map_or_else(|| vec!["*".to_string()], |a| a.permissions.clone());
+        let authorization = self.agents.get(agent_id).map_or_else(
+            || {
+                self.dev_authorizations
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .entry(agent_id.to_owned())
+                    .or_default()
+                    .clone()
+            },
+            |agent| agent.authorization.clone(),
+        );
         AgentIdentity {
             agent_id: agent_id.to_string(),
             permissions,
+            authorization,
         }
     }
 }

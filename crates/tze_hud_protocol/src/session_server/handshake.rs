@@ -114,15 +114,21 @@ fn register_if_paired(
     st: &mut SharedState,
     namespace: &str,
     capabilities: &[String],
+    authorization: &tze_hud_scene::config::agents::PairingAuthorization,
     closer: &SessionCloser,
     recheck: impl FnOnce() -> Result<AgentIdentity, AuthRejection>,
 ) -> Option<crate::session::AgentSession> {
     match recheck() {
-        Ok(identity) if identity.agent_id == namespace => Some(st.sessions.register(
-            namespace,
-            capabilities,
-            closer.clone(),
-        )),
+        Ok(identity)
+            if identity.agent_id == namespace
+                && identity.authorization == *authorization
+                && authorization.with_live_grants(|_| ()).is_some() =>
+        {
+            Some(
+                st.sessions
+                    .register(namespace, capabilities, closer.clone()),
+            )
+        }
         _ => {
             tracing::info!(
                 namespace,
@@ -180,6 +186,7 @@ pub(super) async fn handle_session_init(
             return None;
         }
     };
+    let authorization = identity.authorization;
     let granted_capabilities = identity.permissions;
 
     let session_uuid = uuid::Uuid::now_v7();
@@ -228,9 +235,14 @@ pub(super) async fn handle_session_init(
                 &init.agent_id,
             )
         };
-        let Some(registered) =
-            register_if_paired(&mut st, &namespace, &granted_capabilities, closer, recheck)
-        else {
+        let Some(registered) = register_if_paired(
+            &mut st,
+            &namespace,
+            &granted_capabilities,
+            &authorization,
+            closer,
+            recheck,
+        ) else {
             drop(st);
             send_unpaired(tx).await;
             return None;
@@ -241,6 +253,7 @@ pub(super) async fn handle_session_init(
         )
     };
     let mut session = StreamSession {
+        authorization,
         publication_defaults: Default::default(),
         session_id,
         namespace: namespace.clone(),
