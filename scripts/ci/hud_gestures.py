@@ -582,6 +582,34 @@ class Run:
         self.inj.click()
         self.step(f"click {target or ''}".rstrip())
 
+    def click_link(self, point: tuple[int, int], *, repeat: int = 1) -> None:
+        """At a link, check the physical click target after the normal Windows guard."""
+        if self.injector != "sendinput":
+            self.inj.click(repeat=repeat)
+            return
+
+        def check_target() -> None:
+            observed = WIN.click_target_snapshot()
+            self.timeline.append({
+                "t": round(time.monotonic(), 3),
+                "step": "link click target before SendInput",
+                "click_target_before_send": observed,
+                "intended_point": list(point),
+                "owned_hud_pid": self.pid,
+                "repeat": repeat,
+            })
+            cursor = observed["cursor"]
+            at_cursor = observed["at_cursor"]
+            foreground = observed["foreground"]
+            # Absolute SendInput normalization can round a physical pixel.
+            if (cursor is None or any(abs(actual - wanted) > 1 for actual, wanted in zip(cursor, point))
+                    or at_cursor is None or at_cursor["pid"] != self.pid
+                    or foreground is None or foreground["pid"] != self.pid):
+                raise ScenarioFailed("owned HUD at the link click target", {"intended_point": list(point),
+                                     "owned_hud_pid": self.pid, "click_target_before_send": observed})
+
+        self.inj.click(repeat=repeat, before_send=check_target)
+
     def wheel(self, target: str, notches: int) -> None:
         """Positive notches scroll toward the start (wheel up); returns once the HUD handled them."""
         self.point(target)
@@ -1334,15 +1362,15 @@ def scenario_card_link(run: Run) -> None:
     # portal-reading's handoffs run just before this one.
     regain_owned_foreground(run, "owned HUD foreground before the first link press", 2.0)
     before = run.status()["link_launches"]
-    run.point(f"zone:notification-area/{key}/0")
+    point = run.point(f"zone:notification-area/{key}/0")
     first = time.monotonic()
-    run.inj.click()
+    run.click_link(point)
     run.expect("one accepted link launch", lambda s: s["link_launches"] == before + 1,
                timeout_s=1.0, interval_s=0.02)
     expect_link_feedback(run)
     regain_owned_foreground(run, "owned HUD foreground before second link press",
                             max(0.01, first + 1.8 - time.monotonic()))
-    run.inj.click()
+    run.click_link(point)
     second = time.monotonic()
     if second - first >= 2.0:
         raise ScenarioFailed("second link press must occur within 2s", {"seconds": second - first, "status": run.status()})
@@ -1428,17 +1456,18 @@ def scenario_portal_reading(run: Run) -> None:
     run.key("Escape")
     run.expect("selection cleared", on(s, lambda p: p["selection_chars"] == 0))
 
-    # Real link handoffs last: the browser can take the foreground late
-    # , so nothing but state reads follows a launch.
+    # Real link handoffs follow the other portal input. A browser can take
+    # the foreground after the handoff has returned.
     time.sleep(0.7)  # past the double-click interval
     run.glide(x, a)
-    run.click()
+    run.mark()
+    run.click_link((x, a))
     run.expect("a link click launches once (R2.1 S1)", lambda st: st["link_launches"] == launches + 1)
     expect_link_feedback(run)
     time.sleep(0.7)
     regain_owned_foreground(run, "owned HUD foreground before the link double-click", 1.0)
     run.glide(x, b)
-    run.inj.click(repeat=2)
+    run.click_link((x, b), repeat=2)
     run.expect("a link double-click launches once and selects nothing (R2.1 S3)",
                lambda st: st["link_launches"] == launches + 2 and portal_entry(st, s)["selection_chars"] == 0)
     if items := run.inputs():
@@ -2541,8 +2570,7 @@ def main(argv: list[str] | None = None) -> int:
                                if (tier_w or n not in TIER_W_ONLY)
                                and ((n in overlay_names) == (args.window_mode == "overlay"))]
     # Real link handoffs ("portal-reading", "card-link") can let a browser take
-    # the foreground seconds later (Edge first-run UI covered the HUD for every
-    # later scenario, ), so they run after everything else that
+    # the foreground seconds later, so they run after everything else that
     # injects input. "restart" replaces the HUD and only uses MCP; it stays last.
     # Before those, required scenarios run first in the fresh HUD and
     # informational ones follow in the same boot. A list naming the other window

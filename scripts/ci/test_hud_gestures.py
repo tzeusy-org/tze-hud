@@ -1,4 +1,4 @@
-"""Unit tests for the tier-L gesture harness guards and target resolution."""
+"""Unit tests for the gesture harness guards and target resolution."""
 
 from __future__ import annotations
 
@@ -174,6 +174,76 @@ class WindowsGuardTests(unittest.TestCase):
                 native.gdi32.DeleteDC.assert_called_with(memory)
                 native.gdi32.DeleteObject.assert_called_with(bitmap)
                 native.user32.ReleaseDC.assert_called_with(0, screen)
+
+    def test_link_click_checks_the_owned_window_at_the_physical_cursor(self) -> None:
+        native = native_input_boundary()
+        run = g.Run(exe=Path("tze_hud.exe"), out=Path("."), injector="sendinput", owned_pids=[4242])
+        hud, browser = 0x123456780, 0x123456781
+        target = (891, 106)
+        events = []
+        run.inj = native.SendInput(lambda: events.append("ownership guard"))
+        native.user32.SendInput.side_effect = lambda *args: events.append("SendInput") or args[0]
+
+        def cursor(point):
+            events.append("cursor observation")
+            if actual is None:
+                return 0
+            point._obj.x, point._obj.y = actual
+            return 1
+
+        def window_at(point):
+            self.assertEqual((point.x, point.y), actual)
+            return point_hwnd
+
+        def owner(hwnd, pid):
+            if hwnd not in (hud, browser):
+                return 0
+            pid._obj.value = 4242 if hwnd == hud else 9900
+            return 1
+
+        native.user32.GetCursorPos.side_effect = cursor
+        native.user32.WindowFromPoint.side_effect = window_at
+        native.user32.GetWindowThreadProcessId.side_effect = owner
+        cases = (
+            ("owned", target, hud, hud),
+            ("foreign point", target, browser, hud),
+            ("late foreign foreground", target, hud, browser),
+            ("unknown pointer window", target, None, hud),
+            ("unknown cursor", None, None, hud),
+            ("wrong point", (10, 20), hud, hud),
+        )
+        for case, actual, point_hwnd, foreground in cases:
+            with self.subTest(case=case), mock.patch.object(g, "WIN", native, create=True), \
+                    mock.patch.object(native.ctypes, "get_last_error", return_value=0, create=True):
+                events.clear()
+                run.timeline.clear()
+                run.inj.calls.clear()
+                native.user32.GetForegroundWindow.return_value = foreground
+                if case == "owned":
+                    run.click_link(target, repeat=2)
+                    self.assertEqual(events, ["ownership guard", "cursor observation", "SendInput"])
+                    self.assertEqual(run.inj.calls[-1]["sent"], 4)
+                else:
+                    with self.assertRaises(g.ScenarioFailed):
+                        run.click_link(target, repeat=2)
+                    self.assertEqual(events, ["ownership guard", "cursor observation"])
+                    self.assertEqual(run.inj.calls, [])
+                observation = run.timeline[-1]["click_target_before_send"]
+                self.assertEqual(observation["foreground"]["hwnd"], foreground)
+                self.assertEqual(observation["cursor"], list(actual) if actual else None)
+                window = observation["at_cursor"]
+                if point_hwnd is None:
+                    self.assertIsNone(window)
+                else:
+                    self.assertEqual(window, {"hwnd": point_hwnd, "pid": 4242 if point_hwnd == hud else 9900})
+
+        events.clear()
+        run.timeline.clear()
+        with mock.patch.object(run.inj, "guard", side_effect=g.Refused("foreign foreground")), \
+                self.assertRaises(g.Refused):
+            run.click_link(target)
+        self.assertEqual(events, [])
+        self.assertEqual(run.timeline, [])
 
     def test_a_refused_guard_keeps_earlier_outcomes(self) -> None:
         run = mock.Mock(out=Path("unused"))

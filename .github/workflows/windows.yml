@@ -230,8 +230,44 @@ jobs:
           GESTURES_REQUIRED: overlay-pointer,tray
         shell: pwsh
         run: |
-          python scripts/ci/hud_gestures.py --injector sendinput --exe "target/$env:HUD_BUILD_PROFILE/tze_hud.exe" --out "$env:RUNNER_TEMP/gestures" --required "$env:GESTURES_REQUIRED"
-          $fullscreenExit = $LASTEXITCODE
+          # Keep Edge onboarding out of the link clicks on this disposable VM.
+          # The HUD still hands real links to the Windows default browser.
+          $edgeKey = $null
+          $edgePriorKind = $null
+          $edgePolicySet = $false
+          $edgePolicy = 'HideFirstRunExperience'
+          try {
+            if ($env:GITHUB_ACTIONS -eq 'true' -and $env:RUNNER_ENVIRONMENT -eq 'github-hosted') {
+              try {
+                $edgeKey = [Microsoft.Win32.Registry]::LocalMachine.CreateSubKey('SOFTWARE\Policies\Microsoft\Edge')
+                if ($edgeKey.GetValueNames() -contains $edgePolicy) {
+                  $edgePriorKind = $edgeKey.GetValueKind($edgePolicy)
+                  $edgePriorValue = $edgeKey.GetValue($edgePolicy, $null, 'DoNotExpandEnvironmentNames')
+                }
+                $edgeKey.SetValue($edgePolicy, 1, 'DWord')
+                $edgePolicySet = $true
+                Write-Host 'Configured Edge first-run suppression for fullscreen gestures.'
+              } catch {
+                Write-Warning "Could not configure Edge first-run suppression: $_"
+              }
+            }
+            python scripts/ci/hud_gestures.py --injector sendinput --exe "target/$env:HUD_BUILD_PROFILE/tze_hud.exe" --out "$env:RUNNER_TEMP/gestures" --required "$env:GESTURES_REQUIRED"
+            $fullscreenExit = $LASTEXITCODE
+          } finally {
+            if ($edgeKey) {
+              try {
+                if ($edgePolicySet -and $null -eq $edgePriorKind) {
+                  $edgeKey.DeleteValue($edgePolicy, $false)
+                } elseif ($edgePolicySet) {
+                  $edgeKey.SetValue($edgePolicy, $edgePriorValue, $edgePriorKind)
+                }
+              } catch {
+                Write-Warning "Could not restore Edge first-run policy: $_"
+              } finally {
+                $edgeKey.Dispose()
+              }
+            }
+          }
           # Install the software Vulkan ICD only after WARP has finished. The
           # wrapper verifies the pinned archive before extraction and removes
           # its exact registry value in finally, including on scenario failure.
