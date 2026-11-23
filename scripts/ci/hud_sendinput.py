@@ -357,20 +357,26 @@ def cursor_position() -> tuple[int, int]:
     return point.x, point.y
 
 
+def _window_identity(hwnd: int | None) -> dict | None:
+    pid = wintypes.DWORD()
+    if not hwnd or not user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid)) or not pid.value:
+        return None
+    return {"hwnd": hwnd, "pid": pid.value}
+
+
+def foreground_identity() -> dict | None:
+    """Sample the current foreground handle and its owner together."""
+    return _window_identity(user32.GetForegroundWindow())
+
+
 def click_target_snapshot() -> dict:
     """Sample the physical cursor, window at that point, and foreground."""
-    def identity(hwnd: int | None) -> dict | None:
-        pid = wintypes.DWORD()
-        if not hwnd or not user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid)) or not pid.value:
-            return None
-        return {"hwnd": hwnd, "pid": pid.value}
-
     point = wintypes.POINT()
     has_cursor = user32.GetCursorPos(ctypes.byref(point))
     return {
         "cursor": [point.x, point.y] if has_cursor else None,
-        "at_cursor": identity(user32.WindowFromPoint(point)) if has_cursor else None,
-        "foreground": identity(user32.GetForegroundWindow()),
+        "at_cursor": _window_identity(user32.WindowFromPoint(point)) if has_cursor else None,
+        "foreground": foreground_identity(),
     }
 
 
