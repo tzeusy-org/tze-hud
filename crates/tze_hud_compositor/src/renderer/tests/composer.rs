@@ -150,6 +150,21 @@ async fn composer_echo_caret_and_kept_draft_share_the_input_strip() {
     assert_eq!(visual.x_at_cursor(0), 0.0);
     assert!(visual.x_at_cursor(2) > 0.0);
 
+    let overflow = "M".repeat(60);
+    compositor.local_composer = Some(composer_draft(hit_id, &overflow, overflow.len()));
+    compositor.prime_composer_scroll_offset(&scene);
+    let layout = compositor.composer_layout;
+    assert!(!layout.wrap && layout.h_scroll_px > 0.0);
+    assert_eq!((layout.visible_lines, layout.total_lines), (1.0, 1.0));
+    let scrolled = item(&compositor);
+    assert_eq!(scrolled.text.as_ref(), overflow);
+    assert!(scrolled.pixel_x < scrolled.clip_pixel_x);
+    assert_eq!(
+        (scrolled.clip_pixel_x, scrolled.clip_bounds_width),
+        (38.0, 128.0)
+    );
+    assert!(scrolled.bounds_width > scrolled.clip_bounds_width);
+
     let hidden_phase = || Instant::now() - (CARET_BLINK_HALF_PERIOD + CARET_BLINK_HALF_PERIOD / 2);
     let caret = |c: &Compositor| {
         let mut vertices = Vec::new();
@@ -228,16 +243,18 @@ async fn composer_selection_styled_run_uses_raw_byte_offsets() {
         Rgba::BLACK,
     );
     let tokens = resolve_composer_overlay_tokens(&compositor.token_map);
-    for (cursor, anchor, expected) in [
-        (2, 4, Some((2, 4))),
-        (4, 2, Some((2, 4))),
-        (0, 5, Some((0, 5))),
-        (5, 0, Some((0, 5))),
-        (3, 3, None),
+    for (draft, cursor, anchor, expected) in [
+        ("hello", 2, 4, Some((2, 4))),
+        ("hello", 4, 2, Some((2, 4))),
+        ("hello", 0, 5, Some((0, 5))),
+        ("hello", 5, 0, Some((0, 5))),
+        ("hello", 3, 3, None),
+        ("aé界z", 1, 6, Some((1, 6))),
+        ("aé界z", 6, 1, Some((1, 6))),
     ] {
         compositor.local_composer = Some(LocalComposerState {
             selection_anchor: anchor,
-            ..composer_draft(hit_id, "hello", cursor)
+            ..composer_draft(hit_id, draft, cursor)
         });
         let echo = compositor
             .collect_composer_text_item(
@@ -249,7 +266,7 @@ async fn composer_selection_styled_run_uses_raw_byte_offsets() {
                 &tokens,
             )
             .expect("focused composer must produce a text item");
-        assert_eq!(echo.text.as_ref(), "hello");
+        assert_eq!(echo.text.as_ref(), draft);
         assert_eq!(echo.styled_runs.len(), usize::from(expected.is_some()));
         if let Some(range) = expected {
             let run = &echo.styled_runs[0];
@@ -296,6 +313,9 @@ async fn composer_glyphs_stay_inside_input_panes() {
         let pixels = render_pixels(&mut compositor, &mut scene, &surface);
         let mut glyph_pixels = 0;
         let mut bottom_glyph_pixels = 0;
+        let strip_height = 16.0 * crate::text::LINE_HEIGHT_MULTIPLIER + 12.0;
+        let strip_top = (pane.y + pane.height - strip_height).floor();
+        let mut last_glyph_y = f32::NEG_INFINITY;
         for (index, _) in pixels
             .chunks_exact(4)
             .enumerate()
@@ -312,10 +332,12 @@ async fn composer_glyphs_stay_inside_input_panes() {
                 "draft crosses the right inset"
             );
             glyph_pixels += 1;
-            bottom_glyph_pixels += usize::from(y >= pane.y + pane.height - 37.0);
+            last_glyph_y = last_glyph_y.max(y);
+            bottom_glyph_pixels += usize::from(y >= strip_top - 2.0);
         }
         assert!(glyph_pixels > 0, "visible draft in {pane:?}");
         if let Some(minimum) = bottom_strip_minimum {
+            assert!(last_glyph_y >= strip_top, "glyphs reach the bottom strip");
             assert!(
                 bottom_glyph_pixels > minimum,
                 "visible wrapped draft in the bottom strip of {pane:?}"
@@ -359,17 +381,21 @@ fn composer_scene(
     );
     let root_id = root.id;
     let (mut scene, tile) = scene_with_node_at(root, size, tile_bounds);
-    let input = leaf(NodeData::HitRegion(HitRegionNode {
-        bounds: hit_bounds,
+    let input = composer_hit_region(hit_bounds);
+    let hit = input.id;
+    scene.add_node_to_tile(tile, Some(root_id), input).unwrap();
+    (scene, tile, hit)
+}
+
+fn composer_hit_region(bounds: Rect) -> Node {
+    leaf(NodeData::HitRegion(HitRegionNode {
+        bounds,
         interaction_id: "composer".into(),
         accepts_focus: true,
         accepts_pointer: true,
         accepts_composer_input: true,
         ..Default::default()
-    }));
-    let hit = input.id;
-    scene.add_node_to_tile(tile, Some(root_id), input).unwrap();
-    (scene, tile, hit)
+    }))
 }
 
 /// hud-ljhku.13: splicing a preedit for drawing clamps offsets to char
@@ -755,6 +781,7 @@ async fn transcript_divider_rects_track_tile_scroll_offset() {
 #[tokio::test]
 async fn repro_resize_first_frame_keeps_composer_chrome_aligned_with_wrapped_text() {
     let (mut compositor, _surface) = require_gpu!(make_text_compositor(400, 300).await);
+    assert_default_composer_resize(&mut compositor);
 
     const SURFACE_H: f32 = 500.0;
     let region = Rect::new(0.0, 0.0, 400.0, SURFACE_H);
@@ -811,6 +838,38 @@ async fn repro_resize_first_frame_keeps_composer_chrome_aligned_with_wrapped_tex
     assert!((new_text.font_size_px - old_text.font_size_px * RESIZED_SCALE).abs() < 0.01);
     assert!(new_text.bounds_height > old_text.bounds_height);
     assert!((new_text.clip_pixel_y - expected_box.y).abs() < 0.5);
+}
+
+fn assert_default_composer_resize(compositor: &mut Compositor) {
+    let bounds = Rect::new(0.0, 0.0, 400.0, 300.0);
+    let hit = composer_hit_region(bounds);
+    let composer_id = hit.id;
+    let (mut scene, tile) = scene_with_node_at(hit, (400.0, 300.0), bounds);
+    let draft = "resize-aware input text ".repeat(18);
+    compositor.local_composer = Some(composer_draft(composer_id, &draft, draft.len()));
+    let tokens = resolve_composer_overlay_tokens(&compositor.token_map);
+    assert_eq!(tokens.max_lines, 6);
+
+    let snapshot = |compositor: &mut Compositor, scene: &SceneGraph| {
+        compositor.prime_composer_scroll_offset(scene);
+        assert!(compositor.composer_layout.wrap);
+        let text = compositor
+            .collect_text_items(scene, 400.0, 300.0)
+            .into_iter()
+            .find(|item| item.text.as_ref() == draft)
+            .expect("scaled composer draft must render");
+        (
+            text.font_size_px,
+            text.bounds_height,
+            compositor.composer_layout.total_lines,
+        )
+    };
+    let (base_font, base_height, base_lines) = snapshot(compositor, &scene);
+    assert!((base_font - tokens.font_size_px).abs() < 0.01);
+    scene.set_tile_font_scale(tile, 1.5);
+    let (font, height, lines) = snapshot(compositor, &scene);
+    assert!((font - tokens.font_size_px * 1.5).abs() < 0.01);
+    assert!(height > base_height && lines > base_lines);
 }
 
 fn token_overrides<const N: usize>(pairs: [(&str, &str); N]) -> HashMap<String, String> {
