@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Lines per surface: Rust (production and test), Python, and Markdown.
 
-Reports only; it enforces no target. Counts tracked files the way
+With --base, checks growth against the targets in size_targets.toml.
+Counts tracked files the way
 `git ls-files '*.rs' | xargs cat | wc -l` does (newline characters), so the
 Rust total matches that command.
 
@@ -19,14 +20,19 @@ session or contributor reads.
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import re
 import subprocess
 import sys
+import tomllib
 from collections import defaultdict
+from collections.abc import Collection
 from pathlib import Path, PurePosixPath
+from typing import NamedTuple
 
 COLUMNS = ("rust", "rust_test", "python", "python_test", "markdown")
+SOURCE_SUFFIXES = (".rs", ".py", ".md")
 TWO_PART = {"crates", "app", "examples", "tests"}
 MARKDOWN_SKIP = (".beads/",)
 # `cfg(all(test, ...))` is test-only; `cfg(any(test, ...))` is shared code.
@@ -130,19 +136,152 @@ def tracked(root: Path) -> dict[str, str]:
     }
 
 
+def committed(root: Path, ref: str) -> dict[str, str]:
+    """Read the comparison commit's tracked source blobs without a checkout."""
+    commit = subprocess.check_output(
+        ["git", "rev-parse", "--verify", "--end-of-options", f"{ref}^{{commit}}"],
+        cwd=root, stderr=subprocess.PIPE,
+    ).decode().strip()
+    entries = subprocess.check_output(["git", "ls-tree", "-rz", commit], cwd=root)
+    sources = []
+    for entry in entries.split(b"\0")[:-1]:
+        metadata, name = entry.split(b"\t", 1)
+        path = name.decode()
+        if path.endswith(SOURCE_SUFFIXES):
+            mode, _, object_id = metadata.split()
+            if mode not in (b"100644", b"100755"):
+                raise ValueError(f"comparison source must be a regular file: {path}")
+            sources.append((path, object_id))
+
+    objects = subprocess.check_output(
+        ["git", "cat-file", "--batch"], cwd=root,
+        input=b"".join(object_id + b"\n" for _, object_id in sources),
+    )
+    files = {}
+    with io.BytesIO(objects) as stream:
+        for path, object_id in sources:
+            header = stream.readline().split()
+            if len(header) != 3 or header[:2] != [object_id, b"blob"]:
+                raise ValueError(f"comparison source unavailable: {path}")
+            files[path] = stream.read(int(header[2])).decode("utf-8", "replace")
+            if stream.read(1) != b"\n":
+                raise ValueError(f"comparison source incomplete: {path}")
+    return files
+
+
+class Target(NamedTuple):
+    surfaces: tuple[str, ...]
+    ceilings: dict[str, int]
+    grants: dict[str, int]
+
+
+def line_limits(values: dict, fields: Collection[str]) -> bool:
+    return bool(values) and all(
+        name in fields and type(value) is int and value >= 0
+        for name, value in values.items()
+    )
+
+
+def size_targets(path: Path) -> dict[str, Target]:
+    with path.open("rb") as source:
+        policy = tomllib.load(source)
+    entries = policy.get("targets")
+    allowances = policy.get("allowances", [])
+    if policy.keys() - {"targets", "allowances"} or not isinstance(entries, dict) or not entries:
+        raise ValueError("size policy must contain targets")
+    if not isinstance(allowances, list):
+        raise ValueError("size policy allowances must be a list")
+
+    targets = {}
+    seen_surfaces = set()
+    for name, entry in entries.items():
+        if not isinstance(entry, dict):
+            raise ValueError(f"{name}: target must be a table")
+        surfaces = entry.get("surfaces")
+        ceilings = {key: value for key, value in entry.items() if key != "surfaces"}
+        if not isinstance(surfaces, list) or not surfaces or not all(
+            isinstance(surface, str) and surface.strip() for surface in surfaces
+        ):
+            raise ValueError(f"{name}: target needs named report surfaces")
+        if len(set(surfaces)) != len(surfaces) or seen_surfaces.intersection(surfaces):
+            raise ValueError(f"{name}: report surfaces must appear only once")
+        if not line_limits(ceilings, COLUMNS):
+            raise ValueError(f"{name}: target needs valid line ceilings")
+        targets[name] = Target(tuple(surfaces), ceilings, dict.fromkeys(ceilings, 0))
+        seen_surfaces.update(surfaces)
+
+    seen_grants = set()
+    for grant in allowances:
+        required = ("feature", "approval", "target")
+        if not isinstance(grant, dict) or not all(
+            isinstance(grant.get(key), str) and grant[key].strip() for key in required
+        ):
+            raise ValueError("size allowance needs a feature, owner approval and target")
+        target = targets.get(grant["target"])
+        key = (grant["feature"], grant["target"])
+        values = {field: value for field, value in grant.items() if field not in required}
+        if not target or key in seen_grants or not line_limits(values, target.ceilings):
+            raise ValueError(f"{key[0]}: invalid or duplicate size allowance for {key[1]}")
+        for field, value in values.items():
+            target.grants[field] += value
+        seen_grants.add(key)
+    return targets
+
+
+def target_report(rows: dict, targets: dict[str, Target], base: dict | None) -> tuple[str, list[str]]:
+    report = [
+        "\n| Target surface | Metric | Current | Base | Sketch target | Signed allowances | Distance to target |",
+        "|---|---|--:|--:|--:|--:|--:|",
+    ]
+    failures = []
+    for name, target in targets.items():
+        for field, ceiling in target.ceilings.items():
+            current = sum(rows.get(surface, {}).get(field, 0) for surface in target.surfaces)
+            allowance = target.grants[field]
+            previous = None if base is None else sum(
+                base.get(surface, {}).get(field, 0) for surface in target.surfaces
+            )
+            prior = "—" if previous is None else f"{previous:,}"
+            report.append(f"| {name} | {field} | {current:,} | {prior} | "
+                          f"{ceiling:,} | {allowance:,} | {current - ceiling:+,} |")
+            effective = ceiling + allowance
+            if previous is not None and current > previous and current > effective:
+                failures.append(
+                    f"{name} ({field}) grew from {previous:,} to {current:,} lines "
+                    f"above its {effective:,}-line ceiling (target {ceiling:,} + allowance {allowance:,})"
+                )
+    return "\n".join(report) + "\n", failures
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[2])
     ap.add_argument("--output-dir", type=Path, help="also write size-report.md/.json here")
+    ap.add_argument("--base", help="check growth against this Git commit")
     args = ap.parse_args(argv)
     rows = count(tracked(args.root))
     text = table(rows)
+    failures = []
+    policy = args.root / "scripts/ci/size_targets.toml"
+    try:
+        base = None if args.base is None else count(committed(args.root, args.base))
+        if args.base is not None or policy.exists():
+            target_text, failures = target_report(rows, size_targets(policy), base)
+            text += target_text
+    except subprocess.CalledProcessError:
+        print(f"size gate: cannot read comparison commit {args.base!r}", file=sys.stderr)
+        return 2
+    except (OSError, ValueError) as error:
+        print(f"size gate: {error}", file=sys.stderr)
+        return 2
     sys.stdout.write(text)
     if args.output_dir:
         args.output_dir.mkdir(parents=True, exist_ok=True)
         (args.output_dir / "size-report.md").write_text(text)
         (args.output_dir / "size-report.json").write_text(json.dumps(rows, indent=2, sort_keys=True) + "\n")
-    return 0
+    for failure in failures:
+        print(f"size gate: {failure}", file=sys.stderr)
+    return int(bool(failures))
 
 
 if __name__ == "__main__":
