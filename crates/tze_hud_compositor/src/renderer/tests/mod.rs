@@ -172,6 +172,7 @@ mod hit_drag;
 mod idle_gate;
 mod markdown_cache;
 mod markdown_primer;
+mod notification_label;
 mod notification_layout;
 mod portal_animation;
 mod portal_reading;
