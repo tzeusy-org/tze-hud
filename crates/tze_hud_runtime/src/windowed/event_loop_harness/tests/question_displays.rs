@@ -21,7 +21,8 @@ impl tze_hud_scene::QuestionPlacer for On {
 /// The Approve/Reject card on DISPLAY1 (the primary), then a newer
 /// one-button question placed on DISPLAY2.
 fn two_displays() -> (HeadlessEventLoopHarness, SceneId, SceneId) {
-    let mut harness = approve_reject_notification_harness();
+    let clock = Arc::new(tze_hud_scene::TestClock::new(1_000));
+    let mut harness = approve_reject_notification_harness_on(clock.clone());
     let display = |name: &str, x: f32, primary| {
         (
             DisplayRect {
@@ -37,6 +38,8 @@ fn two_displays() -> (HeadlessEventLoopHarness, SceneId, SceneId) {
         display("DISPLAY2", 1920.0, false),
     ]);
     let older = harness.scene().zone_registry.active_for_zone(ZONE)[0].publication_id;
+    // Give the DISPLAY2 card a later publication timestamp.
+    clock.advance(1);
     {
         let mut scene = harness.scene();
         scene.overlay.question_placer = Some(Arc::new(On("DISPLAY2")));
