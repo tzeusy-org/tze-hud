@@ -602,11 +602,19 @@ class Run:
             at_cursor = observed["at_cursor"]
             foreground = observed["foreground"]
             # Absolute SendInput normalization can round a physical pixel.
-            if (cursor is None or any(abs(actual - wanted) > 1 for actual, wanted in zip(cursor, point))
-                    or at_cursor is None or at_cursor["pid"] != self.pid
+            at_target = cursor is not None and all(abs(actual - wanted) <= 1 for actual, wanted in zip(cursor, point))
+            foreign_target = at_cursor is not None and at_cursor["pid"] != self.pid
+            if (not at_target or at_cursor is None or foreign_target
                     or foreground is None or foreground["pid"] != self.pid):
-                raise ScenarioFailed("owned HUD at the link click target", {"intended_point": list(point),
-                                     "owned_hud_pid": self.pid, "click_target_before_send": observed})
+                last = {"intended_point": list(point), "owned_hud_pid": self.pid, "click_target_before_send": observed}
+                if at_target and foreign_target:
+                    try:
+                        details = WIN.window_owner_details(at_cursor["hwnd"], at_cursor["pid"])
+                    except OSError:
+                        details = {}  # The native lookup is diagnostic only.
+                    if details:
+                        last["point_owner_details"] = details
+                raise ScenarioFailed("owned HUD at the link click target", last)
 
         self.inj.click(repeat=repeat, before_send=check_target)
 
