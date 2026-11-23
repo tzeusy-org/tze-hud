@@ -324,6 +324,136 @@ class WindowsGuardTests(unittest.TestCase):
         self.assertEqual(events, [])
         self.assertEqual(run.timeline, [])
 
+    def test_card_link_rearms_before_any_input_and_refuses_unstable_targets(self) -> None:
+        hud, browser, auxiliary = 0x123456780, 0x123456781, 0x123456782
+        point = (891, 106)
+        status = {"pid": 4242, "notifications": [{
+            "s": "zone:notification-area", "key": "gesture-card-link", "state": "shown",
+            "actions": [{"label": "Open test page", "kind": "url", "rect": {"x": 784, "y": 90, "w": 214, "h": 32}}],
+        }]}
+        changed = copy.deepcopy(status)
+        changed["notifications"][0]["actions"][0]["rect"]["x"] += 4
+        cases = ("covered", "foreground lost", "deadline", "expired during guard", "stale HUD handle",
+                 "card moved", "late takeover", "partial click")
+        for case in cases:
+            with self.subTest(case=case):
+                native = native_input_boundary()
+                run = g.Run(exe=Path("tze_hud.exe"), out=Path("."), injector="sendinput", owned_pids=[4242])
+                run.smoke = mock.Mock(url="http://127.0.0.1:5555/mcp")
+                run.inj = native.SendInput(run.guard)
+                now = 0.0
+                recovered_at = float("inf")
+                foreground = browser if case == "foreground lost" else hud
+                cursor = point if case in {"late takeover", "partial click", "expired during guard"} else (1, 1)
+                cursor_samples = 0
+                presses = []
+
+                def sleep(seconds):
+                    nonlocal now
+                    now += seconds
+
+                def status_at():
+                    nonlocal now
+                    if case == "expired during guard" and cursor_samples:
+                        now = 0.1
+                    return changed if case == "card moved" and now >= 0.04 else status
+
+                def window_pid(handle, output):
+                    self.assertIn(handle, (hud, browser, auxiliary))
+                    output._obj.value = 9900 if handle == browser or case == "stale HUD handle" else 4242
+                    return 1
+
+                def bounds(handle, output):
+                    rect = output._obj
+                    rect.left, rect.top, rect.right, rect.bottom = (0, 0, 1024 if handle == hud else 50, 768)
+                    return True
+
+                def raise_window(*args):
+                    nonlocal recovered_at
+                    self.assertEqual(args, (hud, 0, 0, 0, 0, 0, 0x4213))
+                    if case != "deadline":
+                        recovered_at = now + 0.02
+                    return 1  # An accepted request alone must not authorize input.
+
+                def foreground_window(handle):
+                    nonlocal foreground
+                    self.assertEqual(handle, hud)
+                    foreground = hud
+                    return 1
+
+                def cursor_pos(output):
+                    nonlocal cursor_samples
+                    cursor_samples += 1
+                    output._obj.x, output._obj.y = cursor
+                    return 1
+
+                def window_at(coords):
+                    return browser if ((coords.x, coords.y) == point
+                                       and (now < recovered_at or (case == "late takeover" and cursor_samples >= 2))) else hud
+
+                def send(count, items, _size):
+                    nonlocal cursor
+                    if items[0].mi.dwFlags & native.MOUSE_MOVE:
+                        self.assertGreaterEqual(now, recovered_at + 0.02 - 1e-9,
+                                                "the pointer must wait for consecutive owned-point samples")
+                        cursor = point
+                        return count
+                    presses.append((now, count))
+                    return 1 if case == "partial click" else count
+
+                if cursor == point:
+                    recovered_at = 0.0
+                native.user32.IsWindowVisible.return_value = True
+                native.user32.GetWindowThreadProcessId.side_effect = window_pid
+                native.user32.GetWindowRect.side_effect = bounds
+                native.user32.GetForegroundWindow.side_effect = lambda: foreground
+                native.user32.GetCursorPos.side_effect = cursor_pos
+                native.user32.WindowFromPoint.side_effect = window_at
+                native.user32.SetForegroundWindow.side_effect = foreground_window
+                native.user32.SetWindowPos.side_effect = raise_window
+                native.user32.GetClassNameW.return_value = 0
+                native.kernel32.OpenProcess.return_value = 0
+                native.user32.SendInput.side_effect = send
+                with mock.patch.object(g, "WIN", native), mock.patch.object(run, "status", side_effect=status_at), \
+                        mock.patch.object(native, "_windows_of", return_value=[auxiliary, hud]), \
+                        mock.patch.object(native, "screen_size", return_value=(1024, 768)), \
+                        mock.patch.object(native.ctypes, "get_last_error", return_value=0, create=True), \
+                        mock.patch.object(g, "pid_alive", return_value=True), \
+                        mock.patch.dict(g.os.environ, {"GITHUB_ACTIONS": "true", "RUNNER_ENVIRONMENT": "github-hosted"}), \
+                        mock.patch.object(g.time, "monotonic", side_effect=lambda: now), \
+                        mock.patch.object(g.time, "sleep", side_effect=sleep):
+                    def attempt():
+                        return g.press_hosted_card_link(run, "gesture-card-link", "Open test page", point,
+                                                        deadline=0.1, press="second press")
+
+                    if case in {"covered", "foreground lost"}:
+                        self.assertEqual(attempt(), presses[0][0])
+                        self.assertEqual([call["requested"] for call in run.inj.calls], [1, 2])
+                        self.assertEqual([count for _, count in presses], [2])
+                        native.user32.SetWindowPos.assert_called_once()
+                        self.assertEqual(native.user32.SetForegroundWindow.call_count, int(case == "foreground lost"))
+                    else:
+                        with self.assertRaises(g.ScenarioFailed) as failed:
+                            attempt()
+                        if case == "partial click":
+                            self.assertEqual([count for _, count in presses], [2], "the click must not be retried")
+                            self.assertEqual(failed.exception.last["sendinput"]["sent"], 1)
+                        else:
+                            self.assertEqual(presses, [])
+                            native.user32.SendInput.assert_not_called()
+                        if case in {"deadline", "expired during guard", "stale HUD handle"}:
+                            self.assertEqual(now, 0.1)
+                        if case == "deadline":
+                            self.assertEqual(failed.exception.last["card_link_point"]["at_point"]["pid"], 9900)
+                            native.user32.SetWindowPos.assert_called_once()
+                        elif case == "stale HUD handle":
+                            native.user32.SetWindowPos.assert_not_called()
+                            native.user32.SetForegroundWindow.assert_not_called()
+                        elif case == "card moved":
+                            self.assertEqual(failed.exception.last["current_point"], (895, 106))
+                        elif case == "late takeover":
+                            self.assertEqual(failed.exception.last["click_target_before_send"]["at_cursor"]["pid"], 9900)
+
     def test_a_refused_guard_keeps_earlier_outcomes(self) -> None:
         run = mock.Mock(out=Path("unused"))
         run.clear_publications.return_value = []

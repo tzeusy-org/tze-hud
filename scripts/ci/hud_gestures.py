@@ -109,6 +109,13 @@ def check_owned(*, started_display: str | None, target_display: str | None,
 def check_owned_windows(*, github_actions: str | None, foreground_pid: int, owned_hud_pid: int | None,
                         helper_pids: list[int], status_pid: object, url: str) -> None:
     """Refuse SendInput unless this is a CI VM and an owned process has the foreground."""
+    check_windows_hud(github_actions=github_actions, owned_hud_pid=owned_hud_pid, status_pid=status_pid, url=url)
+    if foreground_pid not in {owned_hud_pid, *helper_pids}:
+        raise Refused(f"the foreground window belongs to pid {foreground_pid}, not an owned process")
+
+
+def check_windows_hud(*, github_actions: str | None, owned_hud_pid: int | None, status_pid: object, url: str) -> None:
+    """Check the hosted HUD's identity before any foreground preparation."""
     host = urllib.parse.urlsplit(url).hostname
     if host not in {"127.0.0.1", "localhost", "::1"}:
         raise Refused(f"refusing a borrowed HUD URL (host {host!r}); this harness owns its HUD")
@@ -118,8 +125,21 @@ def check_owned_windows(*, github_actions: str | None, foreground_pid: int, owne
         raise Refused("no owned HUD process")
     if status_pid != owned_hud_pid:
         raise Refused(f"/admin/status pid {status_pid!r} is not the owned HUD pid {owned_hud_pid}")
-    if foreground_pid not in {owned_hud_pid, *helper_pids}:
-        raise Refused(f"the foreground window belongs to pid {foreground_pid}, not an owned process")
+
+
+def cursor_at_link(cursor: list[int] | None, point: tuple[int, int]) -> bool:
+    # Absolute SendInput normalization can round a physical pixel.
+    return cursor is not None and all(abs(actual - wanted) <= 1 for actual, wanted in zip(cursor, point))
+
+
+def foreign_link_point_details(owner: dict | None, pid: int | None) -> dict:
+    if owner is None or owner["pid"] == pid:
+        return {}
+    try:
+        details = WIN.window_owner_details(owner["hwnd"], owner["pid"])
+    except OSError:
+        return {}  # The native lookup is diagnostic only.
+    return {"point_owner_details": details} if details else {}
 
 
 # ── Geometry ─────────────────────────────────────────────────────────────────
@@ -598,13 +618,16 @@ class Run:
         self.inj.click()
         self.step(f"click {target or ''}".rstrip())
 
-    def click_link(self, point: tuple[int, int], *, repeat: int = 1) -> None:
+    def click_link(self, point: tuple[int, int], *, repeat: int = 1,
+                   confirm: Callable[[], None] | None = None, hwnd: int | None = None) -> None:
         """At a link, check the physical click target after the normal Windows guard."""
         if self.injector != "sendinput":
             self.inj.click(repeat=repeat)
             return
 
         def check_target() -> None:
+            if confirm is not None:
+                confirm()
             observed = WIN.click_target_snapshot()
             self.timeline.append({
                 "t": round(time.monotonic(), 3),
@@ -617,19 +640,16 @@ class Run:
             cursor = observed["cursor"]
             at_cursor = observed["at_cursor"]
             foreground = observed["foreground"]
-            # Absolute SendInput normalization can round a physical pixel.
-            at_target = cursor is not None and all(abs(actual - wanted) <= 1 for actual, wanted in zip(cursor, point))
+            at_target = cursor_at_link(cursor, point)
             foreign_target = at_cursor is not None and at_cursor["pid"] != self.pid
             if (not at_target or at_cursor is None or foreign_target
-                    or foreground is None or foreground["pid"] != self.pid):
+                    or foreground is None or foreground["pid"] != self.pid
+                    or (hwnd is not None and (at_cursor["hwnd"] != hwnd or foreground["hwnd"] != hwnd))):
                 last = {"intended_point": list(point), "owned_hud_pid": self.pid, "click_target_before_send": observed}
-                if at_target and foreign_target:
-                    try:
-                        details = WIN.window_owner_details(at_cursor["hwnd"], at_cursor["pid"])
-                    except OSError:
-                        details = {}  # The native lookup is diagnostic only.
-                    if details:
-                        last["point_owner_details"] = details
+                if hwnd is not None:
+                    last["expected_hwnd"] = hwnd
+                if at_target:
+                    last.update(foreign_link_point_details(at_cursor, self.pid))
                 raise ScenarioFailed("owned HUD at the link click target", last)
 
         self.inj.click(repeat=repeat, before_send=check_target)
@@ -1460,22 +1480,119 @@ def expect_link_feedback(run: Run) -> None:
                timeout_s=1.0, interval_s=0.02)
 
 
+def press_hosted_card_link(run: Run, key: str, label: str, point: tuple[int, int],
+                           *, deadline: float, press: str) -> float:
+    """Rearm the original press under an absolute deadline, without retrying input."""
+    if os.environ.get("RUNNER_ENVIRONMENT") != "github-hosted":
+        raise Refused("card link rearm requires a disposable GitHub-hosted runner")
+    pid = run.pid
+    surface = "zone:notification-area"
+    target = f"{surface}/{key}/0"
+    last: dict = {}
+
+    def unavailable() -> ScenarioFailed:
+        return ScenarioFailed(f"owned HUD at the card link point before {press}", {
+            "intended_point": list(point), "owned_hud_pid": pid, "card_link_point": last,
+            **foreign_link_point_details(last.get("at_point"), pid),
+        })
+
+    def confirm_card() -> None:
+        if time.monotonic() >= deadline:
+            raise unavailable()
+        status = run.status()
+        check_windows_hud(github_actions=os.environ.get("GITHUB_ACTIONS"),
+                          owned_hud_pid=pid if pid and run.pid == pid and pid_alive(pid) else None,
+                          status_pid=status.get("pid"), url=run.smoke.url)
+        cards = [card for card in status.get("notifications") or []
+                 if card.get("s") == surface and card.get("key") == key and card.get("state") != "exiting"]
+        card = cards[0] if len(cards) == 1 else {}
+        actions = card.get("actions") or []
+        try:
+            current = resolve_target(status, target)
+        except LookupError:
+            current = None
+        if (card.get("guarded") or len(actions) != 1 or actions[0].get("kind") != "url"
+                or actions[0].get("label") != label or current != point):
+            raise ScenarioFailed(f"same card link action before {press}", {
+                "target": target, "intended_point": list(point), "current_point": current,
+                "guarded": card.get("guarded"),
+            })
+        if time.monotonic() >= deadline:
+            raise unavailable()
+
+    def observe() -> dict:
+        return {"at_point": WIN.window_at(point), "foreground": WIN.foreground_identity()}
+
+    confirm_card()
+    hwnd = WIN.fullscreen_window(pid)
+    if hwnd is None:
+        raise ScenarioFailed(f"unique owned fullscreen HUD before {press}", {"owned_hud_pid": pid})
+    identity = {"hwnd": hwnd, "pid": pid}
+    owned = {"at_point": identity, "foreground": identity}
+    stable = 0
+    requested = None
+    while time.monotonic() < deadline:
+        last = observe()
+        if last == owned:
+            stable += 1
+            if stable == 2:
+                break
+            requested = None
+        else:
+            stable = 0
+            if last != requested:
+                confirm_card()
+                if operation := WIN.rearm_link_window(hwnd, pid, point):
+                    run.timeline.append({
+                        "t": round(time.monotonic(), 3), "step": f"card link {press} requested {operation}",
+                        "owned_window": identity, "intended_point": list(point), "card_link_point": last,
+                    })
+                requested = last
+        time.sleep(max(0, min(0.02, deadline - time.monotonic())))
+    else:
+        raise unavailable()
+
+    def confirm_input() -> None:
+        nonlocal last
+        confirm_card()
+        last = observe()
+        if last != owned or time.monotonic() >= deadline:
+            raise unavailable()
+
+    # Readiness is sampled at the intended pixel before any pointer movement.
+    if not cursor_at_link(WIN.click_target_snapshot()["cursor"], point):
+        run.inj.move_abs(*point, before_send=confirm_input)
+    pressed = time.monotonic()
+    run.click_link(point, confirm=confirm_input, hwnd=hwnd)
+    receipt = run.inj.calls[-1]
+    if receipt["sent"] != 2:
+        raise ScenarioFailed(f"complete native input for the card link {press}", {"sendinput": receipt})
+    return pressed
+
+
 def scenario_card_link(run: Run) -> None:
     """R14.2 S4/S5: one real link handoff; same action within 2s is refused, with no input."""
     key = "gesture-card-link"
-    open_card(run, key, actions=[{"label": "Open test page", "url": "https://example.invalid/"}])
-    # portal-reading's handoffs run just before this one.
-    regain_owned_foreground(run, "owned HUD foreground before the first link press", 2.0)
-    before = run.status()["link_launches"]
-    point = run.point(f"zone:notification-area/{key}/0")
-    first = time.monotonic()
-    run.click_link(point)
+    label = "Open test page"
+    target = f"zone:notification-area/{key}/0"
+    open_card(run, key, actions=[{"label": label, "url": "https://example.invalid/"}])
+    status = run.status()
+    before = status["link_launches"]
+    if run.injector == "sendinput":
+        # The preceding portal scenario can still be bringing up its browser.
+        point = resolve_target(status, target)
+        first = press_hosted_card_link(run, key, label, point, deadline=time.monotonic() + 2.0, press="first press")
+    else:
+        point = run.point(target)
+        first = time.monotonic()
+        run.click_link(point)
     run.expect("one accepted link launch", lambda s: s["link_launches"] == before + 1,
                timeout_s=1.0, interval_s=0.02)
     expect_link_feedback(run)
-    regain_owned_foreground(run, "owned HUD foreground before second link press",
-                            max(0.01, first + 1.8 - time.monotonic()))
-    run.click_link(point)
+    if run.injector == "sendinput":
+        press_hosted_card_link(run, key, label, point, deadline=first + 1.8, press="second press")
+    else:
+        run.click_link(point)
     second = time.monotonic()
     if second - first >= 2.0:
         raise ScenarioFailed("second link press must occur within 2s", {"seconds": second - first, "status": run.status()})
