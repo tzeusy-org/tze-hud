@@ -9,6 +9,7 @@ import signal
 import subprocess
 import sys
 import threading
+from types import SimpleNamespace
 import urllib.error
 
 import pytest
@@ -197,6 +198,50 @@ def test_busy_armed_wait_falls_back_without_republishing(mcp, capsys):
     assert_cleanup(mcp)
 
 
+@pytest.mark.parametrize("answered", [True, False])
+def test_busy_armed_wait_respects_the_huds_remaining_lifetime(mcp, monkeypatch, capsys, answered):
+    now_ms = 0
+    expires_at_ms = 57_000
+    answer_at_ms = 56_250
+
+    def advance(seconds):
+        nonlocal now_ms
+        now_ms += round(seconds * 1_000)
+
+    monkeypatch.setattr(client, "time", SimpleNamespace(monotonic=lambda: now_ms / 1_000, sleep=advance))
+
+    def busy_after_arm(_):
+        advance(55.5)
+        return {"code": "INTERNAL", "hint": "input state busy; retry hud_input"}
+
+    def input_items(arguments):
+        if "ack" in arguments:
+            return {"items": []}
+        wait_ms = arguments["wait_ms"]
+        if answered and now_ms + wait_ms >= answer_at_ms:
+            advance((answer_at_ms - now_ms) / 1_000)
+            return {"items": [{"id": "own", "s": SURFACE, "key": mcp.card()["key"], "action": "ship"}]}
+        advance(wait_ms / 1_000)
+        return {"items": []}
+
+    mcp.responses["hud_publish"] = busy_after_arm
+    mcp.responses["hud_input"] = input_items
+    mcp.responses["hud_surfaces"] = lambda _: {"surfaces": [
+        {"s": SURFACE, "held": True, "expires_in_ms": max(0, expires_at_ms - now_ms)},
+    ]}
+    args = [*ASK, "--ttl-ms", "55000"]
+    if answered:
+        assert run_ask(capsys, args) == {"action": "ship"}
+        assert mcp.args("hud_input")[-1] == {"ack": ["own"], "max_items": 0}
+        assert now_ms == answer_at_ms
+    else:
+        assert run_ask(capsys, args, exit_code=2) == {"gone": "expired"}
+        assert mcp.args("hud_input")[-1] == {"wait_ms": 0}
+        assert now_ms == expires_at_ms
+    assert len(mcp.args("hud_publish")) == 1
+    assert_cleanup(mcp)
+
+
 @pytest.mark.parametrize("reason", ["expired", "cleared"])
 def test_gone_during_armed_wait(mcp, capsys, reason):
     mcp.responses["hud_publish"] = lambda _: {"ok": True, "gone": reason}
@@ -218,9 +263,13 @@ def test_gone_after_armed_wait(mcp, capsys, remaining, surfaces, reason):
     assert_cleanup(mcp)
 
 
-def test_answer_between_empty_input_and_clear_discovery_wins(mcp, capsys):
+@pytest.mark.parametrize("surface", [
+    {"s": SURFACE},
+    {"s": SURFACE, "held": True, "expires_in_ms": 0},
+])
+def test_answer_between_empty_input_and_gone_discovery_wins(mcp, capsys, surface):
     mcp.responses["hud_publish"] = lambda _: {"ok": True, "expires_in_ms": 10_000}
-    mcp.responses["hud_surfaces"] = lambda _: {"surfaces": [{"s": SURFACE}]}
+    mcp.responses["hud_surfaces"] = lambda _: {"surfaces": [surface]}
 
     def input_items(arguments):
         if arguments.get("wait_ms") or "ack" in arguments:

@@ -26,6 +26,7 @@ HUD; without such a session the client is the agent's unscoped caller.
 import argparse
 import http.client
 import json
+import math
 import os
 import signal
 import sys
@@ -332,20 +333,26 @@ class AskSession:
         try:
             while self.outcome is None:
                 now = time.monotonic()
-                wait_ms = min(ASK_POLL_MS, max(0, int((self.deadline - now) * 1_000)))
+                wait_ms = min(ASK_POLL_MS, max(0, math.ceil((self.deadline - now) * 1_000)))
                 self.outcome = self._answer(wait_ms)
                 if self.outcome is not None:
                     break
                 holding = self._holding()
-                if holding is None or holding.get("expires_in_ms") == 0 or time.monotonic() >= self.deadline:
+                remaining = None if holding is None else holding.get("expires_in_ms")
+                if holding is not None and (type(remaining) is not int or remaining < 0):
+                    raise ToolError("MCP_PROTOCOL", "HUD did not report the ask card's expiry")
+                if holding is None or remaining == 0:
                     # Input may have arrived between the empty poll and discovery.
                     self.outcome = self._answer(0)
                     if self.outcome is None:
                         expired = holding is not None or time.monotonic() >= self.deadline
                         self.outcome = {"gone": "expired" if expired else "cleared"}
                     break
+                # The local estimate can predate admission. Use the HUD's current lifetime.
+                self.deadline = time.monotonic() + remaining / 1_000
                 # Retained unrelated input can make the long poll return immediately.
-                time.sleep(max(0, (now + wait_ms / 1_000) - time.monotonic()))
+                poll_end = min(now + wait_ms / 1_000, self.deadline)
+                time.sleep(max(0, poll_end - time.monotonic()))
         except ToolError as error:
             if error.code != "SESSION_ENDED":
                 raise
