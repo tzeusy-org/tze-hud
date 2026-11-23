@@ -5405,7 +5405,7 @@ mod tests {
         let card = harness.scene().overlay.notification_geometry[0].clone();
         let caret = card.reply_caret.unwrap();
         let window_origin = (40.0, 20.0);
-        let local = super::notification_reply::reply_ime_area(caret, window_origin);
+        let local = crate::windowed::notification_reply::reply_ime_area(caret, window_origin);
         assert_eq!(
             local,
             tze_hud_scene::Rect::new(caret.x - 40.0, caret.y - 20.0, caret.width, caret.height)
