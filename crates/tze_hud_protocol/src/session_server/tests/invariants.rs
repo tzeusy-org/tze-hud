@@ -229,8 +229,7 @@ async fn grpc_termination_clears_owned_publications_without_touching_peer() {
         };
         let mut peer = connect_publications(&mut client, peer_agent, &state).await;
         let origin = owner.session_id;
-        let future = state.lock().await.scene.lock().await.now_wall_us() + 60_000_000;
-        // A pending notification has its own waiter, even before it materializes.
+        // Arm a scene-level waiter on the real resident notification identity.
         assert!(
             publish_and_ack(
                 &owner.tx,
@@ -238,7 +237,7 @@ async fn grpc_termination_clears_owned_publications_without_touching_peer() {
                 6,
                 Publish {
                     surface: "zone:notification-area".into(),
-                    key: "pending-question".into(),
+                    key: "resident-question".into(),
                     content: Some(crate::proto::ZoneContent {
                         payload: Some(crate::proto::zone_content::Payload::Notification(
                             crate::proto::NotificationPayload {
@@ -247,7 +246,6 @@ async fn grpc_termination_clears_owned_publications_without_touching_peer() {
                             },
                         )),
                     }),
-                    present_at_us: future,
                     ..Default::default()
                 },
             )
@@ -274,13 +272,10 @@ async fn grpc_termination_clears_owned_publications_without_touching_peer() {
         let (notification, local_lease) = {
             let st = state.lock().await;
             let mut scene = st.scene.lock().await;
-            let notification = scene
-                .scheduled_publications
+            let notification = scene.zone_registry.active_publishes["notification-area"]
                 .iter()
-                .find(|s| {
-                    s.publisher.origin == Some(origin) && s.notification_publication.is_some()
-                })
-                .and_then(|s| s.notification_publication)
+                .find(|r| r.publication_origin == Some(origin))
+                .map(|r| r.publication_id)
                 .unwrap();
             scene.arm_notification_wait(
                 notification,
