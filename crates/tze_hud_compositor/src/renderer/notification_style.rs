@@ -25,7 +25,7 @@
 use std::collections::HashMap;
 
 use tze_hud_config::tokens::{CANONICAL_TOKENS, px_scale};
-use tze_hud_scene::types::{ChromeLocalState, NotificationPayload, RenderingPolicy, Rgba};
+use tze_hud_scene::types::{ChromeLocalState, NotificationPayload, Rect, RenderingPolicy, Rgba};
 
 use super::control_panel::{MIN_TEXT_CONTRAST, contrast};
 use super::token_colors::parse_hex_color;
@@ -561,6 +561,40 @@ impl NotificationStyle {
     pub(super) fn focus_color(&self) -> Rgba {
         self.focus
     }
+}
+
+/// The fixed caption-row affordance and its current owner-only feedback.
+pub(super) fn go_to_control(
+    scene: &tze_hud_scene::graph::SceneGraph,
+    record: &tze_hud_scene::ZonePublishRecord,
+    style: &NotificationStyle,
+    card: Rect,
+) -> Option<(Rect, Option<tze_hud_scene::graph::overlay::GoToCue>)> {
+    style.caption(record.caption.as_deref())?;
+    if scene
+        .overlay
+        .notification_choices
+        .contains_key(&record.publication_id)
+    {
+        return None;
+    }
+    let state = scene
+        .overlay
+        .notification_go_to
+        .get(&record.publication_id)?;
+    if !state.available {
+        return None;
+    }
+    // Reserve room for failure text without moving the caption row or the
+    // rest of the card. The caption and control can each ellipsize.
+    let width = (style.body.size * 13.0).min((card.width * 0.5 - style.padding_h).max(1.0));
+    let bounds = Rect::new(
+        card.x + card.width - style.padding_h - width,
+        card.y + style.padding_v,
+        width,
+        style.body.line_height,
+    );
+    Some((bounds, state.cue))
 }
 
 /// Bounds of a notification's dismiss ×: the single geometry source for

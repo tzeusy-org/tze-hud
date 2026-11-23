@@ -67,14 +67,24 @@ pub(super) fn route_answer_key(
         .iter()
         .filter(|region| {
             region.publication_id == focus.publication_id
-                && matches!(region.kind, ZoneInteractionKind::Action { .. })
+                && matches!(
+                    region.kind,
+                    ZoneInteractionKind::Action { .. }
+                        | ZoneInteractionKind::GoTo
+                        | ZoneInteractionKind::Dismiss
+                )
         })
         .cloned()
         .collect();
-    controls.sort_by_key(|region| match region.kind {
-        ZoneInteractionKind::Action { index } => index,
-        _ => usize::MAX,
-    });
+    // Existing action-only navigation stays the same on cards without Go to.
+    // Cards with the caption control traverse the full visible control row.
+    if !controls
+        .iter()
+        .any(|region| region.kind == ZoneInteractionKind::GoTo)
+    {
+        controls.retain(|region| region.kind != ZoneInteractionKind::Dismiss);
+    }
+    controls.sort_by_key(|region| region.tab_order);
     if controls.is_empty() {
         return outcome;
     }
@@ -134,6 +144,12 @@ pub(super) fn route_answer_key(
                     if payload.actions.get(*index).is_some_and(|action| action.url.is_some()))
         });
     outcome.activation = scene.activate_notification(target, duration);
+    if matches!(
+        outcome.activation,
+        Some(tze_hud_scene::graph::NotificationActivation::GoTo { .. })
+    ) {
+        return outcome;
+    }
     if outcome.activation.is_some() || url {
         scene.focus_notification(None);
         outcome.exit = true;

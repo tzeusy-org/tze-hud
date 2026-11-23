@@ -847,6 +847,11 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         default_value: "1500",
     },
     CanonicalToken {
+        key: "notification.goto.feedback.ms",
+        description: "How long the result of Go to session stays visible (ms)",
+        default_value: "1200",
+    },
+    CanonicalToken {
         key: NOTIFICATION_ACTION_HOLD_MS_KEY,
         description: "How long a destructive notification action must be held (ms, 0-3000; 0 = no hold)",
         default_value: "600",

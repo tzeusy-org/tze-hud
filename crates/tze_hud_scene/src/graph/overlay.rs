@@ -20,6 +20,7 @@ pub struct NotificationGeometry {
     pub bounds: Rect,
     pub actions: Vec<Rect>,
     pub close: Rect,
+    pub goto: Option<Rect>,
     pub focus: Option<NotificationControl>,
     pub chosen: Option<usize>,
     pub state: &'static str,
@@ -29,6 +30,24 @@ pub struct NotificationGeometry {
 pub enum NotificationControl {
     Action(usize),
     Close,
+    GoTo,
+}
+
+/// Window availability is computed once per presented publication. Mutable
+/// attempt feedback is local and expires on a runtime deadline.
+#[derive(Clone, Debug, Default)]
+pub struct NotificationGoTo {
+    pub available: bool,
+    pub attempted_at_mono_us: Option<u64>,
+    pub cue: Option<GoToCue>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GoToCue {
+    Switching,
+    NotFound,
+    Ambiguous(usize),
+    Blocked,
 }
 
 /// A widget quad that actually reached the frame's draw list, after pixel
@@ -109,6 +128,8 @@ pub struct RuntimeOverlayState {
     /// Last accepted local link attempt per exact publication/button. No timer.
     #[serde(skip, default)]
     pub notification_link_attempts: HashMap<(SceneId, usize), u64>,
+    #[serde(skip, default)]
+    pub notification_go_to: HashMap<SceneId, NotificationGoTo>,
     /// Owner-directed notification focus, independent of agent/editor focus.
     #[serde(skip, default)]
     pub notification_focus: Option<String>,

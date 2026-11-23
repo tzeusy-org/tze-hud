@@ -391,6 +391,7 @@ proptest! {
                     lease_id: None,
                     publication_origin: None,
                     caption: None,
+                    window_token: None,
                     display: None,
                     zone_name: zone_name.clone(),
                     publisher_namespace: "agent.alpha".into(),

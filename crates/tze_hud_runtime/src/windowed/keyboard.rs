@@ -1615,6 +1615,7 @@ impl WinitApp {
                         matches!(
                             region.kind,
                             tze_hud_scene::types::ZoneInteractionKind::Dismiss
+                                | tze_hud_scene::types::ZoneInteractionKind::GoTo
                                 | tze_hud_scene::types::ZoneInteractionKind::Action { .. }
                         )
                     })

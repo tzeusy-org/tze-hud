@@ -53,6 +53,9 @@ pub struct RawRuntime {
     /// Where new questions appear: `focused` (default; the focused window's
     /// monitor), `pointer`, or `fixed` (the notification display).
     pub question_placement: Option<String>,
+    /// Executable basenames eligible for notification-card window activation.
+    /// An empty list disables it. The Windows runtime supplies the default.
+    pub go_to_apps: Option<Vec<String>>,
     /// Log file level: `error`, `warn`, `info` (default), `debug` or
     /// `trace`. `TZE_HUD_FILE_LOG` wins.
     pub log_level: Option<String>,

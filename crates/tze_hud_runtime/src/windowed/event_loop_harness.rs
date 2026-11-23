@@ -165,6 +165,7 @@ impl WindowedRuntimeState {
             press_guard: Default::default(),
             notification_link_opener: Default::default(),
             link_feedback: None,
+            window_go_to: Default::default(),
             context_menu_press: None,
             context_menu_open: false,
             context_menu_dismiss_pending: false,

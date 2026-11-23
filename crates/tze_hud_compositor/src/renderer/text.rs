@@ -439,6 +439,9 @@ impl super::Compositor {
                                         effective_opacity,
                                     )
                                 };
+                                let goto = super::notification_style::go_to_control(
+                                    scene, record, &style, card,
+                                );
                                 for band in &text_layout.bands {
                                     // A caption is secondary, like a body under a title.
                                     let band_color = if band.field == "caption"
@@ -448,11 +451,18 @@ impl super::Compositor {
                                     } else {
                                         tone_color(tone.title)
                                     };
+                                    let width = match (band.field, goto) {
+                                        ("caption", Some((bounds, _))) => text_layout.width.min(
+                                            (bounds.x - card.x - text_layout.x - style.dismiss_gap)
+                                                .max(1.0),
+                                        ),
+                                        _ => text_layout.width,
+                                    };
                                     let mut item = Self::make_zone_text_item(
                                         Arc::from(band.text),
                                         card.x + text_layout.x,
                                         card.y + band.y,
-                                        text_layout.width,
+                                        width,
                                         band.height,
                                         band.font_size_px,
                                         font_family,
@@ -470,6 +480,38 @@ impl super::Compositor {
                                     items.push(item);
                                 }
 
+                                if let Some((bounds, cue)) = goto {
+                                    use tze_hud_scene::graph::overlay::GoToCue;
+                                    let label: Arc<str> = match cue {
+                                        None => "Go to".into(),
+                                        Some(GoToCue::Switching) => "Switching…".into(),
+                                        Some(GoToCue::NotFound) => "Window not found".into(),
+                                        Some(GoToCue::Ambiguous(count)) => {
+                                            format!("{count} windows match").into()
+                                        }
+                                        Some(GoToCue::Blocked) => {
+                                            "Windows blocked the switch".into()
+                                        }
+                                    };
+                                    let mut item = Self::make_zone_text_item(
+                                        label,
+                                        bounds.x,
+                                        bounds.y,
+                                        bounds.width,
+                                        bounds.height,
+                                        style.body.size,
+                                        font_family,
+                                        style.body.weight,
+                                        tone_color(tone.body),
+                                        tze_hud_scene::types::TextAlign::End,
+                                        tze_hud_scene::types::TextOverflow::Ellipsis,
+                                        oc,
+                                        ow,
+                                        effective_opacity,
+                                    );
+                                    item.line_height_multiplier = style.body.multiplier();
+                                    items.push(item);
+                                }
                                 if self.text_rasterizer.is_none() {
                                     continue;
                                 }

@@ -25,6 +25,7 @@ pub struct SurfaceSnapshot {
     pub link_launches: u64,
     /// The overlaid display showing the open control panel.
     pub panel_display: Option<String>,
+    pub window_activations: u64,
     /// The pointer shape the runtime last applied, or `None` while the app
     /// beneath the overlay owns the pointer.
     pub cursor: Option<&'static str>,
@@ -62,6 +63,7 @@ pub struct UiMirror {
     pub cursor: Option<&'static str>,
     /// The pressed link's local feedback: `opening`, `opened` or `failed`.
     pub link_feedback: Option<&'static str>,
+    pub window_activations: u64,
 }
 
 /// Admin-only OUTPUT reading state of one portal: no text crosses here.
@@ -122,6 +124,7 @@ pub fn probe(
                     widgets: widgets_json(&scene, &ui, &displays),
                     panel_display: ui.panel_display,
                     link_launches: link_launches.load(Ordering::Relaxed),
+                    window_activations: ui.window_activations,
                     cursor: ui.cursor,
                     link_feedback: ui.link_feedback,
                 };
@@ -131,6 +134,7 @@ pub fn probe(
                 return SurfaceSnapshot {
                     link_launches: link_launches.load(Ordering::Relaxed),
                     panel_display: ui.panel_display,
+                    window_activations: ui.window_activations,
                     cursor: ui.cursor,
                     link_feedback: ui.link_feedback,
                     ..Default::default()
@@ -169,6 +173,7 @@ fn notifications_json(scene: &SceneGraph, displays: &[Rect]) -> Value {
         let focus = match card.focus {
             Some(NotificationControl::Action(index)) => json!(index),
             Some(NotificationControl::Close) => json!("close"),
+            Some(NotificationControl::GoTo) => json!("goto"),
             None => Value::Null,
         };
         Some(json!({
@@ -178,6 +183,7 @@ fn notifications_json(scene: &SceneGraph, displays: &[Rect]) -> Value {
             "display": display_index(card.bounds, displays),
             "actions": actions,
             "close": rect_json(card.close),
+            "goto": card.goto.map(rect_json),
             "focus": focus,
             "chosen": card.chosen,
             "state": card.state,

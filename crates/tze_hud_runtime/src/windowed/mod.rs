@@ -203,6 +203,8 @@ mod press_guard;
 pub(crate) mod shell_presence;
 mod wake;
 mod widgets;
+mod window_go_to;
+mod window_match;
 
 #[cfg(test)]
 mod test_support;
@@ -477,6 +479,7 @@ struct WindowedRuntimeState {
     notification_link_opener: crate::shell::link::LinkOpener,
     /// The newest pressed link's local feedback.
     link_feedback: Option<crate::shell::link::LinkFeedback>,
+    window_go_to: window_go_to::WindowGoTo,
     context_menu_press: Option<widgets::ContextMenuPress>,
     context_menu_open: bool,
     context_menu_dismiss_pending: bool,
@@ -964,6 +967,7 @@ impl WinitApp {
         // Retry pointer input that found the scene lock busy.
         let retained_pointer_changed = self.drain_retained_pointer_input();
         let link_feedback_changed = self.settle_link_feedback(Instant::now());
+        let go_to_changed = self.settle_go_to(Instant::now());
         let hold_changed = self.settle_notification_hold();
         let guard_changed = self.settle_press_guard();
         self.recover_chrome_capture();
@@ -981,6 +985,7 @@ impl WinitApp {
             || chrome_scene_changed
             || retained_pointer_changed
             || link_feedback_changed
+            || go_to_changed
             || hold_changed
             || guard_changed;
         if self.state.input_processor.chrome_feedback_cancel_pending || pruned_drag.is_deferred() {
@@ -1165,6 +1170,12 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         }
         // A shown link result ends once; an open handoff waits for its worker's wake.
         if let Some(at) = self.state.link_feedback.as_ref().and_then(|f| f.until) {
+            deadlines.push(Deadline::new(
+                at,
+                crate::idle_efficiency::RuntimeWakeupSource::AnimationDeadline,
+            ));
+        }
+        if let Some(at) = self.state.window_go_to.next_deadline() {
             deadlines.push(Deadline::new(
                 at,
                 crate::idle_efficiency::RuntimeWakeupSource::AnimationDeadline,
@@ -3424,6 +3435,12 @@ impl WindowedRuntime {
             press_guard: Default::default(),
             notification_link_opener,
             link_feedback: None,
+            window_go_to: window_go_to::WindowGoTo::new(
+                raw_config_for_startup
+                    .as_ref()
+                    .and_then(|raw| raw.runtime.as_ref())
+                    .and_then(|runtime| runtime.go_to_apps.clone()),
+            ),
             context_menu_press: None,
             context_menu_open: false,
             context_menu_dismiss_pending: false,

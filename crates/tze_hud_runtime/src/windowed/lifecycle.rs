@@ -36,7 +36,7 @@ use super::portal::{
 use super::{WindowedQuiescentEfficiencyConfig, WinitApp};
 
 #[cfg(target_os = "windows")]
-fn hwnd_for_window(window: &Window) -> Option<windows::Win32::Foundation::HWND> {
+pub(super) fn hwnd_for_window(window: &Window) -> Option<windows::Win32::Foundation::HWND> {
     use std::ffi::c_void;
     use windows::Win32::Foundation::HWND;
     use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -1424,98 +1424,91 @@ pub(super) fn focus_window_for_text_input(window: &Window) {
     window.set_ime_allowed(true);
 
     #[cfg(target_os = "windows")]
-    {
-        use windows::Win32::Foundation::{FALSE, TRUE};
-        use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
+    if let Some(hwnd) = hwnd_for_window(window) {
         use windows::Win32::UI::Input::KeyboardAndMouse::SetFocus;
-        use windows::Win32::UI::WindowsAndMessaging::{
-            BringWindowToTop, GetForegroundWindow, GetWindowThreadProcessId, SetForegroundWindow,
-        };
-
-        if let Some(hwnd) = hwnd_for_window(window) {
-            // Acquiring OS keyboard focus for a topmost, taskbar-hidden,
-            // WS_EX_NOREDIRECTIONBITMAP overlay is subject to the Windows
-            // foreground-activation lock: a bare SetForegroundWindow() from a
-            // process that is not already the foreground process silently fails
-            // (returns FALSE and does nothing).  When it fails the overlay
-            // receives mouse input (mouse is routed via SetCapture, which does
-            // not require keyboard focus) but NO WindowEvent::KeyboardInput —
-            // typing and focus-scoped hotkeys (Ctrl+/-) are dead even though the
-            // composer is focused at the scene level.
-            //
-            // The standard Win32 workaround is to temporarily attach this
-            // thread's input queue to the current foreground window's thread.
-            // On the reference overlay, AttachThreadInput alone was insufficient
-            // when SPI_GETFOREGROUNDLOCKTIMEOUT was effectively infinite. Save
-            // the timeout, temporarily clear it with zero SPI flags (therefore
-            // no persisted setting or WM_SETTINGCHANGE broadcast), then restore
-            // it around SetForegroundWindow + SetFocus.
-            //
-            // SAFETY: The HWND is owned by this winit window on the event-loop
-            // thread; all calls are standard user32 focus APIs invoked on that
-            // thread. AttachThreadInput is always paired (TRUE then FALSE).
-            unsafe {
-                let _ = BringWindowToTop(hwnd);
-
-                let fg = GetForegroundWindow();
-                let our_thread = GetCurrentThreadId();
-                // Thread that owns the current foreground window (0 if none).
-                let fg_thread = if fg.0.is_null() {
-                    0
-                } else {
-                    GetWindowThreadProcessId(fg, None)
-                };
-
-                let attach_required = fg_thread != 0 && fg_thread != our_thread;
-                let attached =
-                    attach_required && { AttachThreadInput(our_thread, fg_thread, TRUE).as_bool() };
-
-                let (sfw, timeout_attempt) = with_temporary_foreground_lock_timeout(
-                    read_foreground_lock_timeout,
-                    set_foreground_lock_timeout,
-                    || {
-                        let sfw = SetForegroundWindow(hwnd).as_bool();
-                        // SetFocus targets the keyboard-focus window within the
-                        // (now) foreground thread's input queue; needed in
-                        // addition to SetForegroundWindow so WM_KEY* messages
-                        // route to our HWND.
-                        let _ = SetFocus(hwnd);
-                        sfw
-                    },
-                );
-
-                if attached {
-                    let _ = AttachThreadInput(our_thread, fg_thread, FALSE);
-                }
-
-                // The scheduled-task overlay has no stdout/stderr capture, so
-                // durable diagnostics are useful when this fragile Windows path
-                // fails. Success remains silent to avoid per-click log noise.
-                let timeout_may_be_left_altered = timeout_attempt.setting_may_be_left_altered();
-                if !sfw || (attach_required && !attached) || timeout_may_be_left_altered {
-                    let fg_after = GetForegroundWindow();
-                    crate::diag::diag_write(&format!(
-                        "FOCUS-WARN: foreground focus repair incomplete for overlay \
-                         hwnd={:?} fg_before={:?} attached={} attach_required={} \
-                         prev_lock_timeout={:?} lock_cleared={} lock_restored={:?} \
-                         timeout_may_be_left_altered={} set_foreground_window={} \
-                         fg_after={:?} fg_after_is_ours={}",
-                        hwnd.0,
-                        fg.0,
-                        attached,
-                        attach_required,
-                        timeout_attempt.previous_timeout,
-                        timeout_attempt.lock_cleared,
-                        timeout_attempt.lock_restored,
-                        timeout_may_be_left_altered,
-                        sfw,
-                        fg_after.0,
-                        fg_after.0 == hwnd.0,
-                    ));
-                }
-            }
-        }
+        acquire_window_foreground(hwnd, || {
+            // SAFETY: This is the overlay's live HWND on the winit thread.
+            let _ = unsafe { SetFocus(hwnd) };
+        });
     }
+}
+
+/// Foreground acquisition shared by text focus and the card's native handoff.
+/// Text-only focus and IME steps belong to the caller.
+#[cfg(target_os = "windows")]
+pub(super) fn acquire_window_foreground(
+    hwnd: windows::Win32::Foundation::HWND,
+    after_raise: impl FnOnce(),
+) -> bool {
+    use windows::Win32::Foundation::{FALSE, TRUE};
+    use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        BringWindowToTop, GetForegroundWindow, GetWindowThreadProcessId, SetForegroundWindow,
+    };
+
+    // This topmost, taskbar-hidden overlay can be denied foreground activation
+    // even following an input gesture. Attach to the current foreground thread
+    // and temporarily clear the lock timeout without saving or broadcasting it.
+    // SAFETY: The caller supplies an overlay HWND owned by this winit thread.
+    // AttachThreadInput is paired and never attaches to the destination app.
+    unsafe {
+        let _ = BringWindowToTop(hwnd);
+        let fg = GetForegroundWindow();
+        let our_thread = GetCurrentThreadId();
+        let fg_thread = if fg.0.is_null() {
+            0
+        } else {
+            GetWindowThreadProcessId(fg, None)
+        };
+        let attach_required = fg_thread != 0 && fg_thread != our_thread;
+        let attached = attach_required && AttachThreadInput(our_thread, fg_thread, TRUE).as_bool();
+
+        let (sfw, timeout_attempt) = with_temporary_foreground_lock_timeout(
+            read_foreground_lock_timeout,
+            set_foreground_lock_timeout,
+            || {
+                let sfw = SetForegroundWindow(hwnd).as_bool();
+                after_raise();
+                sfw
+            },
+        );
+        if attached {
+            let _ = AttachThreadInput(our_thread, fg_thread, FALSE);
+        }
+
+        let timeout_may_be_left_altered = timeout_attempt.setting_may_be_left_altered();
+        let fg_after = GetForegroundWindow();
+        if !sfw || (attach_required && !attached) || timeout_may_be_left_altered {
+            crate::diag::diag_write(&format!(
+                "FOCUS-WARN: foreground focus repair incomplete for overlay \
+                 hwnd={:?} fg_before={:?} attached={} attach_required={} \
+                 prev_lock_timeout={:?} lock_cleared={} lock_restored={:?} \
+                 timeout_may_be_left_altered={} set_foreground_window={} \
+                 fg_after={:?} fg_after_is_ours={}",
+                hwnd.0,
+                fg.0,
+                attached,
+                attach_required,
+                timeout_attempt.previous_timeout,
+                timeout_attempt.lock_cleared,
+                timeout_attempt.lock_restored,
+                timeout_may_be_left_altered,
+                sfw,
+                fg_after.0,
+                fg_after == hwnd,
+            ));
+        }
+        fg_after == hwnd
+    }
+}
+
+pub(super) fn discard_foreground_origin() {
+    #[cfg(target_os = "windows")]
+    CHROME_NATIVE_OWNER.with(|owner| {
+        if let Ok(mut owner) = owner.try_borrow_mut() {
+            owner.focus_origin.redirect(None);
+        }
+    });
 }
 
 pub(super) fn begin_os_mouse_capture(window: &Window) {
@@ -2314,6 +2307,7 @@ impl WinitApp {
             reading: self.reading_ui(),
             cursor: self.applied_cursor_name(),
             link_feedback: self.link_feedback_name(),
+            window_activations: self.state.window_go_to.activations,
             hover_targets: self
                 .state
                 .widget_hover_trackers
@@ -2414,6 +2408,12 @@ impl WinitApp {
                     index,
                 },
             ),
+            tze_hud_scene::graph::NotificationActivation::GoTo {
+                publication_id,
+                token,
+                attempted_at_mono_us,
+                bounds,
+            } => self.press_go_to(publication_id, token, attempted_at_mono_us, bounds),
         }
     }
 
@@ -3401,7 +3401,10 @@ impl WinitApp {
                     && match &result.hit {
                         HitResult::ZoneInteraction {
                             interaction_id,
-                            kind: ZoneInteractionKind::Dismiss | ZoneInteractionKind::Action { .. },
+                            kind:
+                                ZoneInteractionKind::Dismiss
+                                | ZoneInteractionKind::GoTo
+                                | ZoneInteractionKind::Action { .. },
                             ..
                         } => scene
                             .overlay
@@ -3434,7 +3437,9 @@ impl WinitApp {
                         } => {
                             let notification = matches!(
                                 kind,
-                                ZoneInteractionKind::Dismiss | ZoneInteractionKind::Action { .. }
+                                ZoneInteractionKind::Dismiss
+                                    | ZoneInteractionKind::GoTo
+                                    | ZoneInteractionKind::Action { .. }
                             );
                             let allowed = self.notification_pointer_permitted()
                                 && notification_permitted.unwrap_or(true);
@@ -3486,12 +3491,16 @@ impl WinitApp {
                         && pressed.as_deref() == Some(interaction_id.as_str())
                         && (!matches!(
                             kind,
-                            ZoneInteractionKind::Dismiss | ZoneInteractionKind::Action { .. }
+                            ZoneInteractionKind::Dismiss
+                                | ZoneInteractionKind::GoTo
+                                | ZoneInteractionKind::Action { .. }
                         ) || (self.notification_pointer_permitted()
                             && notification_permitted.unwrap_or(true)))
                     {
                         match kind {
-                            ZoneInteractionKind::Dismiss | ZoneInteractionKind::Action { .. } => {
+                            ZoneInteractionKind::Dismiss
+                            | ZoneInteractionKind::GoTo
+                            | ZoneInteractionKind::Action { .. } => {
                                 let region = scene
                                     .overlay
                                     .zone_hit_regions
@@ -4154,6 +4163,9 @@ impl WinitApp {
                         deferred.push(surface.present_availability());
                     }
                 }
+            }
+            if primary_presented || secondary_presented {
+                self.go_to_presented();
             }
             self.state.deferred_present |= !deferred.is_empty();
             for availability in deferred {
