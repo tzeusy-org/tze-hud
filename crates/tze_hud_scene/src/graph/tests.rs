@@ -2367,14 +2367,13 @@ fn scene_with_static_image_node(w: u32, h: u32) -> (SceneGraph, SceneId, SceneId
 #[test]
 fn test_update_static_image_same_resource_preserves_decoded_bytes() {
     // WHEN UpdateNodeContent is applied with the same resource_id and decoded_bytes=0
-    // (as proto ingest always produces), the stored decoded_bytes must be preserved.
-    let (mut scene, lease_id, tile_id, node_id, original_decoded_bytes) =
+    // the stored decoded_bytes must be preserved.
+    let (mut scene, _, tile_id, node_id, original_decoded_bytes) =
         scene_with_static_image_node(64, 48);
     assert_eq!(original_decoded_bytes, 64 * 48 * 4);
 
     let (resource_id, _) = make_test_image_resource(64, 48);
 
-    // Simulate proto-ingest: decoded_bytes is zeroed out.
     let result = scene.update_node_content_checked(
         tile_id,
         node_id,
@@ -2382,7 +2381,7 @@ fn test_update_static_image_same_resource_preserves_decoded_bytes() {
             resource_id,
             width: 64,
             height: 48,
-            decoded_bytes: 0,              // proto ingest always zeros this
+            decoded_bytes: 0,
             fit_mode: ImageFitMode::Cover, // changed fit mode
             bounds: Rect::new(10.0, 10.0, 380.0, 280.0),
         }),
@@ -2403,21 +2402,14 @@ fn test_update_static_image_same_resource_preserves_decoded_bytes() {
         }
         _ => panic!("expected StaticImage node"),
     }
-
-    // Texture budget accounting must also reflect the correct bytes.
-    let usage = scene.lease_resource_usage(&lease_id);
-    assert_eq!(
-        usage.texture_bytes, original_decoded_bytes,
-        "lease texture_bytes must still account for the full image size"
-    );
 }
 
 #[test]
 fn test_update_static_image_new_resource_uses_caller_decoded_bytes() {
     // WHEN UpdateNodeContent replaces a StaticImage with a different resource_id
-    // AND the caller supplies non-zero decoded_bytes (as the session server should),
+    // AND the caller supplies non-zero decoded_bytes,
     // the new decoded_bytes must be used — not the old value.
-    let (mut scene, lease_id, tile_id, node_id, original_decoded_bytes) =
+    let (mut scene, _, tile_id, node_id, original_decoded_bytes) =
         scene_with_static_image_node(64, 48);
 
     let (new_resource_id, new_decoded_bytes) = make_test_image_resource(128, 96);
@@ -2460,12 +2452,6 @@ fn test_update_static_image_new_resource_uses_caller_decoded_bytes() {
         }
         _ => panic!("expected StaticImage node"),
     }
-
-    let usage = scene.lease_resource_usage(&lease_id);
-    assert_eq!(
-        usage.texture_bytes, new_decoded_bytes,
-        "lease texture_bytes must account for the new image size"
-    );
 }
 
 #[test]
@@ -3541,37 +3527,6 @@ fn test_suspension_timeout_revokes() {
 
 // Priority Assignment
 // Priority Sort Semantics
-
-// ─── Resource Usage Tests ───────────────────────────────────────────
-
-#[test]
-fn test_lease_resource_usage() {
-    let mut scene = SceneGraph::new(1920.0, 1080.0);
-    let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease("test", 60_000);
-
-    scene
-        .create_tile(
-            tab_id,
-            "test",
-            lease_id,
-            Rect::new(0.0, 0.0, 100.0, 100.0),
-            1,
-        )
-        .unwrap();
-    scene
-        .create_tile(
-            tab_id,
-            "test",
-            lease_id,
-            Rect::new(200.0, 0.0, 100.0, 100.0),
-            2,
-        )
-        .unwrap();
-
-    let usage = scene.lease_resource_usage(&lease_id);
-    assert_eq!(usage.tiles, 2);
-}
 
 #[test]
 fn test_renew_lease_fails_when_not_active() {

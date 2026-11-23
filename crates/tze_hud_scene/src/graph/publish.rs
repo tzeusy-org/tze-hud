@@ -1,13 +1,13 @@
 //! Typed zone and widget publication: what agents send.
 //!
 //! [`SceneGraph::publish`] dispatches one [`Publication`] to the zone or widget
-//! operation. A specified lease must be active and within its resource
-//! budget. A successful commit gets a sequence number and a presentation ID.
+//! operation. A specified lease must be active. A successful commit gets a
+//! sequence number and a presentation ID.
 
 use std::collections::HashMap;
 
 use super::SceneGraph;
-use crate::types::{BudgetError, SceneId, WidgetParameterValue, ZoneContent};
+use crate::types::{SceneId, WidgetParameterValue, ZoneContent};
 use crate::validation::ValidationError;
 
 /// A zone or widget publication.
@@ -112,8 +112,7 @@ impl SceneGraph {
         Ok(())
     }
 
-    /// The lease a publication names must exist, be active and be within
-    /// its budget.
+    /// The lease a publication names must exist and be active.
     fn check_publishing_lease(&self, lease_id: SceneId) -> Result<(), ValidationError> {
         let Some(lease) = self.leases.get(&lease_id) else {
             return Err(ValidationError::LeaseNotFound { id: lease_id });
@@ -130,30 +129,6 @@ impl SceneGraph {
                     ),
                 }
             });
-        }
-        // A publication adds no tiles or textures. Admission still refuses
-        // a lease whose resource usage already exceeds its budget.
-        let usage = self.lease_resource_usage(&lease_id);
-        let budget = &lease.resource_budget;
-        for (resource, current, limit) in [
-            ("tiles", u64::from(usage.tiles), u64::from(budget.max_tiles)),
-            (
-                "texture_bytes",
-                usage.texture_bytes,
-                budget.max_texture_bytes,
-            ),
-        ] {
-            if current > limit {
-                let error = BudgetError {
-                    resource: resource.into(),
-                    current,
-                    limit,
-                    requested: 0,
-                };
-                return Err(ValidationError::BudgetExceeded {
-                    resource: error.to_string(),
-                });
-            }
         }
         Ok(())
     }
@@ -224,7 +199,7 @@ impl SceneGraph {
 
 #[cfg(test)]
 mod tests {
-    use super::super::test_helpers::{make_scene, scene_with_gauge};
+    use super::super::test_helpers::{make_scene, make_scene_with_clock, scene_with_gauge};
     use super::super::tests::make_subtitle_zone;
     use super::*;
     use crate::types::ContentionPolicy;
@@ -242,8 +217,8 @@ mod tests {
     }
 
     #[test]
-    fn publish_commits_and_refuses_a_lease_that_is_gone_or_inactive() {
-        let mut scene = make_scene();
+    fn publish_commits_only_with_an_active_lease_when_named() {
+        let (mut scene, clock) = make_scene_with_clock();
         scene.register_zone(make_subtitle_zone());
         let lease = scene.grant_lease("agent", 60_000);
         let publisher = Publisher {
@@ -257,14 +232,27 @@ mod tests {
         assert_eq!(scene.zone_registry.active_for_zone("subtitle").len(), 1);
 
         scene.suspend_all_leases(scene.now_millis());
-        let refused = scene.publish(&publisher, &subtitle("two"));
-        assert!(matches!(refused, Err(ValidationError::InvalidField { .. })));
-        scene.revoke_lease(lease).unwrap();
+        let due_id =
+            scene.schedule_publication(scene.now_wall_us(), publisher.clone(), subtitle("two"));
+        let due = scene.apply_due_publications();
+        assert_eq!(due.len(), 1);
+        assert_eq!(due[0].id, due_id);
+        assert!(matches!(
+            due[0].result,
+            Err(ValidationError::InvalidField { .. })
+        ));
+        scene.resume_all_leases(scene.now_millis());
+        clock.advance(60_001);
+        assert_eq!(scene.expire_leases()[0].lease_id, lease);
+        assert!(matches!(
+            scene.publish(&publisher, &subtitle("three")),
+            Err(ValidationError::LeaseExpired { id }) if id == lease
+        ));
         let unknown = Publisher {
             lease_id: Some(SceneId::new()),
             ..Publisher::namespace("agent")
         };
-        let refused = scene.publish(&unknown, &subtitle("three"));
+        let refused = scene.publish(&unknown, &subtitle("four"));
         assert!(matches!(
             refused,
             Err(ValidationError::LeaseNotFound { .. })

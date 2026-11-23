@@ -169,23 +169,6 @@ fn count_node_subtree_self_loop_terminates() {
     assert_eq!(count, 1, "self-loop: node counted once, cycle skipped");
 }
 
-/// sum_texture_bytes: cycle terminates and returns zero (no StaticImage nodes).
-#[test]
-fn sum_texture_bytes_cycle_terminates() {
-    let mut scene = make_scene();
-    let id_a = SceneId::new();
-    let id_b = SceneId::new();
-    scene.nodes.insert(id_a, solid_node(id_a, vec![id_b]));
-    scene.nodes.insert(id_b, solid_node(id_b, vec![id_a]));
-
-    // Must not hang; no StaticImage nodes so result is 0.
-    let bytes = scene.sum_texture_bytes(id_a);
-    assert_eq!(
-        bytes, 0,
-        "cycle should terminate; no texture bytes in solid-color nodes"
-    );
-}
-
 /// hit_test_node: cycle terminates; HitRegion nodes in a cycle are still tested.
 #[test]
 fn hit_test_node_cycle_terminates() {
