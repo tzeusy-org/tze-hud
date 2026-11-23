@@ -857,6 +857,11 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         default_value: "1200",
     },
     CanonicalToken {
+        key: "notification.reveal.max_height",
+        description: "Maximum height of the full notification text panel",
+        default_value: "192",
+    },
+    CanonicalToken {
         key: NOTIFICATION_ACTION_HOLD_MS_KEY,
         description: "How long a destructive notification action must be held (ms, 0-3000; 0 = no hold)",
         default_value: "600",

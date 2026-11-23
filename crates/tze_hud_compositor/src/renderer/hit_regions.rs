@@ -198,6 +198,7 @@ impl Compositor {
         let now = self
             .last_animation_frame_at
             .unwrap_or_else(std::time::Instant::now);
+        self.publish_notification_reveal_geometry(scene);
         for card in &mut scene.overlay.notification_geometry {
             let zone = self.zone_animation_states.get(&card.zone_name);
             let publication = self

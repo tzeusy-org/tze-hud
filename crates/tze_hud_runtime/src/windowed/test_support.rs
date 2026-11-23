@@ -325,6 +325,7 @@ pub(super) fn make_windowed_keyboard_test_app(
         link_feedback: None,
         notification_clipboard: Default::default(),
         copy_feedback: None,
+        notification_reveal: Default::default(),
         window_go_to: Default::default(),
         context_menu_press: None,
         context_menu_open: false,

@@ -60,6 +60,7 @@ pub mod hit_regions;
 pub(crate) mod icon;
 pub(crate) mod image_cache;
 mod notification_layout;
+mod notification_reveal;
 mod notification_style;
 mod notification_text;
 pub(crate) mod portal_reading;
@@ -534,6 +535,8 @@ pub struct Compositor {
     /// [`Compositor::init_text_renderer`].
     configured_fonts: crate::fonts::FontConfig,
     notification_layouts: std::cell::RefCell<notification_layout::NotificationLayoutCache>,
+    notification_reveal_frame: notification_reveal::RevealFrame,
+    notification_reveal_measure: Option<notification_reveal::RevealMeasure>,
     subtitle_layouts: std::cell::RefCell<subtitle::SubtitleLayoutCache>,
     status_bar_layouts: std::cell::RefCell<status_bar::StatusBarLayoutCache>,
     /// Saved editor state remains resident while explicit notification focus
@@ -1139,6 +1142,8 @@ impl Compositor {
             configured_max_truncation_input_bytes: None,
             font_fallback_wake: Default::default(),
             notification_layouts: Default::default(),
+            notification_reveal_frame: Default::default(),
+            notification_reveal_measure: None,
             subtitle_layouts: Default::default(),
             status_bar_layouts: Default::default(),
             notification_keyboard_active: false,
@@ -1493,6 +1498,8 @@ impl Compositor {
             configured_max_truncation_input_bytes: None,
             font_fallback_wake: Default::default(),
             notification_layouts: Default::default(),
+            notification_reveal_frame: Default::default(),
+            notification_reveal_measure: None,
             subtitle_layouts: Default::default(),
             status_bar_layouts: Default::default(),
             notification_keyboard_active: false,
@@ -2764,8 +2771,9 @@ impl Compositor {
         // emitting any flat geometry, so text consumes the same resolved layout
         // rather than reflowing after the composer chrome has been staged.
         let has_text_rasterizer = self.text_rasterizer.is_some();
+        let mut reveals = Vec::new();
         let text_items: Vec<TextItem> = if has_text_rasterizer {
-            self.collect_text_items(scene, sw, sh)
+            self.collect_text_items_with_reveal(scene, sw, sh, Some(&mut reveals))
         } else {
             vec![]
         };
@@ -2774,7 +2782,21 @@ impl Compositor {
         } else {
             (vec![], 0)
         };
-        let (affordance_rects, affordance_items) = self.collect_scroll_affordances(scene);
+        let (mut affordance_rects, mut affordance_items) = self.collect_scroll_affordances(scene);
+        let panel = self.paint_notification_reveal(
+            scene,
+            &reveals,
+            &mut affordance_rects,
+            &mut affordance_items,
+        );
+        self.notification_reveal_frame = notification_reveal::RevealFrame {
+            scene: Some((scene.instance_id, scene.version)),
+            regions: reveals
+                .into_iter()
+                .map(|candidate| candidate.region)
+                .collect(),
+            panel,
+        };
         EncodeSources {
             affordance_rects,
             affordance_items,

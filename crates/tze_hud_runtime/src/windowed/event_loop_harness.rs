@@ -167,6 +167,7 @@ impl WindowedRuntimeState {
             link_feedback: None,
             notification_clipboard: Default::default(),
             copy_feedback: None,
+            notification_reveal: Default::default(),
             window_go_to: Default::default(),
             context_menu_press: None,
             context_menu_open: false,
@@ -5141,6 +5142,93 @@ mod tests {
             native.complete(receipt);
         }
         harness.drain();
+    }
+
+    #[test]
+    fn notification_reveal_arms_only_for_cut_text_and_esc_suppresses_the_focused_field() {
+        use std::time::{Duration, Instant};
+        use tze_hud_scene::graph::overlay::{
+            NotificationRevealField, NotificationRevealRegion, NotificationRevealTarget,
+        };
+        let mut harness = approve_reject_notification_harness();
+        let start = Instant::now();
+        assert!(!harness.app.settle_notification_reveal(start));
+        assert_eq!(harness.app.state.notification_reveal.next_deadline(), None);
+        let (id, bounds) = {
+            let scene = harness.scene();
+            let card = &scene.overlay.notification_geometry[0];
+            (card.publication_id, card.bounds)
+        };
+        let target = NotificationRevealTarget {
+            publication_id: id,
+            field: NotificationRevealField::Body,
+        };
+        let focus_id = format!("notification-reveal:{id}:body");
+        let source = Rect::new(bounds.x, bounds.y, bounds.width * 0.5, bounds.height * 0.25);
+        let snapshot = {
+            let mut scene = harness.scene();
+            scene
+                .overlay
+                .notification_reveal_regions
+                .push(NotificationRevealRegion {
+                    target,
+                    bounds: source,
+                    focus_id: focus_id.clone(),
+                });
+            crate::pipeline::HitTestSnapshot::from_scene(&scene)
+        };
+        harness
+            .app
+            .state
+            .pipeline
+            .hit_test_snapshot
+            .store(Arc::new(snapshot));
+        harness.app.state.cursor_x = source.x + source.width * 0.5;
+        harness.app.state.cursor_y = source.y + source.height * 0.5;
+        assert!(!harness.app.settle_notification_reveal(start));
+        let deadline = start + Duration::from_millis(180);
+        assert_eq!(
+            harness.app.state.notification_reveal.next_deadline(),
+            Some(deadline)
+        );
+        assert!(
+            !harness
+                .app
+                .settle_notification_reveal(deadline - Duration::from_millis(1))
+        );
+        assert!(harness.scene().overlay.notification_reveal.is_none());
+        assert!(harness.app.settle_notification_reveal(deadline));
+        assert_eq!(
+            harness.scene().overlay.notification_reveal.unwrap().target,
+            target
+        );
+        assert_eq!(harness.app.state.notification_reveal.next_deadline(), None);
+
+        harness.app.state.cursor_left_window = true;
+        assert!(harness.app.settle_notification_reveal(deadline));
+        assert!(harness.scene().overlay.notification_reveal.is_none());
+        harness.enqueue(key_down("Tab", "Tab", 1_000));
+        harness.enqueue(key_up("Tab", "Tab", 1_100));
+        harness.drain();
+        assert_eq!(
+            harness.scene().overlay.notification_focus.as_deref(),
+            Some(focus_id.as_str())
+        );
+        assert!(harness.app.settle_notification_reveal(deadline));
+        assert_eq!(
+            harness.scene().overlay.notification_reveal.unwrap().target,
+            target
+        );
+        harness.enqueue(key_down("Escape", "Escape", 1_200));
+        harness.enqueue(key_up("Escape", "Escape", 1_300));
+        harness.drain();
+        assert!(
+            !harness
+                .app
+                .settle_notification_reveal(deadline + Duration::from_secs(1))
+        );
+        assert!(harness.scene().overlay.notification_reveal.is_none());
+        assert!(take_action_ids(&harness).is_empty());
     }
 
     #[test]

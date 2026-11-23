@@ -58,11 +58,11 @@ fn number(tokens: &HashMap<String, String>, key: &str) -> f32 {
 }
 
 /// A logical-dp size token in physical px.
-fn dp(tokens: &HashMap<String, String>, key: &str) -> f32 {
+pub(super) fn dp(tokens: &HashMap<String, String>, key: &str) -> f32 {
     number(tokens, key) * px_scale(tokens)
 }
 
-fn color(tokens: &HashMap<String, String>, key: &str) -> Rgba {
+pub(super) fn color(tokens: &HashMap<String, String>, key: &str) -> Rgba {
     tokens
         .get(key)
         .and_then(|v| parse_hex_color(v))

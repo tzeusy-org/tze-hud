@@ -243,6 +243,8 @@ pub struct HitTestSnapshot {
     pub drag_handles: Vec<DragHandleBoundsEntry>,
     /// Current painted Reset action; chrome only, never agent hit testing.
     pub context_menu: Option<Rect>,
+    pub notification_reveals: Vec<tze_hud_scene::graph::overlay::NotificationRevealRegion>,
+    pub notification_reveal_panel: Option<tze_hud_scene::graph::overlay::NotificationRevealPanel>,
 }
 
 /// One entry in the hit-test snapshot.
@@ -295,6 +297,8 @@ impl HitTestSnapshot {
             tiles: Vec::new(),
             drag_handles: Vec::new(),
             context_menu: None,
+            notification_reveals: Vec::new(),
+            notification_reveal_panel: None,
         }
     }
 
@@ -367,6 +371,8 @@ impl HitTestSnapshot {
                 .drag_handle_context_menu
                 .as_ref()
                 .and_then(|m| m.reset_button_rect),
+            notification_reveals: scene.overlay.notification_reveal_regions.clone(),
+            notification_reveal_panel: scene.overlay.notification_reveal_panel,
         }
     }
 

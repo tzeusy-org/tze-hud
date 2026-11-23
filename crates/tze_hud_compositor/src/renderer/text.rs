@@ -60,7 +60,7 @@ impl super::Compositor {
     // twelve genuinely-varying `TextItem` fields, each a distinct primitive.
     // Bundling them into a struct would just rename the same flat argument list.
     #[allow(clippy::too_many_arguments)]
-    fn make_zone_text_item(
+    pub(super) fn make_zone_text_item(
         text: Arc<str>,
         pixel_x: f32,
         pixel_y: f32,
@@ -271,7 +271,7 @@ impl super::Compositor {
         sh: f32,
     ) -> Vec<TextItem> {
         let mut items = Vec::new();
-        self.collect_zone_text_items(scene, sw, sh, true, &mut items);
+        self.collect_zone_text_items(scene, sw, sh, true, &mut items, None);
         items.retain(|item| item.overflow == TextOverflow::Ellipsis);
         items
     }
@@ -285,7 +285,9 @@ impl super::Compositor {
         sh: f32,
         notifications_only: bool,
         items: &mut Vec<TextItem>,
+        mut reveal: Option<&mut Vec<super::notification_reveal::RevealCandidate>>,
     ) {
+        use tze_hud_scene::graph::overlay::NotificationRevealField;
         let now = std::time::Instant::now();
         // ── Zone StreamText, Notification, and StatusBar content ─────────────
         for stack in self.zone_stacks(scene) {
@@ -475,6 +477,30 @@ impl super::Compositor {
                                     );
                                     if let Some(m) = band.line_multiplier {
                                         item.line_height_multiplier = m;
+                                    }
+                                    if let Some(reveal) = reveal.as_deref_mut()
+                                        && let Some(field) = match band.field {
+                                            "title" => Some(NotificationRevealField::Title),
+                                            "body" => Some(NotificationRevealField::Body),
+                                            _ => None,
+                                        }
+                                        && self.notification_text_was_ellipsized(&item)
+                                    {
+                                        reveal.push(
+                                            super::notification_reveal::RevealCandidate::new(
+                                                record,
+                                                card,
+                                                &stack.token_key(),
+                                                field,
+                                                &item,
+                                                Rect::new(
+                                                    item.pixel_x,
+                                                    item.pixel_y,
+                                                    width,
+                                                    band.height,
+                                                ),
+                                            ),
+                                        );
                                     }
                                     items.push(item);
                                 }
@@ -683,6 +709,22 @@ impl super::Compositor {
                                         tze_hud_scene::types::TextAlign::Center,
                                     );
                                     text.overflow = TextOverflow::Ellipsis;
+                                    if let Some(reveal) = reveal.as_deref_mut()
+                                        && feedback.is_none()
+                                        && copy_feedback.is_none()
+                                        && self.notification_text_was_ellipsized(&text)
+                                    {
+                                        reveal.push(
+                                            super::notification_reveal::RevealCandidate::new(
+                                                record,
+                                                card,
+                                                &stack.token_key(),
+                                                NotificationRevealField::Action(index),
+                                                &text,
+                                                b,
+                                            ),
+                                        );
+                                    }
                                     if let Some(color) = error_color {
                                         text.color = color;
                                     }
@@ -1006,6 +1048,16 @@ impl super::Compositor {
     ///
     /// Returns a flat `Vec<TextItem>` ready for `TextRasterizer::prepare_text_items`.
     pub(super) fn collect_text_items(&self, scene: &SceneGraph, sw: f32, sh: f32) -> Vec<TextItem> {
+        self.collect_text_items_with_reveal(scene, sw, sh, None)
+    }
+
+    pub(super) fn collect_text_items_with_reveal(
+        &self,
+        scene: &SceneGraph,
+        sw: f32,
+        sh: f32,
+        reveal: Option<&mut Vec<super::notification_reveal::RevealCandidate>>,
+    ) -> Vec<TextItem> {
         let mut items: Vec<TextItem> = Vec::new();
 
         // Transcript optimal-measure cap: resolve once per frame; a
@@ -1108,7 +1160,7 @@ impl super::Compositor {
             }
         }
 
-        self.collect_zone_text_items(scene, sw, sh, false, &mut items);
+        self.collect_zone_text_items(scene, sw, sh, false, &mut items, reveal);
 
         // ── Composer echo text ───────────────────────────────────
         // Inject a TextItem for the local composer draft + caret glyph on top of

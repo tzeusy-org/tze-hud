@@ -1649,6 +1649,31 @@ impl SceneGraph {
         self.overlay
             .zone_hit_regions
             .retain(|r| valid.contains(&r.interaction_id));
+        self.overlay.notification_reveal_regions.retain(|region| {
+            let id = region.target.publication_id;
+            !hidden
+                && !keys.contains(&id)
+                && self
+                    .zone_registry
+                    .active_publishes
+                    .values()
+                    .flatten()
+                    .any(|record| {
+                        record.publication_id == id
+                            && record.expires_at_wall_us.is_none_or(|expiry| expiry > now)
+                    })
+        });
+        if self.overlay.notification_reveal.is_some_and(|request| {
+            !self
+                .overlay
+                .notification_reveal_regions
+                .iter()
+                .any(|region| region.target == request.target)
+        }) {
+            self.overlay.notification_reveal = None;
+            self.overlay.notification_reveal_panel = None;
+            self.bump_geometry_epoch();
+        }
         self.overlay.chrome_states.retain(|id, _| {
             !id.starts_with("zone:")
                 || valid.contains(id)
@@ -1658,12 +1683,14 @@ impl SceneGraph {
                     .values()
                     .any(|chosen| chosen == id)
         });
-        if self
-            .overlay
-            .notification_focus
-            .as_ref()
-            .is_some_and(|id| !valid.contains(id))
-        {
+        if self.overlay.notification_focus.as_ref().is_some_and(|id| {
+            !valid.contains(id)
+                && !self
+                    .overlay
+                    .notification_reveal_regions
+                    .iter()
+                    .any(|region| &region.focus_id == id)
+        }) {
             self.focus_notification(None);
         }
         // A held control that was replaced, cleared, expired or hidden ends
