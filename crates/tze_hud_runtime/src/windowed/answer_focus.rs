@@ -237,6 +237,8 @@ impl WinitApp {
             .is_some_and(|panel| panel.is_open());
         let found = if paused {
             Ok(false)
+        } else if !self.blur_notification_reply() {
+            Err(())
         } else {
             self.focus_newest_question(super::lifecycle::hud_owns_foreground() && !panel_open)
         };

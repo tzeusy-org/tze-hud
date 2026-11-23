@@ -448,8 +448,7 @@ fn populate_notification_hit_regions_in(
                 reply
                     .zip(scene.overlay.notification_reply.as_ref())
                     .map(|(field, draft)| {
-                        let style =
-                            super::token_colors::resolve_composer_overlay_tokens(&zone_tokens);
+                        let style = super::notification_reply::reply_style(&zone_tokens);
                         super::notification_reply::line_geometry(
                             &mut layouts.borrow_mut(),
                             field,

@@ -1892,6 +1892,9 @@ pub struct NotificationAction {
 
 pub const ACTION_TARGET_HINT: &str = "action needs one of callback_id, url, copy or reply";
 pub const NOTIFICATION_REPLY_MAX_BYTES: usize = 280;
+pub const NOTIFICATION_REPLY_LINE_BREAKS: [char; 7] = [
+    '\r', '\n', '\u{000b}', '\u{000c}', '\u{0085}', '\u{2028}', '\u{2029}',
+];
 const ACTION_REPLY_HINT: &str = "action reply needs a non-empty callback ID";
 const MULTIPLE_REPLIES_HINT: &str = "notification allows at most one reply action";
 pub const ACTION_URL_HINT: &str = "action url must be https";

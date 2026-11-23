@@ -301,6 +301,17 @@ impl WinitApp {
         true
     }
 
+    pub(super) fn set_text_input_preedit(&mut self, text: String, cursor: Option<(usize, usize)>) {
+        let reply = &mut self.state.notification_reply;
+        if reply.active.is_some() {
+            // The card keeps only committed text. The IME owns the keys during
+            // composition, including Enter when it confirms its candidate.
+            reply.composing = !text.is_empty();
+        } else {
+            self.set_composer_preedit(text, cursor);
+        }
+    }
+
     pub(super) fn set_composer_preedit(&mut self, text: String, cursor: Option<(usize, usize)>) {
         let preedit =
             (!text.is_empty()).then_some(tze_hud_compositor::ComposerPreedit { text, cursor });

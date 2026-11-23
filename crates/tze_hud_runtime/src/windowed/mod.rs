@@ -2625,13 +2625,14 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                 if let Some(source) = wake_source {
                     self.state.wake.mark_main_work_pending(source);
                 }
-                self.set_composer_preedit(text, cursor);
+                self.set_text_input_preedit(text, cursor);
             }
             WindowEvent::Ime(winit::event::Ime::Disabled) => {
-                self.set_composer_preedit(String::new(), None);
+                self.set_text_input_preedit(String::new(), None);
             }
             WindowEvent::Ime(winit::event::Ime::Commit(text)) => {
                 self.state.composer_preedit = None;
+                self.state.notification_reply.composing = false;
                 if self.panel_text(secondary, &text) {
                     return;
                 }

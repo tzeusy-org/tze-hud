@@ -9,10 +9,19 @@ use super::{
     image_cache::composer_scroll_offset,
     notification_layout::NotificationLayoutCache,
     tile_render::composer_draft_base_color,
-    token_colors::{ComposerOverlayTokens, srgb_to_linear},
+    token_colors::{ComposerOverlayTokens, resolve_composer_overlay_tokens, srgb_to_linear},
 };
 use crate::pipeline::RoundedRectDrawCmd;
 use crate::text::{LINE_HEIGHT_MULTIPLIER, StyledRunItem, TextItem};
+
+pub(super) fn reply_style(tokens: &HashMap<String, String>) -> ComposerOverlayTokens {
+    let mut style = resolve_composer_overlay_tokens(tokens);
+    let scale = tze_hud_config::tokens::px_scale(tokens);
+    style.font_size_px *= scale;
+    style.content_inset_px *= scale;
+    style.caret_width_px *= scale;
+    style
+}
 
 pub(super) struct ReplyLineGeometry {
     clip: Rect,
@@ -47,7 +56,7 @@ pub(super) fn line_geometry(
         text_x,
         content_width,
         caret: Rect::new(
-            (text_x + caret_x).clamp(clip.x, clip.x + clip.width - caret_width),
+            (text_x + caret_x).clamp(clip.x, clip.x + (clip.width - caret_width)),
             clip.y,
             caret_width,
             line_height,

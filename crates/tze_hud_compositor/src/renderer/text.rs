@@ -582,10 +582,7 @@ impl super::Compositor {
                                     .zip(scene.overlay.notification_reply.as_ref())
                                     .filter(|(_, draft)| !draft.text.is_empty())
                                 {
-                                    let style =
-                                        super::token_colors::resolve_composer_overlay_tokens(
-                                            zone_tokens,
-                                        );
+                                    let style = super::notification_reply::reply_style(zone_tokens);
                                     let geometry = super::notification_reply::line_geometry(
                                         &mut self.notification_layouts.borrow_mut(),
                                         field,

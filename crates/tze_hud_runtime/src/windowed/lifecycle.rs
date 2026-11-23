@@ -3767,6 +3767,7 @@ impl WinitApp {
 
         // The accepted input is committed and both scene/state guards are gone.
         if take_text_focus {
+            self.blur_notification_reply();
             let window = self
                 .state
                 .window

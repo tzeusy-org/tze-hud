@@ -43,7 +43,7 @@ impl NotificationActionLayout {
             && reply.publication_id == record.publication_id
             && reply.action_index < self.heights.len()
         {
-            let composer = super::token_colors::resolve_composer_overlay_tokens(tokens);
+            let composer = super::notification_reply::reply_style(tokens);
             let line_height =
                 (composer.font_size_px * crate::text::LINE_HEIGHT_MULTIPLIER).max(1.0);
             self.reply = Some((

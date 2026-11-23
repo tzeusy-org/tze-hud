@@ -1555,7 +1555,7 @@ impl SceneGraph {
     ) -> Option<RenderWakeNotifier> {
         if text.is_empty()
             || text.len() > crate::types::NOTIFICATION_REPLY_MAX_BYTES
-            || text.contains(['\r', '\n', '\u{0085}', '\u{2028}', '\u{2029}'])
+            || text.contains(crate::types::NOTIFICATION_REPLY_LINE_BREAKS)
         {
             return None;
         }

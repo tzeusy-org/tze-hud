@@ -10,7 +10,7 @@ use tze_hud_input::{
 use tze_hud_scene::{
     Rect, SceneId, ZoneHitRegion, ZoneInteractionKind,
     graph::{SceneGraph, overlay::NotificationReplyView},
-    types::NOTIFICATION_REPLY_MAX_BYTES,
+    types::{NOTIFICATION_REPLY_LINE_BREAKS, NOTIFICATION_REPLY_MAX_BYTES},
 };
 
 #[derive(Default)]
@@ -18,8 +18,10 @@ pub(super) struct NotificationReplyState {
     pub(super) active: Option<ZoneHitRegion>,
     pub(super) keydowns: HashSet<String>,
     pub(super) ignore_character_at: Option<tze_hud_scene::MonoUs>,
+    pub(super) composing: bool,
     blur_pending: bool,
     refresh_view: bool,
+    nested_focus: bool,
     ime_anchor: Option<(winit::window::WindowId, Rect)>,
     drafts: HashMap<SceneId, ReplyDraft>,
 }
@@ -49,6 +51,7 @@ impl NotificationReplyState {
         self.drafts.entry(region.publication_id).or_default();
         self.active = Some(region);
         self.blur_pending = false;
+        self.composing = false;
         self.refresh_view = true;
     }
 
@@ -78,6 +81,13 @@ impl super::WinitApp {
             region.bounds.x + region.bounds.width * 0.5,
             region.bounds.y + region.bounds.height * 0.5,
         );
+        if self.state.notification_reply.active.is_none() {
+            self.state.notification_reply.nested_focus = self
+                .state
+                .answer_keyboard
+                .focus
+                .map_or_else(super::lifecycle::hud_owns_foreground, |focus| focus.nested);
+        }
         self.state.notification_reply.activate(region);
         self.sync_notification_reply();
         if self.state.notification_reply.active.is_some() {
@@ -85,11 +95,12 @@ impl super::WinitApp {
         }
     }
 
-    pub(super) fn blur_notification_reply(&mut self) {
+    pub(super) fn blur_notification_reply(&mut self) -> bool {
         if self.state.notification_reply.active.is_some() {
             self.state.notification_reply.blur_pending = true;
             self.sync_notification_reply();
         }
+        !self.state.notification_reply.blur_pending
     }
 
     pub(super) fn sync_notification_reply(&mut self) {
@@ -101,13 +112,16 @@ impl super::WinitApp {
         let (restore, waits, caret) = {
             let Some(state) = spin_acquire(&self.state.shared_state, INTERACTION_LOCK_BUDGET)
             else {
+                self.schedule_shared_scene_availability_wake();
                 return;
             };
             let Some(mut scene) = spin_acquire(&state.scene, INTERACTION_LOCK_BUDGET) else {
+                self.schedule_shared_scene_availability_wake();
                 return;
             };
             if reply.blur_pending {
                 reply.blur_pending = false;
+                reply.composing = false;
                 reply.active = None;
                 scene.set_notification_reply_view(None);
                 scene.focus_notification(None);
@@ -121,6 +135,7 @@ impl super::WinitApp {
                     .is_none_or(|view| view.publication_id != target.publication_id)
             });
             if stale {
+                reply.composing = false;
                 reply.active = None;
                 self.state.answer_keyboard.focus = None;
             }
@@ -142,7 +157,11 @@ impl super::WinitApp {
                     .find(|card| card.publication_id == target.publication_id)
                     .and_then(|card| card.reply_caret)
             });
-            (stale, scene.take_notification_wait_notifiers(), caret)
+            (
+                stale && !reply.nested_focus,
+                scene.take_notification_wait_notifiers(),
+                caret,
+            )
         };
         for wake in waits {
             wake.notify();
@@ -165,7 +184,7 @@ impl super::WinitApp {
             .or(self.state.window.as_ref());
         let Some(window) = window else { return };
         let (x, y) = self.cursor_to_scene(secondary, (0.0, 0.0));
-        let local = Rect::new(caret.x - x, caret.y - y, caret.width, caret.height);
+        let local = reply_ime_area(caret, (x, y));
         let anchor = (window.id(), local);
         if self.state.notification_reply.ime_anchor == Some(anchor) {
             return;
@@ -184,6 +203,12 @@ impl super::WinitApp {
         use super::keyboard::keyboard_key_identity;
         use super::lifecycle::{INTERACTION_LOCK_BUDGET, spin_acquire};
         let reply = &mut self.state.notification_reply;
+        if reply.blur_pending || reply.composing {
+            reply
+                .keydowns
+                .insert(keyboard_key_identity(&raw.key_code, &raw.key));
+            return Ok(true);
+        }
         let suspended = self
             .state
             .safe_mode_atomic
@@ -247,7 +272,9 @@ impl super::WinitApp {
             reply.active = None;
             self.state.answer_keyboard.focus = None;
             self.state.answer_keyboard.invalidate_visit();
-            self.return_focus_after_key(raw);
+            if wake.is_some() || !reply.nested_focus {
+                self.return_focus_after_key(raw);
+            }
         }
         if let Some(wake) = wake {
             wake.notify();
@@ -264,6 +291,9 @@ impl super::WinitApp {
     ) -> Result<bool, ()> {
         use super::lifecycle::{INTERACTION_LOCK_BUDGET, spin_acquire};
         let reply = &mut self.state.notification_reply;
+        if reply.blur_pending || reply.composing {
+            return Ok(true);
+        }
         if reply.ignore_character_at == Some(raw.timestamp_mono_us) {
             reply.ignore_character_at = None;
             return Ok(true);
@@ -292,6 +322,16 @@ impl super::WinitApp {
     }
 }
 
+/// Translate the rendered caret from scene space to its owning window.
+pub(super) fn reply_ime_area(caret: Rect, origin: (f32, f32)) -> Rect {
+    Rect::new(
+        caret.x - origin.0,
+        caret.y - origin.1,
+        caret.width,
+        caret.height,
+    )
+}
+
 impl ReplyDraft {
     fn view(&self, region: &ZoneHitRegion) -> NotificationReplyView {
         let ZoneInteractionKind::Action { index } = region.kind else {
@@ -312,17 +352,18 @@ impl ReplyDraft {
     }
 
     fn insert(&mut self, text: &str) {
-        if text.chars().take(2).count() == 1
-            && !text.contains(['\r', '\n', '\u{0085}', '\u{2028}', '\u{2029}'])
-        {
+        if text.chars().take(2).count() == 1 && !text.contains(NOTIFICATION_REPLY_LINE_BREAKS) {
             let edited = self.draft.insert(text);
+            self.update_limit(edited);
+        } else if !text.contains(NOTIFICATION_REPLY_LINE_BREAKS) {
+            let edited = self.draft.paste(text);
             self.update_limit(edited);
         } else {
             // A paste or committed string remains one visual line. Keep words
             // separated when the source contained line breaks.
             let text = text
                 .replace("\r\n", " ")
-                .replace(['\r', '\n', '\u{0085}', '\u{2028}', '\u{2029}'], " ");
+                .replace(NOTIFICATION_REPLY_LINE_BREAKS, " ");
             let edited = self.draft.paste(&text);
             self.update_limit(edited);
         }
