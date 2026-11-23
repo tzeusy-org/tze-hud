@@ -132,8 +132,6 @@ class FakeHud(BaseHTTPRequestHandler):
             elif method == "tools/call" and body["params"].get("name") == "hud_input" and session in self.inputs:
                 text = json.dumps({"items": self.inputs[session]})
                 result = {"content": [{"type": "text", "text": text}]}
-            elif method == "tools/call" and mode == "publish_success":
-                result = {"content": [{"type": "text", "text": '{"ok":true}'}]}
             elif method == "tools/call":
                 result = {"isError": True, "content": [{"type": "text", "text": '{"code":"FIXTURE","hint":"雪"}'}]}
             else:
@@ -605,7 +603,7 @@ def test_write_failure_has_no_traceback_and_no_psk(hud):
         assert FakeHud.last_psk not in adapter.stderr
 
 
-def test_hud_env_derives_urls_and_reads_the_file(hud, monkeypatch, capsys):
+def test_hud_env_derives_urls_and_reads_the_file(hud, monkeypatch):
     host, home = hud
     monkeypatch.syspath_prepend(str(SCRIPTS))
     monkeypatch.setenv("HOME", str(home))
@@ -667,26 +665,6 @@ def test_hud_env_derives_urls_and_reads_the_file(hud, monkeypatch, capsys):
     del record["grpc_target"]
     endpoint_file(home).write_text(json.dumps(record))
     assert hud_env.grpc_target(host) == "127.0.0.1:50051"
-
-    # The stress publisher uses this same private paired file, with host metrics
-    # explicitly unavailable even when authenticated publishing succeeds.
-    import stress_test_zones
-
-    url, token = hud_env.resolve(f"http://{host}/mcp", None)
-    FakeHud.modes[1] = "publish_success"
-    profile = stress_test_zones.run_profile("test", 100, 0.05, url, token)
-    FakeHud.modes.pop(1)
-    report = profile.to_dict()
-    assert profile.success_count >= 1
-    assert all(request["authorized"] for request in FakeHud.requests)
-    assert report["telemetry_status"] == "unavailable" and report["telemetry_reason"]
-    assert report["telemetry_samples"] == []
-    assert report["telemetry_avg_cpu_pct"] is None
-    assert report["telemetry_avg_pmem_mb"] is None
-    assert all(bucket["host_cpu_pct"] is None and bucket["host_private_mem_mb"] is None
-               for bucket in report["time_series"])
-    output = capsys.readouterr()
-    assert token not in output.out + output.err
 
     monkeypatch.delenv("HUD_HOST", raising=False)
     record = endpoint_file(home).read_bytes()

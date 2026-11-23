@@ -66,9 +66,7 @@ jobs:
   # ── Static: no compilation ──────────────────────────────────────────────────
   #
   # The Python suites are pure-Python and hermetic: no GPU, Windows, live HUD
-  # runtime or network. Live-HUD CLI tools under the user-test skill's
-  # scripts/ (stress_test_zones.py, publish_*_batch.py, *_exemplar.py) are not
-  # test suites and stay out.
+  # runtime or external network. Live-HUD commands use fake transports here.
 
   static:
     name: static checks

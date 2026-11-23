@@ -89,17 +89,17 @@ def test_publish_attaches_through_hud_publish(capsys):
         client.rpc("tools/call", {}, timeout=0.35)
         assert http.call_args.kwargs["timeout"] == 0.35
 
-    import publish_widget_batch as widgets
+    import hud_mcp
     response.__enter__.return_value.read.return_value = json.dumps(tool_response({"ok": True})).encode()
-    with mock.patch.object(widgets.urllib.request, "urlopen", return_value=response) as http:
-        assert widgets.rpc_call("http://127.0.0.1/mcp", "synthetic", "hud_clear", {}, 1) == {"result": {"ok": True}}
-        assert http.call_args.kwargs["timeout"] == 20
+    with mock.patch.object(hud_mcp.urllib.request, "urlopen", return_value=response) as http:
+        assert hud_mcp.call_tool("http://127.0.0.1/mcp", "synthetic", "hud_clear", {}, 1) == {"result": {"ok": True}}
+        assert http.call_args.kwargs["timeout"] == 65
         response.__enter__.return_value.read.assert_called_with()
-        widgets.rpc_call("http://127.0.0.1/mcp", "synthetic", "hud_clear", {}, 1, timeout=0.2, response_limit=4096)
+        hud_mcp.call_tool("http://127.0.0.1/mcp", "synthetic", "hud_clear", {}, 1, timeout=0.2, response_limit=4096)
         assert http.call_args.kwargs["timeout"] == 0.2
         response.__enter__.return_value.read.assert_called_with(4097)
         with pytest.raises(ValueError):
-            widgets.rpc_call("http://127.0.0.1/mcp", "synthetic", "hud_clear", {}, 1, response_limit=4)
+            hud_mcp.call_tool("http://127.0.0.1/mcp", "synthetic", "hud_clear", {}, 1, response_limit=4)
 
 
 def test_poll_prints_ndjson_and_acks_on_next_call(capsys):
@@ -477,7 +477,7 @@ class UsageHarness(LoopbackToolHarness):
         # The gate is closed before main and cannot extend the delivery lease.
         prepare = ("import runpy,socket,sys\nfrom pathlib import Path\n"
                    "sys.path.insert(0, str(Path(sys.argv[1]).resolve().parents[2] / 'user-test' / 'scripts'))\n"
-                   "import hud_env,publish_widget_batch\n"
+                   "import hud_env,hud_mcp\n"
                    "entry = runpy.run_path(sys.argv[1])['main']\n"
                    "with socket.socket(fileno=int(sys.argv[2])) as gate:\n"
                    "    gate.sendall(b'+')\n"
@@ -923,7 +923,7 @@ def test_usage_failures_are_silent_private_bounded_and_event_driven(tmp_path):
         imports.mkdir()
         marker = imports / "entered"
         original_pythonpath = h.env.get("PYTHONPATH")
-        for index, module in enumerate(("hud_env", "publish_widget_batch")):
+        for index, module in enumerate(("hud_env", "hud_mcp")):
             marker.unlink(missing_ok=True)
             (imports / "sitecustomize.py").write_text(
                 "import sys, time\n"
