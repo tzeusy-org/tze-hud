@@ -3462,7 +3462,7 @@ impl WinitApp {
                             kind,
                             ..
                         } => {
-                            let notification = matches!(
+                            let is_notification = matches!(
                                 kind,
                                 ZoneInteractionKind::Dismiss
                                     | ZoneInteractionKind::GoTo
@@ -3470,7 +3470,7 @@ impl WinitApp {
                             );
                             let allowed = self.notification_pointer_permitted()
                                 && notification.is_some_and(|observed| observed.permitted);
-                            (!notification || allowed).then(|| interaction_id.clone())
+                            (!is_notification || allowed).then(|| interaction_id.clone())
                         }
                         _ => None,
                     };
