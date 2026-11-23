@@ -164,7 +164,7 @@ pub(super) fn pressable_control_regions(scene: &SceneGraph, safe_mode: bool) -> 
         .zone_hit_regions
         .iter()
         .filter(|r| match r.kind {
-            Kind::Dismiss | Kind::Action { .. } => {
+            Kind::Dismiss | Kind::GoTo | Kind::Action { .. } => {
                 !safe_mode
                     && scene.overlay.notification_press_guard != Some(r.publication_id)
                     && !scene

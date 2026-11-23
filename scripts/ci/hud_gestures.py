@@ -155,7 +155,7 @@ def widget_entry(status: dict, surface: str) -> dict | None:
 def resolve_target(status: dict, target: str) -> tuple[int, int]:
     """Centre of a reported portal pane, card control, or widget hover target.
 
-    Card targets are `zone:<name>/<key>/<index|close>`; widget targets are
+    Card targets are `zone:<name>/<key>/<index|close|goto>`; widget targets are
     `widget:<instance>/hover`. No geometry is inferred from pixels or layout.
     """
     surface, _, pane = target.partition("/")
@@ -166,8 +166,8 @@ def resolve_target(status: dict, target: str) -> tuple[int, int]:
         card = notification_entry(status, key, surface)
         if card is None:
             raise LookupError(f"{surface}/{key} is not on screen")
-        if control == "close":
-            rect = card.get("close")
+        if control in {"close", "goto"}:
+            rect = card.get(control)
         elif control:
             try:
                 index = int(control)
@@ -308,6 +308,7 @@ class Run:
     smoke: Smoke | None = None
     injector: str = "xtest"
     window_mode: str = "fullscreen"
+    go_to_probe: bool = False
     inj: object | None = None  # XTest or hud_sendinput.SendInput
     helper_pids: list[int] = field(default_factory=list)  # owned non-HUD apps (scenario 10's Notepad)
     timeline: list[dict] = field(default_factory=list)
@@ -344,6 +345,11 @@ class Run:
         env["TZE_HUD_LOG_JSON"] = "1"
         self.port = free_port()
         config = seed_config(CONFIG, self.psk)
+        if self.go_to_probe:
+            seeded = config.read_text(encoding="utf-8")
+            config.write_text(seeded.replace("[runtime]\n",
+                                             '[runtime]\ngo_to_apps = ["notepad.exe"]\n', 1),
+                              encoding="utf-8")
         # Seed the second agent beside the first: PSK hash only, no admin grant.
         digest = hashlib.sha256(self.foreign_psk.encode()).hexdigest()
         with open(config.parent / "agents.toml", "a", encoding="utf-8") as agents:
@@ -520,7 +526,7 @@ class Run:
         try:
             wait_until(probe, what=what, timeout_s=timeout_s, interval_s=interval_s)
         except AssertionError:
-            raise ScenarioFailed(what, {k: last.get(k) for k in ("portals", "notifications", "widgets", "link_launches", "idle_since_ms")}) from None
+            raise ScenarioFailed(what, {k: last.get(k) for k in ("portals", "notifications", "widgets", "link_launches", "window_activations", "idle_since_ms")}) from None
         self.step(f"ok {what}")
         return last
 
@@ -1794,6 +1800,85 @@ def scenario_no_focus_steal(run: Run) -> None:
         run.helper_pids.remove(notepad.pid)
 
 
+
+def scenario_go_to_session(run: Run) -> None:
+    """Go to switches to the exact owned window without moving it and stays absent for two matches."""
+    zone, key = "zone:notification-area", "gesture-go-to-session"
+    token = "tzgo-" + secrets.token_hex(4)
+    notepads = []
+    session = SessionSmoke(run.smoke.url, run.psk, token)
+
+    def open_editor(name):
+        # Keep the token bounded whether this Notepad includes the extension
+        # in its title. A second file also works on tab-capable Notepad.
+        path = run.home / (name + ".txt")
+        path.write_text("Go to session gesture
+", encoding="utf-8")
+        editor = subprocess.Popen(["notepad.exe", str(path)])
+        notepads.append(editor)
+        run.helper_pids.append(editor.pid)
+
+        def opened():
+            info = WIN.window_snapshot(editor.pid)
+            return info is not None and name in info["title"], info
+
+        info, _ = wait_until(opened, what=f"owned Notepad window for {name}",
+                             timeout_s=15, interval_s=0.1)
+        return info
+
+    def question(body):
+        run.mark()
+        session.ok("hud_publish", {"surface": zone, "key": key, "ttl_ms": 0, "content": {
+            "body": body, "actions": [{"label": "Keep", "callback_id": "kept"}]}})
+        run.step(f"publish scoped Go to card {key}")
+
+    try:
+        target = open_editor(token + " target")
+        other = open_editor("Unmatched gesture editor")
+
+        def foreground_other():
+            foreground = WIN.foreground_pid()
+            if foreground != other["pid"]:
+                WIN.bring_to_front(other["pid"])  # Window request on an owned process only.
+            now = WIN.foreground_pid()
+            return now == other["pid"], now
+
+        wait_until(foreground_other, what="owned unmatched editor foreground",
+                   timeout_s=SETTLE_S, interval_s=0.05)
+        run.glide(1, 1)
+        before = run.status()["window_activations"]
+        question("Follow the session")
+        run.expect("the uniquely matched Go to is drawn and ready", lambda st: bool(
+            (card := notification_entry(st, key)) and card["goto"] and not card["guarded"]))
+        if WIN.foreground_pid() != other["pid"] or run.status()["window_activations"] != before:
+            raise ScenarioFailed("publication kept the current foreground", {"before": before,
+                                 "foreground": WIN.foreground_snapshot()})
+        run.expect_cursor(f"{zone}/{key}/goto", hand=True)
+        run.click()
+        run.expect("exact Go to window activation", lambda st: (
+            st["window_activations"] == before + 1 and WIN.foreground_snapshot() == target))
+        run.step(f"ok exact foreground HWND, title and unchanged rect {target['rect']}")
+        run.expect("the Go to card remains live", lambda st: bool(
+            (card := notification_entry(st, key)) and card["goto"] and card["chosen"] is None))
+        if session.ok("hud_input", {}).get("items"):
+            raise ScenarioFailed("Go to emits no scoped input", {})
+
+        duplicate = open_editor(token + " duplicate")
+        if duplicate["hwnd"] == target["hwnd"]:
+            raise ScenarioFailed("two distinct eligible Notepad windows", {"target": target, "duplicate": duplicate})
+        run.glide(1, 1)
+        question("Two Windows titles match")
+        run.settle()
+        run.observe_for("two eligible windows leave the replacement without Go to", lambda st: bool(
+            (card := notification_entry(st, key)) and card["goto"] is None
+            and st["window_activations"] == before + 1), 0.25)
+    finally:
+        session.end()
+        for editor in reversed(notepads):
+            kill_pid(editor.pid)
+            editor.wait(10)
+            run.helper_pids.remove(editor.pid)
+
 def expect_overlay_capture(run: Run, wanted: bool, what: str) -> None:
     def sample():
         state = WIN.pointer_capture_state(run.pid)
@@ -2313,7 +2398,8 @@ def scenario_capture_exclusion(run: Run) -> None:
 
 
 # Windows only: they need Win32 foreground/edit-control access or global hotkeys.
-TIER_W_ONLY = {"no-focus-steal", "safe-mode", "overlay-pointer", "tray", "tray-answer", "capture-exclusion"}
+OVERLAY_SCENARIOS = {"overlay-pointer", "tray", "tray-answer", "go-to-session"}
+TIER_W_ONLY = OVERLAY_SCENARIOS | {"no-focus-steal", "safe-mode", "capture-exclusion"}
 
 SCENARIOS: dict[str, Callable[[Run], None]] = {
     "output-anchor": scenario_output_anchor,          # 1
@@ -2342,6 +2428,7 @@ SCENARIOS: dict[str, Callable[[Run], None]] = {
     "lifecycle": scenario_lifecycle,                  # 13
     "resize-hotkey": scenario_resize_hotkey,          # 16
     "unicode-typing": scenario_unicode_typing,
+    "go-to-session": scenario_go_to_session,          # tier W, overlay only
     "no-focus-steal": scenario_no_focus_steal,        # 10 (tier W)
     "tray": scenario_tray,                            # tier W, overlay only
     "tray-answer": scenario_tray_answer,              # tier W, overlay only, informational
@@ -2446,9 +2533,9 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(f"{', '.join(sorted(TIER_W_ONLY))} run only with --injector sendinput")
     if args.window_mode == "overlay" and not tier_w:
         parser.error("overlay gestures require --injector sendinput")
-    overlay_names = {"overlay-pointer", "tray", "tray-answer"}
+    overlay_names = OVERLAY_SCENARIOS
     if args.scenarios and any((n in overlay_names) != (args.window_mode == "overlay") for n in args.scenarios):
-        parser.error("overlay-pointer, tray and tray-answer require --window-mode overlay; "
+        parser.error(f"{', '.join(sorted(overlay_names))} require --window-mode overlay; "
                      "other scenarios require fullscreen")
     names = args.scenarios or [n for n in SCENARIOS
                                if (tier_w or n not in TIER_W_ONLY)
@@ -2468,7 +2555,8 @@ def main(argv: list[str] | None = None) -> int:
     # The pid keeps parallel runs started in the same second apart.
     out = args.out or REPO / "test_results/gestures" / sha / f"{time.strftime('%Y%m%dT%H%M%S')}-{os.getpid()}"
     out.mkdir(parents=True, exist_ok=True)
-    run = Run(exe=args.exe.resolve(), out=out, injector=args.injector, window_mode=args.window_mode)
+    run = Run(exe=args.exe.resolve(), out=out, injector=args.injector, window_mode=args.window_mode,
+              go_to_probe="go-to-session" in names)
     started = time.monotonic()
     results: list[dict] = []
     failure = None

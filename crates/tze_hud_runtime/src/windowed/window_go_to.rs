@@ -62,6 +62,12 @@ struct Press {
     until: Instant,
 }
 
+struct PendingPress {
+    press: Press,
+    worker: mpsc::Receiver<Match>,
+    timed_out: bool,
+}
+
 type Feedback = (Press, Option<GoToCue>);
 
 #[derive(Default)]
@@ -69,7 +75,7 @@ pub(super) struct WindowGoTo {
     inspector: Option<Arc<Inspector>>,
     scan_due: bool,
     scan: Option<mpsc::Receiver<Vec<SceneId>>>,
-    press: Option<(Press, mpsc::Receiver<Match>)>,
+    presses: Vec<PendingPress>,
     feedback: Vec<Feedback>,
     cue_deadlines: HashMap<SceneId, (u64, Instant)>,
     #[cfg(test)]
@@ -103,7 +109,12 @@ impl WindowGoTo {
         self.cue_deadlines
             .values()
             .map(|(_, due)| *due)
-            .chain(self.press.iter().map(|(press, _)| press.until))
+            .chain(
+                self.presses
+                    .iter()
+                    .filter(|pending| !pending.timed_out)
+                    .map(|pending| pending.press.until),
+            )
             .min()
     }
 
@@ -128,7 +139,7 @@ fn presented_candidates(scene: &SceneGraph) -> Candidates {
         .iter()
         .filter(|card| {
             card.chosen.is_none()
-                && card.zone_name != "alert-banner"
+                && card.has_window_caption
                 && !scene
                     .overlay
                     .notification_go_to
@@ -177,13 +188,17 @@ impl WinitApp {
             foreground: foreground(),
             until: now + Duration::from_secs(2),
         };
-        if state.press.is_none() {
+        if !state.presses.iter().any(|pending| pending.press.id == id) {
             let wake = self.state.wake.main_work_notifier();
             match inspect(
                 move || inspector.matches(&(inspector.windows)(), &token),
                 wake,
             ) {
-                Ok(worker) => state.press = Some((press, worker)),
+                Ok(worker) => state.presses.push(PendingPress {
+                    press,
+                    worker,
+                    timed_out: false,
+                }),
                 Err(_) => state.feedback.push((press, Some(GoToCue::Blocked))),
             }
         } else {
@@ -196,7 +211,7 @@ impl WinitApp {
         let state = &mut self.state.window_go_to;
         if !state.scan_due
             && state.scan.is_none()
-            && state.press.is_none()
+            && state.presses.is_empty()
             && state.feedback.is_empty()
             && !state.cue_deadlines.values().any(|(_, at)| now >= *at)
         {
@@ -283,31 +298,34 @@ impl WinitApp {
                 changed = true;
             }
         }
-        let completed = state.press.as_ref().and_then(|(press, worker)| {
-            let result = if now >= press.until {
-                Err(mpsc::TryRecvError::Disconnected)
-            } else {
-                worker.try_recv()
-            };
-            match result {
-                Err(mpsc::TryRecvError::Empty) => None,
-                _ => Some((*press, result)),
-            }
-        });
-        if let Some((press, _)) = &completed {
-            state.press = None;
-            scene.prune_notification_feedback();
-            if scene
-                .overlay
-                .notification_go_to
-                .get(&press.id)
-                .is_none_or(|control| control.attempted_at_mono_us != Some(press.stamp))
-            {
-                if changed {
-                    scene.bump_geometry_epoch();
+        let mut completed = Vec::new();
+        state.presses.retain_mut(|pending| {
+            let result = pending.worker.try_recv();
+            if !pending.timed_out {
+                if now >= pending.press.until {
+                    completed.push((pending.press, Err(mpsc::TryRecvError::Disconnected)));
+                    // Keep this card's worker slot until its exit so repeated
+                    // timeouts cannot spawn more workers for one publication.
+                    pending.timed_out = true;
+                } else if !matches!(result, Err(mpsc::TryRecvError::Empty)) {
+                    completed.push((pending.press, result));
                 }
-                return changed;
             }
+            matches!(result, Err(mpsc::TryRecvError::Empty))
+        });
+        if !completed.is_empty() {
+            scene.prune_notification_feedback();
+            completed.retain(|(press, _)| {
+                scene
+                    .overlay
+                    .notification_go_to
+                    .get(&press.id)
+                    .is_some_and(|control| control.attempted_at_mono_us == Some(press.stamp))
+                    && scene.overlay.zone_hit_regions.iter().any(|region| {
+                        region.publication_id == press.id
+                            && region.kind == tze_hud_scene::ZoneInteractionKind::GoTo
+                    })
+            });
         }
         if changed {
             scene.bump_geometry_epoch();
@@ -315,7 +333,7 @@ impl WinitApp {
         drop(scene);
         drop(shared);
 
-        if let Some((press, result)) = completed {
+        for (press, result) in completed {
             let cue = match result {
                 Ok(Match::None) => Some(GoToCue::NotFound),
                 Ok(Match::Multiple(count)) => Some(GoToCue::Ambiguous(count)),

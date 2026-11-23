@@ -478,6 +478,8 @@ fn populate_notification_hit_regions_in(
                     actions: action_rects.clone(),
                     close: dismiss_bounds,
                     goto,
+                    has_window_caption: record.window_token.is_some()
+                        && style.caption(record.caption.as_deref()).is_some(),
                     focus,
                     chosen,
                     state: "shown",
