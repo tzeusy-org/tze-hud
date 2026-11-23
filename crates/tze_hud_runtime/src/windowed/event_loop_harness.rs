@@ -3744,19 +3744,6 @@ mod tests {
         })
     }
 
-    fn ctrl_key_up(key_code: &str, key: &str, shift: bool, ts: u64) -> PendingKeyboardEvent {
-        PendingKeyboardEvent::KeyUp(RawKeyUpEvent {
-            key_code: key_code.to_string(),
-            key: key.to_string(),
-            modifiers: KeyboardModifiers {
-                ctrl: true,
-                shift,
-                ..KeyboardModifiers::NONE
-            },
-            timestamp_mono_us: MonoUs(ts),
-        })
-    }
-
     /// A harness showing one notification with Approve and Reject actions,
     /// ticked so its hit regions are live.
     fn approve_reject_notification_harness() -> HeadlessEventLoopHarness {

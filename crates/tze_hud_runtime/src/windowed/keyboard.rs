@@ -937,7 +937,6 @@ impl WinitApp {
             } else {
                 self.state.consumed_command_keydowns.insert(key_identity);
             }
-            return;
         }
     }
 
@@ -1736,7 +1735,6 @@ impl WinitApp {
                 ?axis,
                 "portal resize: Ctrl+Shift+Arrow directional KeyUp fallback consumed (resize applied)"
             );
-            return;
         }
     }
 
@@ -1860,14 +1858,8 @@ impl WinitApp {
 
         // ── Composer draft intercept ──────────────────────────────
         //
-        // 4.4: NO character input reaches the agent while a composer
-        // region is focused — regardless of what route_character_to_composer
-        // returns.  In particular, when the clipboard text is ENTIRELY control
-        // characters, route_character_to_composer sanitises it to an empty
-        // string and paste("") returns EditOutcome::Unchanged (nothing was
-        // mutated in the draft).  Without an unconditional early-return here,
-        // the Unchanged case would fall through to the agent dispatch path
-        // below, leaking input to the agent while the composer is focused.
+        // Native composer editing sanitises incoming text. An all-control paste
+        // can produce EditOutcome::Unchanged and needs no echo/history update.
         if self.state.input_processor.is_composer_active() {
             let history_tile_id = match self.composer_target_for_tab(tab_id) {
                 ComposerTargetLookup::Ready(tile_id) => Some(tile_id),
@@ -1909,16 +1901,11 @@ impl WinitApp {
                 // clipboard contained only control characters that sanitised to
                 // empty, or the paste arrived while the composer was at
                 // capacity and already at its limit).  No echo push needed.
-                // Unconditional early-return below ensures the event still
-                // never reaches the agent path.
                 tracing::debug!(
                     character = %char_log_preview,
-                    "composer: Character absorbed (Unchanged — all-control or no-op paste); not forwarded to agent (§4.4)"
+                    "composer: Character absorbed (Unchanged — all-control or no-op paste)"
                 );
             }
-            // hard gate: the composer is active, so we MUST NOT fall
-            // through to the agent dispatch path below under any outcome.
-            return;
         }
     }
 
