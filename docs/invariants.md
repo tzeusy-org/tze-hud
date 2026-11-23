@@ -599,11 +599,9 @@ scene access and `CompositorDegradationPolicy` carries no suppression set.
 
 ## 7. Budgets are hard caps, not negotiations
 
-Resource admission enforces per-agent and runtime-wide caps on texture bytes
-and upload occupancy. An upload that exceeds a cap returns a structured error
-and leaves the store unchanged. Internal tiles also have bounds on creation and
-node count. A zone or widget publication commits one validated update, so
-refusing it leaves the current content unchanged.
+Per-agent and runtime-wide limits on tiles, texture bytes, update rate, and
+nodes per tile. An over-budget batch is rejected whole with a structured
+error; nothing escalates, throttles, or partially applies.
 
 - `tze_hud_runtime` [`mutation_budget_bridge::tests::registered_budget_rejects_mutation_above_tile_limit`](../crates/tze_hud_runtime/src/mutation_budget_bridge.rs),
   [`aggregate_limits_are_atomic_across_agents`](../crates/tze_hud_runtime/src/mutation_budget_bridge.rs)
