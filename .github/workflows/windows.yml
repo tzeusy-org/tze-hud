@@ -58,6 +58,7 @@ concurrency:
 jobs:
   windows-build:
     name: windows build + boot smoke
+    if: github.event_name != 'workflow_dispatch' || github.ref != 'refs/heads/evidence/hud-vcj7c-native-raise'
     runs-on: windows-latest
     timeout-minutes: 45
     permissions:
@@ -389,6 +390,44 @@ jobs:
           $named = if ($failed) { "required failed: $($failed -join ', ')" } else { "harness failure, timeout or setup failure with required scenarios" }
           Write-Output "::error title=Required gesture scenarios::$named (see the gesture step summary and gestures artifact)"
           exit 1
+
+  card-link-raise:
+    name: Controlled card-link normal z-order proof
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/evidence/hud-vcj7c-native-raise'
+    runs-on: windows-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Read the pinned artifact from the first exact PR run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact="repos/$GITHUB_REPOSITORY/actions/artifacts/14871486974"
+          gh api "$artifact" > "$RUNNER_TEMP/card-link-raise-artifact.json"
+          gh api "$artifact/zip" > "$RUNNER_TEMP/card-link-raise-original.zip"
+
+      - name: Exercise the original guarded card scenario with an owned cover
+        shell: pwsh
+        run: |
+          python scripts/ci/card_link_raise_probe.py --archive "$env:RUNNER_TEMP/card-link-raise-original.zip" `
+            --artifact-metadata "$env:RUNNER_TEMP/card-link-raise-artifact.json" --out "$env:RUNNER_TEMP/card-link-raise"
+          exit $LASTEXITCODE
+
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: card-link-raise-witness
+          path: ${{ runner.temp }}/card-link-raise/
+          if-no-files-found: warn
 
   release:
     name: sign + publish release
