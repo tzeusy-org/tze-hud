@@ -3886,48 +3886,30 @@ mod tests {
         )
     }
 
-    /// The status indicator's friendly glyphs are not in IBM Plex Sans; they
-    /// draw from the bundled DejaVu Sans through the per-glyph fallback.
     #[test]
-    fn glyph_missing_from_theme_font_falls_back_to_a_bundled_face() {
+    fn missing_widget_glyphs_use_the_matching_bundled_role() {
         let _guard = widget_cache_test_guard();
-        for glyph in ["☾", "☕", "⚡", "☺"] {
-            let render = |family: &str| {
-                rasterize_single_svg_layer(&glyph_svg(family, glyph), 40, 40).expect("rasterizes")
-            };
-            let fallback = render("IBM Plex Sans, sans-serif");
-            assert!(ink(&fallback) > 20, "{glyph} draws a glyph");
+        for (glyph, requested, expected) in [
+            ("☾", "IBM Plex Sans, sans-serif", "DejaVu Sans"),
+            ("☕", "IBM Plex Sans, sans-serif", "DejaVu Sans"),
+            ("⚡", "IBM Plex Sans, sans-serif", "DejaVu Sans"),
+            ("☺", "IBM Plex Sans, sans-serif", "DejaVu Sans"),
+            ("☺", "IBM Plex Mono, monospace", "DejaVu Sans Mono"),
+        ] {
+            let render =
+                |family| rasterize_single_svg_layer(&glyph_svg(family, glyph), 40, 40).unwrap();
+            let fallback = render(requested);
+            assert!(ink(&fallback) > 20, "{requested} must draw {glyph}");
             assert!(
-                fallback.data() == render("DejaVu Sans").data(),
-                "{glyph} is DejaVu Sans's glyph, not Plex's missing-glyph box"
+                fallback.data() == render(expected).data(),
+                "{requested} {glyph}: expected {expected}"
             );
+            if expected.ends_with("Mono") {
+                assert_ne!(fallback.data(), render("DejaVu Sans").data());
+            }
         }
     }
 
-    /// A glyph missing from IBM Plex Mono falls back to the bundled
-    /// monospaced DejaVu Sans Mono, not the proportional DejaVu Sans that
-    /// comes first in the database.
-    #[test]
-    fn monospaced_text_falls_back_to_a_monospaced_face() {
-        let _guard = widget_cache_test_guard();
-        let render = |family: &str| {
-            rasterize_single_svg_layer(&glyph_svg(family, "☺"), 40, 40).expect("rasterizes")
-        };
-        let fallback = render("IBM Plex Mono, monospace");
-        assert!(ink(&fallback) > 20, "draws a glyph");
-        assert!(
-            fallback.data() == render("DejaVu Sans Mono").data(),
-            "the fallback is DejaVu Sans Mono's glyph"
-        );
-        assert!(
-            fallback.data() != render("DejaVu Sans").data(),
-            "not the proportional face's glyph"
-        );
-    }
-
-    /// Widget text follows the font roles the zone text renderer resolved,
-    /// including the direct fast path. The current set is per test thread,
-    /// so this starts at the default set whatever other tests did.
     #[test]
     fn widget_fonts_follow_resolved_font_roles() {
         let sans_family = |fonts: &WidgetFonts| {
@@ -3979,15 +3961,6 @@ mod tests {
         assert_eq!(static_svg_layer_cache_key("<svg/>", 16, 16), default_key);
     }
 
-    fn sans_serif_font_available() -> bool {
-        let db = shared_widget_fontdb();
-        let query = resvg::usvg::fontdb::Query {
-            families: &[resvg::usvg::fontdb::Family::SansSerif],
-            ..Default::default()
-        };
-        db.query(&query).is_some()
-    }
-
     fn widget_cache_test_guard() -> MutexGuard<'static, ()> {
         static CACHE_TEST_MUTEX: OnceLock<Mutex<()>> = OnceLock::new();
         CACHE_TEST_MUTEX
@@ -4016,121 +3989,12 @@ mod tests {
         }
     }
 
-    // ── SVG attribute manipulation tests ──────────────────────────────────────
-
     fn test_cache_key(label: &str) -> StaticSvgLayerCacheKey {
         static_svg_layer_cache_key(label, 16, 16)
     }
 
     fn test_pixmap(width: u32, height: u32) -> tiny_skia::Pixmap {
         tiny_skia::Pixmap::new(width, height).expect("test pixmap allocation must succeed")
-    }
-
-    #[test]
-    fn static_svg_layer_cache_key_uses_full_content_digest() {
-        let key_a = static_svg_layer_cache_key("<svg><rect id=\"a\"/></svg>", 16, 16);
-        let key_b = static_svg_layer_cache_key("<svg><rect id=\"b\"/></svg>", 16, 16);
-
-        assert_ne!(
-            key_a.svg_digest, key_b.svg_digest,
-            "same-size SVG strings with different bytes must not share a cache identity"
-        );
-        assert_eq!(key_a.pixel_width, key_b.pixel_width);
-        assert_eq!(key_a.pixel_height, key_b.pixel_height);
-    }
-
-    #[test]
-    fn static_svg_layer_cache_skips_entries_above_per_entry_limit() {
-        let mut cache = StaticSvgLayerCache::default();
-        let key = test_cache_key("oversize");
-
-        let uncached = cache.insert_with_limits(key, test_pixmap(2, 2), 64, 64, 15);
-
-        assert!(
-            cache.entries.is_empty(),
-            "16-byte pixmap must not be cached when the per-entry limit is 15 bytes"
-        );
-        assert_eq!(cache.total_bytes, 0);
-        assert!(cache.lru.is_empty());
-        assert_eq!(
-            uncached.data().len(),
-            16,
-            "oversize cache entries must still be returned to the caller"
-        );
-    }
-
-    #[test]
-    fn static_svg_layer_cache_evicts_lru_incrementally_to_byte_bound() {
-        let mut cache = StaticSvgLayerCache::default();
-        let key_a = test_cache_key("a");
-        let key_b = test_cache_key("b");
-        let key_c = test_cache_key("c");
-        let key_d = test_cache_key("d");
-
-        cache.insert_with_limits(key_a, test_pixmap(16, 16), 64, 2048, 2048);
-        cache.insert_with_limits(key_b, test_pixmap(16, 16), 64, 2048, 2048);
-        cache.insert_with_limits(key_c, test_pixmap(16, 16), 64, 2048, 2048);
-
-        assert!(
-            !cache.entries.contains_key(&key_a),
-            "inserting the third 1024-byte pixmap into a 2048-byte cache evicts only the LRU entry"
-        );
-        assert!(cache.entries.contains_key(&key_b));
-        assert!(cache.entries.contains_key(&key_c));
-        assert_eq!(cache.total_bytes, 2048);
-
-        let _ = cache.get(&key_b);
-        cache.insert_with_limits(key_d, test_pixmap(16, 16), 64, 2048, 2048);
-
-        assert!(
-            !cache.entries.contains_key(&key_c),
-            "cache hit must promote key_b so key_c becomes the next LRU eviction"
-        );
-        assert!(cache.entries.contains_key(&key_b));
-        assert!(cache.entries.contains_key(&key_d));
-        assert_eq!(cache.total_bytes, 2048);
-    }
-
-    #[test]
-    fn retained_plan_static_cache_is_invalidated_by_svg_content() {
-        let _cache_guard = widget_cache_test_guard();
-        clear_widget_raster_caches();
-        let red_svg = r##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16">
-            <rect id="box" x="0" y="0" width="16" height="16" fill="#ff0000"/>
-        </svg>"##;
-        let blue_svg = r##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16">
-            <rect id="box" x="0" y="0" width="16" height="16" fill="#0000ff"/>
-        </svg>"##;
-        let params = HashMap::new();
-        let constraints = HashMap::new();
-
-        let red_plan = WidgetRenderPlan::compile(&[(red_svg, &[])]);
-        let blue_plan = WidgetRenderPlan::compile(&[(blue_svg, &[])]);
-        let red = rasterize_widget_render_plan(&red_plan, &constraints, &params, 16, 16)
-            .expect("red SVG must rasterize");
-        let blue = rasterize_widget_render_plan(&blue_plan, &constraints, &params, 16, 16)
-            .expect("blue SVG must rasterize");
-
-        assert_ne!(
-            red.data(),
-            blue.data(),
-            "same-size static layers with different SVG bytes must not share cached pixels"
-        );
-        let red_key = static_svg_layer_cache_key(red_svg, 16, 16);
-        let blue_key = static_svg_layer_cache_key(blue_svg, 16, 16);
-        let cache = static_svg_layer_cache().lock().expect("static cache");
-        assert!(
-            cache.entries.contains_key(&red_key),
-            "static cache should include the red SVG content digest"
-        );
-        assert!(
-            cache.entries.contains_key(&blue_key),
-            "static cache should include the blue SVG content digest"
-        );
-        assert_eq!(
-            red_key.pixel_width, blue_key.pixel_width,
-            "same-size SVGs should differ by content digest, not dimensions"
-        );
     }
 
     #[test]
@@ -4161,298 +4025,81 @@ mod tests {
     }
 
     #[test]
-    fn retained_plan_bound_cache_is_invalidated_by_resolved_binding_values() {
-        let _cache_guard = widget_cache_test_guard();
-        clear_widget_raster_caches();
-        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16">
-            <rect id="bar" x="0" y="0" width="0" height="16" fill="#00ff00"/>
-        </svg>"##;
-        let binding = WidgetBinding {
-            param: "level".to_string(),
-            target_element: "bar".to_string(),
-            target_attribute: "width".to_string(),
-            mapping: WidgetBindingMapping::Linear {
-                attr_min: 0.0,
-                attr_max: 16.0,
-            },
-        };
-        let bindings = vec![binding];
-        let plan = WidgetRenderPlan::compile(&[(svg, bindings.as_slice())]);
-        let constraints = HashMap::from([("level".to_string(), (0.0f32, 1.0f32))]);
-        let params_half = HashMap::from([("level".to_string(), WidgetParameterValue::F32(0.5))]);
-        let params_full = HashMap::from([("level".to_string(), WidgetParameterValue::F32(1.0))]);
-
-        let half = rasterize_widget_render_plan(&plan, &constraints, &params_half, 16, 16)
-            .expect("half-width bound layer must rasterize");
-        let half_again = rasterize_widget_render_plan(&plan, &constraints, &params_half, 16, 16)
-            .expect("same bound values must rasterize from cache");
-        let full = rasterize_widget_render_plan(&plan, &constraints, &params_full, 16, 16)
-            .expect("full-width bound layer must rasterize");
-        let full_again = rasterize_widget_render_plan(&plan, &constraints, &params_full, 16, 16)
-            .expect("same full-width bound layer must rasterize from cache");
-        let half_key = cache_key_from_raster_key(&RasterizedLayerCacheKey {
-            source_digest: plan.layers[0].source_digest,
-            binding_digest: resolve_layer_bindings(&bindings, &params_half, &constraints).digest,
-            pixel_width: 16,
-            pixel_height: 16,
-        });
-        let full_key = cache_key_from_raster_key(&RasterizedLayerCacheKey {
-            source_digest: plan.layers[0].source_digest,
-            binding_digest: resolve_layer_bindings(&bindings, &params_full, &constraints).digest,
-            pixel_width: 16,
-            pixel_height: 16,
-        });
-
-        assert_eq!(
-            half.data(),
-            half_again.data(),
-            "identical bound values must return identical cached pixels"
+    fn primitive_plan_ignores_comment_markup_and_defs_without_changing_kept_groups() {
+        let root = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="-3 2 100 40">"#;
+        let visible = r##"<rect id="box" width="100" height="40" fill="#00ff00"/><text x="4" y="20">Hi</text>"##;
+        let start = r#"<g id="outer" opacity="0.5">"#;
+        let end = "</g></svg>";
+        let clean = format!("{root}{start}{visible}{end}");
+        let annotated = format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+            <!-- old: <svg viewBox="0 0 8 8"> -->
+            {root}{start}
+            <!-- owner's " display > <rect id="ghost"/> -->
+            <defs><g id="ignored"><rect id="ignored-box" width="1" height="1"/></g></defs>
+            {visible}<!-- <rect id="trailing"/> -->{end}"#
         );
-        assert_ne!(
-            half.data(),
-            full.data(),
-            "changed bound values must invalidate the bound-layer cache key"
-        );
-        assert_eq!(
-            full.data(),
-            full_again.data(),
-            "repeated full-width values must return identical cached pixels"
-        );
-        let cache = bound_svg_layer_cache().lock().expect("bound cache");
-        assert!(
-            cache.entries.contains_key(&half_key),
-            "bound cache should contain the half-width resolved binding"
-        );
-        assert!(
-            cache.entries.contains_key(&full_key),
-            "bound cache should contain the full-width resolved binding"
-        );
-    }
-
-    #[test]
-    fn retained_plan_bound_cache_includes_primitive_layers_after_static_layers() {
-        let _cache_guard = widget_cache_test_guard();
-        clear_widget_raster_caches();
-        let background = r##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16">
-            <rect id="bg" x="0" y="0" width="16" height="16" fill="#000000"/>
-        </svg>"##;
-        let fill = r##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16">
-            <rect id="bar" x="0" y="0" width="0" height="16" fill="#00ff00"/>
-        </svg>"##;
-        let bindings = vec![WidgetBinding {
-            param: "level".to_string(),
-            target_element: "bar".to_string(),
-            target_attribute: "width".to_string(),
-            mapping: WidgetBindingMapping::Linear {
-                attr_min: 0.0,
-                attr_max: 16.0,
-            },
-        }];
-        let layers = vec![(background, &[][..]), (fill, bindings.as_slice())];
-        let plan = WidgetRenderPlan::compile(&layers);
-        let constraints = HashMap::from([("level".to_string(), (0.0f32, 1.0f32))]);
-        let params_half = HashMap::from([("level".to_string(), WidgetParameterValue::F32(0.5))]);
-        let params_full = HashMap::from([("level".to_string(), WidgetParameterValue::F32(1.0))]);
-
-        let _ = rasterize_widget_render_plan(&plan, &constraints, &params_half, 16, 16)
-            .expect("half-width primitive layer must rasterize");
-        let _ = rasterize_widget_render_plan(&plan, &constraints, &params_half, 16, 16)
-            .expect("half-width primitive layer repeat must rasterize");
-        let _ = rasterize_widget_render_plan(&plan, &constraints, &params_full, 16, 16)
-            .expect("full-width primitive layer must rasterize");
-        let _ = rasterize_widget_render_plan(&plan, &constraints, &params_full, 16, 16)
-            .expect("full-width primitive layer repeat must rasterize");
-        let half_key = cache_key_from_raster_key(&RasterizedLayerCacheKey {
-            source_digest: plan.layers[1].source_digest,
-            binding_digest: resolve_layer_bindings(&bindings, &params_half, &constraints).digest,
-            pixel_width: 16,
-            pixel_height: 16,
-        });
-        let full_key = cache_key_from_raster_key(&RasterizedLayerCacheKey {
-            source_digest: plan.layers[1].source_digest,
-            binding_digest: resolve_layer_bindings(&bindings, &params_full, &constraints).digest,
-            pixel_width: 16,
-            pixel_height: 16,
-        });
-
-        let cache = bound_svg_layer_cache().lock().expect("bound cache");
-        assert!(
-            cache.entries.contains_key(&half_key),
-            "bound primitive layer after static layers should cache the half-width binding"
-        );
-        assert!(
-            cache.entries.contains_key(&full_key),
-            "bound primitive layer after static layers should cache the full-width binding"
-        );
-    }
-
-    #[test]
-    fn primitive_plan_does_not_pop_groups_inside_skipped_defs() {
-        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16">
-            <g id="outer" opacity="0.5">
-              <defs><g id="ignored"><rect id="ignored-box" x="0" y="0" width="1" height="1"/></g></defs>
-              <rect id="box" x="0" y="0" width="16" height="16" fill="#00ff00"/>
-            </g>
-        </svg>"##;
-
-        let plan = PrimitiveSvgLayerPlan::parse(svg).expect("primitive SVG should parse");
-        let PrimitiveItem::Rect(rect) = &plan.items[0] else {
-            panic!("expected the visible rect to be parsed");
-        };
-
-        assert_eq!(rect.ancestor_ids, vec!["outer".to_string()]);
-        assert!(
-            (rect.opacity - 0.5).abs() < f32::EPSILON,
-            "visible rect should retain outer group opacity after skipped defs"
-        );
-    }
-
-    #[test]
-    fn primitive_plan_skips_comments_and_declarations_with_quote_punctuation() {
-        let svg = r##"<?xml version="1.0" encoding="UTF-8"?>
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16">
-            <!-- Owner's info fill -->
-            <!-- a "lone double quote and a > inside -->
-            <rect id="box" x="0" y="0" width="16" height="16" fill="#00ff00"/>
-            <!-- trailing <rect id="ghost"/> stays commented out -->
-        </svg>"##;
-
-        let comment_free = r##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16">
-            <rect id="box" x="0" y="0" width="16" height="16" fill="#00ff00"/>
-        </svg>"##;
-
-        let plan = PrimitiveSvgLayerPlan::parse(svg)
-            .expect("comment punctuation must not push a primitive SVG onto the resvg fallback");
-        let twin = PrimitiveSvgLayerPlan::parse(comment_free).expect("twin parses");
-        assert_eq!(plan, twin, "comments must not change the retained plan");
-    }
-
-    #[test]
-    fn primitive_plan_with_grouped_text_matches_its_comment_free_twin() {
-        let commented = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 40">
-            <!-- don't draw: <rect id="ghost" x="0" y="0" width="1" height="1"/> -->
-            <g id="card" opacity="0.8"><!-- the owner's "card" -->
-              <rect id="bg" x="0" y="0" width="100" height="40" fill="#202020"/>
-              <text id="label" x="4" y="20" font-size="12" fill="#ffffff">Hi</text>
-            </g>
-        </svg>"##;
-        let comment_free = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 40">
-            <g id="card" opacity="0.8">
-              <rect id="bg" x="0" y="0" width="100" height="40" fill="#202020"/>
-              <text id="label" x="4" y="20" font-size="12" fill="#ffffff">Hi</text>
-            </g>
-        </svg>"##;
-
-        let plan = PrimitiveSvgLayerPlan::parse(commented).expect("commented SVG parses");
-        let twin = PrimitiveSvgLayerPlan::parse(comment_free).expect("twin parses");
-        assert_eq!(plan, twin);
-    }
-
-    #[test]
-    fn primitive_plan_takes_its_view_box_from_the_real_root_not_a_commented_one() {
-        let svg = r##"<!-- old: <svg viewBox="0 0 8 8"> -->
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
-            <rect id="box" x="0" y="0" width="16" height="16" fill="#00ff00"/>
-        </svg>"##;
-
-        let plan = PrimitiveSvgLayerPlan::parse(svg).expect("primitive SVG parses");
+        let plan = PrimitiveSvgLayerPlan::parse(&annotated).unwrap();
+        assert_eq!(plan, PrimitiveSvgLayerPlan::parse(&clean).unwrap());
         assert_eq!(
             plan.view_box,
             SvgViewBox {
-                min_x: 0.0,
-                min_y: 0.0,
-                width: 16.0,
-                height: 16.0,
-            },
-            "a commented-out <svg> must not supply the viewBox"
+                min_x: -3.0,
+                min_y: 2.0,
+                width: 100.0,
+                height: 40.0,
+            }
         );
+        let [PrimitiveItem::Rect(rect), PrimitiveItem::Text(_)] = plan.items.as_slice() else {
+            panic!("only the visible rect and text should parse");
+        };
+        assert_eq!(rect.ancestor_ids, ["outer"]);
+        assert_eq!(rect.opacity, 0.5);
     }
 
     #[test]
-    fn primitive_plan_falls_back_for_unterminated_comments_and_cdata() {
-        let unterminated = r##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16">
-            <!-- never closed <rect id="box" x="0" y="0" width="16" height="16"/>
-        </svg>"##;
-        assert!(PrimitiveSvgLayerPlan::parse(unterminated).is_none());
-
-        let cdata = r##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16">
-            <rect id="box" x="0" y="0" width="16" height="16" fill="#00ff00"/>
-            <![CDATA[ it's raw ]]>
-        </svg>"##;
-        assert!(
-            PrimitiveSvgLayerPlan::parse(cdata).is_none(),
-            "CDATA sections are outside the primitive fast path"
-        );
-    }
-
-    #[test]
-    fn primitive_plan_falls_back_for_style_and_dash_attributes() {
-        let styled = r##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16">
-            <rect id="box" x="0" y="0" width="16" height="16" style="fill:#00ff00"/>
-        </svg>"##;
-
-        assert!(
-            PrimitiveSvgLayerPlan::parse(styled).is_none(),
-            "style attributes are outside the primitive fast path and must use resvg fallback"
-        );
-
-        let dashed = r##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16">
-            <circle id="arc" cx="8" cy="8" r="6" fill="none" stroke="#00ff00" stroke-dasharray="9 38"/>
-        </svg>"##;
-        for whitespace in [" ", "\n", "\t"] {
-            let dashed = dashed.replace(
-                " stroke-dasharray",
-                &format!("{whitespace}stroke-dasharray"),
+    fn unsupported_svg_syntax_uses_the_general_rasterizer() {
+        let uses_fallback = |body: &str| {
+            let svg = format!(
+                r#"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16">{body}</svg>"#
             );
             assert!(
-                PrimitiveSvgLayerPlan::parse(&dashed).is_none(),
-                "primitive strokes are solid, so every dashed arc must use resvg fallback"
+                PrimitiveSvgLayerPlan::parse(&svg).is_none(),
+                "primitive path accepted {body}"
             );
+        };
+        for body in [
+            "<!-- never closed <rect width=\"16\" height=\"16\"/>",
+            "<rect width=\"16\" height=\"16\"/><![CDATA[ it's raw ]]>",
+            r##"<rect width="16" height="16" style="fill:#00ff00"/>"##,
+        ] {
+            uses_fallback(body);
+        }
+        for whitespace in [" ", "\n", "\t"] {
+            uses_fallback(&format!(
+                r##"<circle cx="8" cy="8" r="6" fill="none" stroke="#00ff00"{whitespace}stroke-dasharray="9 38"/>"##
+            ));
         }
     }
 
     #[test]
-    fn primitive_plan_supports_rounded_rect_attributes() {
-        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16">
-            <rect id="box" x="0" y="0" width="16" height="16" rx="4" ry="2" fill="#00ff00"/>
-        </svg>"##;
-
-        let plan = PrimitiveSvgLayerPlan::parse(svg).expect("rounded rect should stay primitive");
-        let PrimitiveItem::Rect(rect) = &plan.items[0] else {
-            panic!("expected rounded rect primitive");
-        };
-
-        assert_eq!(rect.rx, Some(4.0));
-        assert_eq!(rect.ry, Some(2.0));
-    }
-
-    #[test]
-    fn primitive_rounded_rect_rasterizes_corners_without_resvg_fallback() {
+    fn primitive_rounded_rect_rasterizes_asymmetric_corners() {
         let _cache_guard = widget_cache_test_guard();
         clear_widget_raster_caches();
         let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16">
-            <rect id="box" x="0" y="0" width="16" height="16" rx="8" ry="8" fill="#00ff00"/>
+            <rect id="box" width="16" height="16" rx="8" ry="6" fill="#00ff00"/>
         </svg>"##;
         let plan = WidgetRenderPlan::compile(&[(svg, &[])]);
-        assert!(
-            plan.layers[0].primitive_plan.is_some(),
-            "rounded rect layer should compile into the primitive fast path"
-        );
-
-        let pixmap = rasterize_widget_render_plan(&plan, &HashMap::new(), &HashMap::new(), 16, 16)
-            .expect("rounded rect should rasterize");
-        let corner = pixmap.pixel(0, 0).expect("corner pixel");
-        let center = pixmap.pixel(8, 8).expect("center pixel");
-
-        assert_eq!(
-            corner.alpha(),
-            0,
-            "rounded corner should remain transparent"
-        );
-        assert!(
-            center.green() > 0 && center.alpha() > 0,
-            "rounded rect center should be filled"
-        );
+        let items = &plan.layers[0].primitive_plan.as_ref().unwrap().items;
+        let PrimitiveItem::Rect(rect) = &items[0] else {
+            panic!("expected rounded rect")
+        };
+        assert_eq!((rect.rx, rect.ry), (Some(8.0), Some(6.0)));
+        let raster =
+            rasterize_widget_render_plan(&plan, &HashMap::new(), &HashMap::new(), 16, 16).unwrap();
+        assert_eq!(raster.pixel(0, 0).unwrap().alpha(), 0);
+        let center = raster.pixel(8, 8).unwrap();
+        assert_eq!((center.green(), center.alpha()), (255, 255));
     }
 
     #[test]
@@ -4478,245 +4125,137 @@ mod tests {
     }
 
     #[test]
-    fn text_svg_cache_is_stable_across_opacity_only_changes() {
+    fn text_mask_ignores_fill_and_ancestor_opacity_while_raster_applies_both() {
         let _cache_guard = widget_cache_test_guard();
         clear_widget_raster_caches();
-        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" width="64" height="32">
-            <g id="fade"><text id="label" x="4" y="20" font-size="12" fill="#ffffff">CPU</text></g>
-        </svg>"##;
-        let bindings = vec![WidgetBinding {
-            param: "opacity".to_string(),
-            target_element: "fade".to_string(),
-            target_attribute: "opacity".to_string(),
-            mapping: WidgetBindingMapping::Linear {
-                attr_min: 0.25,
-                attr_max: 0.75,
-            },
-        }];
-        let layers = vec![(svg, bindings.as_slice())];
-        let plan = WidgetRenderPlan::compile(&layers);
-        let constraints = HashMap::from([("opacity".to_string(), (0.0f32, 1.0f32))]);
-        let params_low = HashMap::from([("opacity".to_string(), WidgetParameterValue::F32(0.0))]);
-        let params_high = HashMap::from([("opacity".to_string(), WidgetParameterValue::F32(1.0))]);
-
-        let _ = rasterize_widget_render_plan(&plan, &constraints, &params_low, 64, 32)
-            .expect("low-opacity text should rasterize");
-        let _ = rasterize_widget_render_plan(&plan, &constraints, &params_high, 64, 32)
-            .expect("high-opacity text should rasterize");
-        let primitive_plan =
-            PrimitiveSvgLayerPlan::parse(svg).expect("primitive text should parse");
-        let PrimitiveItem::Text(text) = &primitive_plan.items[0] else {
-            panic!("expected text primitive");
+        let opacity_binding = |param: &str, target: &str, attr_min, attr_max| WidgetBinding {
+            param: param.into(),
+            target_element: target.into(),
+            target_attribute: "opacity".into(),
+            mapping: WidgetBindingMapping::Linear { attr_min, attr_max },
         };
-        let expected_key = expected_text_mask_cache_key(text, "CPU", 64, 32);
-
-        assert!(
-            text_svg_layer_cache()
-                .lock()
-                .expect("text cache")
-                .entries
-                .contains_key(&expected_key),
-            "opacity-only changes should cache text glyphs without baking opacity into the SVG key"
-        );
-
-        // Bindings replace the authored opacity of each ancestor, including
-        // groups that start hidden. Unbound named and anonymous groups still
-        // multiply with the primitive's own opacity exactly once.
-        for authored in ["0", "0.82", "1"] {
-            let nested_svg = format!(
+        let bindings = [
+            opacity_binding("opacity", "fade", 0.25, 0.75),
+            opacity_binding("inner_opacity", "inner", 0.0, 1.0),
+            WidgetBinding {
+                param: "fill".into(),
+                target_element: "label".into(),
+                target_attribute: "fill".into(),
+                mapping: WidgetBindingMapping::Direct,
+            },
+        ];
+        let constraints = HashMap::from([
+            ("opacity".into(), (0.0, 1.0)),
+            ("inner_opacity".into(), (0.0, 1.0)),
+        ]);
+        for authored in [0.0, 0.82, 1.0] {
+            let svg = format!(
                 r##"<svg xmlns="http://www.w3.org/2000/svg" width="96" height="40">
                     <g opacity="0.5"><g id="static" opacity="0.8">
                     <g id="fade" opacity="{authored}"><g id="inner" opacity="0.5">
-                        <rect x="0" y="0" width="16" height="16" fill="#ffffff" opacity="0.8"/>
+                        <rect width="16" height="16" fill="#ffffff" opacity="0.8"/>
                         <circle cx="40" cy="8" r="7" fill="#ffffff" opacity="0.8"/>
-                        <text id="nested-label" x="60" y="16" font-size="12" fill="#ffffff" opacity="0.8">CPU</text>
+                        <text id="label" x="60" y="16" font-size="12" fill="#ffffff" opacity="0.8">CPU</text>
                     </g></g></g></g>
                 </svg>"##
             );
-            let nested_bindings = vec![
-                bindings[0].clone(),
-                WidgetBinding {
-                    param: "inner_opacity".to_string(),
-                    target_element: "inner".to_string(),
-                    target_attribute: "opacity".to_string(),
-                    mapping: WidgetBindingMapping::Linear {
-                        attr_min: 0.0,
-                        attr_max: 1.0,
-                    },
-                },
-            ];
-            let nested_plan = WidgetRenderPlan::compile(&[(&nested_svg, &nested_bindings)]);
-            let nested_constraints = HashMap::from([
-                ("opacity".to_string(), (0.0f32, 1.0f32)),
-                ("inner_opacity".to_string(), (0.0f32, 1.0f32)),
-            ]);
-            let mut frames = Vec::new();
-            for (value, replacement) in [(0.0, 0.25), (1.0, 0.75)] {
-                let params = HashMap::from([
-                    ("opacity".to_string(), WidgetParameterValue::F32(value)),
-                    ("inner_opacity".to_string(), WidgetParameterValue::F32(0.5)),
-                ]);
-                let frame = rasterize_widget_render_plan(
-                    &nested_plan,
-                    &nested_constraints,
-                    &params,
-                    96,
-                    40,
-                )
-                .expect("bound nested primitives should rasterize");
-                // Anonymous.5, unbound named.8, replaced outer, replaced
-                // inner.5, and local.8. This expected alpha is independent
-                // of the render-plan implementation and the authored outer.
-                let expected_alpha = (255.0f32 * 0.5 * 0.8 * replacement * 0.5 * 0.8).round();
+            let plan = WidgetRenderPlan::compile(&[(&svg, &bindings)]);
+            let render = |params: &HashMap<String, WidgetParameterValue>| {
+                rasterize_widget_render_plan(&plan, &constraints, params, 96, 40).unwrap()
+            };
+            let primitive = plan.layers[0].primitive_plan.as_ref().unwrap();
+            let PrimitiveItem::Text(text) = &primitive.items[2] else {
+                panic!("expected label")
+            };
+            let mask_key = expected_text_mask_cache_key(text, "CPU", 96, 40);
+            let check_alpha = |raster: &tiny_skia::Pixmap, group_opacity: f32| {
+                let expected = (255.0 * 0.5 * 0.8 * group_opacity * 0.5 * 0.8).round();
                 for (x, y) in [(8, 8), (40, 8)] {
-                    let alpha = frame.pixel(x, y).expect("interior sample").alpha();
+                    let alpha = f32::from(raster.pixel(x, y).unwrap().alpha());
                     assert!(
-                        (f32::from(alpha) - expected_alpha).abs() <= 1.0,
-                        "bound opacity must replace authored {authored}, sample ({x}, {y}): {alpha} vs {expected_alpha}"
+                        (alpha - expected).abs() <= 1.0,
+                        "authored {authored}, ({x}, {y}): {alpha} vs {expected}"
                     );
                 }
-                frames.push(frame);
-            }
-            assert_ne!(
-                frames[0].data(),
-                frames[1].data(),
-                "opacity updates on a retained plan must change the final pixels"
-            );
-            let text_alpha = |frame: &tiny_skia::Pixmap| {
-                frame
+            };
+            check_alpha(&render(&HashMap::new()), authored);
+
+            let paint_glyph = |(input, replacement, red)| {
+                let tint = if red {
+                    Rgba::new(1.0, 0.0, 0.0, 1.0)
+                } else {
+                    Rgba::new(0.0, 0.0, 1.0, 1.0)
+                };
+                let raster = render(&HashMap::from([
+                    ("opacity".into(), WidgetParameterValue::F32(input)),
+                    ("inner_opacity".into(), WidgetParameterValue::F32(0.5)),
+                    ("fill".into(), WidgetParameterValue::Color(tint)),
+                ]));
+                check_alpha(&raster, replacement);
+                let glyph = raster
                     .pixels()
                     .chunks(96)
-                    .flat_map(|line| line[60..].iter().map(|pixel| pixel.alpha()))
-                    .max()
-                    .expect("text region")
+                    .flat_map(|row| &row[60..])
+                    .max_by_key(|pixel| pixel.alpha())
+                    .unwrap();
+                assert_eq!((glyph.red() > 0, glyph.blue() > 0), (red, !red));
+                glyph.alpha()
             };
-            assert!(
-                text_alpha(&frames[1]) > text_alpha(&frames[0]),
-                "bound ancestor opacity must also change text pixels"
-            );
-
-            let unbound = rasterize_widget_render_plan(
-                &nested_plan,
-                &nested_constraints,
-                &HashMap::new(),
-                96,
-                40,
-            )
-            .expect("unbound authored opacity should rasterize");
-            let authored_opacity: f32 = authored.parse().expect("fixture opacity");
-            let expected_unbound = (255.0f32 * 0.5 * 0.8 * authored_opacity * 0.5 * 0.8).round();
-            for (x, y) in [(8, 8), (40, 8)] {
-                let alpha = unbound
-                    .pixel(x, y)
-                    .expect("unbound interior sample")
-                    .alpha();
-                assert!(
-                    (f32::from(alpha) - expected_unbound).abs() <= 1.0,
-                    "unbound hierarchy must retain authored {authored}: {alpha} vs {expected_unbound}"
-                );
-            }
-            let nested_primitives = PrimitiveSvgLayerPlan::parse(&nested_svg)
-                .expect("nested primitive SVG should parse");
-            let PrimitiveItem::Text(nested_text) = &nested_primitives.items[2] else {
-                panic!("expected nested text primitive");
-            };
-            let nested_key = expected_text_mask_cache_key(nested_text, "CPU", 96, 40);
-            assert!(
+            let mask_is_cached = || {
                 text_svg_layer_cache()
                     .lock()
-                    .expect("text cache")
+                    .unwrap()
                     .entries
-                    .contains_key(&nested_key),
-                "bound opacity must reuse the opacity-independent nested glyph mask"
+                    .contains_key(&mask_key)
+            };
+            let paint_pair = |first, second| {
+                // Only two sightings of the same mask admit it to the cache.
+                clear_widget_raster_caches();
+                let first_alpha = paint_glyph(first);
+                assert!(!mask_is_cached(), "first sighting cannot admit the mask");
+                let second_alpha = paint_glyph(second);
+                assert!(mask_is_cached(), "both glyphs admit the same mask");
+                (first_alpha, second_alpha)
+            };
+            let low_blue = (0.0, 0.25, false);
+            let (low_red, low_blue_alpha) = paint_pair((0.0, 0.25, true), low_blue);
+            assert_eq!(low_red, low_blue_alpha, "text tint preserves glyph alpha");
+            let (low_blue_alpha, high_blue) = paint_pair(low_blue, (1.0, 0.75, false));
+            assert!(
+                high_blue > low_blue_alpha,
+                "ancestor opacity changes glyph alpha"
             );
         }
-    }
-
-    #[test]
-    fn text_svg_cache_is_stable_across_text_fill_color_changes() {
-        let _cache_guard = widget_cache_test_guard();
-        clear_widget_raster_caches();
-        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" width="64" height="32">
-            <text id="label" x="4" y="20" font-size="12" fill="#ffffff">CPU</text>
-        </svg>"##;
-        let bindings = vec![WidgetBinding {
-            param: "label_color".to_string(),
-            target_element: "label".to_string(),
-            target_attribute: "fill".to_string(),
-            mapping: WidgetBindingMapping::Direct,
-        }];
-        let layers = vec![(svg, bindings.as_slice())];
-        let plan = WidgetRenderPlan::compile(&layers);
-        let constraints = HashMap::new();
-        let params_red = HashMap::from([(
-            "label_color".to_string(),
-            WidgetParameterValue::Color(Rgba::new(1.0, 0.0, 0.0, 1.0)),
-        )]);
-        let params_blue = HashMap::from([(
-            "label_color".to_string(),
-            WidgetParameterValue::Color(Rgba::new(0.0, 0.0, 1.0, 1.0)),
-        )]);
-
-        let red = rasterize_widget_render_plan(&plan, &constraints, &params_red, 64, 32)
-            .expect("red text should rasterize");
-        let blue = rasterize_widget_render_plan(&plan, &constraints, &params_blue, 64, 32)
-            .expect("blue text should rasterize");
-        let primitive_plan =
-            PrimitiveSvgLayerPlan::parse(svg).expect("primitive text should parse");
-        let PrimitiveItem::Text(text) = &primitive_plan.items[0] else {
-            panic!("expected text primitive");
-        };
-        let expected_key = expected_text_mask_cache_key(text, "CPU", 64, 32);
-        let cache = text_svg_layer_cache().lock().expect("text cache");
-
-        if red.data() == blue.data() && !sans_serif_font_available() {
-            eprintln!(
-                "skipping text fill pixel delta assertion: no sans-serif system font detected"
-            );
-        } else {
-            assert_ne!(
-                red.data(),
-                blue.data(),
-                "text fill color changes must still affect final pixels"
-            );
-        }
-        assert!(
-            cache.entries.contains_key(&expected_key),
-            "text cache key should be the fill-independent glyph mask SVG"
-        );
     }
 
     #[test]
     fn primitive_text_fill_none_is_not_tinted_black() {
-        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" width="64" height="32">
-            <rect id="bg" x="0" y="0" width="64" height="32" fill="#00ff00"/>
-            <text id="label" x="4" y="20" font-size="12" fill="none">CPU</text>
-        </svg>"##;
-        let plan = WidgetRenderPlan::compile(&[(svg, &[])]);
+        let background = r##"<svg xmlns="http://www.w3.org/2000/svg" width="64" height="32">
+            <rect id="bg" x="0" y="0" width="64" height="32" fill="#00ff00"/>"##;
         let constraints = HashMap::new();
         let params = HashMap::new();
-
-        let rendered = rasterize_widget_render_plan(&plan, &constraints, &params, 64, 32)
-            .expect("text with fill none should still rasterize the non-text layer");
-        let expected = rasterize_widget_render_plan(
-            &WidgetRenderPlan::compile(&[(
-                r##"<svg xmlns="http://www.w3.org/2000/svg" width="64" height="32">
-                    <rect id="bg" x="0" y="0" width="64" height="32" fill="#00ff00"/>
-                </svg>"##,
-                &[],
-            )]),
-            &constraints,
-            &params,
-            64,
-            32,
-        )
-        .expect("background-only control should rasterize");
-
+        let paint = |label| {
+            let svg = format!("{background}{label}</svg>");
+            let plan = WidgetRenderPlan::compile(&[(&svg, &[])]);
+            rasterize_widget_render_plan(&plan, &constraints, &params, 64, 32).unwrap()
+        };
+        let rendered =
+            paint(r#"<text id="label" x="4" y="20" font-size="12" fill="none">CPU</text>"#);
+        let expected = paint("");
         assert_eq!(
             rendered.data(),
             expected.data(),
             "fill=\"none\" text must not fall back to black tinting"
         );
+    }
+
+    pub(super) fn text_content_binding(param: &str, target: &str) -> WidgetBinding {
+        WidgetBinding {
+            param: param.into(),
+            target_element: target.into(),
+            target_attribute: "text-content".into(),
+            mapping: WidgetBindingMapping::Direct,
+        }
     }
 
     #[test]
@@ -4728,175 +4267,57 @@ mod tests {
             <text id="label" x="4" y="20" font-size="12" fill="#ffffff">A</text>
             <circle id="indicator" cx="56" cy="16" r="6" fill="#ff0000"/>
         </svg>"##;
-        let bindings = vec![WidgetBinding {
-            param: "label".to_string(),
-            target_element: "label".to_string(),
-            target_attribute: "text-content".to_string(),
-            mapping: WidgetBindingMapping::Direct,
-        }];
-        let layers = vec![(svg, bindings.as_slice())];
-        let plan = WidgetRenderPlan::compile(&layers);
+        let bindings = [text_content_binding("label", "label")];
+        let plan = WidgetRenderPlan::compile(&[(svg, &bindings)]);
         let constraints = HashMap::new();
-        let params_a = HashMap::from([(
-            "label".to_string(),
-            WidgetParameterValue::String("A".to_string()),
-        )]);
-        let params_b = HashMap::from([(
-            "label".to_string(),
-            WidgetParameterValue::String("B".to_string()),
-        )]);
-
-        let a = rasterize_widget_render_plan(&plan, &constraints, &params_a, 64, 32)
-            .expect("label A should rasterize");
-        let b = rasterize_widget_render_plan(&plan, &constraints, &params_b, 64, 32)
-            .expect("label B should rasterize");
-        let primitive_plan =
-            PrimitiveSvgLayerPlan::parse(svg).expect("primitive layer should parse");
-        let non_text_digest = resolve_layer_bindings(&bindings, &params_a, &constraints)
-            .digest_excluding_targets(&primitive_plan.text_target_ids);
-        let first_segment_key = primitive_non_text_segment_cache_key(
-            plan.layers[0].source_digest,
-            0,
-            non_text_digest,
-            64,
-            32,
+        let [a, b] = ["A", "B"]
+            .map(|label| [("label".into(), WidgetParameterValue::String(label.into()))].into());
+        let paint =
+            |params| rasterize_widget_render_plan(&plan, &constraints, params, 64, 32).unwrap();
+        assert_ne!(
+            paint(&a).data(),
+            paint(&b).data(),
+            "changing text must invalidate glyph output"
         );
-        let second_segment_key = primitive_non_text_segment_cache_key(
-            plan.layers[0].source_digest,
-            1,
-            non_text_digest,
-            64,
-            32,
-        );
-        let cache = primitive_non_text_layer_cache()
-            .lock()
-            .expect("primitive non-text cache");
-
-        if a.data() == b.data() && !sans_serif_font_available() {
-            eprintln!(
-                "skipping text-content pixel delta assertion: no sans-serif system font detected"
-            );
-        } else {
-            assert_ne!(
-                a.data(),
-                b.data(),
-                "text-content changes must invalidate glyph output"
+        let layer = &plan.layers[0];
+        let primitives = layer.primitive_plan.as_ref().unwrap();
+        let digest = resolve_layer_bindings(&bindings, &a, &constraints)
+            .digest_excluding_targets(&primitives.text_target_ids);
+        let cache = primitive_non_text_layer_cache().lock().unwrap();
+        for segment in [0, 1] {
+            let key =
+                primitive_non_text_segment_cache_key(layer.source_digest, segment, digest, 64, 32);
+            assert!(
+                cache.entries.contains_key(&key),
+                "non-text segment {segment}"
             );
         }
-        assert!(
-            cache.entries.contains_key(&first_segment_key),
-            "non-text segment before text should be cached independently of text-content"
-        );
-        assert!(
-            cache.entries.contains_key(&second_segment_key),
-            "non-text segment after text should be cached independently of text-content"
-        );
     }
 
     #[test]
-    fn apply_svg_attribute_cases() {
-        // (case, svg, element, attr, value, must_contain, must_not_contain)
-        let cases = [
+    fn apply_svg_attribute_changes_only_the_target_value() {
+        let svg =
+            r#"<svg><rect id="bar" width="50" fill="blue"/><text id="label">Old</text></svg>"#;
+        for (id, attribute, value, original, replacement) in [
+            ("bar", "width", "80", r#"width="50""#, r#"width="80""#),
             (
-                "replaces existing",
-                r#"<svg><rect id="bar" width="50" fill="blue"/></svg>"#,
-                "bar",
-                "width",
-                "80",
-                "width=\"80\"",
-                "width=\"50\"",
-            ),
-            (
-                "inserts new",
-                r#"<svg><rect id="bar" fill="blue"/></svg>"#,
                 "bar",
                 "height",
                 "100",
-                "height=\"100\"",
-                "height=\"50\"",
+                r#"fill="blue"/>"#,
+                r#"fill="blue" height="100"/>"#,
             ),
-            (
-                "replaces text content",
-                r#"<svg><text id="label">Old Label</text></svg>"#,
-                "label",
-                "text-content",
-                "New Label",
-                ">New Label<",
-                "Old Label",
-            ),
-        ];
-        for (name, svg, id, attr, value, has, lacks) in cases {
-            let out = apply_svg_attribute(svg, id, attr, value);
-            assert!(out.contains(has), "{name}: missing {has:?} in {out}");
-            assert!(!out.contains(lacks), "{name}: still has {lacks:?} in {out}");
-        }
-        let svg = r#"<svg><rect id="bar" width="50"/></svg>"#;
-        assert_eq!(
-            apply_svg_attribute(svg, "nonexistent", "width", "80"),
-            svg,
-            "unknown element leaves SVG unchanged"
-        );
-    }
-
-    // ── Binding resolution tests ──────────────────────────────────────────────
-
-    #[test]
-    fn test_resolve_linear_binding() {
-        let mut params = HashMap::new();
-        params.insert("level".to_string(), WidgetParameterValue::F32(0.5));
-
-        let binding = WidgetBinding {
-            param: "level".to_string(),
-            target_element: "bar".to_string(),
-            target_attribute: "height".to_string(),
-            mapping: WidgetBindingMapping::Linear {
-                attr_min: 0.0,
-                attr_max: 200.0,
-            },
-        };
-
-        let mut constraints = HashMap::new();
-        constraints.insert("level".to_string(), (0.0, 1.0));
-
-        let val = resolve_binding_value(&binding, &params, &constraints).unwrap();
-        assert_eq!(
-            val, "100",
-            "level=0.5 with attr range 0..200 should give 100"
-        );
-    }
-
-    /// A linear binding onto text is a readout: a whole number, while the same
-    /// value bound to an attribute keeps its fraction.
-    #[test]
-    fn test_resolve_linear_text_content_is_whole_number() {
-        let constraints = HashMap::from([("progress".to_string(), (0.0f32, 1.0f32))]);
-        let binding = |target_attribute: &str| WidgetBinding {
-            param: "progress".to_string(),
-            target_element: "readout".to_string(),
-            target_attribute: target_attribute.to_string(),
-            mapping: WidgetBindingMapping::Linear {
-                attr_min: 0.0,
-                attr_max: 100.0,
-            },
-        };
-        for (progress, text, attr) in [
-            (0.583, "58", "58.300"),
-            (0.586, "59", "58.600"),
-            (1.0, "100", "100"),
+            ("label", "text-content", "New", ">Old<", ">New<"),
+            ("label", "text-content", "", ">Old<", "><"),
         ] {
-            let params =
-                HashMap::from([("progress".to_string(), WidgetParameterValue::F32(progress))]);
-            let resolve = |attribute| {
-                resolve_binding_value(&binding(attribute), &params, &constraints).unwrap()
-            };
-            assert_eq!(resolve("text-content"), text, "progress={progress}");
-            assert_eq!(resolve("width"), attr, "progress={progress}");
+            assert_eq!(
+                apply_svg_attribute(svg, id, attribute, value),
+                svg.replace(original, replacement)
+            );
         }
+        assert_eq!(apply_svg_attribute(svg, "nonexistent", "width", "80"), svg);
     }
 
-    /// Primitive text keeps its font weight: a semibold label rasterizes
-    /// heavier than the same regular label, and leaves the regular-only direct
-    /// glyph path.
     #[test]
     fn test_primitive_text_honors_font_weight() {
         let svg = |attrs: &str| {
@@ -4906,227 +4327,48 @@ mod tests {
                 </svg>"##
             )
         };
-        let render = |svg: &str| {
+        let uses_fast_path = |svg: &str| {
             let plan = PrimitiveSvgLayerPlan::parse(svg).expect("primitive text should parse");
             let PrimitiveItem::Text(text) = &plan.items[0] else {
                 panic!("expected text primitive");
             };
+            text.uses_fast_path_font_family()
+        };
+        assert!(uses_fast_path(&svg("")), "regular sans uses direct glyphs");
+        assert!(
+            !uses_fast_path(&svg(r#" font-weight="600""#)),
+            "weighted text uses the mask path"
+        );
+
+        let coverage = |svg: &str| {
             // A bound layer, so it takes the primitive path, not static resvg.
-            let bindings = vec![WidgetBinding {
-                param: "label".to_string(),
-                target_element: "label".to_string(),
-                target_attribute: "text-content".to_string(),
-                mapping: WidgetBindingMapping::Direct,
-            }];
-            let layers = vec![(svg, bindings.as_slice())];
+            let bindings = [text_content_binding("label", "label")];
             let params = HashMap::from([(
                 "label".to_string(),
                 WidgetParameterValue::String("Build".to_string()),
             )]);
             let pixmap = rasterize_widget_render_plan(
-                &WidgetRenderPlan::compile(&layers),
+                &WidgetRenderPlan::compile(&[(svg, &bindings)]),
                 &HashMap::new(),
                 &params,
                 120,
                 32,
             )
             .expect("text should rasterize");
-            (text.uses_fast_path_font_family(), pixmap.data().to_vec())
+            pixmap
+                .pixels()
+                .iter()
+                .map(|p| u32::from(p.alpha()))
+                .sum::<u32>()
         };
-        let (regular_fast, _) = render(&svg(""));
-        let (bold_fast, _) = render(&svg(r#" font-weight="600""#));
         // A baseline keeps both on the resvg mask path, so only weight differs.
-        let (_, regular) = render(&svg(r#" dominant-baseline="alphabetic""#));
-        let (_, bold) = render(&svg(r#" dominant-baseline="alphabetic" font-weight="600""#));
+        let regular = coverage(&svg(r#" dominant-baseline="alphabetic""#));
+        let bold = coverage(&svg(r#" dominant-baseline="alphabetic" font-weight="600""#));
         assert!(
-            regular_fast,
-            "regular sans text keeps the direct glyph path"
-        );
-        assert!(!bold_fast, "weighted text takes the resvg mask path");
-        let coverage = |pixels: &[u8]| pixels.chunks(4).map(|p| u32::from(p[3])).sum::<u32>();
-        assert!(
-            coverage(&bold) > coverage(&regular),
+            bold > regular,
             "semibold label must cover more pixels than regular"
         );
     }
-
-    #[test]
-    fn test_resolve_direct_color_binding() {
-        let mut params = HashMap::new();
-        params.insert(
-            "fill".to_string(),
-            WidgetParameterValue::Color(Rgba::new(1.0, 0.0, 0.0, 1.0)),
-        );
-
-        let binding = WidgetBinding {
-            param: "fill".to_string(),
-            target_element: "bg".to_string(),
-            target_attribute: "fill".to_string(),
-            mapping: WidgetBindingMapping::Direct,
-        };
-
-        let val = resolve_binding_value(&binding, &params, &HashMap::new()).unwrap();
-        assert_eq!(val, "#ff0000", "red color should format as #ff0000");
-    }
-
-    #[test]
-    fn test_resolve_direct_string_binding() {
-        let mut params = HashMap::new();
-        params.insert(
-            "label".to_string(),
-            WidgetParameterValue::String("CPU".to_string()),
-        );
-
-        let binding = WidgetBinding {
-            param: "label".to_string(),
-            target_element: "lbl".to_string(),
-            target_attribute: "text-content".to_string(),
-            mapping: WidgetBindingMapping::Direct,
-        };
-
-        let val = resolve_binding_value(&binding, &params, &HashMap::new()).unwrap();
-        assert_eq!(val, "CPU");
-    }
-
-    #[test]
-    fn test_resolve_discrete_binding() {
-        let mut params = HashMap::new();
-        params.insert(
-            "severity".to_string(),
-            WidgetParameterValue::Enum("warning".to_string()),
-        );
-
-        let mut value_map = std::collections::BTreeMap::new();
-        value_map.insert("info".to_string(), "#00ff00".to_string());
-        value_map.insert("warning".to_string(), "#ffff00".to_string());
-        value_map.insert("error".to_string(), "#ff0000".to_string());
-
-        let binding = WidgetBinding {
-            param: "severity".to_string(),
-            target_element: "indicator".to_string(),
-            target_attribute: "fill".to_string(),
-            mapping: WidgetBindingMapping::Discrete { value_map },
-        };
-
-        let val = resolve_binding_value(&binding, &params, &HashMap::new()).unwrap();
-        assert_eq!(val, "#ffff00", "warning should map to #ffff00");
-    }
-
-    // ── Interpolation tests ───────────────────────────────────────────────────
-
-    #[test]
-    fn test_f32_linear_interpolation() {
-        let old = WidgetParameterValue::F32(0.0);
-        let new = WidgetParameterValue::F32(1.0);
-
-        let mid = interpolate_param(&old, &new, 0.5);
-        assert_eq!(mid, WidgetParameterValue::F32(0.5));
-
-        let start = interpolate_param(&old, &new, 0.0);
-        assert_eq!(start, WidgetParameterValue::F32(0.0));
-
-        let end = interpolate_param(&old, &new, 1.0);
-        assert_eq!(end, WidgetParameterValue::F32(1.0));
-    }
-
-    #[test]
-    fn test_color_component_wise_interpolation() {
-        let old = WidgetParameterValue::Color(Rgba::new(0.0, 0.0, 1.0, 1.0)); // blue
-        let new = WidgetParameterValue::Color(Rgba::new(1.0, 0.0, 0.0, 1.0)); // red
-
-        let mid = interpolate_param(&old, &new, 0.5);
-        if let WidgetParameterValue::Color(c) = mid {
-            assert!((c.r - 0.5).abs() < 0.001, "r should be 0.5");
-            assert!((c.g - 0.0).abs() < 0.001, "g should be 0.0");
-            assert!((c.b - 0.5).abs() < 0.001, "b should be 0.5");
-            assert!((c.a - 1.0).abs() < 0.001, "a should be 1.0");
-        } else {
-            panic!("expected Color variant");
-        }
-    }
-
-    #[test]
-    fn test_string_snaps_immediately() {
-        let old = WidgetParameterValue::String("Old".to_string());
-        let new = WidgetParameterValue::String("New".to_string());
-
-        // Even at t=0.001, string should snap to new value
-        let result = interpolate_param(&old, &new, 0.001);
-        assert_eq!(
-            result,
-            WidgetParameterValue::String("New".to_string()),
-            "string should snap to new value at any t"
-        );
-    }
-
-    #[test]
-    fn test_enum_snaps_immediately() {
-        let old = WidgetParameterValue::Enum("info".to_string());
-        let new = WidgetParameterValue::Enum("error".to_string());
-
-        let result = interpolate_param(&old, &new, 0.001);
-        assert_eq!(
-            result,
-            WidgetParameterValue::Enum("error".to_string()),
-            "enum should snap to new value at any t"
-        );
-    }
-
-    // ── Degradation-aware transition snapping tests ───────────────────────────
-
-    /// Under Nominal, compute_transition_t returns the elapsed/duration ratio.
-    #[test]
-    fn compute_transition_t_interpolates_below_rendering_simplified() {
-        // At 50% elapsed out of 100ms duration → t = 0.5
-        let t_nominal = compute_transition_t(50.0, 100.0, DegradationLevel::Nominal);
-        assert!(
-            (t_nominal - 0.5).abs() < 1e-6,
-            "Nominal: expected t=0.5, got {t_nominal}"
-        );
-    }
-
-    /// Under Simplified, transitions snap to t=1.0 regardless of elapsed time.
-    #[test]
-    fn compute_transition_t_snaps_when_simplified() {
-        let t = compute_transition_t(1.0, 1000.0, DegradationLevel::Simplified); // 0.1% elapsed
-        assert_eq!(
-            t, 1.0,
-            "Simplified should snap transition to t=1.0, got {t}"
-        );
-    }
-
-    /// Verify the snap produces the final parameter value for an f32 transition.
-    #[test]
-    fn degradation_snap_yields_final_f32_value() {
-        let old = WidgetParameterValue::F32(0.0);
-        let new_val = WidgetParameterValue::F32(100.0);
-
-        // With t=1.0 (snap), interpolation must return the new value exactly.
-        let snapped = interpolate_param(&old, &new_val, 1.0);
-        assert_eq!(
-            snapped,
-            WidgetParameterValue::F32(100.0),
-            "snapped f32 must equal final value"
-        );
-    }
-
-    /// Verify the snap produces the final parameter value for a color transition.
-    #[test]
-    fn degradation_snap_yields_final_color_value() {
-        let old = WidgetParameterValue::Color(Rgba::new(0.0, 0.0, 0.0, 1.0)); // black
-        let new_val = WidgetParameterValue::Color(Rgba::new(1.0, 0.0, 0.0, 1.0)); // red
-
-        let snapped = interpolate_param(&old, &new_val, 1.0);
-        if let WidgetParameterValue::Color(c) = snapped {
-            assert!((c.r - 1.0).abs() < 1e-6, "snapped r must be 1.0");
-            assert!((c.g - 0.0).abs() < 1e-6, "snapped g must be 0.0");
-            assert!((c.b - 0.0).abs() < 1e-6, "snapped b must be 0.0");
-        } else {
-            panic!("expected Color variant after snap");
-        }
-    }
-
-    // ── Rgba → SVG color string tests ─────────────────────────────────────────
 
     #[test]
     fn rgba_to_svg_color_formats_by_alpha() {
@@ -5136,60 +4378,6 @@ mod tests {
             s.starts_with("rgba(255,0,0,"),
             "should use rgba format: {s}"
         );
-    }
-
-    // ── Linear binding with spec scenario ────────────────────────────────────
-
-    #[test]
-    fn test_linear_mapping_spec_scenario() {
-        // spec: level=0.5 with min=0,max=1 linear to attr_min=0,attr_max=200 → "100"
-        let mut params = HashMap::new();
-        params.insert("level".to_string(), WidgetParameterValue::F32(0.5));
-
-        let binding = WidgetBinding {
-            param: "level".to_string(),
-            target_element: "bar".to_string(),
-            target_attribute: "height".to_string(),
-            mapping: WidgetBindingMapping::Linear {
-                attr_min: 0.0,
-                attr_max: 200.0,
-            },
-        };
-
-        let mut constraints = HashMap::new();
-        constraints.insert("level".to_string(), (0.0, 1.0));
-
-        let val = resolve_binding_value(&binding, &params, &constraints).unwrap();
-        assert_eq!(val, "100");
-    }
-
-    // ── SVG + resvg smoke test ────────────────────────────────────────────────
-
-    #[test]
-    fn test_apply_binding_and_rasterize() {
-        // Verify the full pipeline: apply binding → modified SVG → usvg parse → render
-        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
-            <rect id="bar" x="0" y="0" width="50" height="100" fill="blue"/>
-        </svg>"#;
-
-        let modified = apply_svg_attribute(svg, "bar", "width", "80");
-        assert!(
-            modified.contains("width=\"80\""),
-            "width should be updated to 80"
-        );
-
-        // Parse and rasterize
-        let opts = resvg::usvg::Options::default();
-        let tree = resvg::usvg::Tree::from_str(&modified, &opts)
-            .expect("modified SVG should parse without error");
-
-        let mut pixmap = tiny_skia::Pixmap::new(100, 100).expect("pixmap creation");
-        let transform = tiny_skia::Transform::from_scale(1.0, 1.0);
-        resvg::render(&tree, transform, &mut pixmap.as_mut());
-
-        // Pixel at x=75 should be blue (inside the 80-wide rect)
-        let px = pixmap.pixel(75, 50).expect("pixel access");
-        assert!(px.blue() > 200, "pixel inside rect should be blue");
     }
 
     #[test]
@@ -5216,185 +4404,181 @@ mod tests {
         }
     }
 
-    // ── Reference gauge rasterization tests ──────────────────────────────────
-    //
-    // Acceptance criterion 8: Compositor renders reference gauge
-    // correctly. The fill.svg from the gauge fixture is rasterized with specific
-    // parameter values and the pixel output is validated for correctness.
-    //
-
-    /// Return the content of the reference gauge fill.svg fixture.
-    fn reference_gauge_fill_svg() -> &'static str {
-        // Inline the fill.svg content from the gauge fixture so this test has no
-        // file system dependency and runs identically in CI (headless llvmpipe).
-        // Use r##"..."## to allow "#" in SVG attribute hex color values.
-        r##"<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 220" width="100" height="220">
-  <rect id="bar" x="30" y="10" width="40" height="0"
-        fill="#00b4ff" rx="3" ry="3"/>
-  <text id="label-text" x="50" y="215" text-anchor="middle"
-        font-family="sans-serif" font-size="10" fill="#cccccc"></text>
-  <circle id="indicator" cx="85" cy="15" r="6" fill="#00cc66"/>
-</svg>"##
-    }
-
-    /// Apply a set of parameter bindings to the reference gauge fill.svg and
-    /// return the modified SVG string.
-    ///
-    /// Used to test the SVG binding pipeline for the reference gauge fixture.
-    fn apply_gauge_params(
-        level_height: &str,
-        fill_color: &str,
-        label: &str,
-        indicator_fill: &str,
-    ) -> String {
-        let svg = reference_gauge_fill_svg();
-        let svg = apply_svg_attribute(svg, "bar", "height", level_height);
-        let svg = apply_svg_attribute(&svg, "bar", "fill", fill_color);
-        let svg = apply_svg_attribute(&svg, "label-text", "text-content", label);
-        apply_svg_attribute(&svg, "indicator", "fill", indicator_fill)
-    }
-
-    /// Parse and rasterize an SVG string into a Pixmap of the given dimensions.
-    ///
-    /// Shared helper to avoid repeating SVG parse + rasterize setup across pixel
-    /// assertion tests. Panics (via `.expect`) if the SVG is malformed or pixmap
-    /// allocation fails — test failures are the expected signal.
-    fn rasterize_svg(svg_data: &str, width: u32, height: u32) -> tiny_skia::Pixmap {
-        let opts = resvg::usvg::Options::default();
-        let tree =
-            resvg::usvg::Tree::from_str(svg_data, &opts).expect("SVG must parse without error");
-
-        let mut pixmap =
-            tiny_skia::Pixmap::new(width, height).expect("pixmap creation must not fail");
-
-        let transform = tiny_skia::Transform::from_scale(
-            width as f32 / tree.size().width(),
-            height as f32 / tree.size().height(),
-        );
-
-        resvg::render(&tree, transform, &mut pixmap.as_mut());
-        pixmap
-    }
-
-    /// WHEN the reference gauge fill.svg is parsed with default parameters
-    /// THEN resvg parses it without error and produces non-trivial pixel output.
-    ///
     #[test]
-    fn reference_gauge_fill_svg_parses_and_rasterizes() {
-        let svg = reference_gauge_fill_svg();
+    fn static_svg_cache_separates_content_and_evicts_by_actual_pixel_cost() {
+        let _guard = widget_cache_test_guard();
+        clear_widget_raster_caches();
+        let mut keys = Vec::new();
+        for (fill, rgb) in [("#ff0000", [255, 0, 0]), ("#0000ff", [0, 0, 255])] {
+            let svg = format!(
+                r#"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16" fill="{fill}"/></svg>"#
+            );
+            let plan = WidgetRenderPlan::compile(&[(&svg, &[])]);
+            let frame =
+                rasterize_widget_render_plan(&plan, &HashMap::new(), &HashMap::new(), 16, 16)
+                    .unwrap();
+            let pixel = frame.pixel(8, 8).unwrap();
+            assert_eq!([pixel.red(), pixel.green(), pixel.blue()], rgb);
+            keys.push(static_svg_layer_cache_key(&svg, 16, 16));
+        }
+        assert_ne!(keys[0].svg_digest, keys[1].svg_digest);
+        {
+            let cache = static_svg_layer_cache().lock().unwrap();
+            for key in keys {
+                assert_eq!((key.pixel_width, key.pixel_height), (16, 16));
+                assert!(cache.entries.contains_key(&key));
+            }
+        }
 
-        let w = 100u32;
-        let h = 220u32;
-        let pixmap = rasterize_svg(svg, w, h);
+        let mut cache = StaticSvgLayerCache::default();
+        let large =
+            cache.insert_with_limits(test_cache_key("oversize"), test_pixmap(2, 2), 64, 64, 15);
+        assert_eq!(large.data().len(), 16);
+        assert!(cache.entries.is_empty() && cache.lru.is_empty());
+        assert_eq!(cache.total_bytes, 0);
 
-        // Output must be 100×220×4 bytes.
-        assert_eq!(pixmap.data().len(), (w * h * 4) as usize);
+        let [a, b, c, d] = ["a", "b", "c", "d"].map(test_cache_key);
+        for key in [a, b, c] {
+            cache.insert_with_limits(key, test_pixmap(16, 16), 64, 2048, 2048);
+        }
+        assert_eq!(cache.total_bytes, 2048);
+        assert!(!cache.entries.contains_key(&a));
+        assert!(cache.entries.contains_key(&c));
+        assert!(cache.get(&b).is_some());
+        cache.insert_with_limits(d, test_pixmap(16, 16), 64, 2048, 2048);
+        assert!(!cache.entries.contains_key(&c));
+        assert!(cache.entries.contains_key(&b) && cache.entries.contains_key(&d));
+        assert_eq!(cache.total_bytes, 2048);
+    }
 
-        // At least one non-zero pixel — the SVG has a circle and a rect.
-        let has_nonzero = pixmap.data().iter().any(|&b| b > 0);
-        assert!(
-            has_nonzero,
-            "rasterized reference gauge must produce non-transparent pixels"
+    #[test]
+    fn retained_plan_caches_bound_pixels_with_and_without_static_layers() {
+        let _guard = widget_cache_test_guard();
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect id="bar" width="0" height="16" fill="#00ff00"/></svg>"##;
+        let background = r##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16" fill="#000000"/></svg>"##;
+        let bindings = [WidgetBinding {
+            param: "level".into(),
+            target_element: "bar".into(),
+            target_attribute: "width".into(),
+            mapping: WidgetBindingMapping::Linear {
+                attr_min: 0.0,
+                attr_max: 16.0,
+            },
+        }];
+        let constraints = HashMap::from([("level".into(), (0.0, 1.0))]);
+        for with_background in [false, true] {
+            clear_widget_raster_caches();
+            let mut layers: Vec<(&str, &[WidgetBinding])> = Vec::new();
+            if with_background {
+                layers.push((background, &[]));
+            }
+            layers.push((svg, &bindings));
+            let plan = WidgetRenderPlan::compile(&layers);
+            let mut keys = Vec::new();
+            for (level, right_green, right_alpha) in [
+                (0.5, 0, if with_background { 255 } else { 0 }),
+                (1.0, 255, 255),
+            ] {
+                let params = [("level".to_owned(), WidgetParameterValue::F32(level))].into();
+                let pixels =
+                    || rasterize_widget_render_plan(&plan, &constraints, &params, 16, 16).unwrap();
+                let frame = pixels();
+                assert_eq!(frame.data(), pixels().data());
+                assert_eq!(frame.pixel(3, 8).unwrap().green(), 255);
+                let right = frame.pixel(12, 8).unwrap();
+                assert_eq!((right.green(), right.alpha()), (right_green, right_alpha));
+                keys.push(cache_key_from_raster_key(&RasterizedLayerCacheKey {
+                    source_digest: plan.layers.last().unwrap().source_digest,
+                    binding_digest: resolve_layer_bindings(&bindings, &params, &constraints).digest,
+                    pixel_width: 16,
+                    pixel_height: 16,
+                }));
+            }
+            assert_ne!(keys[0], keys[1]);
+            let cache = bound_svg_layer_cache().lock().unwrap();
+            assert!(keys.iter().all(|key| cache.entries.contains_key(key)));
+        }
+    }
+
+    #[test]
+    fn svg_bindings_preserve_fractional_attributes_and_resolve_typed_values() {
+        let constraints = [("value".into(), (0.0, 1.0))].into();
+        let resolve = |attribute: &str, mapping, value| {
+            let binding = WidgetBinding {
+                param: "value".into(),
+                target_element: "target".into(),
+                target_attribute: attribute.into(),
+                mapping,
+            };
+            resolve_binding_value(&binding, &[("value".into(), value)].into(), &constraints)
+                .unwrap()
+        };
+        let linear = |attr_max| WidgetBindingMapping::Linear {
+            attr_min: 0.0,
+            attr_max,
+        };
+        use WidgetParameterValue::{Color, F32, String};
+        for (value, text, attr) in [
+            (0.5, "50", "50"),
+            (0.583, "58", "58.300"),
+            (0.586, "59", "58.600"),
+            (1.0, "100", "100"),
+        ] {
+            assert_eq!(resolve("text-content", linear(100.0), F32(value)), text);
+            assert_eq!(resolve("width", linear(100.0), F32(value)), attr);
+        }
+        assert_eq!(resolve("height", linear(200.0), F32(0.5)), "100");
+        for (attribute, value, expected) in [
+            ("fill", Color(Rgba::new(1.0, 0.0, 0.0, 1.0)), "#ff0000"),
+            ("text-content", String("CPU".into()), "CPU"),
+        ] {
+            assert_eq!(
+                resolve(attribute, WidgetBindingMapping::Direct, value),
+                expected
+            );
+        }
+        assert_eq!(
+            resolve(
+                "fill",
+                WidgetBindingMapping::Discrete {
+                    value_map: [
+                        ("info".into(), "#00ff00".into()),
+                        ("warning".into(), "#ffff00".into())
+                    ]
+                    .into()
+                },
+                WidgetParameterValue::Enum("warning".into()),
+            ),
+            "#ffff00"
         );
     }
 
-    /// WHEN the bar height is set to 100 (50% fill) THEN the blue fill appears in
-    /// the expected region.
-    ///
-    /// fill.svg bar: x=30, y=10, width=40. With height=100 and fill=#00b4ff (blue),
-    /// the bar extends from y=10 to y=110. The pixel at (50, 60) — center of bar
-    /// at mid-height — should be the blue fill color.
-    ///
     #[test]
-    fn reference_gauge_bar_half_full_renders_blue_in_fill_region() {
-        // Apply level=100 (50% fill height), blue fill, empty label, info indicator.
-        let modified_svg = apply_gauge_params("100", "#00b4ff", "", "#00cc66");
-
-        let w = 100u32;
-        let h = 220u32;
-        let pixmap = rasterize_svg(&modified_svg, w, h);
-
-        // Bar at x=30..70, y=10..110. Sample pixel at (50, 60): inside the filled bar.
-        // The bar fill is #00b4ff (R=0, G=180, B=255). Allow ±20 for anti-aliasing.
-        let px = pixmap.pixel(50, 60).expect("pixel access");
-        assert!(
-            px.blue() > 180,
-            "pixel at (50, 60) inside blue fill bar should have high blue channel, got: b={}",
-            px.blue()
-        );
-        assert!(
-            px.red() < 50,
-            "pixel at (50, 60) inside blue bar should have low red, got: r={}",
-            px.red()
-        );
-    }
-
-    /// WHEN the bar fill is set to red (#ff0000) THEN the bar region renders red.
-    ///
-    /// Tests the fill_color → direct → bar.fill binding in the reference gauge.
-    #[test]
-    fn reference_gauge_bar_red_fill_renders_red() {
-        let modified_svg = apply_gauge_params("100", "#ff0000", "", "#00cc66");
-
-        let w = 100u32;
-        let h = 220u32;
-        let pixmap = rasterize_svg(&modified_svg, w, h);
-
-        // Bar center at (50, 60): should be red (#ff0000).
-        let px = pixmap.pixel(50, 60).expect("pixel access");
-        assert!(
-            px.red() > 180,
-            "pixel inside red-filled bar should have high red channel, got: r={}",
-            px.red()
-        );
-        assert!(
-            px.blue() < 50,
-            "pixel inside red-filled bar should have low blue channel, got: b={}",
-            px.blue()
-        );
-    }
-
-    /// WHEN the severity indicator is set to warning (#ffcc00) THEN the indicator
-    /// circle region renders yellow.
-    ///
-    /// Tests the severity → discrete → indicator.fill binding.
-    /// Indicator circle: cx=85, cy=15, r=6.
-    #[test]
-    fn reference_gauge_indicator_warning_renders_yellow() {
-        // Warning severity maps to #ffcc00 (yellow-gold).
-        let modified_svg = apply_gauge_params("0", "#00b4ff", "", "#ffcc00");
-
-        let w = 100u32;
-        let h = 220u32;
-        let pixmap = rasterize_svg(&modified_svg, w, h);
-
-        // Indicator circle center at (85, 15) in the 100×220 SVG coordinate space.
-        // With scale 1.0, the center maps to pixel (85, 15).
-        let px = pixmap
-            .pixel(85, 15)
-            .expect("pixel access at indicator center");
-        assert!(
-            px.red() > 180,
-            "warning indicator should be yellow (high red), got: r={}",
-            px.red()
-        );
-        assert!(
-            px.green() > 150,
-            "warning indicator should be yellow (high green), got: g={}",
-            px.green()
-        );
-        assert!(
-            px.blue() < 50,
-            "warning indicator should be yellow (low blue), got: b={}",
-            px.blue()
-        );
+    fn widget_transitions_interpolate_continuous_values_and_snap_under_degradation() {
+        use WidgetParameterValue::{Color, Enum, F32, String};
+        let blue = Color(Rgba::new(0.0, 0.0, 1.0, 1.0));
+        let purple = Color(Rgba::new(0.5, 0.125, 0.5, 0.75));
+        let red = Color(Rgba::new(1.0, 0.25, 0.0, 0.5));
+        let nominal = compute_transition_t(50.0, 100.0, DegradationLevel::Nominal);
+        let degraded = compute_transition_t(1.0, 1000.0, DegradationLevel::Simplified);
+        assert_eq!((nominal, degraded), (0.5, 1.0));
+        for (start, midpoint, end) in [(F32(0.0), F32(0.5), F32(1.0)), (blue, purple, red)] {
+            assert_eq!(interpolate_param(&start, &end, 0.0), start);
+            assert_eq!(interpolate_param(&start, &end, nominal), midpoint);
+            assert_eq!(interpolate_param(&start, &end, degraded), end);
+        }
+        for (old, new) in [
+            (String("old".into()), String("new".into())),
+            (Enum("info".into()), Enum("error".into())),
+        ] {
+            assert_eq!(interpolate_param(&old, &new, 0.001), new);
+        }
     }
 }
 
 #[cfg(test)]
 mod text_fit_tests {
-    use super::*;
+    use super::{tests::text_content_binding, *};
 
     /// hud-ljhku.5 R5.1 S3: a bound label that runs past the canvas is cut;
     /// one that fits, or a param bound to no text, is not.
@@ -5405,13 +4589,10 @@ mod text_fit_tests {
 <text id="value" x="8" y="38" font-family="sans-serif" font-size="8"></text>
 <rect id="bar" x="0" y="0" width="10" height="4"/>
 </svg>"#;
-        let text = |param: &str, element: &str| WidgetBinding {
-            param: param.into(),
-            target_element: element.into(),
-            target_attribute: "text-content".into(),
-            mapping: WidgetBindingMapping::Direct,
-        };
-        let bindings = vec![text("label", "label"), text("value", "value")];
+        let bindings = [
+            text_content_binding("label", "label"),
+            text_content_binding("value", "value"),
+        ];
         let layers = [(svg, bindings.as_slice())];
         let string = |s: &str| WidgetParameterValue::String(s.into());
         let params = HashMap::from([

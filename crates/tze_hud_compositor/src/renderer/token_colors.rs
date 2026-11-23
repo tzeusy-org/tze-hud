@@ -1141,93 +1141,46 @@ mod tests {
     }
 
     #[test]
-    fn resolve_section_gap_px_defaults_when_absent() {
-        assert_eq!(
-            resolve_section_gap_px(&token_map(&[])),
-            section_gap_default_px()
-        );
-        assert_eq!(resolve_section_gap_px(&token_map(&[])), 8.0);
-    }
-
-    #[test]
-    fn resolve_section_gap_px_uses_override_token() {
-        let tm = token_map(&[("portal.spacing.section_gap_px", "14.5")]);
-        assert_eq!(resolve_section_gap_px(&tm), 14.5);
-        // Zero (flush) is permitted.
-        let tm0 = token_map(&[("portal.spacing.section_gap_px", "0")]);
-        assert_eq!(resolve_section_gap_px(&tm0), 0.0);
-    }
-
-    #[test]
-    fn resolve_section_gap_px_falls_back_on_malformed_or_negative() {
-        for bad in ["notanumber", "-4", "NaN", "inf", ""] {
-            let tm = token_map(&[("portal.spacing.section_gap_px", bad)]);
-            assert_eq!(
-                resolve_section_gap_px(&tm),
-                section_gap_default_px(),
-                "malformed/negative override {bad:?} must fall back to the default"
-            );
+    fn section_gap_resolves_nonnegative_finite_overrides() {
+        let default = resolve_section_gap_px(&token_map(&[]));
+        assert_eq!(default, section_gap_default_px());
+        assert_eq!(default, 8.0);
+        for (value, expected) in [("14.5", 14.5), ("0", 0.0)]
+            .into_iter()
+            .chain(["notanumber", "-4", "NaN", "inf", ""].map(|bad| (bad, default)))
+        {
+            let tm = token_map(&[("portal.spacing.section_gap_px", value)]);
+            assert_eq!(resolve_section_gap_px(&tm), expected, "override {value:?}");
         }
     }
 
-    /// The jump-to-latest pill FILL must render the same intended color whether it
-    /// comes from the built-in default or from an explicitly-set token carrying the
-    /// same hex — the color-space parity restores.
-    ///
-    /// Both feed `color_*` into `gpu_color_raw`, which assumes LINEAR input. The
-    /// token-set path parses `#4A5568` through `parse_hex_color` (sRGB→linear); the
-    /// default must therefore also be linear. Before the fix the default stored the
-    /// straight-sRGB literal `0x4A/255`, so default-vs-token rendered noticeably
-    /// different fills for the same intended color.
+    /// Both token paths supply linear fill to `gpu_color_raw`.
     #[test]
     fn jump_to_latest_pill_fill_default_matches_token_set_color_space() {
-        let default = tze_hud_input::JumpToLatestTokens::default();
-
-        // Explicitly set the token to the SAME hex the default is built from.
-        let mut token_map = HashMap::new();
-        token_map.insert(
-            "portal.jump_to_latest.color".to_string(),
-            "#4A5568".to_string(),
-        );
-        let resolved = resolve_jump_to_latest_tokens(&token_map);
-
-        // RGB parity: default and token-set land in the same (linear) space.
-        // Alpha differs by design (default 0.9 vs the hex's implicit 1.0) and
-        // carries no color-space transform, so it is asserted separately below.
+        let rgb = |token: tze_hud_input::JumpToLatestTokens| {
+            [token.color_r, token.color_g, token.color_b]
+        };
+        let default = rgb(tze_hud_input::JumpToLatestTokens::default());
+        assert_eq!(rgb(resolve_jump_to_latest_tokens(&token_map(&[]))), default);
+        let tokens = token_map(&[("portal.jump_to_latest.color", "#4A5568")]);
+        let set = rgb(resolve_jump_to_latest_tokens(&tokens));
+        let expected = parse_hex_color("#4A5568").unwrap();
         let eps = 1e-6;
-        assert!(
-            (resolved.color_r - default.color_r).abs() < eps,
-            "pill-fill R must match between default and token-set: default={}, token-set={}",
-            default.color_r,
-            resolved.color_r,
-        );
-        assert!(
-            (resolved.color_g - default.color_g).abs() < eps,
-            "pill-fill G must match between default and token-set: default={}, token-set={}",
-            default.color_g,
-            resolved.color_g,
-        );
-        assert!(
-            (resolved.color_b - default.color_b).abs() < eps,
-            "pill-fill B must match between default and token-set: default={}, token-set={}",
-            default.color_b,
-            resolved.color_b,
-        );
-
-        // The default is LINEAR, not the straight-sRGB literal (regression lock).
-        assert!(
-            default.color_r < 0x4A as f32 / 255.0 - eps,
-            "pill-fill default R must be linear (< the straight-sRGB literal), got {}",
-            default.color_r,
-        );
-
-        // The token-set path is the source of truth for the linear value: it must
-        // equal parsing the hex directly (sRGB→linear), confirming the default was
-        // reconciled to that space rather than the two drifting independently.
-        let expected = parse_hex_color("#4A5568").expect("valid hex");
-        assert!((default.color_r - expected.r).abs() < eps);
-        assert!((default.color_g - expected.g).abs() < eps);
-        assert!((default.color_b - expected.b).abs() < eps);
+        assert!(default[0] < 0x4A as f32 / 255.0 - eps);
+        for ((unset, set), linear) in default
+            .into_iter()
+            .zip(set)
+            .zip([expected.r, expected.g, expected.b])
+        {
+            assert!(
+                (unset - set).abs() < eps,
+                "default {unset}, explicit token {set}"
+            );
+            assert!(
+                (unset - linear).abs() < eps,
+                "default {unset}, linear {linear}"
+            );
+        }
     }
 
     // ── Widget/zone UX pass tokens ────────────────────────────────────────────
