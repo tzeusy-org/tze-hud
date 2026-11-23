@@ -549,6 +549,41 @@ pub fn set_widget(
     )
 }
 
+/// Save a finite clear delay for the existing dock. Reset removes the override
+/// so the dock uses its default delay.
+pub fn set_dock_auto_clear(config_path: &Path, ms: Option<u64>) -> Result<(), ConfigWriteError> {
+    edit_with(
+        config_path,
+        |src| apply_dock_auto_clear(src, ms),
+        |from, to| std::fs::rename(from, to),
+    )
+}
+
+fn apply_dock_auto_clear(src: &str, ms: Option<u64>) -> Result<String, ConfigWriteError> {
+    let raw: RawConfig = toml::from_str(src).map_err(|e| ConfigWriteError::Parse(e.to_string()))?;
+    if raw.dock.is_none() {
+        return Err(ConfigWriteError::InvalidValue {
+            key: "dock".into(),
+            expected: "an existing dock table".into(),
+            got: "no dock table".into(),
+        });
+    }
+    let value = ms
+        .map(|ms| {
+            i64::try_from(ms)
+                .ok()
+                .filter(|&value| value > 0)
+                .map(Value::from)
+                .ok_or_else(|| ConfigWriteError::InvalidValue {
+                    key: "dock.auto_clear_ms".into(),
+                    expected: "a positive duration in milliseconds".into(),
+                    got: ms.to_string(),
+                })
+        })
+        .transpose()?;
+    apply_table(src, "dock", &[("auto_clear_ms", value)])
+}
+
 /// Move one zone to an exact display key, or remove its assignment so it uses
 /// the primary display. Other zones, tables and comments are retained; writes
 /// use the same serialized atomic replacement as the other panel settings.
@@ -680,6 +715,19 @@ fn remove_zone(zones: &mut toml_edit::Array, zone: &str) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn dock_clear_delay_round_trips_and_resets_without_touching_other_settings() {
+        let original = "[runtime]\nprofile = 'full-display'\n[dock]\naccepts = ['progress-bar'] # owner choice\n";
+        let edited = apply_dock_auto_clear(original, Some(300_000)).unwrap();
+        assert!(edited.contains("accepts = ['progress-bar'] # owner choice"));
+        let raw: RawConfig = toml::from_str(&edited).unwrap();
+        assert_eq!(raw.dock.unwrap().auto_clear_ms, 300_000);
+        let reset = apply_dock_auto_clear(&edited, None).unwrap();
+        assert_eq!(reset, original);
+        assert!(apply_dock_auto_clear(original, Some(0)).is_err());
+        assert!(apply_dock_auto_clear("[runtime]\n", Some(300_000)).is_err());
+    }
+
     use super::*;
 
     #[test]
