@@ -624,7 +624,6 @@ async fn test_graceful_disconnect_session_close() {
             agent_id: agent.to_string(),
             initial_subscriptions: vec!["SCENE_TOPOLOGY".to_string()],
             auth_credential: Some(crate::auth::psk_credential("test-key")),
-            ..Default::default()
         })
     }
 
@@ -741,7 +740,7 @@ async fn test_graceful_disconnect_session_close() {
             ready(&mut stream).await;
             registry_changes.borrow_and_update();
         }
-        let cleanup = (!preguard).then(|| id);
+        let cleanup = (!preguard).then_some(id);
         let cleanup = if let Some(id) = cleanup {
             Some(owned_state.lock().await.sessions.observe_cleanup(&id))
         } else {
