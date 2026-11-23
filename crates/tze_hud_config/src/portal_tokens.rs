@@ -510,7 +510,7 @@ pub struct PortalPartTokens {
     // Frame (outer backdrop + border)
     pub frame_background: Rgba,
     pub frame_opacity: f32,
-    pub frame_border_color: Rgba,
+    frame_border_color: Rgba,
 
     // Header strip
     pub header_text_color: Rgba,
@@ -523,7 +523,7 @@ pub struct PortalPartTokens {
     /// Indicator color rendered when the draft is at its byte cap.
     /// Applied as a distinct visual signal within the composer region; never
     /// hardcoded in the compositor — always token-driven.
-    pub composer_at_capacity_color: Rgba,
+    composer_at_capacity_color: Rgba,
 
     // Transcript body
     pub transcript_background: Rgba,
@@ -532,7 +532,7 @@ pub struct PortalPartTokens {
     /// Per-turn role-attribution color for non-assistant agent-side OUTPUT turns
     /// (tool / status / error / other), distinct from `transcript_text_color`
     /// used for the assistant's own conversational turns.
-    pub transcript_system_color: Rgba,
+    transcript_system_color: Rgba,
 
     // Degraded / disconnect treatment.
     /// Dimmed transcript text shown while the portal is disconnected/stale.
@@ -580,12 +580,12 @@ pub struct PortalPartTokens {
     // adapter never hardcodes these hues and never issues a round trip to render
     // them.
     /// Color of the ambient in-flight (Pending/Deferred) viewer-turn delivery cue.
-    pub delivery_inflight_color: Rgba,
+    delivery_inflight_color: Rgba,
     /// Color of the ambient delivered (Delivered/Handled) viewer-turn delivery cue.
     pub delivery_delivered_color: Rgba,
     /// Color of the ambient failed (Rejected/Expired) viewer-turn delivery cue.
     /// Muted, not an alarm: a failed cue stays ambient on the turn.
-    pub delivery_failed_color: Rgba,
+    delivery_failed_color: Rgba,
 
     // Ambient per-turn timestamps. Secondary presentation of each
     // unit's runtime-assigned wall-clock arrival time; the adapter never hardcodes
@@ -640,33 +640,33 @@ pub struct PortalPartTokens {
 
     // Scroll-position indicators
     /// Scroll indicator thumb color — geometry-only, carries no content.
-    pub scroll_indicator_color: Rgba,
+    scroll_indicator_color: Rgba,
     /// Scroll indicator track width in px.
-    pub scroll_indicator_width_px: f32,
+    scroll_indicator_width_px: f32,
     /// Minimum scroll indicator thumb height in px.
-    pub scroll_indicator_min_height_px: f32,
+    scroll_indicator_min_height_px: f32,
 
     // Composer caret / selection / placeholder (vd-caret-selection-placeholder-not-tokenized).
     /// Caret glyph color — sourced independently from the composer text color.
-    pub composer_caret_color: Rgba,
+    composer_caret_color: Rgba,
     /// Selection-highlight background color (alpha-bearing).
-    pub composer_selection_color: Rgba,
+    pub(crate) composer_selection_color: Rgba,
     /// Empty-draft placeholder text color (dimmed hint).
-    pub composer_placeholder_color: Rgba,
+    composer_placeholder_color: Rgba,
 
     // Keyboard focus ring (vd-focus-ring-outside-portal-tokens).
     /// Focus-ring stroke color, under portal profile control.
-    pub focus_ring_color: Rgba,
+    focus_ring_color: Rgba,
     /// Focus-ring stroke width in px.
-    pub focus_ring_width_px: f32,
+    focus_ring_width_px: f32,
 
     // Resize-grip affordance (vd-crude-resize-handle-grip).
     /// Resize-grip mark color (the dot-grid grip glyph).
     pub resize_grip_color: Rgba,
     /// Resize-grip hover tint.
-    pub resize_grip_hover_color: Rgba,
+    resize_grip_hover_color: Rgba,
     /// Resize-grip visual extent in px (the grip square at the corner).
-    pub resize_grip_size_px: f32,
+    resize_grip_size_px: f32,
 
     // Spatial rhythm + transcript measure (vd-no-token-rhythm-padding-measure).
     /// Content inset (px) inside portal surfaces.
@@ -676,7 +676,7 @@ pub struct PortalPartTokens {
     /// Vertical gap (px) between stacked portal sections.
     pub section_gap_px: f32,
     /// Transcript optimal-measure cap in px; `0.0` = unbounded (full-width wrap).
-    pub transcript_max_measure_px: f32,
+    transcript_max_measure_px: f32,
 }
 
 impl Default for PortalPartTokens {
