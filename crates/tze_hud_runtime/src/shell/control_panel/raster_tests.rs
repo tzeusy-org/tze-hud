@@ -653,6 +653,10 @@ async fn resident_raster_publish_admits_current_grants_before_enqueue_and_apply(
         let unknown = a.publish_image(&[7; 4], "ambient-background", at).await;
         assert!(!unknown.ok);
         assert_eq!(unknown.code, "INVALID_ARGUMENT");
+        let foreign_wrong_zone = b.publish_image(&pixels, "subtitle", at).await;
+        assert!(!foreign_wrong_zone.ok);
+        assert_eq!(foreign_wrong_zone.code, "INVALID_ARGUMENT");
+        assert!(foreign_wrong_zone.hint.contains("resource"));
         let wrong_zone = a.publish_image(&pixels, "subtitle", at).await;
         assert!(!wrong_zone.ok);
         assert_eq!(wrong_zone.code, "CONTENT_REJECTED");
@@ -675,6 +679,23 @@ async fn resident_raster_publish_admits_current_grants_before_enqueue_and_apply(
         assert!(
             restored.resident_raster.is_none(),
             "serialized hashes confer no authority"
+        );
+        assert!(
+            scene
+                .zone_registry
+                .snapshot()
+                .active_publishes
+                .iter()
+                .all(|r| r.resident_raster.is_none())
+        );
+        assert!(
+            scene
+                .take_snapshot(now, now)
+                .zone_registry
+                .active_publications
+                .values()
+                .flatten()
+                .all(|r| r.resident_raster.is_none())
         );
     }
     a.send(ClientPayload::Clear(session::Clear {
@@ -717,6 +738,26 @@ async fn resident_raster_publish_admits_current_grants_before_enqueue_and_apply(
         );
     }
     assert!(a.publish_image(&pixels, "pip", now + 20_000).await.ok);
+    a.send(ClientPayload::Publish(session::Publish {
+        surface: "zone:pip".into(),
+        present_at_us: now + 15_000,
+        content: Some(tze_hud_protocol::proto::ZoneContent {
+            payload: Some(tze_hud_protocol::proto::zone_content::Payload::SolidColor(
+                tze_hud_protocol::proto::Rgba {
+                    r: 1.0,
+                    g: 0.0,
+                    b: 0.0,
+                    a: 1.0,
+                },
+            )),
+        }),
+        ..Default::default()
+    }))
+    .await;
+    let ServerPayload::RequestResult(color) = a.next().await else {
+        panic!("color result")
+    };
+    assert!(color.ok);
     // Explicit same-key Pair leaves the old stream observable, but revokes its
     // accepted provenance before due application, without namespace Clear.
     let record = rig.pairing.store.cached().agents["raster-a"].clone();
@@ -731,8 +772,8 @@ async fn resident_raster_publish_admits_current_grants_before_enqueue_and_apply(
         let mut scene = rig.control.scene.lock().await;
         rig.clock.advance_us(10_000);
         let due = scene.apply_due_publications();
-        assert_eq!(due.len(), 1);
-        assert!(due[0].result.is_err());
+        assert_eq!(due.len(), 2);
+        assert!(due.iter().all(|d| d.result.is_err()));
         assert!(scene.zone_registry.active_for_zone("pip").is_empty());
         assert!(
             !scene.zone_registry.active_for_zone("ambient-background")[0]
@@ -750,6 +791,69 @@ async fn resident_raster_publish_admits_current_grants_before_enqueue_and_apply(
     b.upload(&pixels, 1, 2, 1, true).await;
     assert!(stored(b.next().await).was_deduplicated);
     assert!(b.publish_image(&pixels, "ambient-background", 0).await.ok);
+    let mut replacement = Resident::connect(&rig.endpoint, "raster-a", &key_a).await;
+    replacement.upload(&pixels, 1, 2, 1, true).await;
+    stored(replacement.next().await);
+    assert!(replacement.publish_image(&pixels, "pip", 0).await.ok);
+    assert!(
+        replacement
+            .publish_image(&pixels, "pip", now + 40_000)
+            .await
+            .ok
+    );
+    let before = rig
+        .control
+        .scene
+        .lock()
+        .await
+        .zone_registry
+        .active_for_zone("pip")[0]
+        .clone();
+    for action in [
+        ClientPayload::Clear(session::Clear {
+            surface: "zone:pip".into(),
+            ..Default::default()
+        }),
+        ClientPayload::Hold(session::Hold {
+            surface: "zone:pip".into(),
+            ttl_ms: 1,
+        }),
+    ] {
+        a.send(action).await;
+        let ServerPayload::RequestResult(result) = a.next().await else {
+            panic!("mutation result")
+        };
+        assert!(!result.ok);
+        assert_eq!(result.code, "NOT_ALLOWED");
+    }
+    // A cached allow-list is no license to replace a new raster with a color.
+    for at in [0, now + 30_000] {
+        a.send(ClientPayload::Publish(session::Publish {
+            surface: "zone:pip".into(),
+            present_at_us: at,
+            content: Some(tze_hud_protocol::proto::ZoneContent {
+                payload: Some(tze_hud_protocol::proto::zone_content::Payload::SolidColor(
+                    tze_hud_protocol::proto::Rgba {
+                        r: 1.0,
+                        g: 0.0,
+                        b: 0.0,
+                        a: 1.0,
+                    },
+                )),
+            }),
+            ..Default::default()
+        }))
+        .await;
+        let ServerPayload::RequestResult(result) = a.next().await else {
+            panic!("color result")
+        };
+        assert!(!result.ok);
+    }
+    {
+        let scene = rig.control.scene.lock().await;
+        assert_eq!(scene.zone_registry.active_for_zone("pip"), &[before]);
+        assert_eq!(scene.scheduled_publications.len(), 1);
+    }
     assert_eq!(rig.ledger.snapshot(), charged);
     assert!(Arc::ptr_eq(
         &allocation.pixels,
@@ -758,4 +862,63 @@ async fn resident_raster_publish_admits_current_grants_before_enqueue_and_apply(
             .unwrap()
             .pixels
     ));
+}
+
+#[tokio::test]
+async fn resident_disconnect_cancels_due_raster_before_stalled_upload_joins() {
+    let rig = RasterRig::new(64).await;
+    let key = rig.pair("raster-a");
+    let mut a = Resident::connect(&rig.endpoint, "raster-a", &key).await;
+    let pixels = [255, 0, 0, 255];
+    a.upload(&pixels, 1, 1, 1, true).await;
+    stored(a.next().await);
+    let now = rig.control.scene.lock().await.now_wall_us();
+    assert!(a.publish_image(&pixels, "ambient-background", 0).await.ok);
+    assert!(a.publish_image(&pixels, "pip", now + 10_000).await.ok);
+    let pending = [0, 255, 0, 255];
+    let (entered, release) = rig
+        .store
+        .pause_before_raster_commit(ResourceId::from_content(&pending));
+    a.upload(&pending, 1, 1, 1, true).await;
+    tokio::time::timeout(WAIT, entered.notified())
+        .await
+        .unwrap();
+    drop(a.tx);
+    // EOF ends the verb loop. Cleanup may not defer active/scheduled origin
+    // removal behind a decoder that cannot publish anything itself.
+    tokio::time::timeout(WAIT, async {
+        loop {
+            let scene = rig.control.scene.lock().await;
+            if scene
+                .zone_registry
+                .active_publishes
+                .values()
+                .all(Vec::is_empty)
+                && scene.scheduled_publications.is_empty()
+            {
+                break;
+            }
+            drop(scene);
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    {
+        let mut scene = rig.control.scene.lock().await;
+        rig.clock.advance_us(10_000);
+        assert!(scene.apply_due_publications().is_empty());
+        assert!(
+            scene
+                .zone_registry
+                .active_publishes
+                .values()
+                .all(Vec::is_empty)
+        );
+    }
+    release.notify_one();
+    assert!(
+        granted(&rig.authorization("raster-a", &key), &pixels),
+        "ordinary disconnect retains pairing grants"
+    );
 }

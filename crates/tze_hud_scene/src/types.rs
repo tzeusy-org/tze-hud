@@ -3455,6 +3455,10 @@ impl ZoneRegistry {
                 .active_publishes
                 .values()
                 .flat_map(|v| v.iter().cloned())
+                .map(|mut record| {
+                    record.resident_raster = None;
+                    record
+                })
                 .collect(),
         }
     }

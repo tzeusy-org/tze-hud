@@ -729,6 +729,7 @@ fn test_lease_expiry() {
         namespace: "test".into(),
         lease_id: None,
         resident_raster: None,
+        resident_authorization: None,
         origin: Some(origin),
     };
     let publication = crate::Publication::Zone {

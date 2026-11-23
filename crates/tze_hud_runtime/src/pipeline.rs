@@ -484,6 +484,7 @@ pub(crate) fn sweep_timed_scene_state(
                 })
                 .collect::<std::collections::HashMap<_, _>>()
         });
+    scene.drain_revoked_resident_rasters();
     let applied = scene.apply_due_publications();
     for late in &applied {
         if let Some((present_at, publication)) = scheduled.as_ref().and_then(|s| s.get(&late.id)) {
