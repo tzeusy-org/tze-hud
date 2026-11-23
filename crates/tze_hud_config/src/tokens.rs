@@ -1026,6 +1026,26 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
     },
     // State layers and focus
     CanonicalToken {
+        key: "tile.hit_region.hover.color",
+        description: "Hover tint for a tile hit region without a local override",
+        default_value: "#FFFFFF",
+    },
+    CanonicalToken {
+        key: "tile.hit_region.hover.opacity",
+        description: "Opacity of the tile hit-region hover tint (0.0-1.0)",
+        default_value: "0.1",
+    },
+    CanonicalToken {
+        key: "tile.hit_region.pressed.color",
+        description: "Pressed tint for a tile hit region without a local override",
+        default_value: "#000000",
+    },
+    CanonicalToken {
+        key: "tile.hit_region.pressed.opacity",
+        description: "Opacity of the tile hit-region pressed tint (0.0-1.0)",
+        default_value: "0.15",
+    },
+    CanonicalToken {
         key: "state.hover.opacity",
         description: "Opacity of the on-surface state layer while hovered (0.0-1.0)",
         default_value: "0.08",
@@ -1646,6 +1666,13 @@ pub(crate) fn canonical_token(key: &str) -> Option<&'static CanonicalToken> {
     CANONICAL_TOKENS.iter().find(|t| t.key == key)
 }
 
+fn is_hit_region_opacity(key: &str) -> bool {
+    matches!(
+        key,
+        "tile.hit_region.hover.opacity" | "tile.hit_region.pressed.opacity"
+    )
+}
+
 /// Check `value` against the kind of the canonical token `key`.
 ///
 /// The kind is inferred from the key and its canonical default: font family
@@ -1685,6 +1712,11 @@ pub(crate) fn validate_canonical_value(key: &str, value: &str) -> Result<(), Str
         (
             parse_numeric(value).is_some_and(|n| (lo..=hi).contains(&n)),
             format!("a number from {lo} to {hi}"),
+        )
+    } else if is_hit_region_opacity(key) {
+        (
+            parse_numeric(value).is_some_and(|n| (0.0..=1.0).contains(&n)),
+            "a number from 0 to 1".into(),
         )
     } else if parse_numeric(token.default_value).is_some() {
         (parse_numeric(value).is_some(), "a finite number".into())
@@ -2018,7 +2050,8 @@ pub(crate) fn validate_design_tokens(raw: &RawConfig, errors: &mut Vec<ConfigErr
         }
         if (key == UI_SCALE_KEY
             || key == NOTIFICATION_ACTION_HOLD_MS_KEY
-            || key == NOTIFICATION_PRESS_GUARD_MS_KEY)
+            || key == NOTIFICATION_PRESS_GUARD_MS_KEY
+            || is_hit_region_opacity(key))
             && let Err(expected) = validate_canonical_value(key, &tokens.0[key])
         {
             errors.push(ConfigError {
@@ -2028,6 +2061,8 @@ pub(crate) fn validate_design_tokens(raw: &RawConfig, errors: &mut Vec<ConfigErr
                 got: tokens.0[key].clone(),
                 hint: if key == UI_SCALE_KEY {
                     "e.g. \"ui.scale\" = \"1.25\" makes everything a quarter bigger".into()
+                } else if is_hit_region_opacity(key) {
+                    format!("e.g. \"{key}\" = \"0.2\"")
                 } else {
                     format!("e.g. \"{key}\" = \"800\"")
                 },
@@ -2313,6 +2348,39 @@ mod tests {
     }
 
     // ── validate_design_tokens ────────────────────────────────────────────────
+
+    #[test]
+    fn hit_region_opacity_accepts_only_unit_interval_values() {
+        use crate::raw::RawDesignTokens;
+
+        for key in [
+            "tile.hit_region.hover.opacity",
+            "tile.hit_region.pressed.opacity",
+        ] {
+            for (value, allowed) in [
+                ("0", true),
+                ("0.2", true),
+                ("1", true),
+                ("-0.1", false),
+                ("1.1", false),
+                ("NaN", false),
+            ] {
+                assert_eq!(validate_canonical_value(key, value).is_ok(), allowed);
+                let raw = RawConfig {
+                    design_tokens: Some(RawDesignTokens(
+                        [(key.to_owned(), value.to_owned())].into(),
+                    )),
+                    ..Default::default()
+                };
+                let mut errors = Vec::new();
+                validate_design_tokens(&raw, &mut errors);
+                assert_eq!(errors.is_empty(), allowed, "{key} = {value}");
+                if !allowed {
+                    assert_eq!(errors[0].code, ConfigErrorCode::TokenValueParseError);
+                }
+            }
+        }
+    }
 
     #[test]
     fn ui_scale_is_config_only_and_ranged() {
