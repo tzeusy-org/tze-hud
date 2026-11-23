@@ -231,12 +231,12 @@ async fn grpc_termination_clears_owned_publications_without_touching_peer() {
         let origin = owner.session_id;
         let future = state.lock().await.scene.lock().await.now_wall_us() + 60_000_000;
         // A pending notification has its own waiter, even before it materializes.
-        owner
-            .tx
-            .send(ClientMessage {
-                sequence: 6,
-                timestamp_wall_us: now_wall_us(),
-                payload: Some(ClientPayload::Publish(Publish {
+        assert!(
+            publish_and_ack(
+                &owner.tx,
+                &mut owner.stream,
+                6,
+                Publish {
                     surface: "zone:notification-area".into(),
                     key: "pending-question".into(),
                     content: Some(crate::proto::ZoneContent {
@@ -249,11 +249,11 @@ async fn grpc_termination_clears_owned_publications_without_touching_peer() {
                     }),
                     present_at_us: future,
                     ..Default::default()
-                })),
-            })
+                },
+            )
             .await
-            .unwrap();
-        // Notifications are ephemeral; a heartbeat orders observation after admission.
+            .ok
+        );
         owner
             .tx
             .send(ClientMessage {
