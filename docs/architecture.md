@@ -143,8 +143,13 @@ retains its existing path. Resident static-image admission checks the live grant
 and static-image zone allowlist before immediate commit or future scheduling.
 Scheduled application rechecks the grant. Active and scheduled records retain
 the store's immutable pixel allocation and pairing as runtime-only provenance;
-serialized hashes convey no authority. Isolated rendering and the signed pixel
-proof remain pending.
+serialized and typed snapshots convey no raster authority. The compositor reads
+only admitted resident provenance into a separate GPU cache; generic tile, icon
+and MCP lookups cannot use it. Pixels stay in the resource store with one CPU
+charge, while GPU admission, degradation and eviction retain the renderer's
+existing policies. Pairing removal/replacement wakes rendering, and revoked
+rasters are excluded before zone selection. The signed canonical-binary and
+Windows pixel proof remain pending.
 
 
 Network listeners bind loopback and local Tailscale-interface addresses

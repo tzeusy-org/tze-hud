@@ -301,6 +301,7 @@ impl Compositor {
         let mut image_refs = Self::scene_image_resource_ids(scene);
         image_refs.extend(Self::scene_icon_resource_ids(scene));
         self.evict_unused_image_textures(&image_refs);
+        self.evict_unused_resident_image_textures(&Self::scene_resident_image_resource_ids(scene));
 
         // Ensure current-frame image/icon textures only after the safe eviction
         // pass, so class/aggregate reserve sees all reclaimable headroom.
@@ -1229,6 +1230,7 @@ impl Compositor {
         for cmd in tv.textured_cmds.iter() {
             let TexturedDrawCmd {
                 resource_id,
+                source,
                 x,
                 y,
                 w: cw,
@@ -1240,6 +1242,7 @@ impl Compositor {
                 continue;
             }
             resource_id.hash(&mut hasher);
+            source.hash(&mut hasher);
             hash_f32s(&mut hasher, &[*x, *y, *cw, *ch]);
             hash_f32s(&mut hasher, uv_rect);
             hash_f32s(&mut hasher, tint);

@@ -657,6 +657,8 @@ async fn resident_raster_publish_admits_current_grants_before_enqueue_and_apply(
         assert!(!foreign_wrong_zone.ok);
         assert_eq!(foreign_wrong_zone.code, "INVALID_ARGUMENT");
         assert!(foreign_wrong_zone.hint.contains("resource"));
+        assert_eq!(denied.hint, unknown.hint);
+        assert_eq!(foreign_wrong_zone.hint, unknown.hint);
         let wrong_zone = a.publish_image(&pixels, "subtitle", at).await;
         assert!(!wrong_zone.ok);
         assert_eq!(wrong_zone.code, "CONTENT_REJECTED");

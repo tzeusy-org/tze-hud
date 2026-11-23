@@ -171,7 +171,8 @@ impl SceneGraph {
         removed
     }
 
-    pub(crate) fn raster_unavailable() -> ValidationError {
+    /// Uniform rejection for unknown, foreign or unusable resident rasters.
+    pub fn raster_unavailable() -> ValidationError {
         ValidationError::InvalidField {
             field: "resource".into(),
             reason:

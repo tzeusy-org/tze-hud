@@ -334,11 +334,8 @@ fn publish_zone(
     let resident_raster = if let tze_hud_scene::ZoneContent::StaticImage(id) = &content {
         let stored_id = tze_hud_resource::ResourceId::from_bytes(*id.as_bytes());
         let Some(raster) = resource_store.validated_raster(&stored_id) else {
-            return fail(
-                seq,
-                "INVALID_ARGUMENT",
-                "resource is unknown, unauthorized or unusable; upload matching raster bytes first",
-            );
+            let error = tze_hud_scene::SceneGraph::raster_unavailable();
+            return fail(seq, validation_error_code(&error), error.to_string());
         };
         Some(std::sync::Arc::new(
             tze_hud_scene::ResidentRasterSource::new(

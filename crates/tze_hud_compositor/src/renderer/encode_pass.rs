@@ -306,7 +306,11 @@ impl super::Compositor {
         image_pass.set_pipeline(&self.texture_rect_pipeline);
 
         for cmd in cmds {
-            let entry = match self.image_texture_cache.get(&cmd.resource_id) {
+            let cache = match cmd.source {
+                super::draw_cmds::ImageSource::Generic => &self.image_texture_cache,
+                super::draw_cmds::ImageSource::Resident => &self.resident_image_texture_cache,
+            };
+            let entry = match cache.get(&cmd.resource_id) {
                 Some(e) => e,
                 None => continue, // shouldn't happen if ensure was called
             };

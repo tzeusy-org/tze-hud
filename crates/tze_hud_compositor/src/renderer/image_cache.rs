@@ -741,23 +741,50 @@ impl super::Compositor {
         img_width: u32,
         img_height: u32,
     ) -> bool {
-        // Already cached?
         if self.image_texture_cache.contains_key(&resource_id) {
             return true;
         }
-
-        // Retrieve raw RGBA bytes.
-        let rgba_data = match self.image_bytes.get(&resource_id) {
-            Some(data) => Arc::clone(data),
-            None => {
-                tracing::debug!(
-                    resource_id = %resource_id,
-                    "image bytes not registered — falling back to placeholder"
-                );
-                return false;
-            }
+        let Some(pixels) = self.image_bytes.get(&resource_id).cloned() else {
+            return false;
         };
+        let Some(entry) =
+            self.upload_image_texture(resource_id, pixels, img_width, img_height, "image")
+        else {
+            return false;
+        };
+        self.image_texture_cache.insert(resource_id, entry);
+        true
+    }
 
+    pub(super) fn ensure_resident_image_texture(
+        &mut self,
+        resource_id: ResourceId,
+        pixels: Arc<[u8]>,
+        width: u32,
+        height: u32,
+    ) -> bool {
+        if self.resident_image_texture_cache.contains_key(&resource_id) {
+            return true;
+        }
+        let Some(entry) =
+            self.upload_image_texture(resource_id, pixels, width, height, "resident-image")
+        else {
+            return false;
+        };
+        self.resident_image_texture_cache.insert(resource_id, entry);
+        true
+    }
+
+    /// Shared GPU budget/degradation policy; resident callers supply the
+    /// admitted store allocation without generic registration or a CPU charge.
+    fn upload_image_texture(
+        &self,
+        resource_id: ResourceId,
+        rgba_data: Arc<[u8]>,
+        img_width: u32,
+        img_height: u32,
+        allocation_prefix: &str,
+    ) -> Option<ImageTextureEntry> {
         // Validate byte count.
         let expected_bytes = (img_width as usize) * (img_height as usize) * 4;
         if rgba_data.len() != expected_bytes {
@@ -767,7 +794,7 @@ impl super::Compositor {
                 actual = rgba_data.len(),
                 "image bytes length mismatch — falling back to placeholder"
             );
-            return false;
+            return None;
         }
         let reduce_quality = self.degradation_policy.level
             >= tze_hud_scene::DegradationLevel::Simplified
@@ -797,12 +824,12 @@ impl super::Compositor {
             && ledger
                 .reserve(
                     tze_hud_resource::ResidentClass::Resource,
-                    format!("image:{resource_id}:gpu"),
+                    format!("{allocation_prefix}:{resource_id}:gpu"),
                     upload_rgba.len() as u64,
                 )
                 .is_err()
         {
-            return false;
+            return None;
         }
 
         // Create GPU texture.
@@ -859,16 +886,6 @@ impl super::Compositor {
             ],
         });
 
-        self.image_texture_cache.insert(
-            resource_id,
-            ImageTextureEntry {
-                _texture: texture,
-                bind_group,
-                width: texture_width,
-                height: texture_height,
-            },
-        );
-
         tracing::debug!(
             resource_id = %resource_id,
             width = img_width,
@@ -876,7 +893,12 @@ impl super::Compositor {
             "image texture uploaded to GPU"
         );
 
-        true
+        Some(ImageTextureEntry {
+            _texture: texture,
+            bind_group,
+            width: texture_width,
+            height: texture_height,
+        })
     }
 
     /// Ensure a GPU texture exists for a status-bar icon SVG file path.
@@ -1053,6 +1075,26 @@ impl super::Compositor {
         );
         tracing::debug!(path, size, "icon texture rasterized and uploaded to GPU");
         true
+    }
+
+    pub(super) fn evict_unused_resident_image_textures(
+        &mut self,
+        referenced: &HashSet<ResourceId>,
+    ) {
+        if let Some(ledger) = &self.resident_ledger {
+            for id in self
+                .resident_image_texture_cache
+                .keys()
+                .filter(|id| !referenced.contains(id))
+            {
+                ledger.release_evicted(
+                    tze_hud_resource::ResidentClass::Resource,
+                    &tze_hud_resource::AllocationId(format!("resident-image:{id}:gpu")),
+                );
+            }
+        }
+        self.resident_image_texture_cache
+            .retain(|id, _| referenced.contains(id));
     }
 
     /// Evict cached GPU textures for resources no longer referenced in the scene.

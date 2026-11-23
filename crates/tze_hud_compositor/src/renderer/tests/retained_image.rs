@@ -43,3 +43,239 @@ async fn test_static_image_node_composited_with_other_nodes() {
         assert_pixel_color(&pixels, width, x, 128, rgba, 12, label).unwrap();
     }
 }
+
+struct RasterAuthority(tze_hud_scene::config::agents::PairingAuthorization);
+
+impl tze_hud_resource::upload::RasterUploadAuthority for RasterAuthority {
+    fn with_live_grants(
+        &self,
+        commit: &mut dyn FnMut(&mut std::collections::HashSet<[u8; 32]>),
+    ) -> bool {
+        self.0.with_live_grants(|grants| commit(grants)).is_some()
+    }
+}
+
+async fn resident_raster_scene(
+    capacity: u64,
+) -> (
+    SceneGraph,
+    tze_hud_resource::ResourceStore,
+    tze_hud_resource::ResidentLedger,
+    tze_hud_scene::config::AgentDirectory,
+    std::sync::Arc<ResidentRasterSource>,
+) {
+    use tze_hud_resource::{
+        AgentBudget, ResidentLedger, ResidentLedgerLimits, ResourceStore, ResourceStoreConfig,
+        ResourceType, UploadId, UploadStartRequest,
+    };
+    let mut directory = tze_hud_scene::config::AgentDirectory::default();
+    directory.insert(
+        "raster-a",
+        tze_hud_scene::config::agents::hash_psk("fixture-key"),
+        vec!["*".into()],
+    );
+    let authorization = directory
+        .resolve("fixture-key", "raster-a")
+        .unwrap()
+        .authorization;
+    let ledger = ResidentLedger::new(ResidentLedgerLimits {
+        aggregate_bytes: capacity,
+        resource_bytes: capacity,
+        widget_source_bytes: 0,
+        widget_raster_bytes: 0,
+        font_bytes: 0,
+    });
+    let store =
+        ResourceStore::new_with_resident_ledger(ResourceStoreConfig::default(), ledger.clone());
+    let bytes = vec![255, 0, 0, 255, 0, 255, 0, 255];
+    let id = tze_hud_resource::ResourceId::from_content(&bytes);
+    store
+        .handle_resident_upload_start(
+            UploadStartRequest {
+                agent_namespace: "raster-a".into(),
+                agent_capabilities: vec!["upload_resource".into()],
+                agent_budget: AgentBudget {
+                    texture_bytes_total_limit: 0,
+                    texture_bytes_total_used: 0,
+                },
+                upload_id: UploadId::from_bytes([1; 16]),
+                resource_type: ResourceType::ImageRgba8,
+                expected_hash: *id.as_bytes(),
+                total_size: bytes.len(),
+                inline_data: bytes,
+                width: 2,
+                height: 1,
+            },
+            std::sync::Arc::new(RasterAuthority(authorization.clone())),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    let raster = store.validated_raster(&id).unwrap();
+    let source = std::sync::Arc::new(ResidentRasterSource::new(
+        ResourceId::from_bytes(*id.as_bytes()),
+        raster.width,
+        raster.height,
+        raster.pixels.clone(),
+        authorization,
+    ));
+    let mut scene = SceneGraph::new(128.0, 64.0);
+    let defaults = ZoneRegistry::with_defaults();
+    for (name, x) in [("resident", 0.0), ("generic", 0.5)] {
+        let mut zone = defaults.get_by_name("ambient-background").unwrap().clone();
+        zone.id = SceneId::new();
+        zone.name = name.into();
+        zone.geometry_policy = GeometryPolicy::Relative {
+            x_pct: x,
+            y_pct: 0.0,
+            width_pct: 0.5,
+            height_pct: 1.0,
+        };
+        zone.layer_attachment = LayerAttachment::Content;
+        zone.auto_clear_ms = None;
+        zone.rendering_policy.transition_in_ms = None;
+        zone.rendering_policy.transition_out_ms = None;
+        scene.register_zone(zone);
+    }
+    let publication = tze_hud_scene::Publication::Zone {
+        zone_name: "resident".into(),
+        content: ZoneContent::StaticImage(source.resource_id()),
+        merge_key: None,
+        expires_at_wall_us: None,
+        content_classification: None,
+        breakpoints: Vec::new(),
+        held: false,
+    };
+    scene
+        .publish(
+            &tze_hud_scene::Publisher {
+                resident_raster: Some(source.clone()),
+                ..tze_hud_scene::Publisher::namespace("raster-a")
+            },
+            &publication,
+        )
+        .unwrap();
+    scene
+        .publish_to_zone(
+            "generic",
+            ZoneContent::StaticImage(source.resource_id()),
+            "mcp-fixture",
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    (scene, store, ledger, directory, source)
+}
+
+#[tokio::test]
+async fn resident_raster_uses_store_pixels_without_generic_image_authority() {
+    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(128, 64).await);
+    let (mut scene, store, ledger, directory, source) = resident_raster_scene(64).await;
+    compositor.set_resident_ledger(ledger.clone());
+    // Upload-before-publication and zero compositor registrations: the sole CPU
+    // charge is the store's 8 bytes; the renderer reserves only 8 GPU bytes.
+    let pixels = render_pixels(&mut compositor, &mut scene, &surface);
+    assert_pixel_color(
+        &pixels,
+        128,
+        8,
+        32,
+        [255, 0, 0, 255],
+        8,
+        "resident left red",
+    )
+    .unwrap();
+    assert_pixel_color(
+        &pixels,
+        128,
+        56,
+        32,
+        [0, 255, 0, 255],
+        8,
+        "resident right green",
+    )
+    .unwrap();
+    assert_ne!(
+        pixel_at(&pixels, 128, 72, 32),
+        [255, 0, 0, 255],
+        "generic same hash cannot borrow resident texture"
+    );
+    assert!(compositor.image_bytes.is_empty());
+    assert!(compositor.image_texture_cache.is_empty());
+    assert_eq!(compositor.resident_image_texture_cache.len(), 1);
+    assert_eq!(ledger.snapshot().resource_bytes, 16);
+    assert_eq!(ledger.snapshot().allocation_count, 2);
+    let retained = store
+        .validated_raster(&tze_hud_resource::ResourceId::from_bytes(
+            *source.resource_id().as_bytes(),
+        ))
+        .unwrap();
+    assert!(std::sync::Arc::ptr_eq(
+        &source.pixels_if_authorized().unwrap().0,
+        &retained.pixels
+    ));
+    scene
+        .clear_zone_and_cancel_pending("resident", "raster-a")
+        .unwrap();
+    render_pixels(&mut compositor, &mut scene, &surface);
+    assert!(compositor.resident_image_texture_cache.is_empty());
+    assert_eq!(ledger.snapshot().resource_bytes, 8);
+    scene
+        .publish(
+            &tze_hud_scene::Publisher {
+                resident_raster: Some(source.clone()),
+                ..tze_hud_scene::Publisher::namespace("raster-a")
+            },
+            &tze_hud_scene::Publication::Zone {
+                zone_name: "resident".into(),
+                content: ZoneContent::StaticImage(source.resource_id()),
+                merge_key: None,
+                expires_at_wall_us: None,
+                content_classification: None,
+                breakpoints: Vec::new(),
+                held: false,
+            },
+        )
+        .unwrap();
+    let republished = render_pixels(&mut compositor, &mut scene, &surface);
+    assert_pixel_color(&republished, 128, 8, 32, [255, 0, 0, 255], 8, "republished").unwrap();
+    directory.with_agents_of(Default::default());
+    let revoked = render_pixels(&mut compositor, &mut scene, &surface);
+    assert_ne!(pixel_at(&revoked, 128, 8, 32), [255, 0, 0, 255]);
+    assert!(compositor.resident_image_texture_cache.is_empty());
+    assert_eq!(
+        ledger.snapshot().resource_bytes,
+        8,
+        "revocation does not free shared store pixels"
+    );
+}
+
+#[tokio::test]
+async fn resident_raster_gpu_budget_and_degradation_keep_store_cpu_charge() {
+    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(128, 64).await);
+    let (mut scene, _store, ledger, _directory, source) = resident_raster_scene(12).await;
+    compositor.set_resident_ledger(ledger.clone());
+    render_pixels(&mut compositor, &mut scene, &surface);
+    assert!(
+        compositor.resident_image_texture_cache.is_empty(),
+        "8 CPU + 8 GPU exceeds cap"
+    );
+    assert_eq!(ledger.snapshot().resource_bytes, 8);
+    compositor.set_degradation_policy(CompositorDegradationPolicy {
+        level: DegradationLevel::Simplified,
+        texture_quality_threshold_px: 1,
+        texture_scale_factor: 0.5,
+    });
+    render_pixels(&mut compositor, &mut scene, &surface);
+    let entry = &compositor.resident_image_texture_cache[&source.resource_id()];
+    assert_eq!((entry.width, entry.height), (1, 1));
+    assert_eq!(ledger.snapshot().resource_bytes, 12);
+    assert_eq!(ledger.snapshot().allocation_count, 2);
+    compositor.set_degradation_policy(Default::default());
+    assert_eq!(
+        ledger.snapshot().resource_bytes,
+        8,
+        "policy invalidation releases resident GPU charge"
+    );
+}

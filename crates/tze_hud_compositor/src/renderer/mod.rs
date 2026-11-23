@@ -393,6 +393,8 @@ pub struct Compositor {
     /// are kept alive by including their ResourceIds in the eviction-guard set
     /// (see `ensure_scene_icon_textures`).
     image_texture_cache: HashMap<ResourceId, ImageTextureEntry>,
+    /// GPU-only resident cache; CPU pixels/charge remain in ResourceStore.
+    resident_image_texture_cache: HashMap<ResourceId, ImageTextureEntry>,
     /// Negative cache for SVG paths that failed to load/parse.
     ///
     /// Paths are inserted on the first failed `ensure_icon_texture` call.
@@ -910,6 +912,27 @@ pub(crate) fn zone_stacks_for<'a>(
     name: &'a String,
     publishes: &'a Vec<ZonePublishRecord>,
 ) -> Vec<ZoneStack<'a>> {
+    let eligible = |record: &&ZonePublishRecord| {
+        record
+            .resident_raster
+            .as_ref()
+            .is_none_or(|source| source.is_authorized())
+    };
+    if publishes.iter().any(|record| !eligible(&record)) {
+        let retained: Vec<_> = publishes.iter().filter(eligible).cloned().collect();
+        if retained.is_empty() {
+            return Vec::new();
+        }
+        // Reuse the same placement/sort path and promote its temporary borrows.
+        return zone_stacks_for(layout, name, &retained)
+            .into_iter()
+            .map(|stack| ZoneStack {
+                name,
+                publishes: std::borrow::Cow::Owned(stack.publishes.into_owned()),
+                display: stack.display,
+            })
+            .collect();
+    }
     let own = ZoneStack::zone_display(layout, name);
     let elsewhere = |record: &ZonePublishRecord| {
         ZoneStack::placed_display(layout, own, record.display.as_deref())
@@ -1154,6 +1177,7 @@ impl Compositor {
             image_bytes: HashMap::new(),
             image_dims: HashMap::new(),
             image_texture_cache: HashMap::new(),
+            resident_image_texture_cache: HashMap::new(),
             failed_icon_paths: HashSet::new(),
             local_composer_state: Arc::new(StdMutex::new(None)),
             composer_visual_layout: Arc::new(StdMutex::new(None)),
@@ -1510,6 +1534,7 @@ impl Compositor {
             image_bytes: HashMap::new(),
             image_dims: HashMap::new(),
             image_texture_cache: HashMap::new(),
+            resident_image_texture_cache: HashMap::new(),
             failed_icon_paths: HashSet::new(),
             local_composer_state: Arc::new(StdMutex::new(None)),
             composer_visual_layout: Arc::new(StdMutex::new(None)),
@@ -2547,7 +2572,7 @@ impl Compositor {
         for publishes in scene.zone_registry.active_publishes.values() {
             for record in publishes {
                 match &record.content {
-                    ZoneContent::StaticImage(resource_id) => {
+                    ZoneContent::StaticImage(resource_id) if record.resident_raster.is_none() => {
                         referenced.insert(*resource_id);
                     }
                     ZoneContent::Notification(payload) if !payload.icon.is_empty() => {
@@ -2560,6 +2585,18 @@ impl Compositor {
             }
         }
         referenced
+    }
+
+    fn scene_resident_image_resource_ids(scene: &SceneGraph) -> HashSet<ResourceId> {
+        scene
+            .zone_registry
+            .active_publishes
+            .values()
+            .flatten()
+            .filter_map(|record| record.resident_raster.as_ref())
+            .filter(|source| source.is_authorized())
+            .map(|source| source.resource_id())
+            .collect()
     }
 
     /// Every node under a tile the owner has not hidden.
@@ -2608,6 +2645,17 @@ impl Compositor {
             for record in publishes {
                 match &record.content {
                     ZoneContent::StaticImage(resource_id) => {
+                        if let Some(source) = &record.resident_raster {
+                            if let Some((pixels, width, height)) = source.pixels_if_authorized() {
+                                self.ensure_resident_image_texture(
+                                    *resource_id,
+                                    pixels,
+                                    width,
+                                    height,
+                                );
+                            }
+                            continue;
+                        }
                         referenced.insert(*resource_id);
                         // Use the explicit dimensions stored by `register_image_bytes`.
                         // This correctly handles non-square images (e.g. 640×360) that

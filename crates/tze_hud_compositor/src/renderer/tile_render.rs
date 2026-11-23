@@ -281,6 +281,7 @@ impl Compositor {
             || self.degradation_policy.texture_scale_factor != policy.texture_scale_factor;
         if texture_policy_changed {
             self.image_texture_cache.clear();
+            self.evict_unused_resident_image_textures(&std::collections::HashSet::new());
         }
         self.degradation_level = policy.level;
         self.degradation_policy = policy;
@@ -2364,6 +2365,7 @@ impl Compositor {
                         Self::clipped_textured_rect(tile, Rect::new(dx, dy, dw, dh), uv_rect)
                     {
                         textured_cmds.push(TexturedDrawCmd {
+                            source: super::draw_cmds::ImageSource::Generic,
                             resource_id: img.resource_id,
                             x: clipped.x,
                             y: clipped.y,
