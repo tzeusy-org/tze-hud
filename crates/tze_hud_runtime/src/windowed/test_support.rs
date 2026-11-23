@@ -337,6 +337,7 @@ pub(super) fn make_windowed_keyboard_test_app(
         consumed_shell_shortcut_keydowns: std::collections::HashSet::new(),
         notification_keydowns: std::collections::HashSet::new(),
         answer_keyboard: Default::default(),
+        notification_reply: Default::default(),
         panel_input: crate::windowed::panel_input::PanelInputState::default(),
         keyboard_activation_nodes: std::collections::HashMap::new(),
         consumed_command_keydowns: std::collections::HashSet::new(),
