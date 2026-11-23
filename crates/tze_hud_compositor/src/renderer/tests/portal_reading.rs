@@ -13,33 +13,19 @@ async fn selection_highlight_and_link_underline_use_reading_tokens() {
         render::{Size, render},
         tokens::PortalVisualTokens,
     };
-    use tze_hud_scene::types::PortalPartKind;
+    use tze_hud_scene::{LinkFeedbackState, PortalReadingDecor, types::PortalPartKind};
 
     let (w, h) = (800_u32, 520_u32);
-    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(w, h).await);
-    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
-    let mut tokens = HashMap::new();
-    tokens.insert(
-        "portal.transcript.selection_color".to_string(),
-        "#FF0000".to_string(),
-    );
-    tokens.insert(
-        "portal.transcript.link_color".to_string(),
-        "#00FF00".to_string(),
-    );
-    tokens.insert("color.error".to_string(), "#FF00FF".to_string());
-    compositor.set_token_map(tokens);
+    let (mut compositor, surface) = require_gpu!(make_text_compositor(w, h).await);
+    compositor.set_token_map(token_overrides([
+        ("portal.transcript.selection_color", "#FF0000"),
+        ("portal.transcript.link_color", "#00FF00"),
+        ("color.error", "#FF00FF"),
+    ]));
 
     let mut scene = SceneGraph::new(w as f32, h as f32);
-    let tab = scene.create_tab("reading", 0).unwrap();
-    let lease = scene.grant_lease("reading", 120_000);
     let tile_bounds = Rect::new(40.0, 20.0, 720.0, 480.0);
-    let tile_id = scene
-        .create_tile(tab, "reading", lease, tile_bounds, 1)
-        .unwrap();
-    scene
-        .register_tile_scroll_config(tile_id, tze_hud_scene::types::TileScrollConfig::vertical())
-        .unwrap();
+    let tile_id = scrollable_tile(&mut scene, "reading", tile_bounds, None);
     let mut view = empty_portal_view("reading", "Reading");
     view.visible_transcript.push(TranscriptUnit {
         sequence: 1,
@@ -49,24 +35,20 @@ async fn selection_highlight_and_link_underline_use_reading_tokens() {
         expects_reply: false,
         appended_at_wall_us: 0,
     });
-    let rendered = render(
-        &view,
-        &PortalVisualTokens::default(),
-        Size {
-            width: tile_bounds.width,
-            height: tile_bounds.height,
-        },
-        3_000_000,
-    );
+    let size = Size {
+        width: tile_bounds.width,
+        height: tile_bounds.height,
+    };
+    let tokens = PortalVisualTokens::default();
+    let rendered = render(&view, &tokens, size, 3_000_000);
     scene
         .set_portal_surface(tile_id, rendered.surface, "reading")
         .unwrap();
     scene
         .set_tile_root_tree(tile_id, rendered.root, rendered.children)
         .unwrap();
-    compositor.prime_markdown_cache(&scene);
-    compositor.prime_truncation_cache(&scene);
-    compositor.render_frame_headless(&mut scene, &surface);
+    prime_text(&mut compositor, &scene);
+    compositor.update_portal_tile_animations(&scene);
     compositor.portal_tile_anim_states.clear();
     compositor.render_frame_headless(&mut scene, &surface);
     compositor.publish_portal_document_layouts(&mut scene);
@@ -98,14 +80,13 @@ async fn selection_highlight_and_link_underline_use_reading_tokens() {
 
     scene.set_portal_reading(
         tile_id,
-        tze_hud_scene::PortalReadingDecor {
+        PortalReadingDecor {
             selection: Some(sel),
             link: Some((link.start, link.end)),
             ..Default::default()
         },
     );
-    compositor.render_frame_headless(&mut scene, &surface);
-    let decorated = surface.read_pixels(&compositor.device);
+    let decorated = render_pixels(&mut compositor, &mut scene, &surface);
 
     // Selection: the top pixel row of the selected row is glyph-free and red.
     let row = screen(layout.range_rects(sel.0, sel.1)[0]);
@@ -151,19 +132,13 @@ async fn selection_highlight_and_link_underline_use_reading_tokens() {
     let mut host_color = None;
     for (feedback, words) in [
         (None, "example.com"),
-        (
-            Some(tze_hud_scene::LinkFeedbackState::Opening),
-            "Opening\u{2026}",
-        ),
-        (Some(tze_hud_scene::LinkFeedbackState::Opened), "Opened"),
-        (
-            Some(tze_hud_scene::LinkFeedbackState::Failed),
-            "Couldn't open",
-        ),
+        (Some(LinkFeedbackState::Opening), "Opening…"),
+        (Some(LinkFeedbackState::Opened), "Opened"),
+        (Some(LinkFeedbackState::Failed), "Couldn't open"),
     ] {
         scene.set_portal_reading(
             tile_id,
-            tze_hud_scene::PortalReadingDecor {
+            PortalReadingDecor {
                 link: Some((link.start, link.end)),
                 hint: Some(("example.com".into(), anchor)),
                 hint_feedback: feedback,
@@ -178,7 +153,7 @@ async fn selection_highlight_and_link_underline_use_reading_tokens() {
             .expect("hint pill label");
         assert_eq!(&*pill.text, words);
         let host = *host_color.get_or_insert(pill.color);
-        if feedback == Some(tze_hud_scene::LinkFeedbackState::Failed) {
+        if feedback == Some(LinkFeedbackState::Failed) {
             assert_eq!(pill.color[..3], [255, 0, 255], "color.error");
         } else {
             assert_eq!(pill.color, host);
@@ -190,15 +165,7 @@ async fn selection_highlight_and_link_underline_use_reading_tokens() {
     // signature is unchanged, but the published link must carry the new href.
     view.visible_transcript[0].output_text =
         "Open [the docs page](https://example.org/other) now\n\nSelect this whole line".into();
-    let rendered = render(
-        &view,
-        &PortalVisualTokens::default(),
-        Size {
-            width: tile_bounds.width,
-            height: tile_bounds.height,
-        },
-        3_000_000,
-    );
+    let rendered = render(&view, &tokens, size, 3_000_000);
     scene
         .set_tile_root_tree(tile_id, rendered.root, rendered.children)
         .unwrap();
