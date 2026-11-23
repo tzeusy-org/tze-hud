@@ -105,6 +105,7 @@ fn publish_keyed(
             let publisher = crate::Publisher {
                 namespace: agent.into(),
                 lease_id: None,
+                resident_raster: None,
                 origin: None,
             };
             let publication = crate::Publication::Zone {
@@ -502,6 +503,7 @@ fn questions_are_placed_once_when_presented() {
     let publisher = crate::Publisher {
         namespace: "a".into(),
         lease_id: None,
+        resident_raster: None,
         origin: None,
     };
     let publication = crate::Publication::Zone {

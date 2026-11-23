@@ -80,6 +80,28 @@ impl Resident {
             .unwrap()
     }
 
+    async fn publish_image(&mut self, bytes: &[u8], zone: &str, at: u64) -> session::RequestResult {
+        self.send(ClientPayload::Publish(session::Publish {
+            surface: format!("zone:{zone}"),
+            content: Some(tze_hud_protocol::proto::ZoneContent {
+                payload: Some(
+                    tze_hud_protocol::proto::zone_content::Payload::StaticImageRef(
+                        tze_hud_protocol::proto::StaticImageRef {
+                            resource_id: ResourceId::from_content(bytes).as_bytes().to_vec(),
+                        },
+                    ),
+                ),
+            }),
+            present_at_us: at,
+            ..Default::default()
+        }))
+        .await;
+        let ServerPayload::RequestResult(result) = self.next().await else {
+            panic!("non-ephemeral Publish must return RequestResult")
+        };
+        result
+    }
+
     async fn upload(&mut self, bytes: &[u8], kind: i32, width: u32, height: u32, inline: bool) {
         let hash = ResourceId::from_content(bytes);
         self.send(ClientPayload::ResourceUploadStart(ResourceUploadStart {
@@ -137,6 +159,7 @@ struct RasterRig {
     control: AgentControl,
     store: ResourceStore,
     ledger: ResidentLedger,
+    clock: Arc<tze_hud_scene::clock::TestClock>,
     endpoint: String,
     server: tokio::task::JoinHandle<()>,
 }
@@ -168,7 +191,10 @@ impl RasterRig {
             },
             ledger.clone(),
         );
-        let base = HudSessionImpl::new(SceneGraph::new(800.0, 600.0), "");
+        let clock = Arc::new(tze_hud_scene::clock::TestClock::new(10_000));
+        let mut scene = SceneGraph::new_with_clock(800.0, 600.0, clock.clone());
+        scene.zone_registry = tze_hud_scene::ZoneRegistry::with_defaults();
+        let base = HudSessionImpl::new(scene, "");
         let shared = base.state.clone();
         shared.lock().await.resource_store = store.clone();
         let scene = shared.lock().await.scene.clone();
@@ -198,6 +224,7 @@ impl RasterRig {
             control,
             store,
             ledger,
+            clock,
             endpoint,
             server,
         }
@@ -600,4 +627,135 @@ async fn runtime_unpair_blocks_old_resident_raster_commit_across_repair() {
             }
         }
     }
+}
+
+#[tokio::test]
+async fn resident_raster_publish_admits_current_grants_before_enqueue_and_apply() {
+    let rig = RasterRig::new(8).await;
+    let key_a = rig.pair("raster-a");
+    let key_b = rig.pair("raster-b");
+    let mut a = Resident::connect(&rig.endpoint, "raster-a", &key_a).await;
+    let mut b = Resident::connect(&rig.endpoint, "raster-b", &key_b).await;
+    let pixels = [255, 0, 0, 255, 0, 255, 0, 255];
+    a.upload(&pixels, 1, 2, 1, true).await;
+    stored(a.next().await);
+    let charged = rig.ledger.snapshot();
+    let allocation = rig
+        .store
+        .validated_raster(&ResourceId::from_content(&pixels))
+        .unwrap();
+    let now = rig.control.scene.lock().await.now_wall_us();
+    for at in [0, now + 10_000] {
+        let denied = b.publish_image(&pixels, "ambient-background", at).await;
+        assert!(!denied.ok);
+        assert_eq!(denied.code, "INVALID_ARGUMENT");
+        assert!(denied.hint.contains("resource"));
+        let unknown = a.publish_image(&[7; 4], "ambient-background", at).await;
+        assert!(!unknown.ok);
+        assert_eq!(unknown.code, "INVALID_ARGUMENT");
+        let wrong_zone = a.publish_image(&pixels, "subtitle", at).await;
+        assert!(!wrong_zone.ok);
+        assert_eq!(wrong_zone.code, "CONTENT_REJECTED");
+    }
+    {
+        let scene = rig.control.scene.lock().await;
+        assert!(scene.zone_registry.active_publishes.is_empty());
+        assert!(scene.scheduled_publications.is_empty());
+    }
+    assert!(a.publish_image(&pixels, "ambient-background", 0).await.ok);
+    {
+        let scene = rig.control.scene.lock().await;
+        let record = &scene.zone_registry.active_for_zone("ambient-background")[0];
+        let source = record.resident_raster.as_ref().unwrap();
+        let (retained, width, height) = source.pixels_if_authorized().unwrap();
+        assert!(Arc::ptr_eq(&retained, &allocation.pixels));
+        assert_eq!((width, height), (2, 1));
+        let restored: tze_hud_scene::ZonePublishRecord =
+            serde_json::from_str(&serde_json::to_string(record).unwrap()).unwrap();
+        assert!(
+            restored.resident_raster.is_none(),
+            "serialized hashes confer no authority"
+        );
+    }
+    a.send(ClientPayload::Clear(session::Clear {
+        surface: "zone:ambient-background".into(),
+        ..Default::default()
+    }))
+    .await;
+    let ServerPayload::RequestResult(clear) = a.next().await else {
+        panic!("clear result")
+    };
+    assert!(clear.ok);
+    assert!(
+        rig.control
+            .scene
+            .lock()
+            .await
+            .zone_registry
+            .active_for_zone("ambient-background")
+            .is_empty()
+    );
+    assert_eq!(rig.ledger.snapshot(), charged);
+    assert!(
+        a.publish_image(&pixels, "ambient-background", now + 10_000)
+            .await
+            .ok
+    );
+    {
+        let mut scene = rig.control.scene.lock().await;
+        assert_eq!(scene.scheduled_publications.len(), 1);
+        rig.clock.advance_us(10_000);
+        let due = scene.apply_due_publications();
+        assert_eq!(due.len(), 1);
+        assert!(due[0].result.is_ok());
+        assert!(
+            scene.zone_registry.active_for_zone("ambient-background")[0]
+                .resident_raster
+                .as_ref()
+                .unwrap()
+                .is_authorized()
+        );
+    }
+    assert!(a.publish_image(&pixels, "pip", now + 20_000).await.ok);
+    // Explicit same-key Pair leaves the old stream observable, but revokes its
+    // accepted provenance before due application, without namespace Clear.
+    let record = rig.pairing.store.cached().agents["raster-a"].clone();
+    rig.pairing
+        .store
+        .apply(&tze_hud_config::agents_file::AgentChange::Pair {
+            agent: "raster-a".into(),
+            record,
+        })
+        .unwrap();
+    {
+        let mut scene = rig.control.scene.lock().await;
+        rig.clock.advance_us(10_000);
+        let due = scene.apply_due_publications();
+        assert_eq!(due.len(), 1);
+        assert!(due[0].result.is_err());
+        assert!(scene.zone_registry.active_for_zone("pip").is_empty());
+        assert!(
+            !scene.zone_registry.active_for_zone("ambient-background")[0]
+                .resident_raster
+                .as_ref()
+                .unwrap()
+                .is_authorized()
+        );
+    }
+    for at in [0, now + 30_000] {
+        let denied = a.publish_image(&pixels, "ambient-background", at).await;
+        assert!(!denied.ok);
+        assert_eq!(denied.code, "INVALID_ARGUMENT");
+    }
+    b.upload(&pixels, 1, 2, 1, true).await;
+    assert!(stored(b.next().await).was_deduplicated);
+    assert!(b.publish_image(&pixels, "ambient-background", 0).await.ok);
+    assert_eq!(rig.ledger.snapshot(), charged);
+    assert!(Arc::ptr_eq(
+        &allocation.pixels,
+        &rig.store
+            .validated_raster(&ResourceId::from_content(&pixels))
+            .unwrap()
+            .pixels
+    ));
 }

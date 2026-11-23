@@ -795,6 +795,7 @@ fn test_publication_ttl_ms_uses_expires_at_wall_us() {
     let record_warning = ZonePublishRecord {
         publication_id: SceneId::new(),
         lease_id: None,
+        resident_raster: None,
         publication_origin: None,
         caption: None,
         window_token: None,
@@ -832,6 +833,7 @@ fn test_publication_ttl_ms_uses_expires_at_wall_us() {
     let record_critical = ZonePublishRecord {
         publication_id: SceneId::new(),
         lease_id: None,
+        resident_raster: None,
         publication_origin: None,
         caption: None,
         window_token: None,
@@ -869,6 +871,7 @@ fn test_publication_ttl_ms_uses_expires_at_wall_us() {
     let record_both = ZonePublishRecord {
         publication_id: SceneId::new(),
         lease_id: None,
+        resident_raster: None,
         publication_origin: None,
         caption: None,
         window_token: None,
@@ -902,6 +905,7 @@ fn test_publication_ttl_ms_uses_expires_at_wall_us() {
     let record_info = ZonePublishRecord {
         publication_id: SceneId::new(),
         lease_id: None,
+        resident_raster: None,
         publication_origin: None,
         caption: None,
         window_token: None,

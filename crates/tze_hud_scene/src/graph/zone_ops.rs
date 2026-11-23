@@ -305,6 +305,7 @@ impl SceneGraph {
             None,
             true,
             None,
+            None,
         )
     }
 
@@ -324,6 +325,7 @@ impl SceneGraph {
         publication_origin: Option<SceneId>,
         urgency_default: bool,
         publication_id: Option<SceneId>,
+        resident_raster: Option<std::sync::Arc<ResidentRasterSource>>,
     ) -> Result<(), ValidationError> {
         self.publish_to_zone_with_timing(
             zone_name,
@@ -335,6 +337,7 @@ impl SceneGraph {
             lease_id,
             publication_origin,
             publication_id,
+            resident_raster,
             AdmissionTiming::Absolute {
                 expiry: expires_at_wall_us,
                 urgency_default,
@@ -355,6 +358,7 @@ impl SceneGraph {
         lease_id: Option<SceneId>,
         publication_origin: Option<SceneId>,
         publication_id: Option<SceneId>,
+        resident_raster: Option<std::sync::Arc<ResidentRasterSource>>,
         timing: AdmissionTiming<'_>,
     ) -> Result<(u64, Option<u64>), ValidationError> {
         // Check zone exists and content type is accepted
@@ -438,6 +442,7 @@ impl SceneGraph {
             breakpoints,
             lease_id,
             publication_origin: publication_origin.filter(|_| lease_id.is_none()),
+            resident_raster,
             caption: label.map(|label| label.caption.clone()),
             window_token: label.and_then(|label| label.window_token.clone()),
             display: None,
@@ -712,6 +717,7 @@ impl SceneGraph {
             Some(lease),
             None,
             publication_id,
+            None,
             AdmissionTiming::AfterMeasurement { ttl_us, measure },
         )
     }

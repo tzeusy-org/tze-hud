@@ -139,9 +139,12 @@ runs outside locks. Store capacity, one immutable decoded raster and the
 pairing's first grant commit under resource admission and the short live-pairing
 guard. Equal validated uploads share the retained allocation and CPU charge;
 digest-only reuse requires that pairing's matching grant. SVG/font behavior
-retains its existing path. This storage checkpoint does not yet connect admitted
-resident static-image publications to an isolated renderer source; that signed
-publication and pixel-proof work remains pending.
+retains its existing path. Resident static-image admission checks the live grant
+and static-image zone allowlist before immediate commit or future scheduling.
+Scheduled application rechecks the grant. Active and scheduled records retain
+the store's immutable pixel allocation and pairing as runtime-only provenance;
+serialized hashes convey no authority. Isolated rendering and the signed pixel
+proof remain pending.
 
 
 Network listeners bind loopback and local Tailscale-interface addresses

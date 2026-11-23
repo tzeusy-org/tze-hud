@@ -65,6 +65,7 @@ pub struct Publisher {
     pub namespace: String,
     pub lease_id: Option<SceneId>,
     pub origin: Option<SceneId>,
+    pub resident_raster: Option<std::sync::Arc<crate::types::ResidentRasterSource>>,
 }
 
 impl Publisher {
@@ -74,6 +75,7 @@ impl Publisher {
             namespace: namespace.into(),
             lease_id: None,
             origin: None,
+            resident_raster: None,
         }
     }
 }
@@ -97,18 +99,70 @@ impl SceneGraph {
         publication: &Publication,
         notification_id: Option<SceneId>,
     ) -> Result<(), ValidationError> {
+        if let Some(source) = &publisher.resident_raster {
+            self.validate_resident_raster(publication, source)?;
+            return source
+                .with_authorized(|| {
+                    self.publish_with_id_inner(id, publisher, publication, notification_id)
+                })
+                .unwrap_or_else(|| Err(Self::raster_unavailable()));
+        }
+        self.publish_with_id_inner(id, publisher, publication, notification_id)
+    }
+
+    fn publish_with_id_inner(
+        &mut self,
+        id: SceneId,
+        publisher: &Publisher,
+        publication: &Publication,
+        notification_id: Option<SceneId>,
+    ) -> Result<(), ValidationError> {
         if let Some(lease_id) = publisher.lease_id {
             self.check_publishing_lease(lease_id)?;
         }
-        self.apply_publication(
-            publication,
-            &publisher.namespace,
-            publisher.lease_id,
-            publisher.origin,
-            notification_id,
-        )?;
+        self.apply_publication(publication, publisher, notification_id)?;
         self.next_sequence_number();
         self.record_present_ack_batch(id);
+        Ok(())
+    }
+
+    pub(crate) fn raster_unavailable() -> ValidationError {
+        ValidationError::InvalidField {
+            field: "resource".into(),
+            reason:
+                "resource is unknown, unauthorized or unusable; upload matching raster bytes first"
+                    .into(),
+        }
+    }
+
+    pub(crate) fn validate_resident_raster(
+        &self,
+        publication: &Publication,
+        source: &crate::types::ResidentRasterSource,
+    ) -> Result<(), ValidationError> {
+        let Publication::Zone {
+            zone_name,
+            content: ZoneContent::StaticImage(id),
+            ..
+        } = publication
+        else {
+            return Err(Self::raster_unavailable());
+        };
+        if *id != source.resource_id() {
+            return Err(Self::raster_unavailable());
+        }
+        let zone = self
+            .zone_registry
+            .get_by_name(zone_name)
+            .ok_or_else(Self::raster_unavailable)?;
+        if !zone
+            .accepted_media_types
+            .contains(&crate::types::ZoneMediaType::StaticImage)
+        {
+            return Err(ValidationError::ZoneMediaTypeMismatch {
+                zone: zone_name.clone(),
+            });
+        }
         Ok(())
     }
 
@@ -137,11 +191,12 @@ impl SceneGraph {
     pub(crate) fn apply_publication(
         &mut self,
         publication: &Publication,
-        namespace: &str,
-        lease_id: Option<SceneId>,
-        origin: Option<SceneId>,
+        publisher: &Publisher,
         notification_id: Option<SceneId>,
     ) -> Result<(), ValidationError> {
+        let namespace = &publisher.namespace;
+        let lease_id = publisher.lease_id;
+        let origin = publisher.origin;
         match publication {
             Publication::Zone {
                 zone_name,
@@ -169,6 +224,7 @@ impl SceneGraph {
                     origin,
                     !*held,
                     notification_id,
+                    publisher.resident_raster.clone(),
                 )
             }
             Publication::Widget {

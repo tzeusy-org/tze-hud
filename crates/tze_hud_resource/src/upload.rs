@@ -212,6 +212,12 @@ impl ResourceStore {
 
     // ─── Handle upload start ─────────────────────────────────────────────────
 
+    /// Read-only shared allocation; only admitted resident provenance may pass
+    /// this into the compositor. A digest lookup by itself grants no access.
+    pub fn validated_raster(&self, id: &ResourceId) -> Option<Arc<ValidatedRaster>> {
+        self.dedup.get(id)?.raster.clone()
+    }
+
     /// Canonical dimensions only for a matching retained raster type. Legacy
     /// font/SVG collisions must never borrow raster metadata.
     pub fn raster_dimensions(&self, id: &ResourceId, kind: ResourceType) -> Option<(u32, u32)> {
