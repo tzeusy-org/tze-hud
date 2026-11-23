@@ -751,9 +751,6 @@ async fn test_texture_upload_p99_within_budget() {
         let mut scene = state.scene.lock().await;
         let tab = scene.active_tab.expect("active tab");
         let lease = scene.grant_lease("upload-test", 60_000);
-        if let Some(l) = scene.leases.get_mut(&lease) {
-            l.resource_budget.max_tiles = 4;
-        }
         (tab, lease)
     };
 
@@ -898,9 +895,6 @@ async fn test_stage6_render_encode_p99_within_budget() {
         let mut scene = state.scene.lock().await;
         let tab = scene.create_tab("BenchTab", 0).unwrap();
         let lease = scene.grant_lease("bench-agent", 120_000);
-        if let Some(l) = scene.leases.get_mut(&lease) {
-            l.resource_budget.max_tiles = (TEXT_TILE_COUNT + 2) as u32;
-        }
 
         for i in 0..TEXT_TILE_COUNT {
             // Lay tiles in a grid across the 800×600 surface.

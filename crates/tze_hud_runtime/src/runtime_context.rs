@@ -244,26 +244,11 @@ impl RuntimeContext {
     pub fn resident_accounting_snapshot(&self) -> serde_json::Value {
         let limits = self.resident_ledger.limits();
         let usage = self.resident_ledger.snapshot();
-        let fallback = self.resource_budget();
         serde_json::json!({
             "profile": self.operational_envelope.profile_name,
             "admission": {
                 "max_resident_sessions": self.operational_envelope.max_resident_sessions,
                 "max_guest_sessions": DEFAULT_MAX_GUEST_SESSIONS,
-                "max_leased_tiles": self.operational_envelope.max_leased_tiles,
-                "max_agent_leased_texture_bytes": self.operational_envelope.max_agent_leased_texture_bytes,
-                "max_agent_update_hz": self.operational_envelope.max_agent_update_hz,
-                "fallback_session": {
-                    "max_tiles": fallback.max_tiles,
-                    "max_nodes_per_tile": fallback.max_nodes_per_tile,
-                    "max_texture_bytes": fallback.max_texture_bytes,
-                    "max_update_rate_hz": fallback.max_update_rate_hz,
-                },
-                "absolute_hard_max": {
-                    "tiles": HARD_MAX_TILES,
-                    "texture_bytes": HARD_MAX_TEXTURE_BYTES,
-                    "update_rate_hz": HARD_MAX_UPDATE_RATE_HZ,
-                },
             },
             "limits": {
                 "aggregate_bytes": limits.aggregate_bytes,
@@ -295,7 +280,6 @@ impl RuntimeContext {
             },
             "consumers": {
                 "session_admission": ["HudSessionImpl", "RuntimeMutationBudgetEnforcer"],
-                "lease_defaults": ["SceneGraph::try_grant_lease_for_session_with_budget"],
                 "resource": ["ResourceStore", "Compositor::image_bytes", "Compositor::image_texture_cache"],
                 "widget_source": ["WidgetAssetRegistry(MCP metadata-only)", "WidgetRenderer::svgs"],
                 "widget_raster": ["WidgetRenderer::textures"],
@@ -431,8 +415,9 @@ mod tests {
         let snapshot = ctx.resident_accounting_snapshot();
         assert_eq!(snapshot["limits"]["aggregate_bytes"], 512 * 1024 * 1024_u64);
         assert_eq!(snapshot["usage"]["allocation_count"], 0);
-        assert_eq!(snapshot["admission"]["max_resident_sessions"], 8);
-        assert_eq!(snapshot["admission"]["max_leased_tiles"], 256);
+        let admission = &snapshot["admission"];
+        assert_eq!(admission["max_resident_sessions"], 8);
+        assert_eq!(admission["max_guest_sessions"], DEFAULT_MAX_GUEST_SESSIONS);
         assert_eq!(snapshot["counters"]["class_denials"], 0);
         assert!(snapshot["accounted_byte_rules"]["measurement_scope"].is_string());
         assert!(snapshot["consumers"]["resource"].is_array());

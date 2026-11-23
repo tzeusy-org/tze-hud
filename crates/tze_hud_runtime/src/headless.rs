@@ -734,8 +734,7 @@ impl HeadlessRuntime {
 mod tests {
     use super::*;
     use tze_hud_scene::types::{
-        FontFamily, Node, NodeData, Rect, ResourceBudget, Rgba, SceneId, TextAlign,
-        TextMarkdownNode, TextOverflow,
+        FontFamily, Node, NodeData, Rect, Rgba, SceneId, TextAlign, TextMarkdownNode, TextOverflow,
     };
 
     #[tokio::test]
@@ -854,17 +853,7 @@ mod tests {
             drop(shared_state);
             let mut scene = scene_arc.lock().await;
             let tab_id = scene.create_tab("Canonical", 0).expect("tab creation");
-            let lease_id = scene
-                .try_grant_lease_for_session_with_budget(
-                    "change-efficiency-agent",
-                    SceneId::nil(),
-                    60_000,
-                    ResourceBudget {
-                        max_tiles: 50,
-                        ..ResourceBudget::default()
-                    },
-                )
-                .expect("canonical lease creation");
+            let lease_id = scene.grant_lease("change-efficiency-agent", 60_000);
             let mut changed = None;
             let mut tile_nodes = Vec::with_capacity(50);
             for row in 0..5 {
