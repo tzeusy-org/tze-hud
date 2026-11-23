@@ -25,18 +25,18 @@ use tze_hud_scene::SceneId;
 
 /// Snapshot of the current capture state for a single pointer device.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct CaptureState {
+pub(super) struct CaptureState {
     /// The tile whose node holds capture.
-    pub tile_id: SceneId,
+    pub(super) tile_id: SceneId,
     /// The node that holds capture.
-    pub node_id: SceneId,
+    pub(super) node_id: SceneId,
     /// Whether capture is released automatically on PointerUpEvent.
-    pub release_on_up: bool,
+    pub(super) release_on_up: bool,
 }
 
 /// Error returned when an `acquire()` attempt is denied.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CaptureError {
+pub(super) enum CaptureError {
     /// Another node already holds capture for this device.
     AlreadyCaptured,
 }
@@ -60,13 +60,13 @@ impl std::error::Error for CaptureError {}
 /// any time.  This struct is owned by [`crate::InputProcessor`] and operated
 /// only through the processor's public API — do not modify the map directly.
 #[derive(Debug, Default)]
-pub struct PointerCaptureManager {
+pub(super) struct PointerCaptureManager {
     captures: HashMap<u32, CaptureState>,
 }
 
 impl PointerCaptureManager {
     /// Create a new, empty capture manager.
-    pub fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {
             captures: HashMap::new(),
         }
@@ -79,7 +79,7 @@ impl PointerCaptureManager {
     ///
     /// Returns [`CaptureError::AlreadyCaptured`] if `device_id` already has an
     /// active capture entry (regardless of which node holds it).
-    pub fn acquire(
+    pub(super) fn acquire(
         &mut self,
         device_id: u32,
         tile_id: SceneId,
@@ -102,23 +102,25 @@ impl PointerCaptureManager {
 
     /// Return the current capture state for `device_id`, or `None` if no
     /// capture is active.
-    pub fn get(&self, device_id: u32) -> Option<&CaptureState> {
+    pub(super) fn get(&self, device_id: u32) -> Option<&CaptureState> {
         self.captures.get(&device_id)
     }
 
     /// Release capture for `device_id`.  Idempotent — safe to call even if no
     /// capture is active.
-    pub fn release(&mut self, device_id: u32) {
+    pub(super) fn release(&mut self, device_id: u32) {
         self.captures.remove(&device_id);
     }
 
     /// Return `true` if `device_id` has an active capture.
-    pub fn is_captured(&self, device_id: u32) -> bool {
+    #[cfg(test)]
+    pub(super) fn is_captured(&self, device_id: u32) -> bool {
         self.captures.contains_key(&device_id)
     }
 
     /// Number of active captures across all devices.
-    pub fn active_count(&self) -> usize {
+    #[cfg(test)]
+    pub(super) fn active_count(&self) -> usize {
         self.captures.len()
     }
 }

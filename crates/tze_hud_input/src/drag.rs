@@ -36,17 +36,17 @@ use std::time::{Duration, Instant};
 use tze_hud_scene::{DragHandleElementKind, ElementStore, ElementType, GeometryPolicy, SceneId};
 
 /// Stored pointer/mouse hold duration; immediate activation bypasses it.
-pub const LONG_PRESS_POINTER_THRESHOLD_MS: u64 = 250;
+pub(super) const LONG_PRESS_POINTER_THRESHOLD_MS: u64 = 250;
 /// Activation hold duration for touch drag handles.
-pub const LONG_PRESS_TOUCH_THRESHOLD_MS: u64 = 1000;
+pub(super) const LONG_PRESS_TOUCH_THRESHOLD_MS: u64 = 1000;
 
 /// Movement tolerance before long-press is cancelled (density-independent pixels).
 ///
 /// and issue scope: 10dp movement tolerance.
-pub const LONG_PRESS_MOVEMENT_TOLERANCE_DP: f32 = 10.0;
+const LONG_PRESS_MOVEMENT_TOLERANCE_DP: f32 = 10.0;
 
 /// Default snap grid as a fraction of the display dimension (2% = 0.02).
-pub const DEFAULT_SNAP_GRID_PCT: f32 = 0.02;
+const DEFAULT_SNAP_GRID_PCT: f32 = 0.02;
 
 /// Z-order boost applied to the dragged element during active drag.
 ///
@@ -73,7 +73,7 @@ pub enum DragPhase {
 ///
 /// The `snap_grid_pct` is expressed as a fraction of the display dimension
 /// (e.g., 0.02 = 2% → positions snap to 2% increments of the display width
-/// and height respectively). Default is [`DEFAULT_SNAP_GRID_PCT`].
+/// and height respectively). The default is 2%.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DragConfig {
     /// Snap grid granularity as a fraction of the display dimension.
@@ -213,7 +213,8 @@ impl DeviceDragState {
     }
 
     /// Whether the activation threshold has been met.
-    pub fn is_threshold_met(&self) -> bool {
+    #[cfg(test)]
+    fn is_threshold_met(&self) -> bool {
         self.is_threshold_met_at(Instant::now())
     }
 
@@ -226,7 +227,7 @@ impl DeviceDragState {
     ///
     /// Returns `true` if the Euclidean distance from `press_x/y` to `(x, y)`
     /// exceeds [`LONG_PRESS_MOVEMENT_TOLERANCE_DP`].
-    pub fn has_exceeded_movement_tolerance(&self, x: f32, y: f32) -> bool {
+    pub(super) fn has_exceeded_movement_tolerance(&self, x: f32, y: f32) -> bool {
         let dx = x - self.press_x;
         let dy = y - self.press_y;
         (dx * dx + dy * dy).sqrt() > LONG_PRESS_MOVEMENT_TOLERANCE_DP
@@ -299,7 +300,7 @@ pub fn clamp_to_display(
 /// Apply snap-grid quantisation and boundary clamping to a new element position.
 ///
 /// Returns the final `(x, y)` that should be used for the element.
-pub fn quantise_and_clamp(
+pub(super) fn quantise_and_clamp(
     raw_x: f32,
     raw_y: f32,
     width: f32,

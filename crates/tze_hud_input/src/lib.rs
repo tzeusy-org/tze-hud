@@ -25,7 +25,7 @@
 //!
 //! ## Pointer Capture
 //!
-//! The [`capture`] module implements pointer capture semantics:
+//! The input processor manages pointer capture:
 //! - Only one node holds capture globally at a time, per device.
 //! - Capture can be explicit (CaptureRequest) or automatic (auto_capture=true).
 //! - While captured, all events from the captured device route to the owning
@@ -34,7 +34,7 @@
 //!   (when release_on_up=true), or runtime theft (Alt+Tab, lease revocation,
 //!   tab switch).
 
-pub mod capture;
+mod capture;
 pub mod events;
 pub mod local_feedback;
 pub mod pointer;
@@ -102,9 +102,8 @@ use tze_hud_scene::graph::SceneGraph;
 use tze_hud_scene::{ElementStore, ElementType, HitResult, NodeData, SceneId, ZoneInteractionKind};
 
 pub use drag::{
-    DEFAULT_SNAP_GRID_PCT, DRAG_OPACITY_BOOST, DRAG_Z_ORDER_BOOST, DeviceDragState, DragConfig,
-    DragEventOutcome, DragPhase, LONG_PRESS_MOVEMENT_TOLERANCE_DP, LONG_PRESS_POINTER_THRESHOLD_MS,
-    LONG_PRESS_TOUCH_THRESHOLD_MS,
+    DRAG_OPACITY_BOOST, DRAG_Z_ORDER_BOOST, DeviceDragState, DragConfig, DragEventOutcome,
+    DragPhase,
 };
 pub use tze_hud_scene::DragHandleElementKind;
 
@@ -306,7 +305,7 @@ pub struct InputProcessor {
     /// Rollback animation tracker (agent-rejection-triggered).
     rollback_tracker: RollbackTracker,
     /// Pointer capture manager.
-    pub capture: capture::PointerCaptureManager,
+    capture: capture::PointerCaptureManager,
     /// Local-first tile scroll state.
     scroll_state: ScrollState,
     portal_input_scroll_state: ScrollState,
