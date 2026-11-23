@@ -4,7 +4,9 @@
 //! agent. Points outside the panel pass through to the desktop. Opening takes
 //! keyboard focus and closing hands it back to the window that had it.
 
-use tze_hud_compositor::PanelHitTarget;
+use std::num::NonZeroU64;
+
+use tze_hud_compositor::{DisplayRect, PanelHitTarget};
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{Key, KeyCode, ModifiersState, NamedKey, PhysicalKey};
 
@@ -17,10 +19,10 @@ use crate::shell::control_panel::{ControlPanelHandle, PanelEvent, PanelKey};
 /// Main-thread bookkeeping for the open panel.
 #[derive(Default)]
 pub(super) struct PanelInputState {
-    /// The panel was open at the last focus sync (open/close edge detection).
-    was_open: bool,
-    /// Target under the left press; a release on the same target clicks.
-    pressed: Option<PanelHitTarget>,
+    /// The opening observed at the last focus sync, if any.
+    visit: Option<NonZeroU64>,
+    /// A matching release clicks only during the visit that handled the press.
+    pressed: Option<(NonZeroU64, PanelHitTarget)>,
     /// Right, middle or other buttons that went down over the panel: each
     /// one's release is the panel's too, wherever it lands.
     other_pressed: Vec<winit::event::MouseButton>,
@@ -111,14 +113,19 @@ impl WinitApp {
 
     /// The display and native window that own the open panel. A missing
     /// overlay falls back to the primary, like other local chrome.
-    fn panel_target(&self) -> Option<(Option<usize>, Option<tze_hud_compositor::DisplayRect>)> {
-        let location = self.open_panel()?.location()?;
+    fn panel_target(&self) -> Option<(NonZeroU64, Option<usize>, Option<DisplayRect>)> {
+        let (visit, location) = self.open_panel()?.opening()?;
+        let (window, display) = self.panel_display_target(location.display.as_deref());
+        Some((visit, window, display))
+    }
+
+    fn panel_display_target(&self, name: Option<&str>) -> (Option<usize>, Option<DisplayRect>) {
         let layout = self
             .state
             .placement_layout
             .lock()
             .unwrap_or_else(|e| e.into_inner());
-        if let Some(name) = location.display
+        if let Some(name) = name
             && let Some((index, display)) = layout
                 .displays()
                 .iter()
@@ -126,25 +133,25 @@ impl WinitApp {
                 .enumerate()
                 .find(|(_, display)| display.name == name)
         {
-            return Some((Some(index), Some(display.clone())));
+            return (Some(index), Some(display.clone()));
         }
-        Some((
+        (
             None,
             layout
                 .displays()
                 .iter()
                 .find(|display| display.primary)
                 .cloned(),
-        ))
+        )
     }
 
     pub(super) fn panel_display_name(&self) -> Option<String> {
-        self.panel_target()?.1.map(|display| display.name)
+        self.panel_target()?.2.map(|display| display.name)
     }
 
     pub(super) fn panel_targets_window(&self, secondary: Option<usize>) -> bool {
         self.panel_target()
-            .is_some_and(|(window, _)| window == secondary)
+            .is_some_and(|(_, window, _)| window == secondary)
     }
 
     /// Route a key event to the open panel. Returns true when the panel owns
@@ -212,20 +219,30 @@ impl WinitApp {
     }
 
     fn panel_hit(&self, secondary: Option<usize>) -> Option<PanelHitTarget> {
-        let (window, display) = self.panel_target()?;
+        self.panel_hit_for_visit(secondary)
+            .map(|(_, target)| target)
+    }
+
+    fn panel_hit_for_visit(
+        &self,
+        secondary: Option<usize>,
+    ) -> Option<(NonZeroU64, PanelHitTarget)> {
+        let (visit, window, display) = self.panel_target()?;
         if window != secondary {
             return None;
         }
-        self.panel_hit_on_display(display)
+        self.panel_hit_on_display(visit, display)
+            .map(|hit| (visit, hit))
     }
 
     fn panel_hit_on_display(
         &self,
-        display: Option<tze_hud_compositor::DisplayRect>,
+        visit: NonZeroU64,
+        display: Option<DisplayRect>,
     ) -> Option<PanelHitTarget> {
         let (x, y) = display.map_or((0.0, 0.0), |display| (display.rect.x, display.rect.y));
         self.open_panel()?
-            .hit(self.state.cursor_x - x, self.state.cursor_y - y)
+            .hit_for_visit(visit, self.state.cursor_x - x, self.state.cursor_y - y)
     }
 
     /// Pointer moved to the current cursor position. Returns true when it is
@@ -246,32 +263,34 @@ impl WinitApp {
 
     /// Left button edge. Returns true when the panel owns it.
     pub(super) fn panel_left_button(&mut self, pressed: bool, secondary: Option<usize>) -> bool {
-        let Some(panel) = self.open_panel().cloned() else {
-            return false;
-        };
-        let hit = self.panel_hit(secondary);
+        let hit = self.panel_hit_for_visit(secondary);
         if pressed {
-            if hit.is_none() {
+            self.state.panel_input.pressed = hit;
+            let Some((_, target)) = self.state.panel_input.pressed.as_ref() else {
                 return false;
-            }
+            };
             // Ordinary panel buttons retain the external app's focus. A text
             // field/search click can retry focus refused on panel opening.
             if let Some(window) = self.panel_window(secondary)
                 && !window_is_foreground(window)
-                && hit.as_ref().is_some_and(|hit| panel.accepts_text(hit))
+                && self
+                    .open_panel()
+                    .is_some_and(|panel| panel.accepts_text(target))
             {
                 focus_window_for_text_input(window);
             }
-            self.state.panel_input.pressed = hit;
             return true;
         }
-        // A release whose press went to the scene (a drag that ended over
-        // the panel) belongs to the scene.
-        let Some(pressed) = self.state.panel_input.pressed.take() else {
+        // The panel owns the release of its press even if that visit ended.
+        let Some((visit, target)) = self.state.panel_input.pressed.take() else {
             return false;
         };
-        if hit.as_ref() == Some(&pressed) {
-            panel.send(PanelEvent::Click(pressed));
+        if let Some((hit_visit, hit_target)) = hit
+            && hit_visit == visit
+            && hit_target == target
+            && let Some(panel) = self.open_panel()
+        {
+            panel.send_for_visit(visit, PanelEvent::Click(target));
         }
         true
     }
@@ -320,7 +339,8 @@ impl WinitApp {
     /// The panel target under the cursor, if any.
     fn panel_hit_at_cursor(&self) -> Option<PanelHitTarget> {
         // Both winit and raw click-through motion use scene coordinates.
-        self.panel_hit_on_display(self.panel_target()?.1)
+        let (visit, _, display) = self.panel_target()?;
+        self.panel_hit_on_display(visit, display)
     }
 
     fn panel_window(&self, secondary: Option<usize>) -> Option<&winit::window::Window> {
@@ -351,37 +371,48 @@ impl WinitApp {
         )
     }
 
-    /// On the open/close edge: take keyboard focus when the panel opens and
-    /// hand it back when it closes. Runs every `about_to_wait`; idle cost is
-    /// one atomic load. (Pointer capture follows new panel geometry through
-    /// the main-loop wake in `set_geometry` and the hit-test refresh every
-    /// full turn runs.)
+    /// Synchronize the latest opening even if a close and reopen landed in
+    /// the same winit turn. An unchanged visit costs one atomic load.
     pub(super) fn sync_panel_focus(&mut self) {
-        let open = self.open_panel().is_some();
-        if open == self.state.panel_input.was_open {
+        let panel = self.state.control_panel.as_ref();
+        let observed = self.state.panel_input.visit;
+        let latest = panel.and_then(ControlPanelHandle::open_visit);
+        if latest == observed {
             return;
         }
-        self.state.panel_input.was_open = open;
-        self.state.panel_input.pressed = None;
+        let opening = latest.and_then(|_| panel.and_then(ControlPanelHandle::opening));
+        let visit = opening.as_ref().map(|(visit, _)| *visit);
+        if visit == observed {
+            return;
+        }
+        self.state.panel_input.visit = visit;
         self.state.panel_input.hovered = None;
-        if open {
+        if let Some((visit, location)) = opening {
             self.state.answer_keyboard.focus = None;
             self.state.input_processor.chrome_feedback_cancel_pending = true;
-            let secondary = self.panel_target().and_then(|(index, _)| index);
+            let secondary = self.panel_display_target(location.display.as_deref()).0;
             self.state.keyboard_window = secondary;
+            // A coalesced reopen keeps the outer origin if HUD already has
+            // focus. If an external app is in front now, the focus take
+            // records it. Tray visits carry the origin from click time.
+            let tray_origin = location
+                .tray
+                .map(|tray| super::lifecycle::tray_focus_return(tray.origin));
             let focused = self.panel_window(secondary).is_none_or(|window| {
                 focus_window_for_text_input(window);
                 window_is_foreground(window)
             });
-            if let Some(visit) = self.open_panel().and_then(|panel| panel.location()?.tray) {
-                super::lifecycle::redirect_focus_return(visit.origin);
+            if let Some(origin) = tray_origin {
+                super::lifecycle::redirect_focus_return(origin);
             }
             if !focused {
                 tracing::warn!(
                     "control panel: Windows refused keyboard focus; click the panel to type"
                 );
             }
-            self.panel_window_focus(focused);
+            if let Some(panel) = self.open_panel() {
+                panel.send_for_visit(visit, PanelEvent::WindowFocus(focused));
+            }
         } else if self.state.answer_keyboard.focus.is_none()
             && self.state.answer_keyboard.return_key.is_none()
         {
@@ -1135,7 +1166,7 @@ pub(super) mod panel_task_tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn panel_owns_its_opening_monitor_until_close() {
         use crate::question_placement::{DisplayProbe, Foreground, NotificationState};
-        use crate::shell::control_panel::{TrayCommand, TrayVisit};
+        use crate::shell::control_panel::{TrayCommand, TrayFocusOrigin, TrayVisit};
         use crate::windowed::WinitApp;
         use tze_hud_compositor::{DisplayLayout, DisplayRect, estimate_control_panel_geometry};
         use tze_hud_scene::Rect;
@@ -1219,7 +1250,7 @@ pub(super) mod panel_task_tests {
             .find(|hit| hit.target == PanelHitTarget::Search)
             .unwrap()
             .rect;
-        panel.set_geometry(1, || geometry);
+        panel.set_geometry(panel.open_visit().unwrap(), 1, || geometry);
         app.state.cursor_x = secondary.x + search.x + search.w * 0.5;
         app.state.cursor_y = secondary.y + search.y + search.h * 0.5;
         assert_eq!(app.panel_hit(Some(0)), Some(PanelHitTarget::Search));
@@ -1248,7 +1279,7 @@ pub(super) mod panel_task_tests {
             true,
         ));
         wait("panel closed", || !panel.is_open()).await;
-        app.sync_panel_focus();
+        // The task can publish the next opening before winit observes close.
         app.push_focus_ring_owner();
         assert_eq!(app.state.surface_ui.lock().unwrap().panel_display, None);
 
@@ -1266,7 +1297,7 @@ pub(super) mod panel_task_tests {
         *probe.0.lock().unwrap() = "DISPLAY3";
         let visit = TrayVisit {
             display: Some("DISPLAY1".into()),
-            origin: Some(11),
+            origin: TrayFocusOrigin::Replace(Some(11)),
         };
         for command in [
             TrayCommand::TogglePanel,
@@ -1277,7 +1308,7 @@ pub(super) mod panel_task_tests {
             wait("tray opens on its click monitor", || panel.is_open()).await;
             app.sync_panel_focus();
             assert_eq!(app.panel_display_name().as_deref(), Some("DISPLAY1"));
-            assert_eq!(panel.location().unwrap().tray, Some(visit.clone()));
+            assert_eq!(panel.opening().unwrap().1.tray, Some(visit.clone()));
             panel.send(PanelEvent::Key(PanelKey::Escape));
             wait("tray-opened panel closed", || !panel.is_open()).await;
             app.sync_panel_focus();
@@ -1286,6 +1317,82 @@ pub(super) mod panel_task_tests {
             probe.1.load(Ordering::Relaxed),
             4,
             "tray never reads foreground"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn coalesced_panel_reopen_restores_identical_hit_geometry() {
+        use crate::windowed::WinitApp;
+        use tze_hud_compositor::PanelPart;
+
+        let f = fixture();
+        let panel = f.panel;
+        let mut app = WinitApp { state: f.state };
+        app.state.control_panel = Some(panel.clone());
+        panel.send(PanelEvent::Chord(ChordRole::Panel));
+        wait("panel opens", || panel.is_open()).await;
+        app.sync_panel_focus();
+
+        let mut seen = 0;
+        let first = panel.model_if_changed(&mut seen).unwrap().unwrap();
+        let geometry = tze_hud_compositor::estimate_control_panel_geometry(
+            &Default::default(),
+            &first.model,
+            1280.0,
+            720.0,
+        );
+        let tile = first
+            .model
+            .tiles
+            .iter()
+            .position(|tile| tile.id == "visibility.hide_all")
+            .unwrap();
+        let target = PanelHitTarget::Tile(tile, PanelPart::Body);
+        let rect = geometry
+            .hits
+            .iter()
+            .find(|hit| hit.target == target)
+            .unwrap()
+            .rect;
+        let point = (rect.x + rect.w * 0.5, rect.y + rect.h * 0.5);
+        (app.state.cursor_x, app.state.cursor_y) = point;
+        panel.set_geometry(first.visit, 1, || geometry.clone());
+        assert_eq!(panel.hit(point.0, point.1), Some(target.clone()));
+        assert!(app.panel_left_button(true, None));
+
+        panel.send(PanelEvent::Key(PanelKey::Escape));
+        wait("panel closes", || !panel.is_open()).await;
+        panel.send(PanelEvent::Chord(ChordRole::Panel));
+        wait("panel reopens", || panel.is_open()).await;
+        let second = panel.model_if_changed(&mut seen).unwrap().unwrap();
+        assert_ne!(first.visit, second.visit);
+        assert_eq!(first.model, second.model);
+        assert_eq!(first.display, second.display);
+
+        panel.set_geometry(first.visit, 2, || panic!("stale geometry rebuilt"));
+        assert_eq!(panel.hit(point.0, point.1), None);
+        panel.set_geometry(second.visit, 1, || geometry);
+        assert_eq!(panel.hit(point.0, point.1), Some(target.clone()));
+
+        assert!(
+            app.panel_left_button(false, None),
+            "old press owns its release"
+        );
+        app.sync_panel_focus();
+        assert_eq!(app.state.panel_input.visit, Some(second.visit));
+        panel.send_for_visit(first.visit, PanelEvent::Click(target));
+        panel.send_for_visit(second.visit, PanelEvent::Text("current visit".into()));
+        wait("current visit handles input", || {
+            panel.current_model().unwrap().query == "current visit"
+        })
+        .await;
+        let scene = Arc::clone(&app.state.shared_state.lock().await.scene);
+        assert_eq!(scene.lock().await.owner_hidden(), Default::default());
+
+        // Ordinary model publication does not start a new visit.
+        assert_eq!(
+            panel.model_if_changed(&mut seen).unwrap().unwrap().visit,
+            second.visit
         );
     }
 
@@ -1990,7 +2097,7 @@ pub(super) mod panel_task_tests {
             1920.0,
             1080.0,
         );
-        panel.set_geometry(1, || geometry.clone());
+        panel.set_geometry(panel.open_visit().unwrap(), 1, || geometry.clone());
         let tile = geometry
             .hits
             .iter()

@@ -36,7 +36,9 @@ use super::{
     TrayClick, WindowFacts,
 };
 use crate::question_placement::Win32Probe;
-use crate::shell::control_panel::{ControlPanelHandle, PanelEvent, TrayCommand, TrayVisit};
+use crate::shell::control_panel::{
+    ControlPanelHandle, PanelEvent, TrayCommand, TrayFocusOrigin, TrayVisit,
+};
 
 const ICON_ID: u32 = 1;
 const NIN_KEYSELECT: u32 = NIN_SELECT | 1;
@@ -475,6 +477,7 @@ impl Host {
 
     /// Left click or Win+B Enter: answer while a click would, else the panel.
     fn click(&self, position: WPARAM) {
+        let origin = sample_tray_origin();
         // VERSION_4 supplies the activation point, including the icon's
         // anchor when activated by keyboard.
         let point = POINT {
@@ -490,12 +493,13 @@ impl Host {
             command,
             TrayVisit {
                 display: Win32Probe::display_at(point),
-                origin: app_window_in_front(),
+                origin,
             },
         );
     }
 
     fn menu(&self) {
+        let origin = sample_tray_origin();
         let view = self.view();
         // VERSION_4 does not specify a WM_CONTEXTMENU anchor in wParam.
         // Capture the pointer at invocation, before the native menu takes
@@ -506,7 +510,7 @@ impl Host {
             display: unsafe { GetCursorPos(&mut point) }
                 .ok()
                 .and_then(|()| Win32Probe::display_at(point)),
-            origin: app_window_in_front(),
+            origin,
         };
         let menu = match unsafe { CreatePopupMenu() } {
             Ok(menu) => Menu(menu),
@@ -682,6 +686,31 @@ fn icon(svg: &str, size: i32) -> Result<Icon, String> {
         let _ = DeleteObject(color);
         result
     }
+}
+
+/// Capture real focus before a menu or an overlay gets a chance to take it.
+fn sample_tray_origin() -> TrayFocusOrigin {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetClassNameW, GetForegroundWindow, GetWindowThreadProcessId,
+    };
+
+    // SAFETY: the HWND is only queried, and the out-parameters are local.
+    let foreground = unsafe {
+        let window = GetForegroundWindow();
+        (!window.is_invalid()).then(|| {
+            let mut pid = 0;
+            GetWindowThreadProcessId(window, Some(&mut pid));
+            let mut class = [0u16; 64];
+            let len = GetClassNameW(window, &mut class).max(0) as usize;
+            WindowFacts {
+                hwnd: window.0 as isize,
+                hud: pid == std::process::id(),
+                class: String::from_utf16_lossy(&class[..len]),
+                ..Default::default()
+            }
+        })
+    };
+    super::tray_focus_origin(foreground, app_window_in_front)
 }
 
 /// One look, top to bottom in z-order, for the app window behind the tray.

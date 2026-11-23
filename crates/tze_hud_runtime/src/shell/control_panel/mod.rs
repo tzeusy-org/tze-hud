@@ -46,6 +46,7 @@ mod search;
 mod sections;
 mod state;
 
+use std::num::NonZeroU64;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 
@@ -92,7 +93,17 @@ pub(crate) type AnswerHook = Arc<dyn Fn(TrayVisit) + Send + Sync>;
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct TrayVisit {
     pub display: Option<String>,
-    pub origin: Option<isize>,
+    pub origin: TrayFocusOrigin,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum TrayFocusOrigin {
+    /// The tray was invoked during an existing HUD focus visit.
+    #[default]
+    Preserve,
+    /// The pre-tray external window, if available.
+    #[cfg(any(target_os = "windows", test))]
+    Replace(Option<isize>),
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -167,13 +178,13 @@ struct Shared {
     /// The notice the compositor draws while the panel is closed, versioned
     /// like `model`.
     closed_notice: RwLock<(u64, Option<PanelNotice>)>,
-    open: AtomicBool,
-    /// The geometry the compositor last drew, with its layout generation.
-    geometry: RwLock<Option<(u64, ControlPanelGeometry)>>,
-    geometry_generation: AtomicU64,
+    /// The model generation of the current opening, or zero when closed.
+    visit: AtomicU64,
+    /// The geometry the compositor last drew, scoped to the opening it used.
+    geometry: RwLock<Option<PublishedGeometry>>,
     /// The panel waits for new geometry to scroll a row into view.
     wants_geometry: AtomicBool,
-    events: mpsc::UnboundedSender<PanelEvent>,
+    events: mpsc::UnboundedSender<(Option<NonZeroU64>, PanelEvent)>,
     clipboard_sequence: AtomicU64,
     #[cfg(any(target_os = "windows", test, feature = "test-harness"))]
     quit: RwLock<Option<crate::operator::handoff::Quit>>,
@@ -196,6 +207,18 @@ struct PublishedModel {
     model: Option<ControlPanelModel>,
     fields: std::collections::HashSet<String>,
     location: Option<PanelLocation>,
+}
+
+pub(crate) struct PanelFrameModel {
+    pub visit: NonZeroU64,
+    pub model: ControlPanelModel,
+    pub display: Option<String>,
+}
+
+struct PublishedGeometry {
+    visit: NonZeroU64,
+    generation: u64,
+    geometry: ControlPanelGeometry,
 }
 
 /// Cheap, cloneable access to the panel from every thread.
@@ -242,7 +265,11 @@ impl ControlPanelHandle {
 
     /// Queue an event for the panel task; false once the task has stopped.
     pub(crate) fn send(&self, event: PanelEvent) -> bool {
-        self.shared.events.send(event).is_ok()
+        self.shared.events.send((None, event)).is_ok()
+    }
+
+    pub(crate) fn send_for_visit(&self, visit: NonZeroU64, event: PanelEvent) -> bool {
+        self.shared.events.send((Some(visit), event)).is_ok()
     }
 
     /// How many background edits have queued their outcome.
@@ -252,36 +279,43 @@ impl ControlPanelHandle {
     }
 
     pub(crate) fn is_open(&self) -> bool {
-        self.shared.open.load(Ordering::Acquire)
+        self.open_visit().is_some()
+    }
+
+    pub(crate) fn open_visit(&self) -> Option<NonZeroU64> {
+        NonZeroU64::new(self.shared.visit.load(Ordering::Acquire))
     }
 
     /// For the compositor thread: the model when it changed since `seen`
     /// (updating `seen`), else `None`.
-    pub(crate) fn model_if_changed(
-        &self,
-        seen: &mut u64,
-    ) -> Option<Option<(ControlPanelModel, Option<String>)>> {
+    pub(crate) fn model_if_changed(&self, seen: &mut u64) -> Option<Option<PanelFrameModel>> {
         let guard = self.shared.model.read().unwrap_or_else(|e| e.into_inner());
         if guard.generation == *seen {
             return None;
         }
         *seen = guard.generation;
-        Some(guard.model.clone().map(|model| {
-            let display = guard
-                .location
-                .as_ref()
-                .and_then(|location| location.display.clone());
-            (model, display)
-        }))
+        Some(
+            guard
+                .model
+                .clone()
+                .zip(self.open_visit())
+                .map(|(model, visit)| {
+                    let display = guard
+                        .location
+                        .as_ref()
+                        .and_then(|location| location.display.clone());
+                    PanelFrameModel {
+                        visit,
+                        model,
+                        display,
+                    }
+                }),
+        )
     }
 
-    pub(crate) fn location(&self) -> Option<PanelLocation> {
-        self.shared
-            .model
-            .read()
-            .unwrap_or_else(|e| e.into_inner())
-            .location
-            .clone()
+    pub(crate) fn opening(&self) -> Option<(NonZeroU64, PanelLocation)> {
+        let guard = self.shared.model.read().unwrap_or_else(|e| e.into_inner());
+        self.open_visit().zip(guard.location.clone())
     }
 
     /// For the compositor thread: the closed-panel notice when it changed since
@@ -326,53 +360,73 @@ impl ControlPanelHandle {
         self.shared.render_wake.notify();
     }
 
-    /// For the compositor thread: record the geometry it drew. Cheap when the
-    /// layout generation did not change.
+    /// Record the geometry drawn for this opening. The compositor can reuse
+    /// the same layout on a new visit, but an older visit can no longer hit.
     pub(crate) fn set_geometry(
         &self,
+        visit: NonZeroU64,
         generation: u64,
         geometry: impl FnOnce() -> ControlPanelGeometry,
     ) {
-        if self
-            .shared
-            .geometry_generation
-            .swap(generation, Ordering::AcqRel)
-            == generation
-        {
-            return;
+        let wants_geometry = {
+            let mut current = self
+                .shared
+                .geometry
+                .write()
+                .unwrap_or_else(|e| e.into_inner());
+            if self.open_visit() != Some(visit)
+                || current
+                    .as_ref()
+                    .is_some_and(|g| g.visit == visit && g.generation == generation)
+            {
+                return;
+            }
+            *current = Some(PublishedGeometry {
+                visit,
+                generation,
+                geometry: geometry(),
+            });
+            self.shared.wants_geometry.swap(false, Ordering::AcqRel)
+        };
+        self.shared.main_wake.notify();
+        if wants_geometry {
+            self.send_for_visit(visit, PanelEvent::Geometry);
         }
-        *self
+    }
+
+    fn with_geometry<T>(
+        &self,
+        visit: NonZeroU64,
+        read: impl FnOnce(&ControlPanelGeometry) -> T,
+    ) -> Option<T> {
+        let geometry = self
             .shared
             .geometry
-            .write()
-            .unwrap_or_else(|e| e.into_inner()) = Some((generation, geometry()));
-        self.shared.main_wake.notify();
-        if self.shared.wants_geometry.swap(false, Ordering::AcqRel) {
-            self.send(PanelEvent::Geometry);
-        }
+            .read()
+            .unwrap_or_else(|e| e.into_inner());
+        let geometry = geometry.as_ref().filter(|g| g.visit == visit)?;
+        (self.open_visit() == Some(visit)).then(|| read(&geometry.geometry))
     }
 
     fn geometry(&self) -> Option<ControlPanelGeometry> {
-        self.shared
-            .geometry
-            .read()
-            .unwrap_or_else(|e| e.into_inner())
-            .as_ref()
-            .map(|(_, g)| g.clone())
+        self.with_geometry(self.open_visit()?, Clone::clone)
     }
 
-    /// What the panel has at display-local `(x, y)`; `None` when the
-    /// panel is closed or the point is outside it (it passes through).
+    /// What this opening has at display-local `(x, y)`. Stale geometry and
+    /// points outside the panel both pass through.
+    pub(crate) fn hit_for_visit(
+        &self,
+        visit: NonZeroU64,
+        x: f32,
+        y: f32,
+    ) -> Option<PanelHitTarget> {
+        self.with_geometry(visit, |geometry| geometry.hit(x, y))
+            .flatten()
+    }
+
+    #[cfg(test)]
     pub(crate) fn hit(&self, x: f32, y: f32) -> Option<PanelHitTarget> {
-        if !self.is_open() {
-            return None;
-        }
-        self.shared
-            .geometry
-            .read()
-            .unwrap_or_else(|e| e.into_inner())
-            .as_ref()
-            .and_then(|(_, g)| g.hit(x, y))
+        self.hit_for_visit(self.open_visit()?, x, y)
     }
 
     /// The model last published (`None`: closed).
@@ -406,12 +460,17 @@ impl ControlPanelHandle {
                 return;
             }
             guard.generation += 1;
+            let first_model = open && guard.model.is_none();
             guard.model = model;
             guard.fields = fields;
             guard.location = location;
-            // Under the model lock: whoever reads this model also reads
-            // whether it is open (keys route only to an open panel).
-            self.shared.open.store(open, Ordering::Release);
+            // Publish the visit while holding the model lock, so readers
+            // can take its display and tray origin from the same snapshot.
+            if first_model {
+                self.shared.visit.store(guard.generation, Ordering::Release);
+            } else if !open {
+                self.shared.visit.store(0, Ordering::Release);
+            }
         }
         if !open {
             *self
@@ -530,9 +589,8 @@ pub(crate) fn spawn_control_panel(
         shared: Arc::new(Shared {
             model: RwLock::new(PublishedModel::default()),
             closed_notice: RwLock::new((0, None)),
-            open: AtomicBool::new(false),
+            visit: AtomicU64::new(0),
             geometry: RwLock::new(None),
-            geometry_generation: AtomicU64::new(0),
             wants_geometry: AtomicBool::new(false),
             events: tx,
             clipboard_sequence: AtomicU64::new(0),
@@ -575,7 +633,10 @@ pub(crate) fn spawn_control_panel(
         loop {
             tokio::select! {
                 event = rx.recv() => {
-                    let Some(event) = event else { break };
+                    let Some((visit, event)) = event else { break };
+                    if visit.is_some() && visit != open.open_visit() {
+                        continue;
+                    }
                     let mut current = task.take().unwrap_or_else(&fresh);
                     let run = tokio::spawn(async move {
                         current.handle(event).await;

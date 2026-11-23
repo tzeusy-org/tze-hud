@@ -6,6 +6,9 @@ use tze_hud_config::tokens::DesignTokenMap;
 use tze_hud_scene::SceneGraph;
 use tze_hud_scene::graph::SurfaceClasses;
 
+#[cfg(any(target_os = "windows", test))]
+use crate::shell::control_panel::TrayFocusOrigin;
+
 #[cfg(target_os = "windows")]
 pub(super) mod native;
 
@@ -212,17 +215,30 @@ pub(crate) struct WindowFacts {
     pub class: String,
 }
 
-/// The app a tray-started visit returns to: the first window, top to bottom,
-/// that a person would call an application window. One look at the click;
-/// no hook and no tracking.
+#[cfg(any(target_os = "windows", test))]
+fn is_tray_shell_window(class: &str) -> bool {
+    matches!(
+        class,
+        "Shell_TrayWnd" | "Shell_SecondaryTrayWnd" | "Progman" | "WorkerW"
+    )
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn tray_focus_origin(
+    foreground: Option<WindowFacts>,
+    fallback: impl FnOnce() -> Option<isize>,
+) -> TrayFocusOrigin {
+    match foreground {
+        Some(window) if window.hud => TrayFocusOrigin::Preserve,
+        Some(window) if is_tray_shell_window(&window.class) => TrayFocusOrigin::Replace(fallback()),
+        Some(window) => TrayFocusOrigin::Replace(Some(window.hwnd)),
+        None => TrayFocusOrigin::Replace(None),
+    }
+}
+
+/// When the shell has already taken focus, look behind it once in z-order.
 #[cfg(any(target_os = "windows", test))]
 pub(crate) fn return_window(windows: impl IntoIterator<Item = WindowFacts>) -> Option<isize> {
-    const SHELL: [&str; 4] = [
-        "Shell_TrayWnd",
-        "Shell_SecondaryTrayWnd",
-        "Progman",
-        "WorkerW",
-    ];
     windows
         .into_iter()
         .find(|w| {
@@ -233,7 +249,7 @@ pub(crate) fn return_window(windows: impl IntoIterator<Item = WindowFacts>) -> O
                 && !w.tool
                 && !w.owned
                 && !w.hud
-                && !SHELL.contains(&w.class.as_str())
+                && !is_tray_shell_window(&w.class)
         })
         .map(|w| w.hwnd)
 }
@@ -770,6 +786,31 @@ mod tests {
             assert_eq!(return_window([first]), None, "{case}: nothing raised");
         }
         assert_eq!(return_window([]), None);
+
+        let mut modal = app(1);
+        modal.topmost = true;
+        modal.tool = true;
+        modal.owned = true;
+        assert_eq!(
+            tray_focus_origin(Some(modal), || panic!("foreground was available")),
+            TrayFocusOrigin::Replace(Some(1))
+        );
+        let mut shell = app(1);
+        shell.class = "Shell_SecondaryTrayWnd".into();
+        assert_eq!(
+            tray_focus_origin(Some(shell), || return_window([app(2)])),
+            TrayFocusOrigin::Replace(Some(2))
+        );
+        let mut hud = app(3);
+        hud.hud = true;
+        assert_eq!(
+            tray_focus_origin(Some(hud), || panic!("preserve the existing HUD origin")),
+            TrayFocusOrigin::Preserve
+        );
+        assert_eq!(
+            tray_focus_origin(None, || panic!("no known shell foreground")),
+            TrayFocusOrigin::Replace(None)
+        );
     }
 
     #[test]

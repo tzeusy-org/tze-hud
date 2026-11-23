@@ -5613,7 +5613,7 @@ mod tests {
                 1080.0,
             );
             let background = geometry.panel;
-            panel.set_geometry(1, || geometry.clone());
+            panel.set_geometry(panel.open_visit().unwrap(), 1, || geometry.clone());
             // The top-left inset is background, outside every row/control.
             (harness.app.state.cursor_x, harness.app.state.cursor_y) =
                 (background.x + 1.0, background.y + 1.0);

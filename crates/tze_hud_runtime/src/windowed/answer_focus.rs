@@ -198,6 +198,9 @@ impl WinitApp {
         if !chord && tray.is_none() {
             return;
         }
+        let tray_origin = tray
+            .as_ref()
+            .map(|visit| super::lifecycle::tray_focus_return(visit.origin));
         let paused = self.state.safe_mode_atomic.load(Ordering::Acquire);
         let panel_open = self
             .state
@@ -216,10 +219,10 @@ impl WinitApp {
         };
         match found {
             Ok(true) => {
-                if let Some(visit) = tray {
-                    // Only cards answer a tray click. The tray took the
-                    // foreground; return to the app that was behind it.
-                    super::lifecycle::redirect_focus_return(visit.origin);
+                if let Some(origin) = tray_origin {
+                    // A tray-focused card returns to the app sampled at the
+                    // click, including the outer origin of a nested visit.
+                    super::lifecycle::redirect_focus_return(origin);
                 }
                 if panel_open && let Some(panel) = &self.state.control_panel {
                     // This explicit owner handoff closes settings only after a

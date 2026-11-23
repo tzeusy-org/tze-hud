@@ -1346,6 +1346,26 @@ pub(super) fn hud_owns_foreground() -> bool {
     }
 }
 
+/// Resolve the tray origin before taking focus, so a native tray menu in
+/// front of an existing HUD visit cannot replace that visit's original app.
+pub(super) fn tray_focus_return(
+    source: crate::shell::control_panel::TrayFocusOrigin,
+) -> Option<isize> {
+    use crate::shell::control_panel::TrayFocusOrigin;
+
+    match source {
+        #[cfg(any(target_os = "windows", test))]
+        TrayFocusOrigin::Replace(origin) => origin,
+        TrayFocusOrigin::Preserve => {
+            #[cfg(target_os = "windows")]
+            return CHROME_NATIVE_OWNER
+                .with(|owner| owner.try_borrow().ok()?.focus_origin.previous);
+            #[cfg(not(target_os = "windows"))]
+            None
+        }
+    }
+}
+
 /// A tray-started visit returns to the app sampled before the tray took focus.
 pub(super) fn redirect_focus_return(origin: Option<isize>) {
     #[cfg(target_os = "windows")]
@@ -4203,6 +4223,16 @@ mod tests {
         origin.acquire(Some(40), false);
         origin.redirect(None);
         assert_eq!(origin.leave(true), None, "no app window: Windows decides");
+
+        origin.acquire(Some(10), false);
+        let outer = origin.previous;
+        origin.acquire(Some(40), false); // The tray menu took the foreground.
+        origin.redirect(outer);
+        assert_eq!(
+            origin.leave(true),
+            Some(10),
+            "nested tray preserves outer origin"
+        );
     }
 
     #[test]
