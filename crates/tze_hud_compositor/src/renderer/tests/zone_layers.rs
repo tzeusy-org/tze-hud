@@ -796,6 +796,7 @@ fn test_publication_ttl_ms_uses_expires_at_wall_us() {
         lease_id: None,
         publication_origin: None,
         caption: None,
+        display: None,
         zone_name: "alert-banner".to_string(),
         publisher_namespace: "agent-warn".to_string(),
         content: ZoneContent::Notification(NotificationPayload {
@@ -830,6 +831,7 @@ fn test_publication_ttl_ms_uses_expires_at_wall_us() {
         lease_id: None,
         publication_origin: None,
         caption: None,
+        display: None,
         zone_name: "alert-banner".to_string(),
         publisher_namespace: "agent-crit".to_string(),
         content: ZoneContent::Notification(NotificationPayload {
@@ -864,6 +866,7 @@ fn test_publication_ttl_ms_uses_expires_at_wall_us() {
         lease_id: None,
         publication_origin: None,
         caption: None,
+        display: None,
         zone_name: "alert-banner".to_string(),
         publisher_namespace: "agent-both".to_string(),
         content: ZoneContent::Notification(NotificationPayload {
@@ -894,6 +897,7 @@ fn test_publication_ttl_ms_uses_expires_at_wall_us() {
         lease_id: None,
         publication_origin: None,
         caption: None,
+        display: None,
         zone_name: "alert-banner".to_string(),
         publisher_namespace: "agent-info".to_string(),
         content: ZoneContent::Notification(NotificationPayload {

@@ -62,6 +62,7 @@ pub mod pairing;
 pub(crate) mod pipeline;
 pub mod portal;
 pub mod portal_tokens;
+pub(crate) mod question_placement;
 pub(crate) mod runtime_context;
 pub(crate) mod scene_startup;
 pub use scene_startup::{SceneStartupResult, run_scene_startup};

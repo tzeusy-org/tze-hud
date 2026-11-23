@@ -102,6 +102,10 @@ pub struct RuntimeOverlayState {
     /// sets and clears it, the compositor draws it.
     #[serde(skip, default)]
     pub link_feedback: Option<(crate::LinkFeedbackTarget, crate::LinkFeedbackState)>,
+    /// Chooses the display of each newly presented question card; `None`
+    /// keeps every card on the notification display.
+    #[serde(skip, default)]
+    pub question_placer: Option<std::sync::Arc<dyn crate::QuestionPlacer>>,
     /// Last accepted local link attempt per exact publication/button. No timer.
     #[serde(skip, default)]
     pub notification_link_attempts: HashMap<(SceneId, usize), u64>,

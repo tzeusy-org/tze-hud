@@ -62,7 +62,7 @@ pub use portal_reading::{
     PortalReadingDecor, PortalReadingLayout, https_link_target,
 };
 pub use publication_defaults::{
-    DEFAULT_ANSWER_WINDOW_MS, MAX_ANSWER_WINDOW_MS, PublicationDefaults,
+    DEFAULT_ANSWER_WINDOW_MS, MAX_ANSWER_WINDOW_MS, PublicationDefaults, QuestionPlacement,
 };
 pub use svg_tokens::{is_valid_token_key, resolve_token_placeholders};
 #[cfg(any(test, feature = "test-support"))]
@@ -77,3 +77,10 @@ pub use widget_deadline::WidgetDeadline;
 
 // ── Lease governance public API ───────────────────────────────────────────────
 pub use lease::degradation::DegradationLevel;
+
+/// Picks the display a new question card appears on, once, when the card is
+/// presented. Runs under the scene lock, so it must be quick.
+pub trait QuestionPlacer: Send + Sync + std::fmt::Debug {
+    /// The normalized OS display name, or `None` for the notification display.
+    fn place(&self) -> Option<String>;
+}

@@ -348,11 +348,14 @@ fn populate_notification_hit_regions_in(
     let mut zone_names: Vec<_> = paint_order.keys().cloned().collect();
     zone_names.sort_unstable();
 
-    for zone_name in &zone_names {
-        let publishes = match scene.zone_registry.active_publishes.get(zone_name) {
-            Some(p) => p,
-            None => continue,
-        };
+    let active = &scene.zone_registry.active_publishes;
+    let stacks: Vec<_> = zone_names
+        .iter()
+        .filter_map(|name| active.get_key_value(name))
+        .flat_map(|(name, publishes)| super::zone_stacks_for(layout, name, publishes))
+        .collect();
+    for stack in &stacks {
+        let (zone_name, publishes) = (stack.name, &*stack.publishes);
         if publishes.is_empty() {
             continue;
         }
@@ -366,10 +369,10 @@ fn populate_notification_hit_regions_in(
         }
 
         let policy = &zone_def.rendering_policy;
-        let zone_tokens = tze_hud_config::tokens::for_zone(token_map, zone_name);
-        let (zx, zy, zw, zh) = super::zone_geometry_in(
+        let zone_tokens = tze_hud_config::tokens::for_zone(token_map, &stack.token_key());
+        let (zx, zy, zw, zh) = super::stack_geometry_in(
             layout,
-            zone_name,
+            stack,
             &scene.effective_zone_geometry(zone_def),
             sw,
             sh,

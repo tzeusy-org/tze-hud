@@ -308,6 +308,7 @@ pub(super) fn make_windowed_keyboard_test_app(
         primary_monitor: None,
         secondaries: Vec::new(),
         display_targets: Default::default(),
+        placement_layout: Default::default(),
         displays_dirty: Default::default(),
         surface_factory: None,
         zone_displays: Default::default(),

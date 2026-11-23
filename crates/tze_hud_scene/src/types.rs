@@ -2374,6 +2374,11 @@ pub struct ZonePublishRecord {
     /// Runtime-only, like the session itself: not part of snapshots.
     #[serde(skip)]
     pub caption: Option<String>,
+    /// The display a question card was placed on when it was presented
+    /// (normalized OS name, e.g. `DISPLAY2`). `None` draws it on the zone's
+    /// own display. Set once; a same-key replacement keeps it.
+    #[serde(skip)]
+    pub display: Option<String>,
 }
 
 /// A zone instance — zone type bound to a specific tab.

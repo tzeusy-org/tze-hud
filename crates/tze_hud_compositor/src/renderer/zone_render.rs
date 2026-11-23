@@ -92,7 +92,9 @@ impl Compositor {
         if !scene.zones_shown() {
             return;
         }
-        for (zone_name, publishes) in scene.shown_zone_publishes() {
+        for stack in self.zone_stacks(scene) {
+            let _tokens = self.tokens_for_stack(&stack);
+            let (zone_name, publishes) = (stack.name, &*stack.publishes);
             if publishes.is_empty() {
                 continue;
             }
@@ -108,7 +110,7 @@ impl Compositor {
                 }
             }
             let (x, y, w, h) =
-                self.zone_geometry(zone_name, &scene.effective_zone_geometry(zone_def), sw, sh);
+                self.stack_geometry(&stack, &scene.effective_zone_geometry(zone_def), sw, sh);
 
             let policy = &zone_def.rendering_policy;
 
@@ -553,14 +555,15 @@ impl Compositor {
         };
         let mut cache = self.notification_layouts.borrow_mut();
         cache.retain(scene);
-        for (name, records) in scene.shown_zone_publishes() {
+        for stack in super::zone_stacks_in(&self.display_layout, scene) {
+            let (name, records) = (stack.name, &*stack.publishes);
             let Some(zone) = scene.zone_registry.zones.get(name) else {
                 continue;
             };
-            let tokens = tze_hud_config::tokens::for_zone(&self.token_map, name);
-            let (_, _, width, _) = super::zone_geometry_in(
+            let tokens = tze_hud_config::tokens::for_zone(&self.token_map, &stack.token_key());
+            let (_, _, width, _) = super::stack_geometry_in(
                 &self.display_layout,
-                name,
+                &stack,
                 &scene.effective_zone_geometry(zone),
                 sw,
                 sh,

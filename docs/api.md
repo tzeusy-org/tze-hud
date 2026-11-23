@@ -768,7 +768,8 @@ agents until one is paired.
   contention, otherwise arrays (empty when nothing was drawn). Geometry comes
   from the compositor's last frame, with no diagnostic timer or redraw.
   A notification entry has `s` (`zone:<name>`), `key` (or `null`), `rect`,
-  `display`, `actions` (`{label, kind, rect}`, with `kind` `callback` or `url`),
+  `display` (index into `displays` of the monitor the card is drawn on,
+  which for a placed question is its placement), `actions` (`{label, kind, rect}`, with `kind` `callback` or `url`),
   `close` rect, `focus` (action index, `"close"`, or `null`), `chosen` (action
   index or `null`), `state` (`entering`, `shown`, `exiting`) and `guarded`
   (presses on it are ignored by the fresh-card press guard). Entries follow
@@ -1083,7 +1084,30 @@ the two different; `fps` (1-240, default 60); `log_level` for the log file
 (zone outlines, default false). `answer_window_ms` is the live saved default
 for action notifications (integer milliseconds, 1–300000 inclusive, default
 60000); invalid values fail configuration validation. It has no flag or
-variable override. For the launch settings, precedence, highest first: a command-line
+variable override. `question_placement` (live, saved from the Layout card
+row "New questions appear on"; no flag or variable) chooses where a new
+question card (a notification with a callback action) appears: `focused`
+(default) is the monitor of the foreground window, or the pointer's monitor
+when there is none, it is the HUD itself, or it is the shell desktop;
+`pointer` is the monitor under the pointer; `fixed` is the notification
+display (the primary unless `[displays]` moves `notification-area`). Any
+other value fails configuration validation. The display is sampled once,
+when the question is presented (at `delay_ms` when it comes due), with no
+hook, timer or idle work; a monitor without an overlay means the
+notification display. With `focused`, a display the foreground window chose
+is covered when Windows reports a full-screen Direct3D app or presentation
+mode and that window fills its monitor: the question goes to the pointer's
+monitor if that differs, else the notification display if that differs,
+else (Direct3D only) the first other overlaid display, primary first;
+otherwise it stays. Each covered placement logs one info line
+(`question placement: DISPLAY1 covered (presentation_mode); placed on
+DISPLAY2`). Other cards, including url- and copy-only ones, use the
+notification display. A placed card draws at the notification-area position
+on its display's rect and scale, in that display's stack; it never moves,
+a same-key replacement keeps its display, and if its display disconnects it
+shows on the notification display. All displays share one `Stack{max_depth:5}`
+trim. A changed setting applies to the next question; no visible card moves.
+For the launch settings, precedence, highest first: a command-line
 flag (`--mcp-port`, `--grpc-port`, `--fps`, `--debug-zones`), an
 environment variable (`TZE_HUD_MCP_PORT`, `TZE_HUD_GRPC_PORT`,
 `TZE_HUD_FPS`, `TZE_HUD_DEBUG_ZONES=1`, `TZE_HUD_FILE_LOG`), `[runtime]`, the

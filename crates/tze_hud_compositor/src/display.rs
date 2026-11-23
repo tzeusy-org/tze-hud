@@ -24,6 +24,12 @@ pub fn normalize_display_name(name: &str) -> String {
     name.trim().trim_start_matches(r"\\.\").to_ascii_uppercase()
 }
 
+/// The token key a zone's cards draw with when placed on `display` (other
+/// than the zone's own): its `runtime.px_scale@<key>` is that monitor's.
+pub fn placed_zone_key(zone: &str, display: &str) -> String {
+    format!("{zone}@{}", normalize_display_name(display))
+}
+
 /// One connected display, in scene coordinates.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DisplayRect {
@@ -63,6 +69,15 @@ impl DisplayLayout {
 
     pub fn displays(&self) -> &[DisplayRect] {
         &self.displays
+    }
+
+    /// Bounds of the connected display named `name` (primary included).
+    pub fn display_rect(&self, name: &str) -> Option<Rect> {
+        let name = normalize_display_name(name);
+        self.displays
+            .iter()
+            .find(|d| d.name == name)
+            .map(|d| d.rect)
     }
 
     /// Bounds of the non-primary display `zone` is assigned to, when that

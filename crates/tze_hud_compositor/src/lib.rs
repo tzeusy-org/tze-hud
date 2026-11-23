@@ -16,7 +16,9 @@ pub(crate) mod text;
 pub mod vertical_flow;
 pub mod widget;
 
-pub use display::{DisplayLayout, DisplayRect, FrameTarget, normalize_display_name};
+pub use display::{
+    DisplayLayout, DisplayRect, FrameTarget, normalize_display_name, placed_zone_key,
+};
 pub use markdown::{MarkdownCache, MarkdownTokens, ParsedMarkdown};
 
 pub use renderer::capture::{CaptureError, CapturedFrame};

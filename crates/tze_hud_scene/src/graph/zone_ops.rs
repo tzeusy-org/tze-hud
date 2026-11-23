@@ -390,7 +390,9 @@ impl SceneGraph {
             lease_id,
             publication_origin: publication_origin.filter(|_| lease_id.is_none()),
             caption: self.session_labels.get(publisher_namespace).cloned(),
+            display: None,
         };
+        let mut record = record;
 
         let publishes = self
             .zone_registry
@@ -408,6 +410,25 @@ impl SceneGraph {
             })
         });
         let replaced_id = replacement.map(|index| publishes[index].publication_id);
+        // A question is placed once, when presented; a same-key replacement
+        // keeps the display its card already has.
+        record.display = match replacement {
+            Some(index) => publishes[index].display.clone(),
+            None if zone_name == "notification-area"
+                && is_unanswered_question(&record, &self.overlay.notification_choices, now_us) =>
+            {
+                self.overlay
+                    .question_placer
+                    .as_ref()
+                    .and_then(|placer| placer.place())
+            }
+            None => None,
+        };
+        let publishes = self
+            .zone_registry
+            .active_publishes
+            .get_mut(zone_name)
+            .expect("entry created above");
         let mut trimmed = Vec::new();
         if let Some(index) = replacement {
             // Keep the visual slot, but never transfer the old activation or

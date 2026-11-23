@@ -180,7 +180,9 @@ impl super::Compositor {
     ) -> Vec<TextItem> {
         let mut items: Vec<TextItem> = Vec::new();
 
-        for (zone_name, publishes) in scene.shown_zone_publishes() {
+        for stack in self.zone_stacks(scene) {
+            let _tokens = self.tokens_for_stack(&stack);
+            let (zone_name, publishes) = (stack.name, &*stack.publishes);
             if publishes.is_empty() {
                 continue;
             }
@@ -192,7 +194,7 @@ impl super::Compositor {
             let scale = tze_hud_config::tokens::px_scale(zone_tokens);
             let policy = &zone_def.rendering_policy;
             let (zx, zy, zw, zh) =
-                self.zone_geometry(zone_name, &scene.effective_zone_geometry(zone_def), sw, sh);
+                self.stack_geometry(&stack, &scene.effective_zone_geometry(zone_def), sw, sh);
 
             // Status-bar rows are always ellipsized, whatever the policy says,
             // so prime exactly the rows the frame path draws.
@@ -287,7 +289,9 @@ impl super::Compositor {
     ) {
         let now = std::time::Instant::now();
         // ── Zone StreamText, Notification, and StatusBar content ─────────────
-        for (zone_name, publishes) in scene.shown_zone_publishes() {
+        for stack in self.zone_stacks(scene) {
+            let _tokens = self.tokens_for_stack(&stack);
+            let (zone_name, publishes) = (stack.name, &*stack.publishes);
             if publishes.is_empty() {
                 continue;
             }
@@ -305,7 +309,7 @@ impl super::Compositor {
 
             // Resolve zone geometry to pixel bounds.
             let (zx, zy, zw, zh) =
-                self.zone_geometry(zone_name, &scene.effective_zone_geometry(zone_def), sw, sh);
+                self.stack_geometry(&stack, &scene.effective_zone_geometry(zone_def), sw, sh);
 
             let policy = &zone_def.rendering_policy;
 

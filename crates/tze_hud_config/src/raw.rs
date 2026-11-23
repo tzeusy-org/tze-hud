@@ -50,6 +50,9 @@ pub struct RawRuntime {
     pub fps: Option<u32>,
     /// Default lifetime for action notifications, 1-300000 ms (default 60000).
     pub answer_window_ms: Option<u32>,
+    /// Where new questions appear: `focused` (default; the focused window's
+    /// monitor), `pointer`, or `fixed` (the notification display).
+    pub question_placement: Option<String>,
     /// Log file level: `error`, `warn`, `info` (default), `debug` or
     /// `trace`. `TZE_HUD_FILE_LOG` wins.
     pub log_level: Option<String>,
