@@ -120,17 +120,19 @@ class SessionPresence:
             return
 
         if event == "Notification":
-            if prompt is not None and prompt in self.closed:
+            if prompt is None:
+                prompt = self.prompt
+            if prompt is None or prompt in self.closed:
                 return
-            if self.prompt is None and prompt is not None:
-                self.adopt_prompt(prompt)
             if self.prompt is None:
+                self.adopt_prompt(prompt)
+            if prompt != self.prompt:
                 return
             notice = item["notice"]
             if notice == "idle_prompt":
                 self.close_prompt()
                 self.set_state("done")
-            elif prompt is None or prompt == self.prompt:
+            else:
                 self.set_state("blocked", "permission" if notice == "permission_prompt" else "input", actor)
             return
         if event == "Stop":

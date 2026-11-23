@@ -21,7 +21,7 @@ PROMPT_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f
 DIGEST = re.compile(r"[0-9a-f]{64}")
 TOOL_KEY = re.compile(r"cc-tool-[0-9a-f]{64}")
 SOCKET_NAME = re.compile(r"claude-([1-9][0-9]{0,9})\.sock")
-PEER_CREDENTIALS = struct.Struct("3i")
+PEER_CREDENTIALS = struct.Struct("iII")
 
 
 def matches(pattern, value):
@@ -80,7 +80,8 @@ def send_event(event):
                 with socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET) as peer:
                     peer.setblocking(False)
                     peer.connect(os.fspath(path))
-                    peer.send(packet)
+                    if peer_uid(peer) == os.getuid():
+                        peer.send(packet)
     except (OSError, ValueError, TypeError):
         pass
 

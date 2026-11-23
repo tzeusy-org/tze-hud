@@ -124,7 +124,7 @@ workspace's `env` to keep the earlier visible portal mirror.
         "matcher": "^(permission_prompt|idle_prompt|elicitation_dialog)$"
       }
     ],
-
+    "Stop": [
       {
         "hooks": [
           {
@@ -183,9 +183,9 @@ mirror enabled.
 The hook and adapter find the socket by their immediate Claude parent PID.
 The path is `$XDG_RUNTIME_DIR/tze-hud/claude-<pid>.sock` when the runtime
 directory belongs to the user, with `~/.cache/tze-hud/run` as the fallback.
-The adapter checks ownership and private modes and admits only packets with
-the same Unix UID. The hook uses one nonblocking connect and send, then
-exits silently. The hook has no credential or HTTP path. Only the existing
+The adapter checks ownership and private modes. Both ends verify that the
+peer has the same Unix UID. The hook uses one nonblocking connect and send,
+then exits silently. The hook has no credential or HTTP path. Only the existing
 adapter worker uses the paired credential for a HUD request. The design uses
 one adapter per session and no daemon, heartbeat or polling.
 

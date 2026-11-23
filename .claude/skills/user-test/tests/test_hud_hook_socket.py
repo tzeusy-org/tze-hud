@@ -64,6 +64,43 @@ def test_sender_uses_parent_pid_with_one_packet(runtime):
     assert not listener.path.exists()
 
 
+def test_sender_closes_foreign_uid_without_sending(runtime, monkeypatch):
+    owner = os.getpid()
+    listener = hooks.HookListener.open(owner)
+    assert listener is not None
+    try:
+        monkeypatch.setattr(hooks.os, "getppid", lambda: owner)
+        monkeypatch.setattr(hooks, "peer_uid", lambda _: os.getuid() + 1)
+        hooks.send_event(TOOL)
+        peer, _ = listener.socket.accept()
+        with peer:
+            peer.settimeout(1)
+            assert peer.recv(1) == b""
+    finally:
+        listener.close()
+
+
+def test_documented_hooks_are_direct_exec():
+    guide = SCRIPTS.parents[1] / "hud-projection" / "references" / "claude-code-hooks.md"
+    example = guide.read_text(encoding="utf-8").split("```json\n", 1)[1].split("```", 1)[0]
+    events = json.loads(example)["hooks"]
+    assert set(events) == {
+        "SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse",
+        "PostToolUseFailure", "Notification", "Stop", "SessionEnd",
+    }
+    for rules in events.values():
+        for rule in rules:
+            for command in rule["hooks"]:
+                assert command["type"] == "command"
+                assert Path(command["command"]).is_absolute()
+                assert Path(command["args"][0]).is_absolute()
+    notification, = events["Notification"]
+    assert notification["matcher"] == "^(permission_prompt|idle_prompt|elicitation_dialog)$"
+    command, = notification["hooks"]
+    assert command["async"] is True
+    assert command["timeout"] == 2
+
+
 def test_production_hook_strips_credential_and_ignores_raw_fields(runtime):
     hook = SCRIPTS.parents[1] / "hud-projection" / "scripts" / "portal_hook.py"
     listener = hooks.HookListener.open(os.getpid())

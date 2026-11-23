@@ -44,6 +44,31 @@ def test_blocked_notice_only_clears_for_its_asker(notice, reason):
     assert drain(state)[0].params == {"state": "working"}
 
 
+def test_promptless_notice_applies_only_while_the_prompt_is_open():
+    state = SessionPresence(False)
+    permission = {"event": "Notification", "session": "fixture", "notice": "permission_prompt"}
+    state.event(event("UserPromptSubmit"))
+    state.event(permission)
+    assert drain(state)[0].params == {"state": "blocked", "reason": "permission"}
+    state.event(event("Stop", content=None))
+    assert drain(state)[0].params == {"state": "done"}
+    state.event(permission)
+    assert state.state == ("done", None)
+    assert not drain(state)
+    state.event(event("UserPromptSubmit", prompt=NEXT))
+    state.event({**permission, "notice": "idle_prompt"})
+    assert drain(state)[0].params == {"state": "done"}
+
+
+def test_idle_notice_for_another_prompt_does_not_close_the_active_prompt():
+    state = SessionPresence(False)
+    state.event(event("UserPromptSubmit"))
+    assert drain(state)[0].params == {"state": "working"}
+    state.event(event("Notification", prompt=NEXT, notice="idle_prompt"))
+    assert state.state == ("working", None)
+    assert not drain(state)
+
+
 def test_question_completion_and_duplicate_working_events():
     state = SessionPresence(False)
     state.event(event("UserPromptSubmit"))
