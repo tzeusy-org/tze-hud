@@ -40,9 +40,7 @@
 //! it calls [`truncate_for_ellipsis`] with the text visible in that window.
 //! Appending new lines beyond the viewport does not change the truncation output
 //! because the first `max_lines` are determined solely by the current text, not
-//! future appends.  This is verified by the structural test
-//! `append_stability_truncation_prefix_unchanged` (original) and the more
-//! descriptive `head_anchored_append_stability_matches_prefix_truncation`.
+//! future appends. See `head_stays_put_while_tail_advances_by_whole_lines`.
 //!
 //! **Scenario: follow-tail advances by whole lines**
 //!
@@ -50,8 +48,7 @@
 //! [`truncate_tail_anchored`].  The function always shows the last `max_lines`
 //! of the full text, so every append automatically advances the visible window
 //! by the exact number of new lines added — never producing a partially clipped
-//! line at the bottom.  This is verified by
-//! `follow_tail_advances_by_whole_lines`.
+//! line at the bottom. The same test checks both viewport anchors.
 //!
 //! # Complexity
 //!
@@ -1357,18 +1354,47 @@ fn binary_search_largest_fitting(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use glyphon::FontSystem;
+    use TruncationViewport::{HeadAnchored, TailAnchored};
     use proptest::prelude::*;
 
-    /// Helper: a fresh FontSystem over the bundled faces production renders
-    /// with. `FontSystem::new()` scans every system font directory (~20 ms per
-    /// call in debug, per proptest case) and makes metrics host-dependent.
-    fn make_font_system() -> FontSystem {
+    const FONT: f32 = 16.0;
+    const LINE: f32 = 22.4;
+
+    fn fonts() -> FontSystem {
         crate::fonts::bundled_font_system()
     }
 
-    fn base_attrs() -> Attrs<'static> {
-        Attrs::new()
+    fn truncate(
+        anchor: TruncationViewport,
+        text: &str,
+        w: f32,
+        h: f32,
+        fonts: &mut FontSystem,
+    ) -> TruncationResult {
+        let truncate = match anchor {
+            HeadAnchored => truncate_for_ellipsis,
+            TailAnchored => truncate_tail_anchored,
+        };
+        truncate(text, Attrs::new(), w, h, FONT, LINE, fonts)
+    }
+
+    fn shape(
+        text: &str,
+        width: f32,
+        wrap: Wrap,
+        metrics: Metrics,
+        fonts: &mut FontSystem,
+    ) -> Buffer {
+        let mut buffer = Buffer::new(fonts, metrics);
+        buffer.set_size(fonts, Some(width), None);
+        buffer.set_wrap(fonts, wrap);
+        buffer.set_text(fonts, text, Attrs::new(), Shaping::Advanced);
+        buffer.shape_until_scroll(fonts, false);
+        buffer
+    }
+
+    fn unwrapped_width(text: &str, width: f32, fonts: &mut FontSystem) -> f32 {
+        measure_single_line(text, Attrs::new(), width, FONT, LINE, fonts)
     }
 
     #[test]
@@ -1387,7 +1413,7 @@ mod tests {
             );
         }
 
-        let mut fs = make_font_system();
+        let mut fs = fonts();
         let transcript_line_height = 14.0 * 1.4;
         for anchor in [
             TruncationViewport::HeadAnchored,
@@ -1408,7 +1434,7 @@ mod tests {
                     transcript_line_height,
                 ),
             ] {
-                let result = truncate(text, base_attrs(), width, height, font, line, &mut fs);
+                let result = truncate(text, Attrs::new(), width, height, font, line, &mut fs);
                 assert_eq!(result.text, text, "{anchor:?}: fitting input");
                 assert!(!result.was_truncated, "{anchor:?}: fitting input {text:?}");
             }
@@ -1422,7 +1448,7 @@ mod tests {
                 ] {
                     for text in ["hello", ""] {
                         let result =
-                            truncate(text, base_attrs(), width, height, font, line, &mut fs);
+                            truncate(text, Attrs::new(), width, height, font, line, &mut fs);
                         let geometry = (width, height, font, line);
                         assert!(result.text.is_empty(), "{anchor:?} {geometry:?}");
                         assert_eq!(
@@ -1436,240 +1462,128 @@ mod tests {
         }
     }
 
-    /// Text too wide for a 60px box is truncated to a result that ends with
-    /// the ellipsis and is shorter than the original plus the ellipsis; an
-    /// unbroken token's single-line result re-measures within the box (no
-    /// partially visible glyph). Random
-    /// widths are covered by `proptest_truncated_always_ends_with_ellipsis`
-    /// and `proptest_truncated_result_fits_within_bounds`.
     #[test]
-    fn truncated_text_ends_with_ellipsis_and_fits() {
-        let mut fs = make_font_system();
-        let bounds_w = 60.0;
-        let font_size = 16.0;
-        let line_h = 22.4;
-        for long in [
-            "This is a long sentence that surely does not fit in sixty pixels.",
-            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    fn long_tokens_retain_the_maximal_fitting_grapheme_prefix() {
+        let mut fonts = fonts();
+        for (input, width, height) in [
+            ("x".repeat(4096), 60.0, 100.0),
+            ("W".repeat(30), 200.0, 100.0),
+            ("e\u{0301}".repeat(40), 80.0, 24.0),
         ] {
-            let result = truncate_for_ellipsis(
-                long,
-                base_attrs(),
-                bounds_w,
-                100.0,
-                font_size,
-                line_h,
-                &mut fs,
-            );
-            assert!(
-                result.was_truncated,
-                "{long:?} must not fit in {bounds_w}px"
-            );
-            assert!(
-                result.text.ends_with(ELLIPSIS),
-                "truncated text must end with '…'; got: {:?}",
-                result.text
-            );
-            assert!(
-                result.text.len() < long.len() + ELLIPSIS.len(),
-                "truncated text must be shorter than original + ellipsis; got {:?}",
-                result.text
-            );
-            if long.contains(' ') {
-                // The sentence word-wraps into several lines; only the
-                // unbroken token's result is a single line to re-measure.
-                continue;
-            }
-            let measured_w = measure_single_line(
-                &result.text,
-                base_attrs(),
-                bounds_w * 4.0,
-                font_size,
-                line_h,
-                &mut fs,
-            );
-            assert!(
-                measured_w <= bounds_w + 1.0, // +1.0 for floating-point tolerance
-                "truncated text must re-measure ≤ bounds_width ({bounds_w}px); got {measured_w:.2}px"
-            );
+            let result = truncate(HeadAnchored, &input, width, height, &mut fonts);
+            assert!(result.was_truncated);
+            let prefix = result.text.strip_suffix(ELLIPSIS).unwrap();
+            assert!(!prefix.is_empty());
+            assert!(input.starts_with(prefix));
+            let next = input
+                .grapheme_indices(true)
+                .find(|(at, _)| *at == prefix.len())
+                .expect("cut must lie at a source grapheme boundary")
+                .1;
+            let mut measure = |text: &str| {
+                first_run_width(&shape(
+                    text,
+                    width * 2.0,
+                    Wrap::None,
+                    Metrics::new(FONT, LINE),
+                    &mut fonts,
+                ))
+            };
+            assert!(measure(&result.text) <= width);
+            let larger = format!("{prefix}{next}{ELLIPSIS}");
+            assert!(measure(&larger) > width);
         }
     }
 
-    /// Multi-line text: lines beyond max_whole_lines are dropped.
     #[test]
-    fn multiline_beyond_height_is_truncated() {
-        let mut fs = make_font_system();
-        // 3 lines, but only 1 line's worth of height.
-        let text = "Line one\nLine two\nLine three";
-        let font_size = 16.0;
-        let line_h = 22.4;
-        // Only ~1 line fits.
-        let result = truncate_for_ellipsis(
-            text,
-            base_attrs(),
-            500.0,
-            line_h + 1.0,
-            font_size,
-            line_h,
-            &mut fs,
-        );
-        assert!(
-            result.was_truncated,
-            "multi-line text taller than bounds must be truncated"
-        );
-        // The result must not contain the last line's content.
-        assert!(
-            !result.text.contains("Line three"),
-            "lines beyond height must be dropped; got: {:?}",
-            result.text
-        );
+    fn ellipsis_prefers_a_whole_word_to_more_fitting_graphemes() {
+        let mut fonts = fonts();
+        let text = format!("alpha {}", "z".repeat(120));
+        let width = unwrapped_width("alpha zz…", 800.0, &mut fonts);
+        let result = truncate(HeadAnchored, &text, width, LINE + 1.0, &mut fonts);
+        assert_eq!(result.text, "alpha…");
+        assert!(result.was_truncated);
     }
 
-    /// Grapheme fallback: single long word without spaces is truncated at a
-    /// grapheme boundary.
-    ///
-    /// Regression guard for the "dead-code grapheme fallback" bug: previously
-    /// the word-boundary loop claimed boundary 0 (empty prefix) which always
-    /// fitted the budget, producing bare `"…"` with zero visible clusters.
-    #[test]
-    fn single_long_word_truncated_at_grapheme_boundary() {
-        let mut fs = make_font_system();
-        // A long unbroken token — no word boundaries within it.
-        let long_word = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"; // 40 'A's
-        let result =
-            truncate_for_ellipsis(long_word, base_attrs(), 60.0, 100.0, 16.0, 22.4, &mut fs);
-        assert!(
-            result.was_truncated,
-            "40 'A's in a 60px box must be truncated; got: {:?}",
-            result.text
-        );
-        assert!(
-            result.text.ends_with(ELLIPSIS),
-            "grapheme-fallback result must end with '…'; got: {:?}",
-            result.text
-        );
-        // The prefix before the ellipsis must be non-empty: at least one visible
-        // grapheme cluster must precede the ellipsis character.
-        let prefix_before_ellipsis = result.text.strip_suffix(ELLIPSIS).unwrap_or("");
-        assert!(
-            !prefix_before_ellipsis.is_empty(),
-            "grapheme-fallback must include at least one visible cluster before '…'; \
-             got bare '…' — long unbroken token regression; result: {:?}",
-            result.text
-        );
-        assert!(
-            result.text.len() < long_word.len() + ELLIPSIS.len(),
-            "grapheme-fallback result must be shorter than original + ellipsis"
-        );
+    fn first_run_width(buffer: &Buffer) -> f32 {
+        buffer.layout_runs().next().map_or(0.0, |run| run.line_w)
+    }
 
-        // The named long-token workload must retain a fitting, maximal
-        // grapheme prefix. Measure the actual candidates independently with a
-        // real Buffer, rather than deriving an expected cut from the search.
-        let payload = "x".repeat(4096);
-        let bounds_width = 60.0;
-        let burst_result = truncate_for_ellipsis(
-            &payload,
-            base_attrs(),
-            bounds_width,
-            100.0,
-            16.0,
-            22.4,
-            &mut fs,
-        );
-        assert!(burst_result.was_truncated);
-        let prefix = burst_result.text.strip_suffix(ELLIPSIS).unwrap();
-        assert!(!prefix.is_empty());
-        assert!(payload.starts_with(prefix));
-        assert!(prefix.len() < payload.len());
-        let mut shaped_width = |text: &str| {
-            let mut buffer = Buffer::new(&mut fs, Metrics::new(16.0, 22.4));
-            buffer.set_size(&mut fs, Some(bounds_width * 2.0), None);
-            buffer.set_wrap(&mut fs, Wrap::None);
-            buffer.set_text(&mut fs, text, base_attrs(), Shaping::Advanced);
-            buffer.shape_until_scroll(&mut fs, false);
-            buffer
-                .layout_runs()
-                .map(|run| run.line_w)
-                .fold(0.0_f32, f32::max)
-        };
-        assert!(shaped_width(&burst_result.text) <= bounds_width);
-        let next_candidate = format!("{}{ELLIPSIS}", &payload[..prefix.len() + 1]);
-        assert!(
-            shaped_width(&next_candidate) > bounds_width,
-            "one more whole x grapheme must exceed the box"
-        );
-
-        // Union-search parity against the word-first, then grapheme, reference.
-        // The reference uses independent complete Buffer shaping; it does not
-        // call `binary_search_largest_fitting` or derive its expected cut.
-        let reference_cut = |line: &str, width: f32, fonts: &mut FontSystem| {
-            let mut measure = |boundary: usize| {
-                let candidate = format!("{}{ELLIPSIS}", line[..boundary].trim_end());
-                let mut buffer = Buffer::new(fonts, Metrics::new(16.0, 22.4));
-                buffer.set_size(fonts, Some(width * 2.0), None);
-                buffer.set_wrap(fonts, Wrap::None);
-                buffer.set_text(fonts, &candidate, base_attrs(), Shaping::Advanced);
-                buffer.shape_until_scroll(fonts, false);
-                buffer
-                    .layout_runs()
-                    .next()
-                    .map(|run| run.line_w)
-                    .unwrap_or(0.0)
-            };
-            let mut reference_search = |boundaries: &[usize]| -> Option<usize> {
-                if !width.is_finite() || boundaries.is_empty() {
-                    return None;
-                }
-
-                // Quick check: does the largest boundary fit?  If yes, return it directly
-                // (common case: the line nearly fits and only needs a tiny trim).
-                let last = *boundaries.last().unwrap();
-                if measure(last) <= width {
-                    return Some(last);
-                }
-
-                // Quick check: does even the smallest boundary fit?  If not, nothing fits.
-                let first = boundaries[0];
-                if measure(first) > width {
-                    return None;
-                }
-
-                // Binary search over the index space [0, boundaries.len()).
-                // Invariant: boundaries[lo] fits, boundaries[hi] does not fit.
-                let mut lo = 0usize;
-                let mut hi = boundaries.len() - 1;
-
-                while lo + 1 < hi {
-                    let mid = lo + (hi - lo) / 2;
-                    if measure(boundaries[mid]) <= width {
-                        lo = mid;
-                    } else {
-                        hi = mid;
-                    }
-                }
-
-                // `lo` is the last index where the predicate holds.
-                Some(boundaries[lo])
-            };
-            let words: Vec<_> = line
-                .unicode_word_indices()
-                .map(|(start, word)| start + word.len())
-                .filter(|&boundary| line.is_char_boundary(boundary))
-                .collect();
-            if let Some(boundary) = reference_search(&words) {
-                return format!("{}{ELLIPSIS}", line[..boundary].trim_end());
+    // Shape each complete candidate in a fresh Buffer. The head oracle
+    // searches word ends and graphemes separately, as before the union search.
+    fn last_fitting_boundary(
+        boundaries: &[usize],
+        fits: &mut impl FnMut(usize) -> bool,
+    ) -> Option<usize> {
+        if fits(*boundaries.last()?) {
+            return boundaries.last().copied();
+        }
+        if !fits(boundaries[0]) {
+            return None;
+        }
+        let (mut low, mut high) = (0, boundaries.len() - 1);
+        while low + 1 < high {
+            let mid = low + (high - low) / 2;
+            if fits(boundaries[mid]) {
+                low = mid;
+            } else {
+                high = mid;
             }
-            let graphemes: Vec<_> = line
+        }
+        Some(boundaries[low])
+    }
+
+    fn fresh_head(line: &str, width: f32, fonts: &mut FontSystem) -> String {
+        let metrics = Metrics::new(FONT, LINE);
+        let candidate = |end: usize| format!("{}{ELLIPSIS}", line[..end].trim_end());
+        let mut fits = |end| {
+            first_run_width(&shape(
+                &candidate(end),
+                width * 2.0,
+                Wrap::None,
+                metrics,
+                fonts,
+            )) <= width
+        };
+        let word_ends: Vec<_> = line
+            .unicode_word_indices()
+            .map(|(start, word)| start + word.len())
+            .collect();
+        let boundary = last_fitting_boundary(&word_ends, &mut fits).or_else(|| {
+            let grapheme_ends: Vec<_> = line
                 .grapheme_indices(true)
                 .map(|(start, grapheme)| start + grapheme.len())
-                .filter(|&boundary| line.is_char_boundary(boundary))
                 .collect();
-            reference_search(&graphemes)
-                .map(|boundary| format!("{}{ELLIPSIS}", line[..boundary].trim_end()))
-                .unwrap_or_else(|| ELLIPSIS.to_owned())
-        };
-        for line in [
-            payload.as_str(),
+            last_fitting_boundary(&grapheme_ends, &mut fits)
+        });
+        boundary.map_or_else(|| ELLIPSIS.to_owned(), candidate)
+    }
+
+    fn fresh_tail(line: &str, width: f32, fonts: &mut FontSystem) -> String {
+        let metrics = Metrics::new(FONT, LINE);
+        let candidate = |start: usize| format!("{ELLIPSIS}{}", line[start..].trim_start());
+        let words = line
+            .unicode_word_indices()
+            .map(|(start, _)| start)
+            .filter(|&start| start > 0);
+        let graphemes = line.grapheme_indices(true).skip(1).map(|(start, _)| start);
+        std::iter::once(0)
+            .chain(words)
+            .chain(graphemes)
+            .map(candidate)
+            .find(|text| {
+                first_run_width(&shape(text, width * 2.0, Wrap::None, metrics, fonts)) <= width
+            })
+            .unwrap_or_else(|| ELLIPSIS.to_owned())
+    }
+
+    #[test]
+    fn ellipsis_search_matches_fresh_word_then_grapheme_measurement() {
+        let mut fs = fonts();
+        let metrics = Metrics::new(FONT, LINE);
+        let long_token = "x".repeat(4096);
+        for text in [
+            long_token.as_str(),
             "alpha beta gamma delta",
             "alpha   beta\tlongwordlongwordlongword",
             "العربية الطويلة مع نص آخر",
@@ -1677,1521 +1591,114 @@ mod tests {
             "👨‍👩‍👧‍👦👨‍👩‍👧‍👦e\u{301}e\u{301}ffi",
         ] {
             for width in [60.0, 120.0, 400.0] {
-                let mut reference_fonts = make_font_system();
-                let expected = reference_cut(line, width, &mut reference_fonts);
-                let ellipsis_width =
-                    measure_single_line(ELLIPSIS, base_attrs(), width * 2.0, 16.0, 22.4, &mut fs);
+                let ellipsis = unwrapped_width(ELLIPSIS, width * 2.0, &mut fs);
                 let actual = truncate_line_to_ellipsis(
-                    line,
-                    base_attrs(),
+                    text,
+                    Attrs::new(),
                     width,
-                    16.0,
-                    22.4,
-                    ellipsis_width,
+                    FONT,
+                    LINE,
+                    ellipsis,
                     &mut fs,
                 );
                 assert_eq!(
-                    actual, expected,
-                    "prior word preference/output: {line:?}, {width}"
+                    actual,
+                    fresh_head(text, width, &mut fonts()),
+                    "head: {text:?} at {width}px"
                 );
-                let mut check = Buffer::new(&mut fs, Metrics::new(16.0, 22.4));
-                check.set_size(&mut fs, Some(width * 2.0), None);
-                check.set_wrap(&mut fs, Wrap::None);
-                check.set_text(&mut fs, &actual, base_attrs(), Shaping::Advanced);
-                check.shape_until_scroll(&mut fs, false);
-                assert!(check.layout_runs().all(|run| run.line_w <= width));
+                assert!(
+                    shape(&actual, width * 2.0, Wrap::None, metrics, &mut fs)
+                        .layout_runs()
+                        .all(|run| run.line_w <= width),
+                    "head: {actual:?} exceeds {width}px",
+                );
             }
         }
 
-        // A fitting grapheme extension must not replace a fitting word end.
-        let preferred_line = format!("alpha {payload}");
-        let preferred_width =
-            measure_single_line("alpha zz…", base_attrs(), 800.0, 16.0, 22.4, &mut fs);
-        let ellipsis_width =
-            measure_single_line(ELLIPSIS, base_attrs(), 800.0, 16.0, 22.4, &mut fs);
+        let word_before_long_token = format!("alpha {long_token}");
+        let width = unwrapped_width("alpha zz…", 800.0, &mut fs);
+        let ellipsis = unwrapped_width(ELLIPSIS, 800.0, &mut fs);
         assert!(
-            measure_single_line(
-                &format!("{preferred_line}{ELLIPSIS}"),
-                base_attrs(),
-                preferred_width * 2.0,
-                16.0,
-                22.4,
-                &mut fs,
-            ) > preferred_width
+            unwrapped_width(
+                &format!("{word_before_long_token}{ELLIPSIS}"),
+                width * 2.0,
+                &mut fs
+            ) > width
         );
         assert_eq!(
             truncate_line_to_ellipsis(
-                &preferred_line,
-                base_attrs(),
-                preferred_width,
-                16.0,
-                22.4,
-                ellipsis_width,
-                &mut fs,
+                &word_before_long_token,
+                Attrs::new(),
+                width,
+                FONT,
+                LINE,
+                ellipsis,
+                &mut fs
             ),
-            "alpha…"
+            "alpha…",
         );
 
-        // Invalid geometry must retain the original empty, truncated result.
-        for (width, height) in [(0.0, 100.0), (60.0, 0.0), (f32::NAN, 100.0)] {
-            assert_eq!(
-                truncate_for_ellipsis(
-                    "not empty",
-                    base_attrs(),
-                    width,
-                    height,
-                    16.0,
-                    22.4,
-                    &mut fs
-                ),
-                TruncationResult {
-                    text: String::new(),
-                    was_truncated: true
-                }
-            );
-        }
-
-        // Check the production collector against a fresh, unmodified backend buffer,
-        // before any final-string comparison can share the changed summary.
-        for (font_size, width) in [(12.0, 60.0), (16.0, 120.0), (24.0, 400.0)] {
-            let line_height = font_size * 1.4;
-            let height = line_height * 3.0;
-            for text in [
-                "",
-                "العربية الطويلة مع نص آخر",
-                "LTR العربية ffi e\u{301} 👨‍👩‍👧‍👦 tail",
-                "several words that soft wrap across lines",
-                "first\r\nsecond\nthird\tfourth",
-            ] {
-                let mut ellipse_reference =
-                    Buffer::new(&mut fs, Metrics::new(font_size, line_height));
-                ellipse_reference.set_size(&mut fs, Some(width * 2.0), None);
-                ellipse_reference.set_wrap(&mut fs, Wrap::None);
-                ellipse_reference.set_text(&mut fs, ELLIPSIS, base_attrs(), Shaping::Advanced);
-                ellipse_reference.shape_until_scroll(&mut fs, false);
-                let expected_ellipsis_w = ellipse_reference
-                    .layout_runs()
-                    .next()
-                    .map(|run| run.line_w)
-                    .unwrap_or(0.0);
-                let mut reference = Buffer::new(&mut fs, Metrics::new(font_size, line_height));
-                reference.set_size(&mut fs, Some(width), None);
-                reference.set_wrap(&mut fs, Wrap::Word);
-                reference.set_text(&mut fs, text, base_attrs(), Shaping::Advanced);
-                reference.shape_until_scroll(&mut fs, false);
-                let expected: Vec<_> = reference
-                    .layout_runs()
-                    .map(|run| {
-                        let glyphs: Vec<GlyphInfo> = run
-                            .glyphs
-                            .iter()
-                            .map(|g| (g.start, g.end, g.x + g.w))
-                            .collect();
-                        (run.line_i, run.line_w, glyphs)
-                    })
-                    .collect();
-                let expected_ordered_layouts: Vec<_> = reference
-                    .layout_runs()
-                    .map(|run| format!("{run:?}"))
-                    .collect();
-                let actual = shape_runs(
-                    text,
-                    base_attrs(),
-                    width,
-                    height,
-                    font_size,
-                    line_height,
-                    &mut fs,
-                );
-                match actual {
-                    ShapeOutcome::EarlyReturn(result) => {
-                        assert!(expected.is_empty());
-                        assert_eq!(result.text, text);
-                        assert!(!result.was_truncated);
-                    }
-                    ShapeOutcome::Proceed(actual) => {
-                        assert_eq!(actual.ellipsis_w, expected_ellipsis_w);
-                        assert_eq!(actual.max_lines, (height / line_height).floor() as usize);
-                        assert_eq!(actual.runs.len(), expected.len());
-                        for ((line_i, width, summary), (expected_i, expected_w, glyphs)) in
-                            actual.runs.iter().zip(&expected)
-                        {
-                            assert_eq!((*line_i, *width), (*expected_i, *expected_w));
-                            let minimum = glyphs.iter().map(|g| g.0).min().unwrap_or(0);
-                            assert_eq!(run_logical_start(summary), minimum);
-                            assert_eq!(summary.len(), usize::from(!glyphs.is_empty()));
-                            let first_minimum: Vec<GlyphInfo> = glyphs
-                                .iter()
-                                .min_by_key(|g| g.0)
-                                .copied()
-                                .into_iter()
-                                .collect();
-                            assert_eq!(*summary, first_minimum);
-                            for glyph in summary {
-                                assert_eq!(glyph.0, minimum);
-                                assert!(glyphs.contains(glyph), "summary must retain a real glyph");
-                            }
-                        }
-                        assert_eq!(
-                            format!("{:?}", actual.full_buf.lines),
-                            format!("{:?}", reference.lines)
-                        );
-                        assert_eq!(actual.full_buf.scroll(), reference.scroll());
-                        assert_eq!(actual.full_buf.size(), reference.size());
-                        assert_eq!(actual.full_buf.metrics(), reference.metrics());
-                        assert_eq!(actual.full_buf.wrap(), reference.wrap());
-                        assert_eq!(actual.full_buf.tab_width(), reference.tab_width());
-                        assert_eq!(actual.full_buf.tab_width(), 8);
-                        assert_eq!(
-                            actual.full_buf.monospace_width(),
-                            reference.monospace_width()
-                        );
-                        assert_eq!(actual.full_buf.monospace_width(), None);
-                        let actual_ordered_layouts: Vec<_> = actual
-                            .full_buf
-                            .layout_runs()
-                            .map(|run| format!("{run:?}"))
-                            .collect();
-                        assert_eq!(actual_ordered_layouts, expected_ordered_layouts);
-                    }
-                }
-            }
-
-            // A fixed-config callback must completely reset every candidate.
-            // Independent fresh Buffer::new preserves the original setup path.
-            let mut reused = Buffer::new_empty(Metrics::new(font_size, line_height));
-            reused.set_size(&mut fs, Some(width * 2.0), None);
-            reused.set_wrap(&mut fs, Wrap::None);
-            for text in [
-                "",
-                "العربية…",
-                "LTR ffi e\u{301} 👨‍👩‍👧‍👦…",
-                "one\ttwo…",
-                "",
-                "one\r\ntwo\rthree\n",
-            ] {
-                let actual_width =
-                    measure_single_line_in_buffer(text, base_attrs(), &mut fs, &mut reused);
-                let mut reference = Buffer::new(&mut fs, Metrics::new(font_size, line_height));
-                reference.set_size(&mut fs, Some(width * 2.0), None);
-                reference.set_wrap(&mut fs, Wrap::None);
-                reference.set_text(&mut fs, text, base_attrs(), Shaping::Advanced);
-                reference.shape_until_scroll(&mut fs, false);
-                assert_eq!(
-                    actual_width,
-                    reference
-                        .layout_runs()
-                        .next()
-                        .map(|r| r.line_w)
-                        .unwrap_or(0.0)
-                );
-                assert_eq!(
-                    format!("{:?}", reused.lines),
-                    format!("{:?}", reference.lines)
-                );
-                let actual_runs: Vec<_> = reused.layout_runs().map(|r| format!("{r:?}")).collect();
-                let expected_runs: Vec<_> =
-                    reference.layout_runs().map(|r| format!("{r:?}")).collect();
-                assert_eq!(actual_runs, expected_runs);
-                assert_eq!(reused.scroll(), reference.scroll());
-                assert_eq!(reused.size(), reference.size());
-            }
-        }
-
-        // Independent complete candidate measurement protects leading-ellipsis
-        // search as well as the existing trailing reference_cut controls.
-        let reference_tail = |line: &str, width: f32, fonts: &mut FontSystem| {
-            let mut measure = |cut: usize| {
-                let candidate = format!("{ELLIPSIS}{}", line[cut..].trim_start());
-                let mut buffer = Buffer::new(fonts, Metrics::new(16.0, 22.4));
-                buffer.set_size(fonts, Some(width * 2.0), None);
-                buffer.set_wrap(fonts, Wrap::None);
-                buffer.set_text(fonts, &candidate, base_attrs(), Shaping::Advanced);
-                buffer.shape_until_scroll(fonts, false);
-                buffer.layout_runs().next().map(|r| r.line_w).unwrap_or(0.0)
-            };
-            if measure(0) <= width {
-                return format!("{ELLIPSIS}{}", line.trim_start());
-            }
-            let words: Vec<_> = line
-                .unicode_word_indices()
-                .map(|(i, _)| i)
-                .filter(|&i| i > 0 && line.is_char_boundary(i))
-                .collect();
-            if let Some(cut) = binary_search_smallest_fitting(&words, width, &mut measure) {
-                return format!("{ELLIPSIS}{}", line[cut..].trim_start());
-            }
-            let graphemes: Vec<_> = line
-                .grapheme_indices(true)
-                .map(|(i, _)| i)
-                .filter(|&i| i > 0 && line.is_char_boundary(i))
-                .collect();
-            binary_search_smallest_fitting(&graphemes, width, &mut measure)
-                .map(|cut| format!("{ELLIPSIS}{}", line[cut..].trim_start()))
-                .unwrap_or_else(|| ELLIPSIS.to_owned())
-        };
-        for line in [
+        let width = 120.0;
+        let ellipsis = unwrapped_width(ELLIPSIS, width * 2.0, &mut fs);
+        for text in [
             "alpha beta gamma delta",
             "العربية الطويلة مع نص آخر",
             "ffi e\u{301} 👨‍👩‍👧‍👦 tail",
         ] {
-            let ellipsis = measure_single_line(ELLIPSIS, base_attrs(), 240.0, 16.0, 22.4, &mut fs);
-            let expected = reference_tail(line, 120.0, &mut fs);
-            assert_eq!(
-                truncate_line_to_leading_ellipsis(
-                    line,
-                    base_attrs(),
-                    120.0,
-                    16.0,
-                    22.4,
-                    ellipsis,
-                    &mut fs
-                ),
-                expected
+            let actual = truncate_line_to_leading_ellipsis(
+                text,
+                Attrs::new(),
+                width,
+                FONT,
+                LINE,
+                ellipsis,
+                &mut fs,
             );
+            assert_eq!(actual, fresh_tail(text, width, &mut fs), "tail: {text:?}");
         }
-        // Whole-line selection must still use the original full backend runs.
+
         let text = "first\nsecond\nthird";
-        let mut reference = Buffer::new(&mut fs, Metrics::new(16.0, 22.4));
-        reference.set_size(&mut fs, Some(400.0), None);
-        reference.set_wrap(&mut fs, Wrap::Word);
-        reference.set_text(&mut fs, text, base_attrs(), Shaping::Advanced);
-        reference.shape_until_scroll(&mut fs, false);
+        let width = 400.0;
+        let reference = shape(text, width, Wrap::Word, metrics, &mut fs);
         let runs: Vec<_> = reference.layout_runs().collect();
         assert_eq!(runs.len(), 3);
         let first = reference.lines[runs[0].line_i].text();
         let last = reference.lines[runs[2].line_i].text();
-        let expected_head = reference_cut(first, 400.0, &mut fs);
-        let expected_tail = reference_tail(last, 400.0, &mut fs);
-        let head = truncate_for_ellipsis(text, base_attrs(), 400.0, 22.4, 16.0, 22.4, &mut fs);
-        let tail = truncate_tail_anchored(text, base_attrs(), 400.0, 22.4, 16.0, 22.4, &mut fs);
+        let head = truncate(HeadAnchored, text, width, LINE, &mut fs);
+        let tail = truncate(TailAnchored, text, width, LINE, &mut fs);
         assert!(head.was_truncated && tail.was_truncated);
-        assert_eq!(head.text, expected_head);
-        assert_eq!(tail.text, expected_tail);
+        assert_eq!(head.text, fresh_head(first, width, &mut fs));
+        assert_eq!(tail.text, fresh_tail(last, width, &mut fs));
     }
 
-    /// Canonical repro from the bug report: `'W'×30` in a `200px` box must yield
-    /// at least one visible `W` cluster before the ellipsis, not bare `"…"`.
-    ///
-    /// Source: issue — "Ellipsis grapheme fallback is dead code".
-    ///
-    /// Preconditions are measured at runtime so the test remains correct across
-    /// environments with different default font metrics:
-    ///   1. A single `"W"` + ellipsis must fit within 200px (otherwise there is
-    ///      no room to show even one cluster and a bare `"…"` would be correct).
-    ///   2. The full 30-`"W"` token must overflow 200px (otherwise truncation
-    ///      would not occur and there is nothing to test).
     #[test]
-    fn long_unbroken_token_w30_in_200px_has_visible_prefix() {
-        let mut fs = make_font_system();
-        let font_size = 16.0_f32;
-        let line_h = 22.4_f32;
-        let bounds_w = 200.0_f32;
-
-        // Measure preconditions using the same font system and parameters.
-        let ellipsis_w = measure_single_line(
-            ELLIPSIS,
-            base_attrs(),
-            bounds_w * 2.0,
-            font_size,
-            line_h,
-            &mut fs,
-        );
-        let single_w_w = measure_single_line(
-            "W",
-            base_attrs(),
-            bounds_w * 2.0,
-            font_size,
-            line_h,
-            &mut fs,
-        );
-        let text = "W".repeat(30);
-        let full_w = measure_single_line(
-            &text,
-            base_attrs(),
-            bounds_w * 2.0,
-            font_size,
-            line_h,
-            &mut fs,
-        );
-
-        // Pre-condition 1: at least one cluster + ellipsis must fit.
-        // If this fails the font is so wide that a bare "…" is the correct answer.
-        if single_w_w + ellipsis_w > bounds_w {
-            // Cannot run the non-empty-prefix assertion — skip gracefully.
-            return;
-        }
-        // Pre-condition 2: the full token must overflow.
-        if full_w <= bounds_w {
-            // Cannot run the was_truncated assertion — skip gracefully.
-            return;
-        }
-
-        let result = truncate_for_ellipsis(
-            &text,
-            base_attrs(),
-            bounds_w,
-            100.0,
-            font_size,
-            line_h,
-            &mut fs,
-        );
-        assert!(
-            result.was_truncated,
-            "30 'W's ({full_w:.1}px) in a {bounds_w}px box must be truncated; got was_truncated=false"
-        );
-        assert!(
-            result.text.ends_with(ELLIPSIS),
-            "truncated long-token result must end with '…'; got: {:?}",
-            result.text
-        );
-        let prefix = result
-            .text
-            .strip_suffix(ELLIPSIS)
-            .expect("ends_with ELLIPSIS already asserted");
-        assert!(
-            !prefix.is_empty(),
-            "long unbroken token must produce at least one visible cluster before '…'; \
-             got bare '…' — grapheme fallback regression; result: {:?}",
-            result.text
-        );
-        // Verify all characters in the prefix are 'W' (no corruption / mid-codepoint split).
-        assert!(
-            prefix.chars().all(|c| c == 'W'),
-            "prefix before ellipsis must consist only of source characters; got: {prefix:?}",
-        );
-    }
-
-    /// Multi-codepoint grapheme cluster boundary: combining characters must not
-    /// be split.  Uses a base letter + combining acute accent (U+0301) as the
-    /// cluster unit.  The fallback must only cut at cluster boundaries.
-    #[test]
-    fn grapheme_cluster_boundary_not_split_mid_cluster() {
-        let mut fs = make_font_system();
-        // Build a string of 20 "é" (e + combining acute, 2 bytes each → 20 clusters).
-        // Using the decomposed form to guarantee a multi-codepoint cluster.
-        let cluster = "e\u{0301}"; // 'e' + combining acute accent (NFD)
-        let text: String = cluster.repeat(20);
-        // Verify our test input is actually multi-byte-per-cluster
-        let cluster_count = text.graphemes(true).count();
-        assert_eq!(
-            cluster_count, 20,
-            "expected 20 grapheme clusters in test input"
-        );
-
-        let result = truncate_for_ellipsis(&text, base_attrs(), 80.0, 100.0, 16.0, 22.4, &mut fs);
-        if result.was_truncated {
+    fn head_truncation_retains_logical_source_order_across_scripts() {
+        let mut fonts = fonts();
+        for (input, width) in [
+            ("ABC fi ".repeat(16), 80.0),
+            ("السلام عليكم ".repeat(3), 150.0),
+            ("Hello السلام عليكم ".repeat(3), 120.0),
+        ] {
+            let result = truncate(HeadAnchored, &input, width, LINE + 1.0, &mut fonts);
+            assert!(result.was_truncated);
+            let prefix = result.text.strip_suffix(ELLIPSIS).unwrap();
+            assert!(!prefix.is_empty());
             assert!(
-                result.text.ends_with(ELLIPSIS),
-                "multi-codepoint-cluster truncation must end with '…'; got: {:?}",
-                result.text
+                input.starts_with(prefix),
+                "logical beginning lost: {prefix:?} of {input:?}"
             );
-            // The prefix before the ellipsis must be valid UTF-8 and consist of
-            // whole grapheme clusters only.
-            let prefix = result.text.strip_suffix(ELLIPSIS).unwrap_or("");
-            // Every grapheme in the prefix must equal the original cluster unit.
-            // If the fallback split a cluster mid-codepoint we'd get partial
-            // graphemes (e.g. "e" without the accent).
-            for g in prefix.graphemes(true) {
-                // Accept either the precomposed form or NFD form — the font system
-                // may normalise; what matters is no lone combining codepoints.
-                let has_lone_combining = g
-                    .chars()
-                    .next()
-                    .map(|c| {
-                        // Unicode "combining character" range: 0x0300..=0x036F and beyond.
-                        // A lone combining as the *first* codepoint of a grapheme cluster
-                        // means we split before the base.
-                        (c as u32) >= 0x0300 && (c as u32) <= 0x036F
-                    })
-                    .unwrap_or(false);
-                assert!(
-                    !has_lone_combining,
-                    "grapheme cluster boundary violated: prefix grapheme {g:?} starts with \
-                     a combining codepoint — the fallback split a multi-codepoint cluster; \
-                     full result: {:?}",
-                    result.text
-                );
-            }
-            // At least one whole cluster must be visible before the ellipsis.
-            assert!(
-                !prefix.is_empty(),
-                "at least one grapheme cluster must precede '…' in the truncated result; \
-                 got bare '…'; result: {:?}",
-                result.text
-            );
-        }
-    }
-
-    // ── Task 3.4: property-based tests (proptest) ────────────────────────────
-    //
-    // These use proptest to verify invariants across random content/widths.
-    // FontSystem is not Send, so each proptest body owns its own instance.
-    //
-    // Iteration count is 32 to keep total CI time well under 10 s in debug mode
-    // with software font rasterisation.  The invariant guarantee comes from random
-    // input coverage, not iteration count. These check correctness; latency
-    // conformance requires separate workload measurements.
-
-    proptest! {
-        #![proptest_config(proptest::test_runner::Config {
-            cases: 32,
-            source_file: Some("crates/tze_hud_compositor/src/overflow.rs"),
-            ..proptest::test_runner::Config::default()
-        })]
-
-        /// Invariant: if truncation occurs, the result always ends with ELLIPSIS.
-        #[test]
-        fn proptest_truncated_always_ends_with_ellipsis(
-            text in "[a-zA-Z0-9 ]{1,80}",
-            width_px in 20.0_f32..200.0_f32,
-        ) {
-            let mut fs = make_font_system();
-            let result = truncate_for_ellipsis(
-                &text, base_attrs(), width_px, 200.0, 16.0, 22.4, &mut fs,
-            );
-            if result.was_truncated {
-                prop_assert!(
-                    result.text.ends_with(ELLIPSIS),
-                    "was_truncated=true but result does not end with '…'; \
-                     text={text:?} width={width_px} result={:?}",
-                    result.text,
-                );
-            }
-        }
-
-        /// Invariant: truncated text, when rendered at bounds_width with word-wrap,
-        /// has every layout run fitting within bounds_width.  This is the "no clipped
-        /// glyphs" contract: no run is wider than the content box.
-        ///
-        /// Note: the result text may be multi-line (when a word-wrapped paragraph has
-        /// a non-final line that overflows horizontally, the preceding whole lines are
-        /// preserved and the overflow line is truncated).  In that case
-        /// `measure_single_line(result)` can legitimately exceed `bounds_width`, but
-        /// every individual layout run must still fit.  We therefore shape the result
-        /// at `bounds_width` with `Wrap::Word` and assert each run's `line_w ≤ bounds_width`.
-        #[test]
-        fn proptest_truncated_result_fits_within_bounds(
-            text in "[a-zA-Z0-9 ]{1,80}",
-            width_px in 30.0_f32..300.0_f32,
-            font_size in 10.0_f32..24.0_f32,
-        ) {
-            let mut fs = make_font_system();
-            let line_h = font_size * 1.4;
-            let result = truncate_for_ellipsis(
-                &text, base_attrs(), width_px, 200.0, font_size, line_h, &mut fs,
-            );
-            if result.was_truncated && !result.text.is_empty() {
-                // Shape the result at bounds_width with word-wrap — the same
-                // geometry used by the renderer — and check every run's width.
-                let mut check = Buffer::new(&mut fs, Metrics::new(font_size, line_h));
-                check.set_size(&mut fs, Some(width_px), None);
-                check.set_wrap(&mut fs, Wrap::Word);
-                check.set_text(&mut fs, &result.text, base_attrs(), Shaping::Advanced);
-                check.shape_until_scroll(&mut fs, false);
-                for run in check.layout_runs() {
-                    prop_assert!(
-                        run.line_w <= width_px + 2.0, // 2px tolerance for fp rounding
-                        "layout run measured {:.2}px > bounds {width_px}px; \
-                         text={text:?} result={:?} run_line_i={}",
-                        run.line_w, result.text, run.line_i,
-                    );
-                }
-            }
-        }
-
-        /// Invariant: whole-line vertical visibility — the result must not produce
-        /// more layout runs than the number of lines that fit in bounds_height.
-        #[test]
-        fn proptest_whole_line_visibility_no_partial_lines(
-            n_lines in 2usize..6usize,
-            bounds_scale in 1.0_f32..1.5_f32,
-        ) {
-            let mut fs = make_font_system();
-            let font_size = 14.0_f32;
-            let line_h = font_size * 1.4;
-            // Build text with more lines than n_lines so truncation always applies.
-            let text: String = (0..n_lines + 3)
-                .map(|i| format!("Line number {i} of test content"))
-                .collect::<Vec<_>>()
-                .join("\n");
-            let height = line_h * (n_lines as f32) * bounds_scale;
-            let bounds_w = 400.0_f32;
-
-            let result = truncate_for_ellipsis(
-                &text, base_attrs(), bounds_w, height, font_size, line_h, &mut fs,
-            );
-
-            // Shape the result and verify the layout run count.
-            let mut check_buf = Buffer::new(&mut fs, Metrics::new(font_size, line_h));
-            check_buf.set_size(&mut fs, Some(bounds_w), None);
-            check_buf.set_wrap(&mut fs, Wrap::Word);
-            check_buf.set_text(&mut fs, &result.text, base_attrs(), Shaping::Advanced);
-            check_buf.shape_until_scroll(&mut fs, false);
-            let run_count = check_buf.layout_runs().count();
-            let max_allowed = max_whole_lines(height, line_h);
-            prop_assert!(
-                run_count <= max_allowed + 1, // +1: trailing ellipsis may add one run
-                "result produced {run_count} runs but max_whole_lines({height}, {line_h}) = {max_allowed}; \
-                 result={:?}",
-                result.text,
-            );
-        }
-
-        /// Invariant: grapheme fallback — unbroken tokens (no spaces) are truncated
-        /// at a grapheme boundary with ellipsis appended, never at mid-codepoint.
-        ///
-        /// Strengthened: when the box is measurably wide enough to fit at least
-        /// one `"A"` cluster + ellipsis, the prefix before `"…"` must be non-empty
-        /// (not bare `"…"`).  The threshold is derived by measuring "A" + ELLIPSIS
-        /// with the same font system rather than relying on a fixed pixel constant.
-        #[test]
-        fn proptest_grapheme_fallback_valid_utf8_boundary(
-            repeat in 10usize..50usize,
-            width_px in 40.0_f32..80.0_f32,
-        ) {
-            let mut fs = make_font_system();
-            let font_size = 16.0_f32;
-            let line_h = 22.4_f32;
-
-            // Measure the minimum width needed to show one "A" cluster + ellipsis.
-            // If `width_px` is narrower than this, a bare "…" is the correct answer
-            // and we must not assert a non-empty prefix.
-            let single_a_w = measure_single_line("A", base_attrs(), width_px * 4.0, font_size, line_h, &mut fs);
-            let ellipsis_w = measure_single_line(ELLIPSIS, base_attrs(), width_px * 4.0, font_size, line_h, &mut fs);
-            let min_width_for_prefix = single_a_w + ellipsis_w;
-
-            // Single unbroken token — no word boundaries.
-            let text = "A".repeat(repeat);
-            let result = truncate_for_ellipsis(
-                &text, base_attrs(), width_px, 200.0, font_size, line_h, &mut fs,
-            );
-            // Result must be valid UTF-8 and never split at a non-char-boundary.
-            prop_assert!(
-                std::str::from_utf8(result.text.as_bytes()).is_ok(),
-                "result is not valid UTF-8; text={text:?} width={width_px} result={:?}",
-                result.text,
-            );
-            if result.was_truncated {
-                prop_assert!(
-                    result.text.ends_with(ELLIPSIS),
-                    "grapheme fallback result must end with '…'; text={text:?} result={:?}",
-                    result.text,
-                );
-                // Only assert a non-empty prefix when the box is measurably wide
-                // enough to fit at least one cluster + ellipsis.  When the box is
-                // too narrow even for that, a bare "…" is correct behavior.
-                if width_px >= min_width_for_prefix {
-                    let prefix = result.text.strip_suffix(ELLIPSIS).unwrap_or("");
-                    prop_assert!(
-                        !prefix.is_empty(),
-                        "unbroken token must have at least one visible cluster before '…' \
-                         when width ({width_px}px) >= min_width_for_prefix ({min_width_for_prefix:.1}px); \
-                         got bare '…' — grapheme fallback regression; \
-                         text={text:?} result={:?}",
-                        result.text,
-                    );
-                }
-            }
-        }
-    }
-
-    // ── Task 3.4: scrolled-back append stability (structural test) ────────────
-    //
-    // The scrolled-back append stability guarantee is architectural: appends
-    // beyond the viewport do not cause layout_runs() to change for already-
-    // rendered lines.  This is enforced by the compositor's scene-commit path
-    // (not by this function), so we test it structurally: truncating a
-    // prefix of text and then the same prefix + suffix produces the same
-    // truncated prefix.
-    #[test]
-    fn append_stability_truncation_prefix_unchanged() {
-        let mut fs = make_font_system();
-        let font_size = 16.0_f32;
-        let line_h = font_size * 1.4;
-        let bounds_w = 100.0_f32;
-        // Height for exactly 1 line.
-        let height = line_h * 1.0 + 1.0;
-
-        let prefix = "Hello world foo bar";
-        let suffix = "\nNew line of text appended after scroll";
-        let full = format!("{prefix}{suffix}");
-
-        let result_prefix = truncate_for_ellipsis(
-            prefix,
-            base_attrs(),
-            bounds_w,
-            height,
-            font_size,
-            line_h,
-            &mut fs,
-        );
-        let result_full = truncate_for_ellipsis(
-            &full,
-            base_attrs(),
-            bounds_w,
-            height,
-            font_size,
-            line_h,
-            &mut fs,
-        );
-
-        // Both should produce the same first-line text (within the single-line height).
-        assert_eq!(
-            result_prefix.text, result_full.text,
-            "appending lines beyond the viewport must not change the truncated first-line content"
-        );
-    }
-
-    // ── RTL / bidi regression tests ──────────────────────────────
-    //
-    // These tests guard the fix for "Ellipsis truncation corrupts RTL text:
-    // visual-order glyph offsets treated as logical".  cosmic-text outputs
-    // glyphs in visual order; for RTL runs glyphs[0] is the logical end, not
-    // the logical start.  The old code took glyphs[0].start as run_start,
-    // silently skipping the leading bytes of every RTL run.
-    //
-    // Each test:
-    //   1. Verifies the result ends with ELLIPSIS (contract invariant).
-    //   2. Asserts the rendered prefix against the actual text — no silent
-    //      leading-byte drop, no mid-token split.
-    //   3. Verifies the result is valid UTF-8 (no byte-offset misalignment).
-
-    /// Arabic canonical repro from the issue description.
-    ///
-    /// "السلام عليكم" repeated to guarantee overflow in a 150×25 box must not
-    /// silently drop the first letter of the source string (ا, U+0627).  The
-    /// truncated prefix, stripped of the trailing "…", must begin with exactly
-    /// U+0627 — not merely some Arabic-block character — confirming that
-    /// truncation started from the logical beginning of the run, not mid-word.
-    ///
-    /// Overflow is guaranteed by repetition; the precondition is an `assert!`
-    /// rather than an early `return` so this test cannot be silently skipped.
-    /// Because font metrics vary across environments the exact truncation point
-    /// is not asserted; we verify structural correctness only.
-    #[test]
-    fn rtl_arabic_truncation_no_leading_byte_drop() {
-        let mut fs = make_font_system();
-        // Arabic greeting: "السلام عليكم" (Peace be upon you).
-        // U+0627 U+0644 U+0633 U+0644 U+0627 U+0645 SPACE
-        // U+0639 U+0644 U+064A U+0643 U+0645
-        // Repeated to guarantee overflow at any reasonable font metrics.
-        let arabic_unit = "السلام عليكم";
-        let arabic: String = format!("{arabic_unit} {arabic_unit} {arabic_unit}");
-        let bounds_w = 150.0_f32;
-        let font_size = 14.0_f32;
-        let line_h = font_size * 1.4;
-
-        // Verify overflow is guaranteed. Assert rather than return so the test
-        // cannot be silently skipped on unusual font configurations.
-        let full_w = measure_single_line(
-            &arabic,
-            base_attrs(),
-            bounds_w * 4.0,
-            font_size,
-            line_h,
-            &mut fs,
-        );
-        assert!(
-            full_w > bounds_w,
-            "repeated Arabic string ({full_w:.1}px) must exceed {bounds_w}px; \
-             font metrics are unexpectedly narrow — adjust the repetition count"
-        );
-
-        let result = truncate_for_ellipsis(
-            &arabic,
-            base_attrs(),
-            bounds_w,
-            25.0, // single-line height
-            font_size,
-            line_h,
-            &mut fs,
-        );
-
-        assert!(
-            result.was_truncated,
-            "Arabic text ({full_w:.1}px) in a {bounds_w}px box must be truncated; got was_truncated=false"
-        );
-        assert!(
-            result.text.ends_with(ELLIPSIS),
-            "RTL truncated text must end with '…'; got: {:?}",
-            result.text
-        );
-
-        // The prefix before the ellipsis must begin with the first Arabic
-        // codepoint of the source — U+0627 (ARABIC LETTER ALEF) — exactly.
-        // Checking only "some Arabic-block character" is insufficient: the old
-        // bug dropped leading bytes and could still produce an Arabic codepoint
-        // that is not the logical start (e.g. U+0633 or U+0644).
-        let prefix = result
-            .text
-            .strip_suffix(ELLIPSIS)
-            .expect("ends_with ELLIPSIS already asserted");
-        assert!(
-            !prefix.is_empty(),
-            "RTL truncation must produce at least one visible codepoint before '…'; \
-             got bare '…'; result: {:?}",
-            result.text
-        );
-
-        let first_cp = prefix.chars().next().unwrap();
-        assert_eq!(
-            first_cp, '\u{0627}',
-            "RTL prefix must start with U+0627 (ARABIC LETTER ALEF, ا) — the logical \
-             first character of the source string; got U+{:04X} ({first_cp:?}); \
-             this indicates the old leading-byte-drop bug is still present; \
-             prefix: {prefix:?}; result: {:?}",
-            first_cp as u32, result.text,
-        );
-    }
-
-    /// Mixed bidi: LTR prefix + RTL suffix in one string.
-    ///
-    /// "Hello السلام عليكم" repeated to guarantee overflow in a 120px box.
-    /// The LTR word "Hello" is at the logical start and must appear in the
-    /// truncated result:
-    ///   - the prefix (before "…") must start with 'H',
-    ///   - no mid-codepoint split may occur.
-    ///
-    /// Overflow is guaranteed by repetition; the precondition is an `assert!`
-    /// rather than an early `return` so this test cannot be silently skipped.
-    /// We intentionally do not assert the exact truncation boundary because
-    /// bidi rendering and ellipsis placement on mixed lines is font-dependent.
-    #[test]
-    fn mixed_bidi_ltr_rtl_no_corruption() {
-        let mut fs = make_font_system();
-        // Mixed-direction string: Latin greeting + Arabic greeting, repeated.
-        let mixed_unit = "Hello السلام عليكم";
-        let mixed: String = format!("{mixed_unit} {mixed_unit} {mixed_unit}");
-        let bounds_w = 120.0_f32;
-        let font_size = 14.0_f32;
-        let line_h = font_size * 1.4;
-
-        let full_w = measure_single_line(
-            &mixed,
-            base_attrs(),
-            bounds_w * 4.0,
-            font_size,
-            line_h,
-            &mut fs,
-        );
-        assert!(
-            full_w > bounds_w,
-            "repeated mixed-bidi string ({full_w:.1}px) must exceed {bounds_w}px; \
-             adjust the repetition count"
-        );
-
-        let result = truncate_for_ellipsis(
-            &mixed,
-            base_attrs(),
-            bounds_w,
-            30.0,
-            font_size,
-            line_h,
-            &mut fs,
-        );
-
-        assert!(
-            result.was_truncated,
-            "mixed-bidi text ({full_w:.1}px) in {bounds_w}px must be truncated"
-        );
-        assert!(
-            result.text.ends_with(ELLIPSIS),
-            "mixed-bidi truncated text must end with '…'; got: {:?}",
-            result.text
-        );
-
-        let prefix = result
-            .text
-            .strip_suffix(ELLIPSIS)
-            .expect("ends_with ELLIPSIS asserted");
-        assert!(
-            !prefix.is_empty(),
-            "mixed-bidi truncation must produce at least one visible codepoint before '…'; \
-             got bare '…'; result: {:?}",
-            result.text
-        );
-
-        // The result prefix must begin with 'H' — the LTR content is at the
-        // logical start and must not be silently dropped or reordered.
-        let first_char = prefix.chars().next().unwrap();
-        assert_eq!(
-            first_char, 'H',
-            "mixed-bidi result prefix must start with 'H' (logical start of the string); \
-             got: {first_char:?}; prefix: {prefix:?}; result: {:?}",
-            result.text
-        );
-    }
-
-    /// Pure LTR regression guard: the RTL fix must not break the existing LTR path.
-    ///
-    /// Verifies that a simple LTR string still produces a truncated prefix
-    /// starting with the first character ('A') when repeated to guarantee
-    /// overflow.  Overflow is assured by assertion, not by an early `return`,
-    /// so this test cannot be silently skipped on any font configuration.
-    #[test]
-    fn ltr_truncation_unaffected_by_rtl_fix() {
-        let mut fs = make_font_system();
-        // Repeat the alphabet to guarantee overflow at any reasonable font size.
-        let text: String = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".repeat(3);
-        let bounds_w = 100.0_f32;
-        let font_size = 14.0_f32;
-        let line_h = font_size * 1.4;
-
-        let full_w = measure_single_line(
-            &text,
-            base_attrs(),
-            bounds_w * 4.0,
-            font_size,
-            line_h,
-            &mut fs,
-        );
-        assert!(
-            full_w > bounds_w,
-            "repeated LTR string ({full_w:.1}px) must exceed {bounds_w}px; \
-             adjust the repetition count"
-        );
-
-        let result = truncate_for_ellipsis(
-            &text,
-            base_attrs(),
-            bounds_w,
-            30.0,
-            font_size,
-            line_h,
-            &mut fs,
-        );
-
-        assert!(result.was_truncated, "LTR text must be truncated");
-        assert!(
-            result.text.ends_with(ELLIPSIS),
-            "LTR truncated text must end with '…'; got: {:?}",
-            result.text
-        );
-
-        let prefix = result
-            .text
-            .strip_suffix(ELLIPSIS)
-            .expect("ends_with ELLIPSIS asserted");
-        assert_eq!(
-            prefix.chars().next(),
-            Some('A'),
-            "LTR prefix must start with 'A' (logical start); got: {:?}; result: {:?}",
-            prefix,
-            result.text
-        );
-    }
-
-    /// run_logical_start helper — unit test for the core fix.
-    ///
-    /// Verifies that for a simulated RTL glyph ordering (visual order: highest
-    /// start byte first) the helper returns the minimum (logical) start, not the
-    /// first element.
-    #[test]
-    fn run_logical_start_returns_min_not_first() {
-        // Simulate RTL visual ordering: glyph[0] has a high byte offset (it is
-        // the visual-first / logical-last glyph), glyph[1] has a lower byte offset.
-        let rtl_glyphs: Vec<GlyphInfo> = vec![
-            (10, 12, 20.0), // visual-first glyph: logical bytes 10..12
-            (6, 10, 12.0),  // second glyph: logical bytes 6..10
-            (0, 6, 6.0),    // visual-last glyph: logical bytes 0..6
-        ];
-        assert_eq!(
-            run_logical_start(&rtl_glyphs),
-            0,
-            "run_logical_start must return the minimum start offset (0), not glyphs[0].start (10)"
-        );
-
-        // LTR case: glyph[0] already has the smallest start — result is the same.
-        let ltr_glyphs: Vec<GlyphInfo> = vec![(0, 4, 6.0), (4, 8, 12.0), (8, 12, 20.0)];
-        assert_eq!(
-            run_logical_start(&ltr_glyphs),
-            0,
-            "run_logical_start must return 0 for LTR glyphs[0].start == 0"
-        );
-
-        // Empty slice returns 0.
-        assert_eq!(
-            run_logical_start(&[]),
-            0,
-            "run_logical_start on empty slice must return 0"
-        );
-    }
-
-    // ── Task 3.2 — follow-tail whole-line advancement (truncate_tail_anchored) ─
-
-    /// When content has more layout runs than max_lines, `truncate_tail_anchored`
-    /// shows the LAST max_lines, not the first.  This is the follow-tail guarantee:
-    /// every append produces a result ending with the newest content.
-    ///
-    /// Follow-tail advances by whole lines.
-    #[test]
-    fn follow_tail_advances_by_whole_lines() {
-        let mut fs = make_font_system();
-        let font_size = 14.0_f32;
-        let line_h = font_size * 1.4;
-        // 5 lines of content, but only space for 3.
-        let lines = [
-            "Line one",
-            "Line two",
-            "Line three",
-            "Line four",
-            "Line five (newest)",
-        ];
-        let text = lines.join("\n");
-        let bounds_w = 400.0_f32;
-        // Height for exactly 3 lines.
-        let bounds_h = line_h * 3.0 + 1.0;
-
-        let result = truncate_tail_anchored(
-            &text,
-            base_attrs(),
-            bounds_w,
-            bounds_h,
-            font_size,
-            line_h,
-            &mut fs,
-        );
-
-        assert!(
-            result.was_truncated,
-            "5 lines into 3-line box must be truncated; got: {:?}",
-            result.text
-        );
-
-        // The newest line must be visible in the result.
-        assert!(
-            result.text.contains("Line five"),
-            "tail-anchored result must contain the newest content ('Line five'); \
-             got: {:?}",
-            result.text
-        );
-
-        // The oldest lines must NOT be visible (they were dropped).
-        assert!(
-            !result.text.contains("Line one"),
-            "tail-anchored result must NOT contain 'Line one' (oldest content was dropped); \
-             got: {:?}",
-            result.text
-        );
-
-        // The result starts with the ELLIPSIS to signal omitted leading content.
-        assert!(
-            result.text.starts_with(ELLIPSIS),
-            "tail-anchored result must start with '…' when leading lines are omitted; \
-             got: {:?}",
-            result.text
-        );
-
-        // ── LINE COUNT ASSERTION (defect #1 regression guard) ────────────────
-        //
-        // The total number of output lines (after shaping the result) must be
-        // <= max_lines (3 in this test: bounds_h = line_h * 3.0 + 1.0).
-        //
-        // Before the fix, the ellipsis was prepended on top of max_lines content
-        // runs, producing max_lines + 1 = 4 layout lines in a 3-line box.
-        //
-        // We count '\n'-separated logical lines in the result string as an
-        // inexpensive proxy.  Word-wrapping can split a single logical line
-        // into multiple shaped runs, so the actual rendered line count can
-        // exceed this logical count.  Keeping `max_lines` small in this test
-        // (3 lines) avoids wrapping in practice; the proptest below covers
-        // the general case.
-        let max_lines_in_box = (bounds_h / line_h).floor() as usize;
-        let logical_line_count = result.text.split('\n').count();
-        assert!(
-            logical_line_count <= max_lines_in_box,
-            "tail-anchored result has {logical_line_count} logical lines but box fits \
-             only {max_lines_in_box}; result: {:?}",
-            result.text
-        );
-    }
-
-    /// Degenerate `max_lines == 1`: a follow-tail box
-    /// with room for exactly one line must show the NEWEST line's content with
-    /// an inline LEADING ellipsis — never a bare "…" that shows nothing.
-    ///
-    /// Two sub-cases are exercised:
-    ///   1. The newest line fits within bounds_width: result is "…<newest line>"
-    ///      (leading ellipsis marks the omitted earlier lines; full newest line
-    ///      shown).
-    ///   2. The newest line itself overflows bounds_width: result is
-    ///      "…<tail of newest line>" — the newest content's TAIL is shown after
-    ///      the leading ellipsis, horizontally truncated to fit.
-    ///
-    /// In both cases the result is exactly one logical line, starts with "…",
-    /// and carries visible newest content after the ellipsis.
-    #[test]
-    fn tail_anchored_max_lines_one_shows_newest_with_leading_ellipsis() {
-        let mut fs = make_font_system();
-        let font_size = 14.0_f32;
-        let line_h = font_size * 1.4;
-        // Height for exactly ONE line: line_h + a fractional surplus, < 2*line_h.
-        let bounds_h = line_h + 1.0;
-        assert_eq!(
-            max_whole_lines(bounds_h, line_h),
-            1,
-            "test precondition: box must fit exactly one line"
-        );
-
-        // ── Sub-case 1: short newest line that fits horizontally ─────────────
-        let text = "First old line\nSecond old line\nNewest";
-        let bounds_w = 400.0_f32; // wide enough for "…Newest"
-        let result = truncate_tail_anchored(
-            text,
-            base_attrs(),
-            bounds_w,
-            bounds_h,
-            font_size,
-            line_h,
-            &mut fs,
-        );
-        assert!(
-            result.was_truncated,
-            "3 lines into a 1-line box must be truncated; got: {:?}",
-            result.text
-        );
-        // Exactly one logical line (no '\n').
-        assert_eq!(
-            result.text.split('\n').count(),
-            1,
-            "max_lines==1 result must be a single line; got: {:?}",
-            result.text
-        );
-        // Must NOT be the degenerate bare ellipsis — newest content is the point.
-        assert_ne!(
-            result.text, ELLIPSIS,
-            "max_lines==1 must NOT return a bare '…' (option (a) rejected); \
-             the newest content must be shown"
-        );
-        // Leading omission signal preserved.
-        assert!(
-            result.text.starts_with(ELLIPSIS),
-            "max_lines==1 result must start with the leading '…' omission signal; got: {:?}",
-            result.text
-        );
-        // Newest content visible after the ellipsis.
-        assert!(
-            result.text.contains("Newest"),
-            "max_lines==1 result must contain the newest line's content; got: {:?}",
-            result.text
-        );
-        // Older lines dropped.
-        assert!(
-            !result.text.contains("First old line"),
-            "older content must be dropped; got: {:?}",
-            result.text
-        );
-
-        // ── Sub-case 2: newest line overflows horizontally ───────────────────
-        // A long unbroken newest line forces a horizontal cut; the TAIL of the
-        // newest content is shown after the leading ellipsis.
-        let long_newest = "WWWWWWWWWWWWWWWWWWWWWWWWWWWWWW"; // 30 'W's
-        let text2 = format!("old\nold\n{long_newest}");
-        let narrow_w = 80.0_f32;
-        // Precondition: the long newest line overflows the narrow box.
-        let newest_w = measure_single_line(
-            long_newest,
-            base_attrs(),
-            narrow_w * 4.0,
-            font_size,
-            line_h,
-            &mut fs,
-        );
-        assert!(
-            newest_w > narrow_w,
-            "test precondition: newest line ({newest_w:.1}px) must overflow {narrow_w}px"
-        );
-        let result2 = truncate_tail_anchored(
-            &text2,
-            base_attrs(),
-            narrow_w,
-            bounds_h,
-            font_size,
-            line_h,
-            &mut fs,
-        );
-        assert!(result2.was_truncated, "overflowing case must be truncated");
-        assert_eq!(
-            result2.text.split('\n').count(),
-            1,
-            "max_lines==1 overflow result must be a single line; got: {:?}",
-            result2.text
-        );
-        assert!(
-            result2.text.starts_with(ELLIPSIS),
-            "overflow result must start with leading '…'; got: {:?}",
-            result2.text
-        );
-        // No-partial-glyph guarantee: the result re-measures within bounds_width.
-        let measured_w = measure_single_line(
-            &result2.text,
-            base_attrs(),
-            narrow_w * 4.0,
-            font_size,
-            line_h,
-            &mut fs,
-        );
-        assert!(
-            measured_w <= narrow_w + 1.0, // +1.0 float tolerance
-            "max_lines==1 newest-line truncation must re-measure ≤ bounds_width \
-             ({narrow_w}px); got {measured_w:.2}px; result: {:?}",
-            result2.text
-        );
-        // Some newest content must be visible after the ellipsis (not bare '…').
-        let tail = result2.text.strip_prefix(ELLIPSIS).unwrap_or("");
-        assert!(
-            tail.chars().any(|c| c == 'W'),
-            "max_lines==1 overflow result must show some newest content ('W') \
-             after the leading '…'; got: {:?}",
-            result2.text
-        );
-    }
-
-    /// Appending more content to an already-overflowing transcript must not
-    /// disturb the visible window when the caller is head-anchored (scrolled
-    /// back).  This is the structural mirror of the scroll-layer task 3.3 test
-    /// in tze_hud_input::scroll.
-    ///
-    /// Appends preserve a scrolled-back viewport.
-    ///
-    /// For the truncation layer: head-anchored truncation of `prefix` must
-    /// produce the same result as head-anchored truncation of `prefix + suffix`.
-    /// The suffix is new streaming content appended beyond the viewport.
-    #[test]
-    fn head_anchored_append_stability_matches_prefix_truncation() {
-        let mut fs = make_font_system();
-        let font_size = 14.0_f32;
-        let line_h = font_size * 1.4;
-        let bounds_w = 200.0_f32;
-        // Height for exactly 2 lines.
-        let bounds_h = line_h * 2.0 + 1.0;
-
-        let prefix = "Existing line A\nExisting line B\nExisting line C";
-        let suffix = "\nNew line D appended during streaming";
-        let full = format!("{prefix}{suffix}");
-
-        let result_prefix = truncate_for_ellipsis(
-            prefix,
-            base_attrs(),
-            bounds_w,
-            bounds_h,
-            font_size,
-            line_h,
-            &mut fs,
-        );
-        let result_full = truncate_for_ellipsis(
-            &full,
-            base_attrs(),
-            bounds_w,
-            bounds_h,
-            font_size,
-            line_h,
-            &mut fs,
-        );
-
-        assert_eq!(
-            result_prefix.text, result_full.text,
-            "head-anchored append stability: visible content must be identical \
-             whether or not new lines have been appended beyond the viewport"
-        );
-    }
-
-    // ── Task 3.2: property-based tests for truncate_tail_anchored ──
-    //
-    // These proptests verify the core invariants of tail-anchored truncation
-    // (1–3b share one generator and one proptest):
-    //
-    //   1. Tail content always visible — the LAST line(s) of the input always
-    //      appear in the output when truncation occurs.
-    //   2. Leading ellipsis — when leading lines are omitted, the result starts
-    //      with ELLIPSIS (the omission indicator for tail-anchored display).
-    //   3. Result is strictly shorter — truncated result is shorter than the
-    //      original text plus the ELLIPSIS prefix overhead.
-    //   4. Grapheme-cluster integrity — result is valid UTF-8 and no grapheme
-    //      cluster is split at the truncation boundary.
-    //
-    // A fifth proptest exercises RTL/bidi inputs to guard the run_logical_start
-    // path (hud-676 semantics) under tail-anchored truncation.
-    //
-    // Configuration mirrors the existing proptest! blocks above: 32 cases, same
-    // source_file annotation.  Each case builds its own (bundled) FontSystem.
-
-    proptest! {
-        #![proptest_config(proptest::test_runner::Config {
-            cases: 32,
-            source_file: Some("crates/tze_hud_compositor/src/overflow.rs"),
-            ..proptest::test_runner::Config::default()
-        })]
-
-        /// Invariants 1–3b over one multi-line generator.
-        ///
-        /// For `n_lines` distinct lines in a box `max_lines` lines tall:
-        ///
-        /// - 1: when truncated, the LAST line of the original text is visible —
-        ///   the newest content (tail) is the whole point of tail-anchored mode;
-        /// - 2: when truncated, the result STARTS with ELLIPSIS (the omission
-        ///   indicator mirrors head-anchored's trailing ellipsis);
-        /// - 3: when truncated, the result is shorter than the original plus
-        ///   the `"…\n"` overhead, or truncation gained nothing;
-        /// - 3b (defect #1 regression guard): the result never has more than
-        ///   `max_lines` logical lines. Before the fix the ellipsis was
-        ///   prepended on top of `max_lines` content runs (`max_lines + 1`).
-        ///
-        /// `max_lines` ranges over 2..8 so the "exactly one line over" boxes the
-        /// former per-invariant tests used (`n_lines - 1`) stay in the space.
-        #[test]
-        fn proptest_tail_anchored_vertical_truncation_invariants(
-            n_lines in 3usize..8usize,
-            max_lines in 2usize..8usize,
-            width_px in 200.0_f32..600.0_f32,
-        ) {
-            let mut fs = make_font_system();
-            let font_size = 14.0_f32;
-            let line_h = font_size * 1.4;
-            let lines: Vec<String> = (0..n_lines)
-                // Short enough that no line word-wraps at 200px, so "last
-                // source line" and "last visual line" coincide.
-                .map(|i| format!("Content line number {i}"))
-                .collect();
-            let last_line = lines.last().unwrap().clone();
-            let text = lines.join("\n");
-
-            // Box height: exactly `max_lines` lines, plus a tiny fractional
-            // surplus to avoid height rounding edge cases.
-            let bounds_h = line_h * (max_lines as f32) + 0.5;
-
-            let result = truncate_tail_anchored(
-                &text, base_attrs(), width_px, bounds_h, font_size, line_h, &mut fs,
-            );
-
-            let logical_line_count = result.text.split('\n').count();
-            prop_assert!(
-                logical_line_count <= max_lines,
-                "tail-anchored result has {logical_line_count} logical lines but \
-                 max_lines={max_lines} (bounds_h={bounds_h} line_h={line_h}); \
-                 n_lines={n_lines} width={width_px} result={:?}",
-                result.text,
-            );
-
-            if result.was_truncated {
-                prop_assert!(
-                    result.text.contains(&last_line),
-                    "tail-anchored: last line must be visible after truncation; \
-                     last_line={last_line:?} result={:?}",
-                    result.text,
-                );
-                prop_assert!(
-                    result.text.starts_with(ELLIPSIS),
-                    "tail-anchored truncated result must START with '…' (leading-ellipsis \
-                     omission indicator); n_lines={n_lines} max_lines={max_lines} \
-                     width={width_px} result={:?}",
-                    result.text,
-                );
-                let overhead = ELLIPSIS.len() + 1; // "…\n"
-                prop_assert!(
-                    result.text.len() < text.len() + overhead,
-                    "tail-anchored truncated result must be shorter than original + ellipsis overhead; \
-                     result.len()={} original.len()={} overhead={overhead}; \
-                     n_lines={n_lines} width={width_px} result={:?}",
-                    result.text.len(), text.len(), result.text,
-                );
-            } else {
-                prop_assert!(
-                    n_lines <= max_lines,
-                    "{n_lines} lines in a {max_lines}-line box must truncate; result={:?}",
-                    result.text,
-                );
-            }
-        }
-
-        /// Invariant 4 — Grapheme-cluster integrity.
-        ///
-        /// The result must be valid UTF-8 and every grapheme cluster in the result
-        /// must be whole — no grapheme may begin with a combining codepoint
-        /// (which would indicate a split mid-cluster).  This mirrors the existing
-        /// `proptest_grapheme_fallback_valid_utf8_boundary` for the head-anchored
-        /// path and guards the same `truncate_line_to_ellipsis` code path reached
-        /// from the tail-anchored entry point.
-        ///
-        /// Uses multi-codepoint clusters (NFD "e\u{0301}" = 'é') as the stress input
-        /// so that any mid-codepoint split would produce a lone combining codepoint
-        /// as the first character of a grapheme.
-        #[test]
-        fn proptest_tail_anchored_grapheme_cluster_integrity(
-            repeat in 8usize..30usize,
-            width_px in 40.0_f32..120.0_f32,
-        ) {
-            let mut fs = make_font_system();
-            let font_size = 16.0_f32;
-            let line_h = 22.4_f32;
-
-            // Build a single long line of NFD "é" clusters (no word boundaries).
-            // NFD form: 'e' + combining acute (U+0301), 3 bytes per cluster ('e'=1, U+0301=2).
-            let cluster = "e\u{0301}";
-            let long_line = cluster.repeat(repeat);
-
-            // Wrap in a multi-line string so vertical truncation is guaranteed.
-            // Three copies separated by newlines ensure at least one line is dropped.
-            let text = format!("{long_line}\n{long_line}\n{long_line}");
-            let bounds_h = line_h * 1.5; // only ~1 line fits
-
-            let result = truncate_tail_anchored(
-                &text, base_attrs(), width_px, bounds_h, font_size, line_h, &mut fs,
-            );
-
-            // Must always be valid UTF-8.
-            prop_assert!(
-                std::str::from_utf8(result.text.as_bytes()).is_ok(),
-                "tail-anchored result is not valid UTF-8; result={:?}",
-                result.text,
-            );
-
-            // No grapheme in the result may start with a bare combining codepoint.
-            for g in result.text.graphemes(true) {
-                let has_lone_combining = g
-                    .chars()
-                    .next()
-                    .map(|c| (c as u32) >= 0x0300 && (c as u32) <= 0x036F)
-                    .unwrap_or(false);
-                prop_assert!(
-                    !has_lone_combining,
-                    "grapheme cluster boundary violated in tail-anchored result: \
-                     grapheme {g:?} starts with a combining codepoint — cluster was split; \
-                     repeat={repeat} width={width_px} result={:?}",
-                    result.text,
-                );
-            }
-        }
-    }
-
-    proptest! {
-        #![proptest_config(proptest::test_runner::Config {
-            cases: 32,
-            source_file: Some("crates/tze_hud_compositor/src/overflow.rs"),
-            ..proptest::test_runner::Config::default()
-        })]
-
-        /// Invariant 5 — RTL/bidi logical-offset correctness (hud-676 semantics).
-        ///
-        /// `truncate_tail_anchored` uses the same `run_logical_start` helper as
-        /// the head-anchored path to resolve the byte start of each layout run.
-        /// For RTL runs, cosmic-text orders glyphs visually (highest logical byte
-        /// first), so `run_logical_start` must take `min(g.start)` not `glyphs[0].start`.
-        ///
-        /// This proptest exercises RTL Arabic and mixed-bidi (LTR + Arabic) inputs
-        /// to confirm that:
-        ///   (a) the result is valid UTF-8 (no byte-boundary misalignment),
-        ///   (b) when truncated, the result starts with ELLIPSIS,
-        ///   (c) the visible tail contains at least one character from the source text
-        ///       (no silent byte-drop that produces garbage).
-        ///
-        /// Strategy: generate a repetition count to guarantee overflow, then run
-        /// with Arabic text and with mixed LTR+Arabic text.
-        #[test]
-        fn proptest_tail_anchored_rtl_bidi_logical_offset(
-            repeat in 2usize..5usize,
-        ) {
-            let mut fs = make_font_system();
-            let font_size = 14.0_f32;
-            let line_h = font_size * 1.4;
-            let bounds_w = 150.0_f32;
-
-            // Arabic greeting repeated across multiple lines to guarantee both
-            // horizontal overflow (on each line) and vertical overflow (>max_lines).
-            let arabic_unit = "السلام عليكم";
-            let arabic_line = arabic_unit.repeat(repeat);
-            // Three lines so vertical truncation forces tail-anchored selection.
-            let arabic_text = format!("{arabic_line}\n{arabic_line}\n{arabic_line}");
-
-            // Height for exactly 2 lines — ensures vertical truncation while still
-            // leaving room for one ellipsis line + one content line.
-            // (With max_lines=1 the box can only show the ellipsis itself; using
-            // max_lines=2 exercises the tail-selection path and content visibility.)
-            let bounds_h = line_h * 2.5;
-
-            let result = truncate_tail_anchored(
-                &arabic_text, base_attrs(), bounds_w, bounds_h, font_size, line_h, &mut fs,
-            );
-
-            // (a) Valid UTF-8.
-            prop_assert!(
-                std::str::from_utf8(result.text.as_bytes()).is_ok(),
-                "RTL tail-anchored result is not valid UTF-8; result={:?}",
-                result.text,
-            );
-
-            if result.was_truncated {
-                // (b) Leading ellipsis.
-                prop_assert!(
-                    result.text.starts_with(ELLIPSIS),
-                    "RTL tail-anchored truncated result must start with '…'; \
-                     repeat={repeat} result={:?}",
-                    result.text,
-                );
-
-                // (c) Non-empty visible content after the ellipsis line.
-                // Strip the leading "…\n" and verify something remains.
-                // (When max_lines >= 2 there is always room for at least 1 content run.)
-                let after_ellipsis = result.text
-                    .strip_prefix(ELLIPSIS)
-                    .map(|s| s.trim_start_matches('\n'))
-                    .unwrap_or("");
-                prop_assert!(
-                    !after_ellipsis.is_empty(),
-                    "RTL tail-anchored result must have visible content after the ellipsis line; \
-                     got empty tail; repeat={repeat} result={:?}",
-                    result.text,
-                );
-
-                // (d) Tail contains only valid Arabic or ASCII characters (no garbage bytes).
-                for ch in after_ellipsis.chars() {
-                    prop_assert!(
-                        ch.is_ascii() || ('\u{0600}'..='\u{06FF}').contains(&ch)
-                            || ch == ' ' || ch == '\n' || ch == '\u{2026}',
-                        "RTL tail-anchored result contains unexpected codepoint U+{:04X} ({ch:?}); \
-                         this may indicate a logical-offset corruption (hud-676 regression); \
-                         repeat={repeat} result={:?}",
-                        ch as u32, result.text,
-                    );
-                }
-            }
-
-            // Also test mixed LTR+RTL input.
-            let mixed_unit = "Hello السلام";
-            let mixed_line = mixed_unit.repeat(repeat);
-            let mixed_text = format!("{mixed_line}\n{mixed_line}\n{mixed_line}");
-
-            let mixed_result = truncate_tail_anchored(
-                &mixed_text, base_attrs(), bounds_w, bounds_h, font_size, line_h, &mut fs,
-            );
-
-            prop_assert!(
-                std::str::from_utf8(mixed_result.text.as_bytes()).is_ok(),
-                "mixed-bidi tail-anchored result is not valid UTF-8; result={:?}",
-                mixed_result.text,
-            );
-
-            if mixed_result.was_truncated {
-                prop_assert!(
-                    mixed_result.text.starts_with(ELLIPSIS),
-                    "mixed-bidi tail-anchored truncated result must start with '…'; \
-                     repeat={repeat} result={:?}",
-                    mixed_result.text,
-                );
-            }
         }
     }
 
     #[test]
     fn first_or_middle_horizontal_overflow_truncates_before_later_lines() {
-        let mut fs = make_font_system();
+        let mut fs = fonts();
         let font = 16.0;
         let line = font * 1.4;
         let width = 80.0;
         let wide = "W".repeat(20);
         let token_width =
-            measure_single_line(&wide, base_attrs(), width * 4.0, font, line, &mut fs);
+            measure_single_line(&wide, Attrs::new(), width * 4.0, font, line, &mut fs);
         assert!(
             token_width > width,
             "wide token measures {token_width}px in a {width}px box"
@@ -3210,7 +1717,7 @@ mod tests {
                 let text = format!("{prefix}{wide}\n{later}");
                 let result = truncate(
                     &text,
-                    base_attrs(),
+                    Attrs::new(),
                     width,
                     line * rows + 1.0,
                     font,
@@ -3237,17 +1744,226 @@ mod tests {
         }
     }
 
-    /// Index each source line so selecting the wrong edge is visible in the result.
+    #[test]
+    fn one_line_tail_keeps_recent_text_within_the_box() {
+        let mut fonts = fonts();
+        let newest = "W".repeat(30);
+        for (tail, width) in [("Newest", 400.0), (newest.as_str(), 80.0)] {
+            let text = format!("first old line\nsecond old line\n{tail}");
+            let result = truncate(TailAnchored, &text, width, LINE + 1.0, &mut fonts);
+            assert!(result.was_truncated);
+            let visible = result.text.strip_prefix(ELLIPSIS).unwrap();
+            assert!(!visible.is_empty());
+            assert!(tail.ends_with(visible), "{visible:?}");
+            assert!(unwrapped_width(&result.text, width * 2.0, &mut fonts) <= width + 1.0);
+            if width == 400.0 {
+                assert_eq!(visible, tail);
+            }
+        }
+    }
+
+    #[test]
+    fn head_stays_put_while_tail_advances_by_whole_lines() {
+        let mut fonts = fonts();
+        for max_lines in [1, 2, 3] {
+            let height = LINE * max_lines as f32 + 1.0;
+            let before = "line 01\nline 02\nline 03\nline 04";
+            let after = format!("{before}\nline 05 latest");
+            let head = truncate(HeadAnchored, before, 400.0, height, &mut fonts);
+            assert_eq!(
+                head,
+                truncate(HeadAnchored, &after, 400.0, height, &mut fonts)
+            );
+            assert!(head.text.starts_with("line 01") && head.text.ends_with(ELLIPSIS));
+
+            let tail = truncate(TailAnchored, &after, 400.0, height, &mut fonts);
+            assert!(tail.was_truncated);
+            assert!(tail.text.starts_with(ELLIPSIS) && tail.text.ends_with("line 05 latest"));
+            assert!(!tail.text.contains("line 01"));
+            assert!(
+                shape(
+                    &tail.text,
+                    400.0,
+                    Wrap::Word,
+                    Metrics::new(FONT, LINE),
+                    &mut fonts
+                )
+                .layout_runs()
+                .count()
+                    <= max_lines
+            );
+        }
+    }
+
+    #[test]
+    fn wrapped_head_ignores_lines_appended_beyond_viewport() {
+        let mut fs = fonts();
+        let prefix = "Hello world foo bar";
+        let full = format!("{prefix}\nNew line of text appended after scroll");
+        let width = 100.0;
+        let metrics = Metrics::new(FONT, LINE);
+        assert!(
+            shape(prefix, width, Wrap::Word, metrics, &mut fs)
+                .layout_runs()
+                .count()
+                > 1
+        );
+        let before = truncate(HeadAnchored, prefix, width, LINE + 1.0, &mut fs);
+        let after = truncate(HeadAnchored, &full, width, LINE + 1.0, &mut fs);
+        assert!(before.was_truncated);
+        assert_eq!(before, after);
+    }
+
+    #[test]
+    fn two_row_tail_preserves_visible_wrapped_arabic_and_mixed_content() {
+        let mut fs = fonts();
+        let font = 14.0;
+        let line = font * 1.4;
+        let width = 150.0;
+        let height = line * 2.5;
+        let metrics = Metrics::new(font, line);
+        for portion in ["السلام عليكم", "Hello السلام"] {
+            let mut wraps = false;
+            for count in 2..=4 {
+                let row = portion.repeat(count);
+                let text = format!("{row}\n{row}\n{row}");
+                wraps |= shape(&text, width, Wrap::Word, metrics, &mut fs)
+                    .layout_runs()
+                    .count()
+                    > 3;
+                let result =
+                    truncate_tail_anchored(&text, Attrs::new(), width, height, font, line, &mut fs);
+                assert!(result.was_truncated, "{portion:?} x{count}");
+                let visible = result
+                    .text
+                    .strip_prefix("…\n")
+                    .expect("leading ellipsis on its own row");
+                assert!(
+                    !visible.is_empty(),
+                    "{portion:?} x{count}: {:?}",
+                    result.text
+                );
+                assert!(
+                    visible.chars().all(|ch| ch.is_ascii()
+                        || ('\u{0600}'..='\u{06ff}').contains(&ch)
+                        || ch == '…'),
+                    "{portion:?} x{count}: {visible:?}",
+                );
+            }
+            assert!(wraps, "at least one {portion:?} fixture must soft wrap");
+        }
+    }
+
+    fn assert_same_backend_layout(actual: &Buffer, reference: &Buffer) {
+        assert_eq!(actual.metrics(), reference.metrics());
+        assert_eq!(actual.size(), reference.size());
+        assert_eq!(actual.scroll(), reference.scroll());
+        assert_eq!(actual.wrap(), reference.wrap());
+        assert_eq!(actual.tab_width(), reference.tab_width());
+        assert_eq!(actual.monospace_width(), reference.monospace_width());
+        assert_eq!(
+            format!("{:?}", actual.lines),
+            format!("{:?}", reference.lines)
+        );
+        let ordered_runs = |buffer: &Buffer| {
+            buffer
+                .layout_runs()
+                .map(|run| format!("{run:?}"))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(ordered_runs(actual), ordered_runs(reference));
+    }
+
+    #[test]
+    fn shape_summary_and_reused_candidate_buffer_match_fresh_backend_layout() {
+        for glyphs in [
+            &[(10, 12, 20.0), (6, 10, 12.0), (0, 6, 6.0)][..],
+            &[(0, 4, 6.0), (4, 8, 12.0), (8, 12, 20.0)][..],
+            &[],
+        ] {
+            assert_eq!(run_logical_start(glyphs), 0, "{glyphs:?}");
+        }
+
+        let mut fs = fonts();
+        for (font, width) in [(12.0, 60.0), (16.0, 120.0), (24.0, 400.0)] {
+            let line = font * 1.4;
+            let height = line * 3.0;
+            let metrics = Metrics::new(font, line);
+            let ellipsis =
+                first_run_width(&shape(ELLIPSIS, width * 2.0, Wrap::None, metrics, &mut fs));
+            for text in [
+                "",
+                "العربية الطويلة مع نص آخر",
+                "LTR العربية ffi e\u{301} 👨‍👩‍👧‍👦 tail",
+                "several words that soft wrap across lines",
+                "first\r\nsecond\nthird\tfourth",
+            ] {
+                let reference = shape(text, width, Wrap::Word, metrics, &mut fs);
+                match shape_runs(text, Attrs::new(), width, height, font, line, &mut fs) {
+                    ShapeOutcome::EarlyReturn(result) => {
+                        assert_eq!(reference.layout_runs().count(), 0);
+                        assert_eq!(result.text, text);
+                        assert!(!result.was_truncated);
+                    }
+                    ShapeOutcome::Proceed(actual) => {
+                        assert_eq!(actual.ellipsis_w, ellipsis);
+                        assert_eq!(actual.max_lines, (height / line).floor() as usize);
+                        assert_same_backend_layout(&actual.full_buf, &reference);
+                        assert_eq!(actual.full_buf.tab_width(), 8);
+                        assert_eq!(actual.full_buf.monospace_width(), None);
+                        assert_eq!(actual.runs.len(), reference.layout_runs().count());
+                        for ((index, run_width, summary), run) in
+                            actual.runs.iter().zip(reference.layout_runs())
+                        {
+                            assert_eq!((*index, *run_width), (run.line_i, run.line_w));
+                            let minimum = run.glyphs.iter().min_by_key(|glyph| glyph.start);
+                            let expected =
+                                minimum.map(|glyph| (glyph.start, glyph.end, glyph.x + glyph.w));
+                            assert_eq!(
+                                run_logical_start(summary),
+                                minimum.map_or(0, |glyph| glyph.start)
+                            );
+                            assert!(
+                                summary.iter().copied().eq(expected),
+                                "minimum logical glyph differs"
+                            );
+                        }
+                    }
+                }
+            }
+
+            let mut reused = Buffer::new_empty(metrics);
+            reused.set_size(&mut fs, Some(width * 2.0), None);
+            reused.set_wrap(&mut fs, Wrap::None);
+            for text in [
+                "",
+                "العربية…",
+                "LTR ffi e\u{301} 👨‍👩‍👧‍👦…",
+                "one\ttwo…",
+                "LTR العربية ffi e\u{301} 👨‍👩‍👧‍👦 tail",
+                "one\ttwo",
+                "",
+                "one\r\ntwo\rthree\n",
+            ] {
+                let measured =
+                    measure_single_line_in_buffer(text, Attrs::new(), &mut fs, &mut reused);
+                let reference = shape(text, width * 2.0, Wrap::None, metrics, &mut fs);
+                assert_eq!(measured, first_run_width(&reference));
+                assert_same_backend_layout(&reused, &reference);
+            }
+        }
+    }
+
     fn transcript(lines: usize) -> String {
         (0..lines)
-            .map(|i| format!("line {i:04}: the quick brown fox jumps over"))
+            .map(|index| format!("line {index:04}: the quick brown fox jumps over"))
             .collect::<Vec<_>>()
             .join("\n")
     }
 
     #[test]
     fn fallback_windows_are_bounded_and_preserve_visible_output() {
-        let mut fs = make_font_system();
+        let mut fs = fonts();
         let font = 14.0;
         let line = font * 1.4;
         let width = 400.0;
@@ -3311,12 +2027,19 @@ mod tests {
             for rows in [1, 3, 5, 9] {
                 let height = line * rows as f32;
                 let adjacent = window(replay.as_str(), height);
+                let correct_edge = match anchor {
+                    TruncationViewport::HeadAnchored => adjacent.starts_with("line 0000:"),
+                    TruncationViewport::TailAnchored => {
+                        adjacent.ends_with("line 0255: the quick brown fox jumps over")
+                    }
+                };
+                assert!(correct_edge, "{anchor:?}, {rows} rows: wrong source edge");
                 assert!(
                     adjacent.len() < replay.len(),
                     "{anchor:?}, {rows} rows: fallback must engage"
                 );
-                let full = truncate(&replay, base_attrs(), width, height, font, line, &mut fs);
-                let windowed = truncate(adjacent, base_attrs(), width, height, font, line, &mut fs);
+                let full = truncate(&replay, Attrs::new(), width, height, font, line, &mut fs);
+                let windowed = truncate(adjacent, Attrs::new(), width, height, font, line, &mut fs);
                 assert!(
                     full.was_truncated,
                     "{anchor:?}, {rows} rows: replay must clip"
@@ -3329,38 +2052,26 @@ mod tests {
         }
     }
 
-    // ── Drawn counts behind `clipped` ─────────────────────────────────────────
-
-    /// The search finds every threshold within ceil(log2(upper + 1)) probes.
     #[test]
-    fn longest_fitting_prefix_finds_the_threshold_within_the_bound() {
+    fn clipped_character_count_can_be_republished_and_search_is_logarithmic() {
         for upper in 0..=130usize {
-            let bound = (usize::BITS - upper.leading_zeros()) as usize; // ceil(log2(upper+1))
+            let bound = (usize::BITS - upper.leading_zeros()) as usize;
             for threshold in 0..=upper {
                 let mut probes = 0;
-                let n = longest_fitting_prefix(upper, |n| {
+                let actual = longest_fitting_prefix(upper, |n| {
                     probes += 1;
                     n <= threshold
                 });
-                assert_eq!(n, threshold, "upper {upper}");
-                assert!(probes <= bound, "upper {upper}: {probes} > {bound}");
+                assert_eq!(actual, threshold);
+                assert!(probes <= bound, "{upper}: {probes} > {bound}");
             }
         }
-    }
-
-    #[test]
-    fn char_prefix_counts_scalar_values() {
         assert_eq!(char_prefix("café 👩‍💻", 4), "café");
         assert_eq!(char_prefix("ab", 5), "ab");
         assert_eq!(char_prefix("ab", 0), "");
-    }
 
-    /// The drawn count of a cut line (single or wrapped), republished as that
-    /// many characters, is drawn whole.
-    #[test]
-    fn drawn_chars_prefix_republishes_uncut() {
-        let mut fs = make_font_system();
-        let cases = [
+        let mut fonts = fonts();
+        for (text, width, height) in [
             (
                 "The quick brown fox jumps over the lazy dog again and again",
                 120.0,
@@ -3377,22 +2088,135 @@ mod tests {
                 44.0,
             ),
             ("Line one\nline two\nline three\nline four", 200.0, 44.0),
-        ];
-        for (text, width, height) in cases {
-            let cut = truncate_for_ellipsis(text, base_attrs(), width, height, 16.0, 22.0, &mut fs);
-            assert!(cut.was_truncated, "{text}");
+        ] {
+            let cut =
+                truncate_for_ellipsis(text, Attrs::new(), width, height, FONT, 22.0, &mut fonts);
+            assert!(cut.was_truncated);
             let n = cut.drawn_chars(text);
-            assert!(n < text.chars().count(), "{text}");
+            assert!(n < text.chars().count());
             let prefix = char_prefix(text, n);
             assert_eq!(cut.text, format!("{}{ELLIPSIS}", prefix.trim_end()));
-            let replay =
-                truncate_for_ellipsis(prefix, base_attrs(), width, height, 16.0, 22.0, &mut fs);
             assert!(
-                !replay.was_truncated,
-                "{text}: first {n} chars {prefix:?} cut again"
+                !truncate_for_ellipsis(prefix, Attrs::new(), width, height, FONT, 22.0, &mut fonts)
+                    .was_truncated
             );
         }
-        let fits = truncate_for_ellipsis("Hi", base_attrs(), 200.0, 20.0, 16.0, 22.0, &mut fs);
+        let fits = truncate_for_ellipsis("Hi", Attrs::new(), 200.0, 20.0, 16.0, 22.0, &mut fonts);
         assert_eq!(fits.drawn_chars("Hi"), 2);
+    }
+
+    proptest! {
+        #![proptest_config(proptest::test_runner::Config {
+            cases: 32,
+            source_file: Some("crates/tze_hud_compositor/src/overflow.rs"),
+            ..proptest::test_runner::Config::default()
+        })]
+
+        #[test]
+        fn head_ellipsis_always_fits_the_wrapped_width(
+            text in "[a-zA-Z0-9 ]{1,80}",
+            width in 30.0_f32..300.0_f32,
+            suffix_width in 20.0_f32..200.0_f32,
+            font in 10.0_f32..24.0_f32,
+        ) {
+            let mut fonts = fonts();
+            let head = truncate(HeadAnchored, &text, suffix_width, 200.0, &mut fonts);
+            if head.was_truncated {
+                prop_assert!(head.text.ends_with(ELLIPSIS));
+            }
+
+            let line = font * 1.4;
+            let result = truncate_for_ellipsis(&text, Attrs::new(), width, 200.0, font, line, &mut fonts);
+            if result.was_truncated && !result.text.is_empty() {
+                prop_assert!(result.text.ends_with(ELLIPSIS));
+                let buffer = shape(&result.text, width, Wrap::Word, Metrics::new(font, line), &mut fonts);
+                for run in buffer.layout_runs() {
+                    prop_assert!(run.line_w <= width + 2.0, "{:?} at {width}px", result.text);
+                }
+            }
+        }
+
+        #[test]
+        fn truncation_respects_whole_line_budget(
+            input_rows in 3usize..8usize,
+            visible_rows in 1usize..8usize,
+            width in 200.0_f32..600.0_f32,
+            surplus in 0.0_f32..0.8_f32,
+        ) {
+            let mut fonts = fonts();
+            let font = 14.0;
+            let line = font * 1.4;
+            let lines: Vec<_> = (0..input_rows).map(|i| format!("Content line number {i}")).collect();
+            let text = lines.join("\n");
+            let height = line * (visible_rows as f32 + surplus) + 0.01;
+            let metrics = Metrics::new(font, line);
+            let source = shape(&text, width, Wrap::Word, metrics, &mut fonts);
+            prop_assert_eq!(source.layout_runs().count(), input_rows);
+            for anchor in [HeadAnchored, TailAnchored] {
+                let truncate = match anchor {
+                    HeadAnchored => truncate_for_ellipsis,
+                    TailAnchored => truncate_tail_anchored,
+                };
+                let result = truncate(&text, Attrs::new(), width, height, font, line, &mut fonts);
+                let layout = shape(&result.text, width, Wrap::Word, metrics, &mut fonts);
+                prop_assert!(layout.layout_runs().count() <= visible_rows);
+                prop_assert_eq!(result.was_truncated, input_rows > visible_rows);
+                if result.was_truncated {
+                    prop_assert!(result.text.len() < text.len() + ELLIPSIS.len() + 1);
+                    let (start, end) = match anchor {
+                        HeadAnchored => (lines[0].as_str(), ELLIPSIS),
+                        TailAnchored => (ELLIPSIS, lines[input_rows - 1].as_str()),
+                    };
+                    prop_assert!(result.text.starts_with(start) && result.text.ends_with(end));
+                } else {
+                    prop_assert_eq!(&result.text, &text);
+                }
+            }
+        }
+
+        #[test]
+        fn narrow_unbroken_tokens_cut_on_grapheme_boundaries(
+            head_repeat in 10usize..50usize,
+            tail_repeat in 8usize..30usize,
+            head_width in 40.0_f32..80.0_f32,
+            tail_width in 40.0_f32..120.0_f32,
+        ) {
+            let mut fonts = fonts();
+            let metrics = Metrics::new(FONT, LINE);
+            let token = "A".repeat(head_repeat);
+            let result = truncate(HeadAnchored, &token, head_width, 200.0, &mut fonts);
+            if result.was_truncated {
+                let retained = result.text.strip_suffix(ELLIPSIS).expect("trailing ellipsis");
+                let minimum = shape("A…", head_width * 2.0, Wrap::None, metrics, &mut fonts);
+                prop_assert!(first_run_width(&minimum) > head_width || !retained.is_empty());
+                prop_assert!(token.starts_with(retained));
+            }
+
+            let grapheme = "e\u{301}";
+            let row = grapheme.repeat(tail_repeat);
+            let text = format!("{row}\n{row}\n{row}");
+            let result = truncate(TailAnchored, &text, tail_width, LINE * 1.5, &mut fonts);
+            prop_assert!(result.was_truncated);
+            let retained = result.text.strip_prefix(ELLIPSIS).expect("leading ellipsis");
+            let minimum = shape("…e\u{301}", tail_width * 2.0, Wrap::None, metrics, &mut fonts);
+            prop_assert!(first_run_width(&minimum) > tail_width || !retained.is_empty());
+            prop_assert!(row.ends_with(retained));
+            prop_assert_eq!(retained.len() % grapheme.len(), 0);
+        }
+
+        #[test]
+        fn tail_keeps_whole_graphemes_and_logical_newest_content(repeat in 3usize..11usize) {
+            let mut fonts = fonts();
+            for portion in ["السلام عليكم", "Hello السلام", "👨‍👩‍👧‍👦e\u{301}"] {
+                let last = portion.repeat(repeat);
+                let text = format!("old line\nolder line\n{last}");
+                let result = truncate(TailAnchored, &text, 150.0, LINE + 1.0, &mut fonts);
+                prop_assert!(result.was_truncated);
+                let retained = result.text.strip_prefix(ELLIPSIS).expect("leading ellipsis");
+                prop_assert!(!retained.is_empty() && last.ends_with(retained), "{retained:?} of {last:?}");
+                let offset = last.len() - retained.len();
+                prop_assert!(last.grapheme_indices(true).any(|(start, _)| start == offset));
+            }
+        }
     }
 }
