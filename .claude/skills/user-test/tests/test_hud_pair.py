@@ -430,7 +430,8 @@ def test_malformed_packets_and_unsafe_listener_leave_model_calls_intact(hud):
     assert pair(host, home).returncode == 0
     with tempfile.TemporaryDirectory(prefix="hud-hook-") as runtime:
         directory = Path(runtime) / "tze-hud"
-        directory.mkdir(mode=0o750)
+        directory.mkdir()
+        directory.chmod(0o750)
         with AdapterProcess(home, host=host, runtime=runtime) as adapter:
             adapter.ready()
             assert list(directory.iterdir()) == []

@@ -176,7 +176,8 @@ def test_listener_does_not_use_unsafe_path(runtime, kind, monkeypatch):
         destination.mkdir(mode=0o700)
         runtime.symlink_to(destination, target_is_directory=True)
     elif kind == "mode":
-        runtime.mkdir(mode=0o750)
+        runtime.mkdir()
+        runtime.chmod(0o750)
     elif kind == "owner":
         runtime.mkdir(mode=0o700)
         lstat = Path.lstat
