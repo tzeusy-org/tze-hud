@@ -1,5 +1,6 @@
 use super::notification_wait::is_unanswered_question;
 use super::*;
+use std::collections::hash_map::Entry;
 
 impl SceneGraph {
     /// Agent writes cannot change owner configuration or runtime-local widget state.
@@ -394,12 +395,7 @@ impl SceneGraph {
         };
         let mut record = record;
 
-        let publishes = self
-            .zone_registry
-            .active_publishes
-            .entry(zone_name.to_string())
-            .or_default();
-
+        let publishes = self.zone_registry.active_for_zone(zone_name);
         let replacement = notification.then_some(()).and_then(|()| {
             merge_key.as_ref().and_then(|key| {
                 publishes.iter().position(|old| {
@@ -424,11 +420,15 @@ impl SceneGraph {
             }
             None => None,
         };
-        let publishes = self
+        let mut new_records = Vec::new();
+        let mut slot = self
             .zone_registry
             .active_publishes
-            .get_mut(zone_name)
-            .expect("entry created above");
+            .entry(zone_name.to_string());
+        let publishes = match &mut slot {
+            Entry::Occupied(entry) => entry.get_mut(),
+            Entry::Vacant(_) => &mut new_records,
+        };
         let mut trimmed = Vec::new();
         if let Some(index) = replacement {
             // Keep the visual slot, but never transfer the old activation or
@@ -458,6 +458,10 @@ impl SceneGraph {
                 // A full notification stack spares unanswered questions.
                 |r| is_unanswered_question(r, choices, now_us),
             )?;
+        }
+
+        if let Entry::Vacant(entry) = slot {
+            entry.insert(new_records);
         }
 
         if let Some(wait) = self.notification_waits.get_mut(&publication_id) {
@@ -892,11 +896,15 @@ impl SceneGraph {
             publication_origin: publication_origin.filter(|_| lease_id.is_none()),
         };
 
-        let publishes = self
+        let mut new_records = Vec::new();
+        let mut slot = self
             .widget_registry
             .active_publishes
-            .entry(widget_name.to_string())
-            .or_default();
+            .entry(widget_name.to_string());
+        let publishes = match &mut slot {
+            Entry::Occupied(entry) => entry.get_mut(),
+            Entry::Vacant(_) => &mut new_records,
+        };
 
         apply_contention(
             publishes,
@@ -909,6 +917,10 @@ impl SceneGraph {
             },
             |_| false,
         )?;
+
+        if let Entry::Vacant(entry) = slot {
+            entry.insert(new_records);
+        }
 
         // ── Step 4: Update current_params on the instance ─────────────────────
         // Merge new validated params over existing current_params.
