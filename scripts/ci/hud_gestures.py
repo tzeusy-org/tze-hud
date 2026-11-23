@@ -1285,6 +1285,7 @@ def scenario_card_copy(run: Run) -> None:
     ))
     if WINDOWS and WIN.clipboard_text() != text:
         raise ScenarioFailed("the real clipboard holds the published text", run.status())
+    run.snapshot("card-copy.feedback")
     if items := run.inputs(wait_ms=250):
         raise ScenarioFailed("copy queues no agent input", {"items": items})
 
@@ -1318,10 +1319,12 @@ def scenario_card_reveal(run: Run) -> None:
         reveal(st).get("field") == "body" and card(st)["rect"] == original["rect"]
         and card(st)["actions"][0]["rect"] == original["actions"][0]["rect"]
     ))
+    run.snapshot("card-reveal.hover")
     panel = reveal(hovered)["rect"]
     run.glide(int(panel["x"] + panel["w"] / 2), int(panel["y"] + panel["h"] / 2))
     run.inj.click(5, repeat=2)
     run.expect("wheel scrolls inside the reveal panel", lambda st: reveal(st).get("scrolled"))
+    run.snapshot("card-reveal.scrolled")
     run.glide(1, 1)
     run.expect("leaving closes the body reveal", lambda st: not reveal(st))
 
@@ -1333,6 +1336,7 @@ def scenario_card_reveal(run: Run) -> None:
     else:
         raise ScenarioFailed("Tab reaches the clipped action label", run.status())
     run.expect("the focused action label reveals", lambda st: reveal(st).get("field") == 0)
+    run.snapshot("card-reveal.keyboard")
     run.key("Escape")
     run.expect("the reveal closes", lambda st: not reveal(st))
     run.observe_for("Esc closes the reveal while focus stays", lambda st: (

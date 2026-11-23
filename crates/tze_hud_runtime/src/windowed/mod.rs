@@ -2548,7 +2548,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                 if let Some(source) = wake_source {
                     self.state.wake.mark_main_work_pending(source);
                 }
-                if self.notification_reveal_panel_under_cursor()
+                if self.notification_reveal_panel_under_cursor().is_some()
                     && (state == ElementState::Pressed || !self.state.left_button_down)
                 {
                     return;
@@ -2577,9 +2577,6 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                     _ => step.to_px(delta_y, tze_hud_input::WHEEL_LINE_PX, 0.0),
                 };
                 if self.panel_wheel(panel_dy, secondary) {
-                    return;
-                }
-                if self.scroll_notification_reveal(panel_dy) {
                     return;
                 }
                 self.enqueue_scroll_event(delta_x, delta_y, step);

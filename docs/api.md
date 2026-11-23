@@ -472,7 +472,7 @@ with the same cancellation and idle semantics as a `hud_input` wait.
   button). The action count is the shortest drawn prefix among the cut labels.
   It stops before the ellipsis and before the original label's first line break.
   Widgets report the string parameters set in this call whose drawn text
-  overflows the widget; a status-bar publish reports
+  overflows the widget. A status-bar publish reports
   each entry it sets whose value is cut, by entry key, measured against the
   merged bar as it draws right after this publish (0 when the full bar does
   not draw that entry; removals and values that fit report nothing; a cut

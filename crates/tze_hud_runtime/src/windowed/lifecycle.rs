@@ -3906,8 +3906,14 @@ impl WinitApp {
         step: tze_hud_input::WheelStep,
     ) {
         self.refresh_widget_hover_tracking();
-        let x = self.state.cursor_x;
-        let y = self.state.cursor_y;
+        let scroll = RetainedScroll {
+            x: self.state.cursor_x,
+            y: self.state.cursor_y,
+            delta_x,
+            delta_y,
+            step,
+            reveal: self.notification_reveal_panel_under_cursor(),
+        };
         self.update_overlay_cursor_hittest();
 
         // Earlier keyboard work and retained clicks keep their place ahead of
@@ -3915,13 +3921,6 @@ impl WinitApp {
         if !self.state.pending_keyboard_events.is_empty()
             || !self.state.pending_pointer_buttons.is_empty()
         {
-            let scroll = RetainedScroll {
-                x,
-                y,
-                delta_x,
-                delta_y,
-                step,
-            };
             // Consecutive notches share one entry and coalesce there, so a
             // burst of wheel input can never evict the click ahead of it.
             let keys_ahead = self.state.pending_keyboard_events.len();
@@ -3940,16 +3939,7 @@ impl WinitApp {
             return;
         }
 
-        retain_scroll(
-            &mut self.state.pending_scroll,
-            RetainedScroll {
-                x,
-                y,
-                delta_x,
-                delta_y,
-                step,
-            },
-        );
+        retain_scroll(&mut self.state.pending_scroll, scroll);
         if self.apply_retained_scroll().is_none() {
             // A later key must see this wheel in the same arrival-order FIFO.
             let deltas = std::mem::take(&mut self.state.pending_scroll);
@@ -3979,6 +3969,21 @@ impl WinitApp {
             retain_scroll(&mut self.state.pending_scroll, scroll);
         }
         for retained in self.state.pending_scroll.drain(..) {
+            if let Some(target) = retained.reveal {
+                if let Some(panel) = scene
+                    .overlay
+                    .notification_reveal_panel
+                    .filter(|panel| panel.target == target)
+                {
+                    let dy = retained.step.to_px(
+                        retained.delta_y,
+                        tze_hud_input::WHEEL_LINE_PX,
+                        panel.bounds.height,
+                    );
+                    super::notification_reveal::scroll_panel(&mut scene, dy);
+                }
+                continue;
+            }
             if let Some(ev) = self.state.input_processor.process_wheel_event(
                 &tze_hud_input::ScrollEvent {
                     x: retained.x,
@@ -4123,6 +4128,8 @@ pub(super) struct RetainedScroll {
     pub(super) delta_y: f32,
     /// Unit of `delta_y` (hud-ljhku.13); only equal units coalesce.
     pub(super) step: tze_hud_input::WheelStep,
+    /// A wheel aimed at a reveal panel never reaches content underneath it.
+    reveal: Option<tze_hud_scene::graph::overlay::NotificationRevealTarget>,
 }
 
 /// Upper bound on retained wheel entries, so contention can never grow memory.
@@ -4136,15 +4143,14 @@ fn same_direction(a: f32, b: f32) -> bool {
 }
 
 /// Queue `next`, summing it into the newest entry when the pointer has not
-/// moved and the direction is unchanged (a notch burst). At the bound the two
-/// oldest entries combine instead: the oldest delta then applies at the
-/// second entry's position, without its own intermediate clamping. Only
-/// input more than 32 direction or position changes old is affected.
+/// moved and the direction is unchanged (a notch burst). At the bound the
+/// oldest entry can combine into the next entry for the same surface target.
 fn retain_scroll(pending: &mut std::collections::VecDeque<RetainedScroll>, next: RetainedScroll) {
     if let Some(last) = pending.back_mut()
         && last.x == next.x
         && last.y == next.y
         && last.step == next.step
+        && last.reveal == next.reveal
         && same_direction(last.delta_x, next.delta_x)
         && same_direction(last.delta_y, next.delta_y)
     {
@@ -4155,6 +4161,7 @@ fn retain_scroll(pending: &mut std::collections::VecDeque<RetainedScroll>, next:
     if pending.len() >= RETAINED_SCROLL_MAX
         && let Some(oldest) = pending.pop_front()
         && let Some(second) = pending.front_mut()
+        && oldest.reveal == second.reveal
     {
         second.delta_x += oldest.delta_x;
         second.delta_y += oldest.delta_y;
@@ -4841,6 +4848,7 @@ mod tests {
             delta_x: 0.0,
             delta_y: dy,
             step: tze_hud_input::WheelStep::Pixels,
+            reveal: None,
         };
         let mut pending = std::collections::VecDeque::new();
         retain_scroll(&mut pending, at(1.0, 10.0));

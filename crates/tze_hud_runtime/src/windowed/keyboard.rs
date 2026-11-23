@@ -1611,9 +1611,9 @@ impl WinitApp {
                     .notification_reveal_panel
                     .is_some_and(|panel| {
                         let dy = if raw.key_code == "PageUp" {
-                            panel.bounds.height
-                        } else {
                             -panel.bounds.height
+                        } else {
+                            panel.bounds.height
                         };
                         super::notification_reveal::scroll_panel(&mut scene, dy)
                     })

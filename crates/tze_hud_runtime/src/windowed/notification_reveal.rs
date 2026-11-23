@@ -69,7 +69,7 @@ pub(super) fn scroll_panel(scene: &mut SceneGraph, dy: f32) -> bool {
     if panel.target != request.target {
         return false;
     }
-    let scroll = (request.scroll - dy).clamp(0.0, panel.max_scroll);
+    let scroll = (request.scroll + dy).clamp(0.0, panel.max_scroll);
     if scroll != request.scroll {
         request.scroll = scroll;
         scene.bump_geometry_epoch();
@@ -140,30 +140,17 @@ impl WinitApp {
         )
     }
 
-    pub(super) fn notification_reveal_panel_under_cursor(&self) -> bool {
-        let Some((x, y)) = self.reveal_pointer() else {
-            return false;
-        };
+    pub(super) fn notification_reveal_panel_under_cursor(
+        &self,
+    ) -> Option<NotificationRevealTarget> {
+        let (x, y) = self.reveal_pointer()?;
         self.state
             .pipeline
             .hit_test_snapshot
             .load()
             .notification_reveal_panel
-            .is_some_and(|panel| panel.bounds.contains_point(x, y))
-    }
-
-    pub(super) fn scroll_notification_reveal(&mut self, dy: f32) -> bool {
-        if !self.notification_reveal_panel_under_cursor() {
-            return false;
-        }
-        let Ok(shared) = self.state.shared_state.try_lock() else {
-            return true;
-        };
-        let Ok(mut scene) = shared.scene.try_lock() else {
-            return true;
-        };
-        scroll_panel(&mut scene, dy);
-        true
+            .filter(|panel| panel.bounds.contains_point(x, y))
+            .map(|panel| panel.target)
     }
 
     pub(super) fn settle_notification_reveal(&mut self, now: Instant) -> bool {
@@ -236,9 +223,8 @@ impl WinitApp {
             .hover
             .filter(|&(target, at)| now >= at && state.dismissed != Some(target))
             .map(|(target, _)| target);
-        let target = keyboard
-            .filter(|target| state.dismissed != Some(*target))
-            .or(ready_pointer);
+        let keyboard = keyboard.filter(|target| state.dismissed != Some(*target));
+        let target = keyboard.or(ready_pointer);
         state.pending = state
             .hover
             .filter(|&(target, at)| {

@@ -5165,16 +5165,30 @@ mod tests {
         };
         let focus_id = format!("notification-reveal:{id}:body");
         let source = Rect::new(bounds.x, bounds.y, bounds.width * 0.5, bounds.height * 0.25);
+        let other = NotificationRevealTarget {
+            field: NotificationRevealField::Title,
+            ..target
+        };
+        let other_source = Rect::new(
+            source.x + source.width,
+            source.y,
+            source.width,
+            source.height,
+        );
         let snapshot = {
             let mut scene = harness.scene();
-            scene
-                .overlay
-                .notification_reveal_regions
-                .push(NotificationRevealRegion {
+            scene.overlay.notification_reveal_regions.extend([
+                NotificationRevealRegion {
                     target,
                     bounds: source,
                     focus_id: focus_id.clone(),
-                });
+                },
+                NotificationRevealRegion {
+                    target: other,
+                    bounds: other_source,
+                    focus_id: format!("notification-reveal:{id}:title"),
+                },
+            ]);
             crate::pipeline::HitTestSnapshot::from_scene(&scene)
         };
         harness
@@ -5228,6 +5242,90 @@ mod tests {
                 .settle_notification_reveal(deadline + Duration::from_secs(1))
         );
         assert!(harness.scene().overlay.notification_reveal.is_none());
+
+        let hovered = deadline + Duration::from_secs(2);
+        harness.app.state.cursor_left_window = false;
+        harness.app.state.cursor_x = other_source.x + other_source.width * 0.5;
+        assert!(!harness.app.settle_notification_reveal(hovered));
+        let dwell = hovered + Duration::from_millis(180);
+        assert_eq!(
+            harness.app.state.notification_reveal.next_deadline(),
+            Some(dwell)
+        );
+        assert!(harness.app.settle_notification_reveal(dwell));
+        assert_eq!(
+            harness.scene().overlay.notification_reveal.unwrap().target,
+            other
+        );
+        assert!(take_action_ids(&harness).is_empty());
+    }
+
+    #[test]
+    fn reveal_wheel_replays_after_contention_without_retargeting() {
+        use tze_hud_scene::graph::overlay::{
+            NotificationRevealField, NotificationRevealPanel, NotificationRevealRequest,
+            NotificationRevealTarget,
+        };
+        let mut harness = approve_reject_notification_harness();
+        let bounds = Rect::new(20.0, 30.0, 200.0, 120.0);
+        let (panel, snapshot) = {
+            let mut scene = harness.scene();
+            let target = NotificationRevealTarget {
+                publication_id: scene.overlay.notification_geometry[0].publication_id,
+                field: NotificationRevealField::Body,
+            };
+            let panel = NotificationRevealPanel {
+                target,
+                bounds,
+                bridge: Rect::new(0.0, 0.0, 0.0, 0.0),
+                max_scroll: 240.0,
+            };
+            scene.overlay.notification_reveal_panel = Some(panel);
+            scene.overlay.notification_reveal = Some(NotificationRevealRequest {
+                target,
+                scroll: 0.0,
+            });
+            (panel, crate::pipeline::HitTestSnapshot::from_scene(&scene))
+        };
+        harness
+            .app
+            .state
+            .pipeline
+            .hit_test_snapshot
+            .store(Arc::new(snapshot));
+        (harness.app.state.cursor_x, harness.app.state.cursor_y) = (50.0, 60.0);
+        let scene_handle = Arc::clone(&harness.app.state.shared_state.blocking_lock().scene);
+        let (dx, dy, step) = crate::windowed::input_dispatch::normalize_mouse_wheel_delta(
+            &winit::event::MouseScrollDelta::LineDelta(0.0, -1.0),
+            crate::os_prefs::WheelLines::Fixed,
+        );
+        let held = scene_handle.blocking_lock();
+        harness.app.enqueue_scroll_event(dx, dy, step);
+        assert_eq!(held.overlay.notification_reveal.unwrap().scroll, 0.0);
+        drop(held);
+        assert!(harness.app.drain_retained_pointer_input());
+        assert_eq!(
+            harness.scene().overlay.notification_reveal.unwrap().scroll,
+            tze_hud_input::WHEEL_LINE_PX
+        );
+
+        let mut held = scene_handle.blocking_lock();
+        harness.app.enqueue_scroll_event(dx, dy, step);
+        let target = NotificationRevealTarget {
+            field: NotificationRevealField::Action(0),
+            ..panel.target
+        };
+        held.overlay.notification_reveal_panel = Some(NotificationRevealPanel { target, ..panel });
+        held.overlay.notification_reveal = Some(NotificationRevealRequest {
+            target,
+            scroll: 0.0,
+        });
+        drop(held);
+        assert!(harness.app.drain_retained_pointer_input());
+        assert_eq!(
+            harness.scene().overlay.notification_reveal.unwrap().scroll,
+            0.0
+        );
         assert!(take_action_ids(&harness).is_empty());
     }
 
