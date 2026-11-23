@@ -300,8 +300,19 @@ async fn load_font_bytes_new_font_resets_truncation_cache_scene_version() {
         assert_eq!((work.layout, work.raster, work.upload), (layouts, 0, 0));
         assert!(compositor.take_work_counts().is_none());
     };
-    prime_text(&mut compositor, &scene);
+    // Both ellipsis nodes share one truncation entry on a cold Markdown snapshot.
+    assert!(compositor.markdown_cache().is_empty());
+    compositor.prime_truncation_cache(&scene);
     assert_eq!(compositor.truncation_cache_scene_version, scene.version);
+    assert_eq!(
+        compositor.resize_reprime_content_bytes,
+        2 * TRUNCATED_TEXT.len()
+    );
+    let rasterizer = compositor.text_rasterizer.as_ref().unwrap();
+    assert_eq!(rasterizer.truncation_cache.len(), 1);
+    assert!(compositor.markdown_cache().is_empty());
+
+    compositor.prime_markdown_cache(&scene);
     render(&mut compositor, &mut scene, 2);
     render(&mut compositor, &mut scene, 0);
 
