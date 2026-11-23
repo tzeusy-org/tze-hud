@@ -18,23 +18,23 @@ use tze_hud_scene::{
 pub struct SurfaceProbe(Arc<dyn Fn() -> SurfaceSnapshot + Send + Sync>);
 
 #[derive(Default)]
-pub struct SurfaceSnapshot {
-    pub portals: Value,
-    pub notifications: Value,
-    pub widgets: Value,
-    pub link_launches: u64,
+pub(crate) struct SurfaceSnapshot {
+    pub(crate) portals: Value,
+    pub(crate) notifications: Value,
+    pub(crate) widgets: Value,
+    pub(crate) link_launches: u64,
     /// The overlaid display showing the open control panel.
-    pub panel_display: Option<String>,
-    pub window_activations: u64,
+    pub(crate) panel_display: Option<String>,
+    pub(crate) window_activations: u64,
     /// The pointer shape the runtime last applied, or `None` while the app
     /// beneath the overlay owns the pointer.
-    pub cursor: Option<&'static str>,
+    pub(crate) cursor: Option<&'static str>,
     /// The pressed link's local feedback: `opening`, `opened` or `failed`.
-    pub link_feedback: Option<&'static str>,
+    pub(crate) link_feedback: Option<&'static str>,
 }
 
 impl SurfaceProbe {
-    pub fn read(&self) -> SurfaceSnapshot {
+    pub(crate) fn read(&self) -> SurfaceSnapshot {
         (self.0)()
     }
 }
@@ -47,41 +47,41 @@ impl std::fmt::Debug for SurfaceProbe {
 
 /// Keyboard focus and draft length as the main thread last saw them.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct UiMirror {
+pub(crate) struct UiMirror {
     /// Focused `(tile, node)`; `node` is `None` for a tile-level stop.
-    pub focus: Option<(SceneId, Option<SceneId>)>,
+    pub(crate) focus: Option<(SceneId, Option<SceneId>)>,
     /// Characters in each unsent draft by composer node, focused or kept.
-    pub drafts: HashMap<SceneId, usize>,
+    pub(crate) drafts: HashMap<SceneId, usize>,
     /// Actual runtime hover targets, including their configured trigger inset.
-    pub hover_targets: HashMap<String, Rect>,
+    pub(crate) hover_targets: HashMap<String, Rect>,
     /// OUTPUT reading observations per portal tile (hud-ljhku.2); absent
     /// tiles report `arrow`, no hint and no selection.
-    pub reading: HashMap<SceneId, ReadingUi>,
+    pub(crate) reading: HashMap<SceneId, ReadingUi>,
     /// [`SurfaceSnapshot::panel_display`].
-    pub panel_display: Option<String>,
+    pub(crate) panel_display: Option<String>,
     /// [`SurfaceSnapshot::cursor`].
-    pub cursor: Option<&'static str>,
+    pub(crate) cursor: Option<&'static str>,
     /// The pressed link's local feedback: `opening`, `opened` or `failed`.
-    pub link_feedback: Option<&'static str>,
-    pub window_activations: u64,
+    pub(crate) link_feedback: Option<&'static str>,
+    pub(crate) window_activations: u64,
 }
 
 /// Admin-only OUTPUT reading state of one portal: no text crosses here.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct ReadingUi {
+pub(crate) struct ReadingUi {
     /// `ibeam`, `hand` or `arrow`: the cursor the runtime last resolved.
-    pub cursor: &'static str,
+    pub(crate) cursor: &'static str,
     /// The host the link hover hint shows.
-    pub link_hint: Option<String>,
+    pub(crate) link_hint: Option<String>,
     /// Characters in the OUTPUT selection.
-    pub selection_chars: usize,
+    pub(crate) selection_chars: usize,
 }
 
 /// The main thread's [`UiMirror`], written each settle.
-pub type UiHandle = Arc<StdMutex<UiMirror>>;
+pub(crate) type UiHandle = Arc<StdMutex<UiMirror>>;
 
 /// The admin name of a link feedback state (never the URL).
-pub fn link_feedback_name(state: tze_hud_scene::LinkFeedbackState) -> &'static str {
+pub(crate) fn link_feedback_name(state: tze_hud_scene::LinkFeedbackState) -> &'static str {
     match state {
         tze_hud_scene::LinkFeedbackState::Opening => "opening",
         tze_hud_scene::LinkFeedbackState::Opened => "opened",
@@ -90,7 +90,7 @@ pub fn link_feedback_name(state: tze_hud_scene::LinkFeedbackState) -> &'static s
 }
 
 /// The admin name of a cursor shape.
-pub fn cursor_name(cursor: tze_hud_input::PortalCursor) -> &'static str {
+pub(crate) fn cursor_name(cursor: tze_hud_input::PortalCursor) -> &'static str {
     use tze_hud_input::PortalCursor as C;
     match cursor {
         C::Default => "arrow",
@@ -107,7 +107,7 @@ pub fn cursor_name(cursor: tze_hud_input::PortalCursor) -> &'static str {
 
 /// The status probe for one runtime: reads `scene` (only the scene lock, as
 /// the compositor does, waiting up to 100 ms) and the main thread's `ui`.
-pub fn probe(
+pub(crate) fn probe(
     scene: Arc<tokio::sync::Mutex<SceneGraph>>,
     ui: UiHandle,
     link_launches: Arc<AtomicU64>,
@@ -298,7 +298,7 @@ fn part_text(scene: &SceneGraph, tile: SceneId, kind: PortalPartKind) -> Option<
 ///
 /// `displays` are the overlaid display rects in scene pixels, in
 /// `/admin/status` order.
-pub fn portals_json(scene: &SceneGraph, ui: &UiMirror, displays: &[Rect]) -> Value {
+pub(crate) fn portals_json(scene: &SceneGraph, ui: &UiMirror, displays: &[Rect]) -> Value {
     let mut entries: Vec<(String, Value)> = Vec::new();
     for (&tile_id, tile) in &scene.tiles {
         let Some(surface) = scene.portal_surface(tile_id) else {
