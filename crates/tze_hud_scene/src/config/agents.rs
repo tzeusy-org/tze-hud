@@ -76,20 +76,48 @@ pub struct AuthRejection {
 /// The guard linearizes raster admission with revocation. Grants belong to this
 /// pairing rather than a transport, and disappear when it is revoked. Callers
 /// must finish all awaits before entering the synchronous commit closure.
-#[derive(Clone, Default)]
-pub struct PairingAuthorization(Arc<Mutex<PairingState>>);
+#[derive(Clone)]
+pub struct PairingAuthorization(PairingScope);
+
+#[derive(Clone)]
+enum PairingScope {
+    Paired(Arc<Mutex<PairingState>>),
+    Dev {
+        state: Arc<Mutex<DevPairings>>,
+        namespace: String,
+        generation: u64,
+    },
+}
 
 struct PairingState {
     live: bool,
     raster_grants: HashSet<[u8; 32]>,
 }
 
-impl Default for PairingState {
+impl Default for PairingAuthorization {
     fn default() -> Self {
-        Self {
+        Self(PairingScope::Paired(Arc::new(Mutex::new(PairingState {
             live: true,
             raster_grants: HashSet::new(),
-        }
+        }))))
+    }
+}
+
+/// Resolving an arbitrary dev namespace allocates no durable entry. Entries
+/// below arise only from actual grants or namespace pairing transitions.
+#[derive(Default)]
+struct DevPairings {
+    generations: HashMap<String, u64>,
+    grants: HashMap<String, HashSet<[u8; 32]>>,
+}
+
+impl DevPairings {
+    fn revoke(&mut self, namespace: &str) {
+        let generation = self.generations.entry(namespace.to_owned()).or_default();
+        *generation = generation
+            .checked_add(1)
+            .expect("pairing generation exhausted");
+        self.grants.remove(namespace);
     }
 }
 
@@ -101,7 +129,22 @@ impl std::fmt::Debug for PairingAuthorization {
 
 impl PartialEq for PairingAuthorization {
     fn eq(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.0, &other.0)
+        match (&self.0, &other.0) {
+            (PairingScope::Paired(a), PairingScope::Paired(b)) => Arc::ptr_eq(a, b),
+            (
+                PairingScope::Dev {
+                    state: a,
+                    namespace: an,
+                    generation: ag,
+                },
+                PairingScope::Dev {
+                    state: b,
+                    namespace: bn,
+                    generation: bg,
+                },
+            ) => Arc::ptr_eq(a, b) && an == bn && ag == bg,
+            _ => false,
+        }
     }
 }
 impl Eq for PairingAuthorization {}
@@ -112,14 +155,60 @@ impl PairingAuthorization {
         &self,
         commit: impl FnOnce(&mut HashSet<[u8; 32]>) -> T,
     ) -> Option<T> {
-        let mut state = self.0.lock().unwrap_or_else(|e| e.into_inner());
-        state.live.then(|| commit(&mut state.raster_grants))
+        match &self.0 {
+            PairingScope::Paired(state) => {
+                let mut state = state.lock().unwrap_or_else(|e| e.into_inner());
+                state.live.then(|| commit(&mut state.raster_grants))
+            }
+            PairingScope::Dev {
+                state,
+                namespace,
+                generation,
+            } => {
+                let mut state = state.lock().unwrap_or_else(|e| e.into_inner());
+                if state
+                    .generations
+                    .get(namespace)
+                    .copied()
+                    .unwrap_or_default()
+                    != *generation
+                {
+                    return None;
+                }
+                let mut grants = state.grants.remove(namespace).unwrap_or_default();
+                let result = commit(&mut grants);
+                if !grants.is_empty() {
+                    state.grants.insert(namespace.clone(), grants);
+                }
+                Some(result)
+            }
+        }
     }
 
     fn revoke(&self) {
-        let mut state = self.0.lock().unwrap_or_else(|e| e.into_inner());
-        state.live = false;
-        state.raster_grants.clear();
+        match &self.0 {
+            PairingScope::Paired(state) => {
+                let mut state = state.lock().unwrap_or_else(|e| e.into_inner());
+                state.live = false;
+                state.raster_grants.clear();
+            }
+            PairingScope::Dev {
+                state,
+                namespace,
+                generation,
+            } => {
+                let mut state = state.lock().unwrap_or_else(|e| e.into_inner());
+                if state
+                    .generations
+                    .get(namespace)
+                    .copied()
+                    .unwrap_or_default()
+                    == *generation
+                {
+                    state.revoke(namespace);
+                }
+            }
+        }
     }
 }
 
@@ -137,7 +226,9 @@ pub struct AgentDirectory {
     /// Plaintext dev/test PSK that may claim any agent id. Only
     /// [`AgentDirectory::unrestricted`] sets it.
     dev_psk: Option<String>,
-    dev_authorizations: Arc<Mutex<HashMap<String, PairingAuthorization>>>,
+    dev_authorizations: Arc<Mutex<DevPairings>>,
+    /// Captured by this immutable directory, so stale snapshots stay revoked.
+    dev_generations: Arc<HashMap<String, u64>>,
 }
 
 /// The live agent directory shared by MCP and gRPC. `store` a new directory
@@ -166,6 +257,7 @@ impl AgentDirectory {
             agents: HashMap::new(),
             dev_psk: (!dev_psk.is_empty()).then_some(dev_psk),
             dev_authorizations: Default::default(),
+            dev_generations: Default::default(),
         }
     }
 
@@ -189,12 +281,12 @@ impl AgentDirectory {
     /// This directory's dev PSK with `paired`'s agents: what the runtime
     /// authenticates against after `agents.toml` changes.
     pub fn with_agents_of(&self, paired: AgentDirectory) -> Self {
-        self.with_repaired_agent(paired, None)
+        self.with_agent_change(paired, None)
     }
 
     /// Commit a validated directory transition before publishing its ArcSwap.
-    /// An explicit re-pair replaces the identity even if the key is unchanged.
-    pub fn with_repaired_agent(&self, mut paired: AgentDirectory, replaced: Option<&str>) -> Self {
+    /// Explicit Pair/Unpair also invalidate a dev-only claimed namespace.
+    pub fn with_agent_change(&self, mut paired: AgentDirectory, replaced: Option<&str>) -> Self {
         for (id, old) in &self.agents {
             match paired.agents.get_mut(id) {
                 Some(new) if replaced != Some(id.as_str()) && old.psk_sha256 == new.psk_sha256 => {
@@ -203,30 +295,31 @@ impl AgentDirectory {
                 _ => old.authorization.revoke(),
             }
         }
-        // Dev credentials remain unrestricted, but cannot revive an earlier
-        // grant when a claimed namespace is removed or explicitly re-paired.
+        let mut changed: HashSet<&str> = self
+            .agents
+            .keys()
+            .chain(paired.agents.keys())
+            .map(String::as_str)
+            .filter(|id| match (self.agents.get(*id), paired.agents.get(*id)) {
+                (Some(old), Some(new)) => old.psk_sha256 != new.psk_sha256,
+                _ => true,
+            })
+            .collect();
+        changed.extend(replaced);
         let mut dev = self
             .dev_authorizations
             .lock()
             .unwrap_or_else(|e| e.into_inner());
-        dev.retain(|id, authorization| {
-            let changed = replaced == Some(id.as_str())
-                || self.agents.get(id).is_some_and(|old| {
-                    paired
-                        .agents
-                        .get(id)
-                        .is_none_or(|new| old.psk_sha256 != new.psk_sha256)
-                });
-            if changed {
-                authorization.revoke();
-            }
-            !changed
-        });
+        for id in changed {
+            dev.revoke(id);
+        }
+        let generations = Arc::new(dev.generations.clone());
         drop(dev);
         Self {
             agents: paired.agents,
             dev_psk: self.dev_psk.clone(),
             dev_authorizations: Arc::clone(&self.dev_authorizations),
+            dev_generations: generations,
         }
     }
 
@@ -316,12 +409,15 @@ impl AgentDirectory {
             .map_or_else(|| vec!["*".to_string()], |a| a.permissions.clone());
         let authorization = self.agents.get(agent_id).map_or_else(
             || {
-                self.dev_authorizations
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .entry(agent_id.to_owned())
-                    .or_default()
-                    .clone()
+                PairingAuthorization(PairingScope::Dev {
+                    state: Arc::clone(&self.dev_authorizations),
+                    namespace: agent_id.to_owned(),
+                    generation: self
+                        .dev_generations
+                        .get(agent_id)
+                        .copied()
+                        .unwrap_or_default(),
+                })
             },
             |agent| agent.authorization.clone(),
         );
@@ -389,5 +485,40 @@ mod tests {
         );
         assert!(AgentDirectory::unrestricted("").is_empty());
         assert!(!format!("{dev:?}").contains("\"dev\""));
+        for i in 0..1_000 {
+            let identity = dev.resolve("dev", &format!("no-grant-{i}")).unwrap();
+            assert!(
+                identity
+                    .authorization
+                    .with_live_grants(|g| g.is_empty())
+                    .unwrap()
+            );
+        }
+        {
+            let state = dev.dev_authorizations.lock().unwrap();
+            assert!(state.generations.is_empty() && state.grants.is_empty());
+        }
+        let a = dev.resolve("dev", "dev-a").unwrap().authorization;
+        let b = dev.resolve("dev", "dev-b").unwrap().authorization;
+        a.with_live_grants(|g| g.insert([1; 32])).unwrap();
+        b.with_live_grants(|g| g.insert([2; 32])).unwrap();
+        // Explicit Unpair of an unconfigured dev namespace revokes only its
+        // current work; a fresh dev handshake remains unrestricted.
+        let changed = dev.with_agent_change(dev.clone(), Some("dev-a"));
+        assert!(a.with_live_grants(|_| ()).is_none());
+        assert!(
+            dev.resolve("dev", "dev-a")
+                .unwrap()
+                .authorization
+                .with_live_grants(|_| ())
+                .is_none(),
+            "old directory snapshots must not acquire the new generation"
+        );
+        let fresh = changed.resolve("dev", "dev-a").unwrap().authorization;
+        assert_ne!(a, fresh);
+        assert!(fresh.with_live_grants(|g| g.is_empty()).unwrap());
+        assert!(b.with_live_grants(|g| g.contains(&[2; 32])).unwrap());
+        let edited = changed.with_agents_of(changed.clone());
+        assert_eq!(fresh, edited.resolve("dev", "dev-a").unwrap().authorization);
     }
 }

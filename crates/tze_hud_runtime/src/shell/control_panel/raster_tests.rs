@@ -149,17 +149,21 @@ impl Drop for RasterRig {
 
 impl RasterRig {
     async fn new(capacity: u64) -> Self {
+        Self::with_caps(capacity, capacity).await
+    }
+
+    async fn with_caps(store_capacity: u64, ledger_capacity: u64) -> Self {
         let pairing = crate::pairing::tests::rig();
         let ledger = ResidentLedger::new(ResidentLedgerLimits {
-            aggregate_bytes: capacity,
-            resource_bytes: capacity,
+            aggregate_bytes: ledger_capacity,
+            resource_bytes: ledger_capacity,
             widget_source_bytes: 0,
             widget_raster_bytes: 0,
             font_bytes: 0,
         });
         let store = ResourceStore::new_with_resident_ledger(
             ResourceStoreConfig {
-                max_total_texture_bytes: capacity as usize,
+                max_total_texture_bytes: store_capacity as usize,
                 ..Default::default()
             },
             ledger.clone(),
@@ -374,7 +378,17 @@ async fn resident_raster_first_grants_validate_and_keep_one_store_charge() {
         let encoded = encoded.into_inner();
         let id = ResourceId::from_content(&encoded);
         a.upload(&encoded, kind, 0, 0, true).await;
-        assert!(!stored(a.next().await).was_deduplicated);
+        let first = stored(a.next().await);
+        assert!(!first.was_deduplicated);
+        let metadata = first.metadata.unwrap();
+        assert_eq!((metadata.width, metadata.height), (2, 1));
+        // Nonzero compressed declarations must match, even on an existing hash.
+        b.upload(&encoded, kind, 1, 2, true).await;
+        error(
+            b.next().await,
+            session::ResourceErrorCode::ResourceDecodeError,
+        );
+        assert!(!granted(&rig.authorization("raster-b", &key_b), &encoded));
         let raster = rig
             .store
             .dedup_index()
@@ -406,94 +420,184 @@ async fn resident_raster_first_grants_validate_and_keep_one_store_charge() {
         ));
         assert_eq!(rig.ledger.snapshot().resource_bytes, 8);
         assert_eq!(rig.ledger.snapshot().allocation_count, 1);
+        error(
+            b.digest(&encoded, kind, 1, 2).await,
+            session::ResourceErrorCode::ResourceDecodeError,
+        );
+    }
+    // Separate caps exercise both the store check and actual ledger refusal.
+    for (store_cap, ledger_cap) in [(3, 64), (64, 3)] {
+        let rig = RasterRig::with_caps(store_cap, ledger_cap).await;
+        let key = rig.pair("raster-a");
+        let auth = rig.authorization("raster-a", &key);
+        let mut a = Resident::connect(&rig.endpoint, "raster-a", &key).await;
+        let bytes = [1, 2, 3, 255];
+        a.upload(&bytes, 1, 1, 1, true).await;
+        error(
+            a.next().await,
+            session::ResourceErrorCode::ResourceBudgetExceeded,
+        );
+        assert!(!granted(&auth, &bytes));
+        assert!(
+            rig.store
+                .dedup_index()
+                .get(&ResourceId::from_content(&bytes))
+                .is_none()
+        );
+        let denied = rig.ledger.snapshot();
+        assert_eq!((denied.resource_bytes, denied.allocation_count), (0, 0));
+        assert_eq!(denied.class_denial_count, u64::from(ledger_cap < 4));
     }
 }
 
 #[tokio::test]
 async fn runtime_unpair_blocks_old_resident_raster_commit_across_repair() {
-    for inline in [true, false] {
-        for dedup in [true, false] {
-            let rig = RasterRig::new(64).await;
-            let key_a = rig.pair("raster-a");
-            let key_b = rig.pair("raster-b");
-            let auth_a = rig.authorization("raster-a", &key_a);
-            let auth_b = rig.authorization("raster-b", &key_b);
-            let mut a = Resident::connect(&rig.endpoint, "raster-a", &key_a).await;
-            let mut b = Resident::connect(&rig.endpoint, "raster-b", &key_b).await;
-            let peer_pixels = [255, 0, 0, 255];
-            let new_pixels = [0, 255, 0, 255];
-            b.upload(&peer_pixels, 1, 1, 1, true).await;
-            stored(b.next().await);
-            let peer_id = ResourceId::from_content(&peer_pixels);
-            let peer_allocation = rig
-                .store
-                .dedup_index()
-                .get(&peer_id)
-                .unwrap()
-                .raster
-                .as_ref()
-                .unwrap()
-                .clone();
-            let before = rig.ledger.snapshot();
-            let target = if dedup { &peer_pixels } else { &new_pixels };
-            let target_id = ResourceId::from_content(target);
-            let (entered, release) = rig.store.pause_before_raster_commit(target_id);
-            a.upload(target, 1, 1, 1, inline).await;
-            tokio::time::timeout(WAIT, entered.notified())
-                .await
-                .unwrap();
-            let control = rig.control.clone();
-            let unpair = tokio::spawn(async move { control.unpair("raster-a").await });
-            tokio::time::timeout(WAIT, async {
-                while auth_a.with_live_grants(|_| ()).is_some() {
-                    tokio::task::yield_now().await;
-                }
-            })
-            .await
-            .unwrap();
-            // Pair through the actual HTTP pairing implementation while old
-            // work is still paused, not by manufacturing a new scene identity.
-            let new_key_a = rig.pair("raster-a");
-            let new_auth_a = rig.authorization("raster-a", &new_key_a);
-            assert_ne!(new_auth_a, auth_a);
-            release.notify_one();
-            tokio::time::timeout(WAIT, unpair)
-                .await
-                .unwrap()
-                .unwrap()
-                .unwrap();
-            assert!(auth_a.with_live_grants(|_| ()).is_none());
-            assert!(!granted(&new_auth_a, target));
-            assert!(granted(&auth_b, &peer_pixels));
-            assert_eq!(rig.ledger.snapshot(), before);
-            assert_eq!(rig.store.dedup_index().len(), 1);
-            assert!(Arc::ptr_eq(
-                &peer_allocation,
-                rig.store
+    for replacement in [false, true] {
+        for inline in [true, false] {
+            for dedup in [true, false] {
+                let rig = RasterRig::new(64).await;
+                let key_a = rig.pair("raster-a");
+                let key_b = rig.pair("raster-b");
+                let auth_a = rig.authorization("raster-a", &key_a);
+                let auth_b = rig.authorization("raster-b", &key_b);
+                let mut a = Resident::connect(&rig.endpoint, "raster-a", &key_a).await;
+                let mut b = Resident::connect(&rig.endpoint, "raster-b", &key_b).await;
+                let peer_pixels = [255, 0, 0, 255];
+                let new_pixels = [0, 255, 0, 255];
+                b.upload(&peer_pixels, 1, 1, 1, true).await;
+                stored(b.next().await);
+                let peer_id = ResourceId::from_content(&peer_pixels);
+                let peer_allocation = rig
+                    .store
                     .dedup_index()
                     .get(&peer_id)
                     .unwrap()
                     .raster
                     .as_ref()
                     .unwrap()
-            ));
-            if !dedup {
-                assert!(rig.store.dedup_index().get(&target_id).is_none());
+                    .clone();
+                let before = rig.ledger.snapshot();
+                let target = if dedup { &peer_pixels } else { &new_pixels };
+                let target_id = ResourceId::from_content(target);
+                let mut stale_slots = Vec::new();
+                if replacement {
+                    for _ in 0..if inline { 4 } else { 3 } {
+                        let ServerPayload::ResourceUploadAccepted(accepted) =
+                            a.digest(target, 1, 1, 1).await
+                        else {
+                            panic!("old chunk slot")
+                        };
+                        stale_slots.push(accepted.upload_id);
+                    }
+                }
+                let (entered, release) = rig.store.pause_before_raster_commit(target_id);
+                a.upload(target, 1, 1, 1, inline).await;
+                tokio::time::timeout(WAIT, entered.notified())
+                    .await
+                    .unwrap();
+                let (new_key_a, unpair) = if replacement {
+                    // Actual serialized Pair edit with the same test key, without
+                    // closing the old stream: its denied completion is observable.
+                    let record = rig.pairing.store.cached().agents["raster-a"].clone();
+                    rig.pairing
+                        .store
+                        .apply(&tze_hud_config::agents_file::AgentChange::Pair {
+                            agent: "raster-a".into(),
+                            record,
+                        })
+                        .unwrap();
+                    (key_a.clone(), None)
+                } else {
+                    let control = rig.control.clone();
+                    let unpair = tokio::spawn(async move { control.unpair("raster-a").await });
+                    tokio::time::timeout(WAIT, async {
+                        while auth_a.with_live_grants(|_| ()).is_some() {
+                            tokio::task::yield_now().await;
+                        }
+                    })
+                    .await
+                    .unwrap();
+                    // Pair through the production HTTP implementation while the
+                    // old upload remains parked, before waiting for its cleanup.
+                    (rig.pair("raster-a"), Some(unpair))
+                };
+                let new_auth_a = rig.authorization("raster-a", &new_key_a);
+                assert_ne!(new_auth_a, auth_a);
+                release.notify_one();
+                if let Some(unpair) = unpair {
+                    tokio::time::timeout(WAIT, unpair)
+                        .await
+                        .unwrap()
+                        .unwrap()
+                        .unwrap();
+                } else {
+                    error(
+                        a.next().await,
+                        session::ResourceErrorCode::ResourceCapabilityDenied,
+                    );
+                    error(
+                        a.digest(target, 1, 1, 1).await,
+                        session::ResourceErrorCode::ResourceCapabilityDenied,
+                    );
+                    assert_eq!(
+                        rig.store.in_flight_count("raster-a").await,
+                        stale_slots.len()
+                    );
+                    a.send(ClientPayload::ResourceUploadChunk(
+                        session::ResourceUploadChunk {
+                            upload_id: stale_slots[0].clone(),
+                            chunk_index: 0,
+                            data: target.to_vec(),
+                        },
+                    ))
+                    .await;
+                    error(
+                        a.next().await,
+                        session::ResourceErrorCode::ResourceCapabilityDenied,
+                    );
+                    assert_eq!(
+                        rig.store.in_flight_count("raster-a").await,
+                        stale_slots.len() - 1
+                    );
+                }
+                assert!(auth_a.with_live_grants(|_| ()).is_none());
+                assert!(!granted(&new_auth_a, target));
+                assert!(granted(&auth_b, &peer_pixels));
+                assert_eq!(rig.ledger.snapshot(), before);
+                assert_eq!(rig.store.dedup_index().len(), 1);
+                assert!(Arc::ptr_eq(
+                    &peer_allocation,
+                    rig.store
+                        .dedup_index()
+                        .get(&peer_id)
+                        .unwrap()
+                        .raster
+                        .as_ref()
+                        .unwrap()
+                ));
+                if !dedup {
+                    assert!(rig.store.dedup_index().get(&target_id).is_none());
+                }
+                assert!(stored(b.digest(&peer_pixels, 1, 1, 1).await).was_deduplicated);
+                let mut repaired = Resident::connect(&rig.endpoint, "raster-a", &new_key_a).await;
+                assert!(matches!(
+                    repaired.digest(target, 1, 1, 1).await,
+                    ServerPayload::ResourceUploadAccepted(_)
+                ));
+                assert!(!granted(&new_auth_a, target));
+                assert_eq!(
+                    rig.store.in_flight_count("raster-a").await,
+                    1,
+                    "fresh admission prunes only revoked raster slots"
+                );
+                repaired.upload(target, 1, 1, 1, true).await;
+                assert_eq!(stored(repaired.next().await).was_deduplicated, dedup);
+                assert!(granted(&new_auth_a, target));
+                assert_eq!(
+                    rig.ledger.snapshot().resource_bytes,
+                    if dedup { 4 } else { 8 }
+                );
             }
-            assert!(stored(b.digest(&peer_pixels, 1, 1, 1).await).was_deduplicated);
-            let mut repaired = Resident::connect(&rig.endpoint, "raster-a", &new_key_a).await;
-            assert!(matches!(
-                repaired.digest(target, 1, 1, 1).await,
-                ServerPayload::ResourceUploadAccepted(_)
-            ));
-            assert!(!granted(&new_auth_a, target));
-            repaired.upload(target, 1, 1, 1, true).await;
-            assert_eq!(stored(repaired.next().await).was_deduplicated, dedup);
-            assert!(granted(&new_auth_a, target));
-            assert_eq!(
-                rig.ledger.snapshot().resource_bytes,
-                if dedup { 4 } else { 8 }
-            );
         }
     }
 }

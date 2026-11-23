@@ -38,16 +38,25 @@ use crate::validation::{
     decode_and_validate, decode_raster,
 };
 
-/// A synchronous raster commit, run while its pairing is still authorized.
-pub type RasterGrantCommit<'a> =
-    Box<dyn FnOnce(&mut HashSet<[u8; 32]>) -> Result<ResourceStored, ResourceError> + Send + 'a>;
-
-/// The protocol supplies the live pairing guard; the resource layer never sees
-/// credentials and does not depend on scene/session types. Revocation clears
-/// the pairing's grants under the same guard that runs `commit`.
+/// The protocol supplies a short live pairing guard. The callback runs once,
+/// synchronously, or not at all if that pairing has been revoked.
 pub trait RasterUploadAuthority: Send + Sync {
-    fn has_live_grant(&self, id: &[u8; 32]) -> bool;
-    fn commit(&self, commit: RasterGrantCommit<'_>) -> Result<ResourceStored, ResourceError>;
+    fn with_live_grants(&self, commit: &mut dyn FnMut(&mut HashSet<[u8; 32]>)) -> bool;
+    fn is_live(&self) -> bool {
+        self.with_live_grants(&mut |_| {})
+    }
+}
+
+fn authorized<T>(
+    authority: &dyn RasterUploadAuthority,
+    commit: impl FnOnce(&mut HashSet<[u8; 32]>) -> Result<T, ResourceError>,
+) -> Result<T, ResourceError> {
+    let mut commit = Some(commit);
+    let mut result = Err(ResourceError::CapabilityDenied);
+    authority.with_live_grants(&mut |grants| {
+        result = commit.take().expect("pairing commit runs once")(grants);
+    });
+    result
 }
 
 fn is_raster(resource_type: ResourceType) -> bool {
@@ -93,6 +102,8 @@ struct InflightUpload {
     width: u32,
     /// Height in pixels (for IMAGE_RGBA8 dimension validation).
     height: u32,
+    /// The original raster pairing owns every chunk and the final commit.
+    authority: Option<Arc<dyn RasterUploadAuthority>>,
 }
 
 impl InflightUpload {
@@ -240,7 +251,7 @@ impl ResourceStore {
     pub async fn handle_resident_upload_start(
         &self,
         req: UploadStartRequest,
-        authority: &dyn RasterUploadAuthority,
+        authority: Arc<dyn RasterUploadAuthority>,
     ) -> Result<Option<ResourceStored>, ResourceError> {
         self.start_upload(req, Some(authority)).await
     }
@@ -248,43 +259,35 @@ impl ResourceStore {
     async fn start_upload(
         &self,
         req: UploadStartRequest,
-        authority: Option<&dyn RasterUploadAuthority>,
+        authority: Option<Arc<dyn RasterUploadAuthority>>,
     ) -> Result<Option<ResourceStored>, ResourceError> {
-        // 1. Capability gate.
         check_capability(&req.agent_capabilities)?;
-
-        // 5. Type check (cheap; do early to short-circuit).
         check_resource_type(req.resource_type)?;
-
+        let raster_authority = authority
+            .as_deref()
+            .filter(|_| is_raster(req.resource_type));
+        if let Some(authority) = raster_authority {
+            authorized(authority, |_| Ok(()))?;
+        }
         let resource_id = ResourceId::from_bytes(req.expected_hash);
         if let Some(record) = self.dedup.get(&resource_id) {
-            if is_raster(req.resource_type)
-                && let Some(authority) = authority
-            {
-                // Full bytes always validate on a first grant. Digest-only
-                // reuse cannot borrow another pairing's global dedup record.
-                if req.inline_data.is_empty() && authority.has_live_grant(&req.expected_hash) {
-                    return authority
-                        .commit(Box::new(|grants| {
-                            if !grants.contains(&req.expected_hash) {
-                                return Err(ResourceError::CapabilityDenied);
-                            }
-                            self.matching_raster(
-                                &record,
-                                req.resource_type,
-                                req.width,
-                                req.height,
-                            )?;
-                            Ok(stored_record(&record, true))
-                        }))
-                        .map(Some);
+            if let Some(authority) = raster_authority {
+                if req.inline_data.is_empty() {
+                    let reused = authorized(authority, |grants| {
+                        if !grants.contains(&req.expected_hash) {
+                            return Ok(None);
+                        }
+                        self.matching_raster(&record, req.resource_type, req.width, req.height)?;
+                        Ok(Some(stored_record(&record, true)))
+                    })?;
+                    if reused.is_some() {
+                        return Ok(reused);
+                    }
                 }
             } else if record.resource_type == req.resource_type {
                 return Ok(Some(stored_record(&record, true)));
             }
         }
-
-        // ── Inline fast path ───────────────────────────────────────────────
         if !req.inline_data.is_empty() {
             if req.inline_data.len() > INLINE_SIZE_LIMIT {
                 return Err(ResourceError::SizeExceeded {
@@ -304,56 +307,55 @@ impl ResourceStore {
                     &req.agent_namespace,
                     req.width,
                     req.height,
-                    authority,
+                    raster_authority,
                 )
                 .await
                 .map(Some);
         }
-
-        // ── Chunked path: register in-flight upload ────────────────────────
-        // Only pre-check total_size when it's declared (non-zero).
         if req.total_size > 0 {
             check_raw_size(req.total_size, &self.config)?;
         }
-
-        let upload_id = req.upload_id;
         let mut guard = self.agent_uploads.lock().await;
         let entry = guard
             .entry(req.agent_namespace.clone())
             .or_insert_with(AgentUploads::new);
-
-        if entry.count() >= MAX_CONCURRENT_UPLOADS_PER_AGENT {
-            return Err(ResourceError::TooManyUploads);
+        // Retired raster pairings cannot occupy the new pairing's namespace
+        // slots. Never prune another live stream or the unchanged font/SVG path.
+        entry
+            .inflight
+            .retain(|_, u| u.authority.as_ref().is_none_or(|a| a.is_live()));
+        let mut register = || {
+            if entry.count() >= MAX_CONCURRENT_UPLOADS_PER_AGENT {
+                return Err(ResourceError::TooManyUploads);
+            }
+            if entry.inflight.contains_key(&req.upload_id) {
+                return Err(ResourceError::InvalidChunk(format!(
+                    "upload_id {:?} already in flight for agent {}",
+                    req.upload_id, req.agent_namespace
+                )));
+            }
+            entry.inflight.insert(
+                req.upload_id,
+                InflightUpload {
+                    resource_type: req.resource_type,
+                    expected_hash: req.expected_hash,
+                    total_size: req.total_size,
+                    chunks: Vec::new(),
+                    accumulated_bytes: 0,
+                    next_chunk_index: 0,
+                    width: req.width,
+                    height: req.height,
+                    authority: authority.clone().filter(|_| is_raster(req.resource_type)),
+                },
+            );
+            Ok(())
+        };
+        if let Some(authority) = raster_authority {
+            authorized(authority, |_| register())?;
+        } else {
+            register()?;
         }
-
-        if entry.inflight.contains_key(&upload_id) {
-            return Err(ResourceError::InvalidChunk(format!(
-                "upload_id {:?} already in flight for agent {}",
-                upload_id, req.agent_namespace
-            )));
-        }
-
-        entry.inflight.insert(
-            upload_id,
-            InflightUpload {
-                resource_type: req.resource_type,
-                expected_hash: req.expected_hash,
-                total_size: req.total_size,
-                chunks: Vec::new(),
-                accumulated_bytes: 0,
-                next_chunk_index: 0,
-                width: req.width,
-                height: req.height,
-            },
-        );
-
-        tracing::debug!(
-            agent = %req.agent_namespace,
-            upload_id = ?upload_id,
-            total_size = req.total_size,
-            "chunked upload registered"
-        );
-
+        tracing::debug!(agent = %req.agent_namespace, upload_id = ?req.upload_id, total_size = req.total_size, "chunked upload registered");
         Ok(None)
     }
 
@@ -388,31 +390,38 @@ impl ResourceStore {
             ResourceError::UploadNotFound(format!("unknown upload_id {upload_id:?}"))
         })?;
 
-        if chunk_index != inflight.next_chunk_index {
-            return Err(ResourceError::InvalidChunk(format!(
-                "expected chunk index {} but got {}",
-                inflight.next_chunk_index, chunk_index
-            )));
+        let authority = inflight.authority.clone();
+        let append = || {
+            if chunk_index != inflight.next_chunk_index {
+                return Err(ResourceError::InvalidChunk(format!(
+                    "expected chunk index {} but got {}",
+                    inflight.next_chunk_index, chunk_index
+                )));
+            }
+
+            // Guard against exceeding declared total size (if declared) or the
+            // max_resource_bytes limit (always).  Use the running counter to avoid
+            // O(n²) work summing all prior chunks on each call.
+            let new_accumulated = inflight.accumulated_bytes + data.len();
+            if inflight.total_size > 0 && new_accumulated > inflight.total_size {
+                return Err(ResourceError::SizeExceeded {
+                    detail: format!(
+                        "accumulated chunk bytes {} exceed declared total_size {}",
+                        new_accumulated, inflight.total_size
+                    ),
+                });
+            }
+
+            inflight.chunks.push(data);
+            inflight.accumulated_bytes = new_accumulated;
+            inflight.next_chunk_index += 1;
+            Ok(())
+        };
+        if let Some(authority) = authority {
+            authorized(authority.as_ref(), |_| append())
+        } else {
+            append()
         }
-
-        // Guard against exceeding declared total size (if declared) or the
-        // max_resource_bytes limit (always).  Use the running counter to avoid
-        // O(n²) work summing all prior chunks on each call.
-        let new_accumulated = inflight.accumulated_bytes + data.len();
-        if inflight.total_size > 0 && new_accumulated > inflight.total_size {
-            return Err(ResourceError::SizeExceeded {
-                detail: format!(
-                    "accumulated chunk bytes {} exceed declared total_size {}",
-                    new_accumulated, inflight.total_size
-                ),
-            });
-        }
-
-        inflight.chunks.push(data);
-        inflight.accumulated_bytes = new_accumulated;
-        inflight.next_chunk_index += 1;
-
-        Ok(())
     }
 
     // ─── Handle upload complete ───────────────────────────────────────────────
@@ -433,73 +442,33 @@ impl ResourceStore {
         agent_capabilities: &[String],
         agent_budget: &AgentBudget,
     ) -> Result<ResourceStored, ResourceError> {
-        self.finish_upload(
-            agent_namespace,
-            upload_id,
-            agent_capabilities,
-            agent_budget,
-            None,
-        )
-        .await
-    }
-
-    pub async fn handle_resident_upload_complete(
-        &self,
-        agent_namespace: &str,
-        upload_id: UploadId,
-        agent_capabilities: &[String],
-        agent_budget: &AgentBudget,
-        authority: &dyn RasterUploadAuthority,
-    ) -> Result<ResourceStored, ResourceError> {
-        self.finish_upload(
-            agent_namespace,
-            upload_id,
-            agent_capabilities,
-            agent_budget,
-            Some(authority),
-        )
-        .await
-    }
-
-    async fn finish_upload(
-        &self,
-        agent_namespace: &str,
-        upload_id: UploadId,
-        agent_capabilities: &[String],
-        agent_budget: &AgentBudget,
-        authority: Option<&dyn RasterUploadAuthority>,
-    ) -> Result<ResourceStored, ResourceError> {
-        // Extract the inflight state.
-        let (resource_type, expected_hash, assembled, width, height) = {
+        let inflight = {
             let mut guard = self.agent_uploads.lock().await;
-            let uploads = guard.get_mut(agent_namespace).ok_or_else(|| {
-                ResourceError::UploadNotFound("no uploads in flight for agent".into())
-            })?;
-
-            let inflight = uploads.inflight.remove(&upload_id).ok_or_else(|| {
-                ResourceError::UploadNotFound(format!("unknown upload_id {upload_id:?}"))
-            })?;
-
-            let assembled = inflight.assemble();
-            (
-                inflight.resource_type,
-                inflight.expected_hash,
-                assembled,
-                inflight.width,
-                inflight.height,
-            )
+            guard
+                .get_mut(agent_namespace)
+                .ok_or_else(|| {
+                    ResourceError::UploadNotFound("no uploads in flight for agent".into())
+                })?
+                .inflight
+                .remove(&upload_id)
+                .ok_or_else(|| {
+                    ResourceError::UploadNotFound(format!("unknown upload_id {upload_id:?}"))
+                })?
         };
-
+        if let Some(authority) = &inflight.authority {
+            authorized(authority.as_ref(), |_| Ok(()))?;
+        }
+        let assembled = inflight.assemble();
         self.complete_upload(
             assembled,
-            expected_hash,
-            resource_type,
+            inflight.expected_hash,
+            inflight.resource_type,
             agent_capabilities,
             agent_budget,
             agent_namespace,
-            width,
-            height,
-            authority,
+            inflight.width,
+            inflight.height,
+            inflight.authority.as_deref(),
         )
         .await
     }
@@ -609,11 +578,11 @@ impl ResourceStore {
         if is_raster(resource_type)
             && let Some(authority) = authority
         {
-            authority.commit(Box::new(|grants| {
+            authorized(authority, |grants| {
                 let stored = commit()?;
                 grants.insert(*stored.resource_id.as_bytes());
                 Ok(stored)
-            }))
+            })
         } else {
             commit()
         }
@@ -631,8 +600,9 @@ impl ResourceStore {
             .as_ref()
             .filter(|r| {
                 r.resource_type == resource_type
-                    && (resource_type != ResourceType::ImageRgba8
-                        || (r.width == width && r.height == height))
+                    && (width == 0 || r.width == width)
+                    && (height == 0 || r.height == height)
+                    && (resource_type != ResourceType::ImageRgba8 || (width != 0 && height != 0))
             })
             .ok_or_else(|| {
                 ResourceError::DecodeError(

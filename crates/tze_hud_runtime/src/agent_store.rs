@@ -110,14 +110,14 @@ impl AgentStore {
         let edited = agents_file::edit(path, change).map_err(|e| e.to_string())?;
         let paired = edited.after.directory().map_err(|e| e.to_string())?;
         let replaced = match change {
-            AgentChange::Pair { agent, .. } => Some(agent.as_str()),
+            AgentChange::Pair { agent, .. } | AgentChange::Unpair(agent) => Some(agent.as_str()),
             _ => None,
         };
         // Persist/validate first, then revoke old identities before the live
         // directory can authenticate a replacement. The writer lock serializes
         // Pair, Unpair, allow edits and hand-edit reconciliation.
         self.live.store(Arc::new(
-            self.live.load().with_repaired_agent(paired, replaced),
+            self.live.load().with_agent_change(paired, replaced),
         ));
         *cached = Cached {
             file: edited.after.clone(),

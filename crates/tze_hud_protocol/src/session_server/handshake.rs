@@ -118,25 +118,24 @@ fn register_if_paired(
     closer: &SessionCloser,
     recheck: impl FnOnce() -> Result<AgentIdentity, AuthRejection>,
 ) -> Option<crate::session::AgentSession> {
-    match recheck() {
+    let registered = match recheck() {
         Ok(identity)
-            if identity.agent_id == namespace
-                && identity.authorization == *authorization
-                && authorization.with_live_grants(|_| ()).is_some() =>
+            if identity.agent_id == namespace && identity.authorization == *authorization =>
         {
-            Some(
+            authorization.with_live_grants(|_| {
                 st.sessions
-                    .register(namespace, capabilities, closer.clone()),
-            )
+                    .register(namespace, capabilities, closer.clone())
+            })
         }
-        _ => {
-            tracing::info!(
-                namespace,
-                "handshake refused: the agent was unpaired meanwhile"
-            );
-            None
-        }
+        _ => None,
+    };
+    if registered.is_none() {
+        tracing::info!(
+            namespace,
+            "handshake refused: the agent was unpaired meanwhile"
+        );
     }
+    registered
 }
 
 async fn send_unpaired(tx: &tokio::sync::mpsc::Sender<Result<ServerMessage, Status>>) {

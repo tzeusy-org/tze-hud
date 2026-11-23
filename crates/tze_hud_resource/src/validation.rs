@@ -199,6 +199,11 @@ pub(crate) fn decode_raster(
         }
         _ => unreachable!("only raster upload types are decoded here"),
     };
+    if (width != 0 && meta.width_px != width) || (height != 0 && meta.height_px != height) {
+        return Err(ResourceError::DecodeError(
+            "declared dimensions do not match the validated raster".into(),
+        ));
+    }
     Ok(crate::dedup::ValidatedRaster {
         resource_type,
         width: meta.width_px,
