@@ -20,7 +20,7 @@ use tze_hud_input::{
 };
 use tze_hud_runtime::element_store::{from_toml_str, to_toml_string};
 use tze_hud_scene::{
-    ElementStore, ElementStoreEntry, ElementType, GeometryPolicy, Rect, SceneGraph, SceneId,
+    ElementStore, ElementStoreEntry, ElementType, GeometryPolicy, Rect, SceneId,
     geometry_policy_to_absolute_rect, rect_to_relative_geometry_policy,
 };
 
