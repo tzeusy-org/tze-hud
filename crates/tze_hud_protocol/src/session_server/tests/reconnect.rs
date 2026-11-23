@@ -132,7 +132,7 @@ async fn fresh_init_uses_current_credentials_and_permissions() {
             let mut retained = subtitle_publish("retained permission", 0, 0, 0);
             retained.surface = "zone:reload-control".to_string();
             let allowed = request(&tx, &mut stream, 3, ClientPayload::Publish(retained)).await;
-            assert!(allowed.ok, "{change}: resume={resume}: {allowed:?}");
+            assert!(allowed.ok, "{change}: fresh init: {allowed:?}");
         }
 
         let (control_tx, _, mut control_stream) =
