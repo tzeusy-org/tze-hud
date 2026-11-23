@@ -1,134 +1,45 @@
 use super::*;
-
-#[tokio::test]
-async fn test_static_image_node_renders_placeholder_quad() {
-    // The static image placeholder renders a warm-gray outer quad ~[0.55, 0.50, 0.45].
-    // In sRGB output the linear values are gamma-compressed.
-    // We just verify that *some* non-background pixels appear in the expected warm range.
-    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(256, 256).await);
-
-    // RS-4: StaticImageNode uses resource_id + decoded_bytes; no raw blob embedded.
-    let resource_id = ResourceId::of(b"8x8 test image placeholder");
-    let node = Node {
-        layout: Default::default(),
-        id: SceneId::new(),
-        children: vec![],
-        data: NodeData::StaticImage(StaticImageNode {
-            resource_id,
-            width: 8,
-            height: 8,
-            decoded_bytes: 8 * 8 * 4,
-            fit_mode: ImageFitMode::Contain,
-            bounds: Rect::new(0.0, 0.0, 256.0, 256.0),
-        }),
-    };
-
-    // Resource must be registered before set_tile_root inserts the StaticImageNode tree.
-    let mut scene = SceneGraph::new(256.0, 256.0);
-    scene.register_resource(resource_id);
-    let tab_id = scene.create_tab("test", 0).unwrap();
-    let lease_id = scene.grant_lease("test", 60_000);
-    let tile_id = scene
-        .create_tile(
-            tab_id,
-            "test",
-            lease_id,
-            Rect::new(0.0, 0.0, 256.0, 256.0),
-            1,
-        )
-        .unwrap();
-    scene.set_tile_root(tile_id, node).unwrap();
-    compositor.prime_markdown_cache(&scene);
-    compositor.prime_truncation_cache(&scene);
-    compositor.render_frame_headless(&mut scene, &surface);
-
-    let pixels = surface.read_pixels(&compositor.device);
-    // The background clear color is ~[0.05, 0.05, 0.1] in linear; tile bg is [0.05,0.05,0.05].
-    // The placeholder outer quad is warm gray [0.55, 0.50, 0.45] in linear.
-    // In sRGB this is approximately [198, 188, 176]. We look for pixels brighter than 150 in
-    // all three channels to confirm the quad was rendered (not just the dark background).
-    let any_warm_pixel = pixels
-        .chunks(4)
-        .any(|p| p[0] > 150 && p[1] > 140 && p[2] > 130);
-    assert!(
-        any_warm_pixel,
-        "expected warm-gray placeholder pixels from StaticImageNode"
-    );
-}
+use crate::test_pixels::{assert_pixel_color, pixel_at};
 
 #[tokio::test]
 async fn test_static_image_node_composited_with_other_nodes() {
-    // Render a scene with both a SolidColor node and a StaticImage node in adjacent tiles.
-    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(512, 256).await);
+    let (width, height) = (512, 256);
+    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(width, height).await);
+    let mut scene = SceneGraph::new(width as f32, height as f32);
+    let tab = scene.create_tab("test", 0).unwrap();
+    let lease = scene.grant_lease("agent", 60_000);
 
-    let mut scene = SceneGraph::new(512.0, 256.0);
-    // Resource must be registered before set_tile_root inserts a StaticImageNode tree.
-    let static_image_resource_id = ResourceId::of(b"8x8 green placeholder");
-    scene.register_resource(static_image_resource_id);
-    let tab_id = scene.create_tab("test", 0).unwrap();
-    let lease_id = scene.grant_lease("agent", 60_000);
+    // Register the scene resource without uploading bytes to the compositor.
+    let resource_id = ResourceId::of(b"missing 8x8 retained image");
+    scene.register_resource(resource_id);
+    let bounds = Rect::new(0.0, 0.0, 256.0, 256.0);
+    let red = solid_node(bounds, Rgba::new(1.0, 0.0, 0.0, 1.0), None);
+    let image = leaf(NodeData::StaticImage(StaticImageNode {
+        resource_id,
+        width: 8,
+        height: 8,
+        decoded_bytes: 8 * 8 * 4,
+        fit_mode: ImageFitMode::Cover,
+        bounds,
+    }));
 
-    // Left tile: red solid color
-    let left_tile_id = scene
-        .create_tile(
-            tab_id,
-            "agent",
-            lease_id,
-            Rect::new(0.0, 0.0, 256.0, 256.0),
-            1,
-        )
-        .unwrap();
-    scene
-        .set_tile_root(
-            left_tile_id,
-            Node {
-                layout: Default::default(),
-                id: SceneId::new(),
-                children: vec![],
-                data: NodeData::SolidColor(SolidColorNode {
-                    color: Rgba::new(1.0, 0.0, 0.0, 1.0),
-                    bounds: Rect::new(0.0, 0.0, 256.0, 256.0),
-                    radius: None,
-                }),
-            },
-        )
-        .unwrap();
+    for (x, z, node) in [(0.0, 1, red), (256.0, 2, image)] {
+        let tile = scene
+            .create_tile(tab, "agent", lease, Rect::new(x, 0.0, 256.0, 256.0), z)
+            .unwrap();
+        scene.set_tile_root(tile, node).unwrap();
+    }
 
-    // Right tile: static image
-    // RS-4: StaticImageNode uses resource_id + decoded_bytes; no raw blob embedded.
-    let right_tile_id = scene
-        .create_tile(
-            tab_id,
-            "agent",
-            lease_id,
-            Rect::new(256.0, 0.0, 256.0, 256.0),
-            2,
-        )
-        .unwrap();
-    scene
-        .set_tile_root(
-            right_tile_id,
-            Node {
-                layout: Default::default(),
-                id: SceneId::new(),
-                children: vec![],
-                data: NodeData::StaticImage(StaticImageNode {
-                    resource_id: static_image_resource_id,
-                    width: 8,
-                    height: 8,
-                    decoded_bytes: 8 * 8 * 4,
-                    fit_mode: ImageFitMode::Cover,
-                    bounds: Rect::new(0.0, 0.0, 256.0, 256.0),
-                }),
-            },
-        )
-        .unwrap();
+    prime_text(&mut compositor, &scene);
+    let pixels = render_pixels(&mut compositor, &mut scene, &surface);
+    assert_eq!(pixels.len(), (width * height * 4) as usize);
+    assert_eq!(pixel_at(&pixels, width, 128, 128), [255, 0, 0, 255]);
 
-    compositor.prime_markdown_cache(&scene);
-    compositor.prime_truncation_cache(&scene);
-    compositor.render_frame_headless(&mut scene, &surface);
-
-    let pixels = surface.read_pixels(&compositor.device);
-    assert_eq!(pixels.len(), 512 * 256 * 4, "pixel buffer size mismatch");
-    // Just verify the frame completed without panic and returned the expected buffer size.
+    // Use the same sRGB swatches and tolerance as tile_static_image_fit_modes.
+    for (x, rgba, label) in [
+        (258, [196, 188, 179, 255], "placeholder frame"),
+        (384, [225, 218, 211, 255], "placeholder inset"),
+    ] {
+        assert_pixel_color(&pixels, width, x, 128, rgba, 12, label).unwrap();
+    }
 }
