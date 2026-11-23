@@ -605,16 +605,32 @@ fn widget_occupancy_latest_wins_uses_most_recent() {
     scene
         .publish_to_widget(
             "gauge",
-            std::collections::HashMap::from([(
-                "level".to_string(),
-                WidgetParameterValue::F32(0.2),
-            )]),
+            std::collections::HashMap::from([
+                ("level".to_string(), WidgetParameterValue::F32(0.2)),
+                (
+                    "label".to_string(),
+                    WidgetParameterValue::String("CPU".into()),
+                ),
+            ]),
             "agent.a",
             None,
             0,
             None,
         )
         .unwrap();
+    let label = |scene: &SceneGraph| {
+        scene
+            .widget_registry
+            .get_occupancy("gauge", tab_id)
+            .unwrap()
+            .effective_params
+            .get("label")
+            .cloned()
+    };
+    assert_eq!(
+        label(&scene),
+        Some(WidgetParameterValue::String("CPU".into()))
+    );
     scene
         .publish_to_widget(
             "gauge",
@@ -641,6 +657,11 @@ fn widget_occupancy_latest_wins_uses_most_recent() {
     assert!(
         matches!(level, Some(WidgetParameterValue::F32(v)) if (*v - 0.9).abs() < 1e-6),
         "LatestWins: most recent level (0.9) should win, got: {level:?}"
+    );
+    assert_eq!(
+        label(&scene),
+        Some(WidgetParameterValue::String(String::new())),
+        "LatestWins uses the schema default for a label omitted by the newest publisher"
     );
 }
 
@@ -738,15 +759,17 @@ fn widget_occupancy_stack_top_after_depth_cap() {
 fn widget_occupancy_merge_by_key_merges_all_keys_over_defaults() {
     let (mut scene, tab_id) = scene_with_gauge(ContentionPolicy::MergeByKey { max_keys: 8 });
 
-    // "cpu" key sets level=0.4; "mem" key sets level=0.6.
-    // Since both touch the same param ("level"), the last-inserted key wins.
+    // The newer key wins for the shared level and leaves the older label intact.
     scene
         .publish_to_widget(
             "gauge",
-            std::collections::HashMap::from([(
-                "level".to_string(),
-                WidgetParameterValue::F32(0.4),
-            )]),
+            std::collections::HashMap::from([
+                ("level".to_string(), WidgetParameterValue::F32(0.4)),
+                (
+                    "label".to_string(),
+                    WidgetParameterValue::String("cpu".into()),
+                ),
+            ]),
             "agent.a",
             Some("cpu".to_string()),
             0,
@@ -756,13 +779,10 @@ fn widget_occupancy_merge_by_key_merges_all_keys_over_defaults() {
     scene
         .publish_to_widget(
             "gauge",
-            std::collections::HashMap::from([
-                ("level".to_string(), WidgetParameterValue::F32(0.6)),
-                (
-                    "label".to_string(),
-                    WidgetParameterValue::String("mem".to_string()),
-                ),
-            ]),
+            std::collections::HashMap::from([(
+                "level".to_string(),
+                WidgetParameterValue::F32(0.6),
+            )]),
             "agent.b",
             Some("mem".to_string()),
             0,
@@ -786,11 +806,11 @@ fn widget_occupancy_merge_by_key_merges_all_keys_over_defaults() {
         "MergeByKey: last-inserted key's level (0.6) should win, got: {level:?}"
     );
 
-    // "label" was only set by "mem" — should appear in effective_params.
+    // The later publication omits the older key’s label.
     let label = occ.effective_params.get("label");
     assert!(
-        matches!(label, Some(WidgetParameterValue::String(s)) if s == "mem"),
-        "MergeByKey: label from 'mem' key should be 'mem', got: {label:?}"
+        matches!(label, Some(WidgetParameterValue::String(s)) if s == "cpu"),
+        "MergeByKey: label from the older key should be 'cpu', got: {label:?}"
     );
 
     // "severity" was not set by either key — should fall back to schema default.

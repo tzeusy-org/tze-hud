@@ -4,40 +4,21 @@
 //! Time is the scene's injected `TestClock`; nothing here sleeps.
 //! Set `TZE_HUD_SKIP_GPU_TESTS=1` to skip; run with `HEADLESS_FORCE_SOFTWARE=1`.
 
-use crate::common;
+use crate::common::{Gpu, publish_params, register_bundle, register_instance};
+use serde_json::{Value, json};
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use tze_hud_compositor::{Compositor, CompositorError, surface::HeadlessSurface};
 use tze_hud_scene::graph::SceneGraph;
-use tze_hud_scene::types::{Rgba, SceneId, WidgetInstance, WidgetParameterValue};
+use tze_hud_scene::types::{Rgba, WidgetParameterValue};
 use tze_hud_scene::{DegradationLevel, TestClock};
-use tze_hud_widget::loader::{BundleScanResult, load_bundle_from_files};
-
-macro_rules! bundle {
-    ($name:literal, [$($file:literal),*]) => {
-        load_bundle_from_files(
-            $name,
-            &[
-                ("widget.toml", include_bytes!(concat!("../../../assets/widget_bundles/", $name, "/widget.toml")) as &[u8]),
-                $(($file, include_bytes!(concat!("../../../assets/widget_bundles/", $name, "/", $file)) as &[u8])),*
-            ],
-            &tokens(),
-        )
-    };
-}
-
-/// The canonical design tokens the built-in bundles resolve against.
-fn tokens() -> HashMap<String, String> {
-    tze_hud_config::tokens::resolve_tokens(&Default::default(), &Default::default())
-}
+use tze_hud_widget::loader::BundleScanResult;
 
 const GAUGE: &str = "gauge-1";
 
 struct Rig {
-    compositor: Compositor,
-    surface: HeadlessSurface,
+    gpu: Gpu,
     scene: SceneGraph,
     clock: Arc<TestClock>,
 }
@@ -46,29 +27,7 @@ impl Rig {
     /// A gauge already on screen with `level = 0.0`, `color = black`,
     /// `severity = info`, published with no transition.
     async fn new() -> Option<Rig> {
-        let require_gpu = std::env::var("TZE_HUD_REQUIRE_GPU").is_ok_and(|v| v.trim() == "1");
-        if std::env::var("TZE_HUD_SKIP_GPU_TESTS").is_ok_and(|v| v.trim() == "1") {
-            assert!(
-                !require_gpu,
-                "TZE_HUD_REQUIRE_GPU=1 forbids skipping widget transition assertions"
-            );
-            eprintln!("SKIPPED: widget_transition TZE_HUD_SKIP_GPU_TESTS=1");
-            return None;
-        }
-        let mut compositor = match common::new_headless_serialized(256, 256).await {
-            Ok(c) => c,
-            Err(CompositorError::NoAdapter) => {
-                assert!(
-                    !require_gpu,
-                    "TZE_HUD_REQUIRE_GPU=1 but no adapter for widget transition assertions"
-                );
-                eprintln!("SKIPPED: widget_transition no GPU adapter");
-                return None;
-            }
-            Err(e) => panic!("unexpected compositor error: {e}"),
-        };
-        let surface = HeadlessSurface::new(&compositor.device, 256, 256);
-        compositor.init_widget_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+        let mut gpu = Gpu::with_widgets(256, 256).await?;
 
         let clock = Arc::new(TestClock::new(1_000));
         let mut scene = SceneGraph::new_with_clock(256.0, 256.0, clock.clone());
@@ -96,30 +55,9 @@ impl Rig {
                 binding.param = "color".into();
             }
         }
-        let type_name = b.definition.id.clone();
-        for (file, bytes) in b.svg_contents {
-            compositor
-                .widget_renderer_mut()
-                .unwrap()
-                .register_svg(&type_name, &file, bytes);
-        }
-        scene.widget_registry.register_definition(b.definition);
-        scene.widget_registry.register_instance(WidgetInstance {
-            id: SceneId::new(),
-            widget_type_name: type_name,
-            tab_id: tab,
-            geometry_override: None,
-            contention_override: None,
-            instance_name: GAUGE.to_string(),
-            current_params: HashMap::new(),
-            auto_clear_ms: None,
-        });
-        let mut rig = Rig {
-            compositor,
-            surface,
-            scene,
-            clock,
-        };
+        let type_name = register_bundle(&mut gpu.compositor, &mut scene, BundleScanResult::Ok(b));
+        register_instance(&mut scene, tab, &type_name, GAUGE, None, false);
+        let mut rig = Rig { gpu, scene, clock };
         rig.publish(
             [
                 ("level", WidgetParameterValue::F32(0.0)),
@@ -136,19 +74,11 @@ impl Rig {
     }
 
     fn publish<const N: usize>(&mut self, params: [(&str, WidgetParameterValue); N], ms: u32) {
-        let params = params
-            .into_iter()
-            .map(|(k, v)| (k.to_string(), v))
-            .collect();
-        self.scene
-            .publish_to_widget(GAUGE, params, "agent-a", None, ms, None)
-            .unwrap();
+        publish_params(&mut self.scene, GAUGE, "agent-a", ms, params);
     }
 
     fn render(&mut self) -> tze_hud_telemetry::FrameTelemetry {
-        self.compositor.prime_markdown_cache(&self.scene);
-        self.compositor
-            .render_frame_headless(&mut self.scene, &self.surface)
+        self.gpu.draw(&mut self.scene)
     }
 
     /// Advance the injected clock, render, and return the params last rasterized.
@@ -159,15 +89,36 @@ impl Rig {
     }
 
     fn rendered(&self) -> HashMap<String, WidgetParameterValue> {
-        let wr = self.compositor.widget_renderer().unwrap();
+        let wr = self.gpu.compositor.widget_renderer().unwrap();
         wr.texture_entry(GAUGE)
             .unwrap()
             .last_rendered_params
             .clone()
     }
 
+    fn assert_idle(&self) {
+        assert!(!self.gpu.compositor.has_inflight_animation(&self.scene));
+        assert!(self.gpu.compositor.next_animation_deadline().is_none());
+    }
+
+    fn widget_has_transition(&self) -> bool {
+        self.gpu
+            .compositor
+            .widget_renderer()
+            .unwrap()
+            .has_active_transition()
+    }
+
+    fn active_duration(&self) -> u32 {
+        self.scene.widget_registry.active_publishes[GAUGE]
+            .last()
+            .unwrap()
+            .transition_ms
+    }
+
     fn rasters(&self) -> u64 {
-        self.compositor
+        self.gpu
+            .compositor
             .widget_renderer()
             .unwrap()
             .raster_count(GAUGE)
@@ -181,97 +132,41 @@ fn level(p: &HashMap<String, WidgetParameterValue>) -> f32 {
     }
 }
 
-#[tokio::test]
-async fn f32_param_eases_over_transition_ms() {
-    let Some(mut rig) = Rig::new().await else {
-        return;
-    };
-    rig.publish([("level", WidgetParameterValue::F32(1.0))], 200);
-    assert!(
-        level(&rig.step(0)) < 0.01,
-        "starts from the on-screen value"
-    );
-    let mid = level(&rig.step(100));
-    assert!(
-        (mid - 0.5).abs() < 0.01,
-        "intermediate at 100 ms, got {mid}"
-    );
-    assert_eq!(level(&rig.step(100)), 1.0, "final at >= 200 ms");
-}
+const PSK: &str = "motion-test-key";
 
-#[tokio::test]
-async fn color_param_eases_component_wise() {
-    let Some(mut rig) = Rig::new().await else {
-        return;
-    };
-    rig.publish(
-        [(
-            "color",
-            WidgetParameterValue::Color(Rgba::new(1.0, 0.5, 0.0, 1.0)),
-        )],
-        200,
-    );
-    rig.step(0);
-    let WidgetParameterValue::Color(mid) = rig.step(100)["color"].clone() else {
-        panic!("color is not a color");
-    };
-    assert!((mid.r - 0.5).abs() < 0.01 && (mid.g - 0.25).abs() < 0.01 && mid.b == 0.0);
-}
-
-#[tokio::test]
-async fn enum_param_snaps_while_f32_eases() {
-    let Some(mut rig) = Rig::new().await else {
-        return;
-    };
-    rig.publish(
-        [
-            ("severity", WidgetParameterValue::Enum("error".into())),
-            ("level", WidgetParameterValue::F32(1.0)),
-        ],
-        200,
-    );
-    let p = rig.step(100);
-    assert_eq!(p["severity"], WidgetParameterValue::Enum("error".into()));
-    assert!(level(&p) < 0.9);
-}
-
-#[tokio::test]
-async fn degraded_mode_snaps_widget_transition() {
-    let Some(mut rig) = Rig::new().await else {
-        return;
-    };
-    rig.compositor.degradation_level = DegradationLevel::Simplified;
-    let shared = Arc::new(tokio::sync::Mutex::new(rig.scene.clone()));
-    let mut config = tze_hud_mcp::McpConfig::with_psk("motion-test-key");
+fn motion_config(ms: u32) -> tze_hud_mcp::McpConfig {
+    let mut config = tze_hud_mcp::McpConfig::with_psk(PSK);
     config.widget_transition_ms = tze_hud_config::tokens::resolve_motion_duration_ms(
-        &HashMap::from([("motion.state.ms".into(), "200".into())]),
+        &HashMap::from([("motion.state.ms".into(), ms.to_string())]),
         "motion.state.ms",
     );
-    let server = tze_hud_mcp::McpServer::with_shared_scene(shared.clone()).with_config(config);
-    let reply = server.dispatch(
-        r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"hud_publish","arguments":{"surface":"widget:gauge-1","params":{"level":1.0}}}}"#,
-        &tze_hud_mcp::CallerContext::with_bearer("motion-test-key"),
-    ).await;
+    config
+}
+
+async fn widget_call(server: &tze_hud_mcp::McpServer, name: &str, params: Option<Value>) {
+    let mut arguments = json!({"surface": format!("widget:{GAUGE}")});
+    if let Some(params) = params {
+        arguments["params"] = params;
+    }
+    let request = json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {"name": name, "arguments": arguments},
+    });
+    let reply = server
+        .dispatch(
+            &request.to_string(),
+            &tze_hud_mcp::CallerContext::with_bearer(PSK),
+        )
+        .await;
+    let reply: Value = serde_json::from_str(&reply).expect("widget response is JSON");
     assert!(
-        !reply.contains("\"error\"") && !reply.contains("\"isError\":true"),
+        reply["error"].is_null()
+            && reply["result"].is_object()
+            && reply["result"]["isError"] != true,
         "{reply}"
     );
-    rig.scene = shared.lock().await.clone();
-    assert_eq!(
-        rig.scene.widget_registry.active_publishes[GAUGE]
-            .last()
-            .unwrap()
-            .transition_ms,
-        200
-    );
-    assert_eq!(level(&rig.step(0)), 1.0, "snaps with no time elapsed");
-    assert_eq!(
-        rig.rasters(),
-        2,
-        "one raster for the change, not one per tick"
-    );
-    assert!(!rig.compositor.has_inflight_animation(&rig.scene));
-    assert!(rig.compositor.next_animation_deadline().is_none());
 }
 
 #[tokio::test]
@@ -279,41 +174,30 @@ async fn transition_stops_waking_after_completion() {
     let Some(mut rig) = Rig::new().await else {
         return;
     };
-    assert!(
-        rig.compositor.next_animation_deadline().is_none(),
-        "idle widget schedules nothing"
-    );
+    rig.assert_idle();
 
     let shared = Arc::new(tokio::sync::Mutex::new(rig.scene.clone()));
-    let mut config = tze_hud_mcp::McpConfig::with_psk("motion-test-key");
-    config.widget_transition_ms = tze_hud_config::tokens::resolve_motion_duration_ms(
-        &HashMap::from([("motion.state.ms".into(), "200".into())]),
-        "motion.state.ms",
-    );
-    let server = tze_hud_mcp::McpServer::with_shared_scene(shared.clone()).with_config(config);
-    let caller = tze_hud_mcp::CallerContext::with_bearer("motion-test-key");
-    let reply = server.dispatch(
-        r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"hud_publish","arguments":{"surface":"widget:gauge-1","params":{"level":1.0,"color":{"r":1.0,"g":0.5,"b":0.0,"a":1.0},"severity":"error","label":"CPU"}}}}"#,
-        &caller,
-    ).await;
-    assert!(
-        !reply.contains("\"error\"") && !reply.contains("\"isError\":true"),
-        "{reply}"
-    );
+    let server =
+        tze_hud_mcp::McpServer::with_shared_scene(shared.clone()).with_config(motion_config(200));
+    widget_call(
+        &server,
+        "hud_publish",
+        Some(json!({
+            "level": 1.0,
+            "color": {"r": 1.0, "g": 0.5, "b": 0.0, "a": 1.0},
+            "severity": "error",
+            "label": "CPU",
+        })),
+    )
+    .await;
     rig.scene = shared.lock().await.clone();
-    assert_eq!(
-        rig.scene.widget_registry.active_publishes[GAUGE]
-            .last()
-            .unwrap()
-            .transition_ms,
-        200
-    );
-    rig.step(0);
+    assert_eq!(rig.active_duration(), 200);
+    assert!(level(&rig.step(0)) < 0.01, "starts at the visible value");
     assert!(
-        rig.compositor.next_animation_deadline().is_some(),
+        rig.gpu.compositor.next_animation_deadline().is_some(),
         "animating widget wakes the loop"
     );
-    assert!(rig.compositor.has_inflight_animation(&rig.scene));
+    assert!(rig.gpu.compositor.has_inflight_animation(&rig.scene));
     assert_eq!(
         rig.rendered()["severity"],
         WidgetParameterValue::Enum("error".into())
@@ -327,46 +211,33 @@ async fn transition_stops_waking_after_completion() {
     let WidgetParameterValue::Color(color) = midway["color"].clone() else {
         panic!("color must interpolate");
     };
-    assert!((color.r - 0.5).abs() < 0.01 && color.g > 0.0 && color.g < 0.5);
-
-    rig.step(250);
+    assert!((color.r - 0.5).abs() < 0.01 && (color.g - 0.25).abs() < 0.01 && color.b == 0.0);
+    assert_eq!(
+        midway["severity"],
+        WidgetParameterValue::Enum("error".into())
+    );
+    assert_eq!(level(&rig.step(100)), 1.0, "final at 200 ms");
     let landed = rig.rasters();
-    assert!(rig.compositor.next_animation_deadline().is_none());
-    assert!(!rig.compositor.has_inflight_animation(&rig.scene));
-    assert!(rig.step(1000).contains_key("level"));
+    rig.assert_idle();
+    assert_eq!(level(&rig.step(1_000)), 1.0);
     assert_eq!(
         rig.rasters(),
         landed,
         "no raster after the transition lands"
     );
     // The same MCP producer must preserve W1's zero-duration cancellation.
-    let reply = server.dispatch(
-        r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"hud_publish","arguments":{"surface":"widget:gauge-1","params":{"level":0.0}}}}"#,
-        &caller,
-    ).await;
-    assert!(!reply.contains("\"isError\":true"), "{reply}");
+    widget_call(&server, "hud_publish", Some(json!({"level": 0.0}))).await;
     rig.scene = shared.lock().await.clone();
     rig.step(0);
     rig.step(100);
-    assert!(rig.compositor.has_inflight_animation(&rig.scene));
-    let mut instant = tze_hud_mcp::McpConfig::with_psk("motion-test-key");
-    instant.widget_transition_ms = 0;
-    let server = server.with_config(instant);
-    let reply = server.dispatch(
-        r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"hud_publish","arguments":{"surface":"widget:gauge-1","params":{"level":0.0}}}}"#,
-        &caller,
-    ).await;
-    assert!(!reply.contains("\"isError\":true"), "{reply}");
+    assert!(rig.gpu.compositor.has_inflight_animation(&rig.scene));
+    let server = server.with_config(motion_config(0));
+    widget_call(&server, "hud_publish", Some(json!({"level": 0.0}))).await;
     rig.scene = shared.lock().await.clone();
     assert_eq!(level(&rig.step(0)), 0.0);
-    assert!(!rig.compositor.has_inflight_animation(&rig.scene));
-    assert!(rig.compositor.next_animation_deadline().is_none());
+    rig.assert_idle();
 
-    let reply = server.dispatch(
-        r#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"hud_clear","arguments":{"surface":"widget:gauge-1"}}}"#,
-        &caller,
-    ).await;
-    assert!(!reply.contains("\"isError\":true"), "{reply}");
+    widget_call(&server, "hud_clear", None).await;
     {
         let mut scene = shared.lock().await;
         scene.clear_widget_for_publisher(GAUGE, "agent-a").unwrap();
@@ -374,29 +245,42 @@ async fn transition_stops_waking_after_completion() {
     }
     rig.render();
     assert!(
-        rig.compositor
+        rig.gpu
+            .compositor
             .widget_renderer()
             .unwrap()
             .texture_entry(GAUGE)
             .is_none()
     );
-    assert!(!rig.compositor.has_inflight_animation(&rig.scene));
-    let mut configured = tze_hud_mcp::McpConfig::with_psk("motion-test-key");
-    configured.widget_transition_ms = 200;
-    let server = server.with_config(configured);
-    let reply = server.dispatch(
-        r#"{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"hud_publish","arguments":{"surface":"widget:gauge-1","params":{"level":0.8}}}}"#,
-        &caller,
-    ).await;
-    assert!(!reply.contains("\"isError\":true"), "{reply}");
+    assert!(!rig.gpu.compositor.has_inflight_animation(&rig.scene));
+    let server = server.with_config(motion_config(200));
+    widget_call(&server, "hud_publish", Some(json!({"level": 0.8}))).await;
     rig.scene = shared.lock().await.clone();
     assert_eq!(
         level(&rig.step(0)),
         0.8,
         "first appearance snaps despite positive duration"
     );
-    assert!(!rig.compositor.has_inflight_animation(&rig.scene));
-    assert!(rig.compositor.next_animation_deadline().is_none());
+    rig.assert_idle();
+
+    rig.gpu.compositor.degradation_level = DegradationLevel::Simplified;
+    let before_snap = rig.rasters();
+    widget_call(&server, "hud_publish", Some(json!({"level": 1.0}))).await;
+    rig.scene = shared.lock().await.clone();
+    assert_eq!(rig.active_duration(), 200);
+    assert_eq!(
+        level(&rig.step(0)),
+        1.0,
+        "simplified mode snaps on the first frame"
+    );
+    assert_eq!(rig.rasters(), before_snap + 1);
+    rig.assert_idle();
+    assert_eq!(level(&rig.step(1000)), 1.0);
+    assert_eq!(
+        rig.rasters(),
+        before_snap + 1,
+        "no further raster while idle"
+    );
 }
 
 #[tokio::test]
@@ -409,20 +293,10 @@ async fn rewound_clock_still_lands_and_stops_waking() {
     rig.step(0);
     rig.clock.set(1_000); // step far backward mid-transition
     rig.render();
-    assert!(
-        rig.compositor
-            .widget_renderer()
-            .unwrap()
-            .has_active_transition()
-    );
+    assert!(rig.widget_has_transition());
     assert_eq!(level(&rig.step(250)), 1.0);
-    assert!(
-        !rig.compositor
-            .widget_renderer()
-            .unwrap()
-            .has_active_transition()
-    );
-    assert!(rig.compositor.next_animation_deadline().is_none());
+    assert!(!rig.widget_has_transition());
+    assert!(rig.gpu.compositor.next_animation_deadline().is_none());
 }
 
 #[tokio::test]
@@ -431,9 +305,11 @@ async fn retarget_mid_flight_is_continuous_and_uses_the_new_duration() {
         return;
     };
     rig.publish([("level", WidgetParameterValue::F32(1.0))], 200);
+    assert_eq!(rig.active_duration(), 200);
     rig.step(0);
     let before = level(&rig.step(100)); // ~0.5 on screen
     rig.publish([("level", WidgetParameterValue::F32(0.0))], 400);
+    assert_eq!(rig.active_duration(), 400);
     let start = level(&rig.step(0));
     assert!(
         (start - before).abs() < 0.01,
@@ -459,14 +335,9 @@ async fn retarget_mid_flight_is_continuous_and_uses_the_new_duration() {
         rig.step(0);
         let halfway = level(&rig.step(100));
         assert!((halfway - 0.5).abs() < 0.01, "active halfway: {halfway}");
-        assert!(
-            rig.compositor
-                .widget_renderer()
-                .unwrap()
-                .has_active_transition()
-        );
-        assert!(rig.compositor.has_inflight_animation(&rig.scene));
-        assert!(rig.compositor.next_animation_deadline().is_some());
+        assert!(rig.widget_has_transition());
+        assert!(rig.gpu.compositor.has_inflight_animation(&rig.scene));
+        assert!(rig.gpu.compositor.next_animation_deadline().is_some());
 
         rig.publish([("level", WidgetParameterValue::F32(instant_target))], 0);
         assert_eq!(
@@ -475,14 +346,11 @@ async fn retarget_mid_flight_is_continuous_and_uses_the_new_duration() {
             "zero duration snaps without advancing the clock"
         );
         assert!(
-            !rig.compositor
-                .widget_renderer()
-                .unwrap()
-                .has_active_transition(),
+            !rig.widget_has_transition(),
             "the old instance animation is cancelled"
         );
-        assert!(!rig.compositor.has_inflight_animation(&rig.scene));
-        assert!(rig.compositor.next_animation_deadline().is_none());
+        assert!(!rig.gpu.compositor.has_inflight_animation(&rig.scene));
+        assert!(rig.gpu.compositor.next_animation_deadline().is_none());
         let snapped_rasters = rig.rasters();
         assert_eq!(level(&rig.step(1_000)), instant_target);
         assert_eq!(
@@ -492,16 +360,4 @@ async fn retarget_mid_flight_is_continuous_and_uses_the_new_duration() {
         );
         println!("instant retarget {instant_target}: cancelled, no deadline or later raster");
     }
-}
-
-#[tokio::test]
-async fn each_publish_keeps_its_own_transition_ms() {
-    let Some(mut rig) = Rig::new().await else {
-        return;
-    };
-    rig.publish([("level", WidgetParameterValue::F32(0.5))], 200);
-    let first = rig.scene.widget_registry.active_publishes[GAUGE][0].transition_ms;
-    rig.publish([("level", WidgetParameterValue::F32(1.0))], 750);
-    let second = rig.scene.widget_registry.active_publishes[GAUGE][0].transition_ms;
-    assert_eq!((first, second), (200, 750));
 }
