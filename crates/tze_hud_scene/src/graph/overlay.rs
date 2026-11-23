@@ -538,7 +538,7 @@ impl SceneGraph {
     /// content mutation co-travels in the batch. A redundant re-publish of the
     /// same accent leaves the version untouched, keeping a steady-state portal
     /// idle.
-    pub fn set_tile_lifecycle_accent(
+    fn set_tile_lifecycle_accent(
         &mut self,
         tile_id: SceneId,
         accent: LifecycleAccent,
@@ -559,9 +559,8 @@ impl SceneGraph {
     /// ([`set_tile_root_checked`](Self::set_tile_root_checked),
     /// [`update_tile_input_mode`](Self::update_tile_input_mode),
     /// [`set_portal_surface`](Self::set_portal_surface)): namespace isolation, a
-    /// live `require_active_lease`, and `ModifyOwnTiles`. The unchecked
-    /// [`set_tile_lifecycle_accent`](Self::set_tile_lifecycle_accent) only checks
-    /// tile existence, so the in-process portal scene-apply path
+    /// live `require_active_lease`, and `ModifyOwnTiles`. The internal accent
+    /// setter checks only tile existence, so the in-process portal scene-apply path
     /// (`portal::apply_render`) uses the checked method before changing the accent or
     /// `scene.version`. `require_active_lease` accepts only
     /// the `Active` state, so the lease-grace degraded repaint — which reconnects
@@ -584,7 +583,7 @@ impl SceneGraph {
     /// Bumps `scene.version` only when an accent was actually present, so a
     /// redaction-CLEAR transition re-arms the present-gate and the stale accent
     /// is removed on screen; a clear with nothing stored stays idle.
-    pub fn clear_tile_lifecycle_accent(&mut self, tile_id: SceneId) {
+    fn clear_tile_lifecycle_accent(&mut self, tile_id: SceneId) {
         if self
             .overlay
             .tile_lifecycle_accents
@@ -633,9 +632,9 @@ impl SceneGraph {
     /// Transactional, / ).
     ///
     /// Bumps `scene.version` only when the stored spec actually changes, so a
-    /// redundant re-publish of the same composer keeps a steady-state portal idle
-    /// (mirroring [`set_tile_lifecycle_accent`](Self::set_tile_lifecycle_accent)).
-    pub fn set_tile_composer_interaction(
+    /// redundant re-publish of the same composer keeps a steady-state portal idle,
+    /// just as an unchanged lifecycle accent does.
+    fn set_tile_composer_interaction(
         &mut self,
         tile_id: SceneId,
         region: HitRegionNode,
@@ -675,10 +674,9 @@ impl SceneGraph {
     /// Mirrors the checked tile-content mutations
     /// ([`set_tile_root_checked`](Self::set_tile_root_checked),
     /// [`set_tile_lifecycle_accent_checked`](Self::set_tile_lifecycle_accent_checked)):
-    /// namespace isolation, a live `require_active_lease`, and `ModifyOwnTiles`. The
-    /// unchecked [`set_tile_composer_interaction`](Self::set_tile_composer_interaction)
-    /// checks tile existence. The portal render path uses the checked method to
-    /// require an active lease before changing composer state.
+    /// namespace isolation, a live `require_active_lease`, and `ModifyOwnTiles`.
+    /// The internal composer setter checks only tile existence. The portal render
+    /// path uses the checked method before changing composer state.
     pub fn set_tile_composer_interaction_checked(
         &mut self,
         tile_id: SceneId,
@@ -696,9 +694,8 @@ impl SceneGraph {
     ///
     /// Bumps `scene.version` only when a spec was actually present, so a
     /// disable-transition removes the region on screen while a clear with nothing
-    /// stored stays idle (mirroring
-    /// [`clear_tile_lifecycle_accent`](Self::clear_tile_lifecycle_accent)).
-    pub fn clear_tile_composer_interaction(&mut self, tile_id: SceneId) {
+    /// stored stays idle, as with clearing a lifecycle accent.
+    fn clear_tile_composer_interaction(&mut self, tile_id: SceneId) {
         if self
             .overlay
             .tile_composer_interactions
@@ -1053,9 +1050,8 @@ impl SceneGraph {
     ///
     /// Bumps `scene.version` only when the stored count actually changes, so a
     /// count-only update (no co-travelling content mutation) still re-arms the
-    /// #943 idle present-gate and the badge repaints — mirroring
-    /// [`set_tile_lifecycle_accent`](Self::set_tile_lifecycle_accent). A redundant
-    /// re-write of the same count leaves the version untouched, keeping a
+    /// #943 idle present-gate and the badge repaints, as with a lifecycle accent
+    /// change. Re-writing the same count leaves the version untouched, keeping a
     /// steady-state portal idle.
     ///
     /// No-op if the tile does not exist.
