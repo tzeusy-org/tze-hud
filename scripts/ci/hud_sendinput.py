@@ -18,6 +18,7 @@ import ctypes
 import json
 import ntpath
 import subprocess
+import time
 from ctypes import wintypes
 from typing import Callable
 
@@ -395,16 +396,18 @@ def fullscreen_window(pid: int) -> int | None:
     return matches[0] if len(matches) == 1 else None
 
 
-def rearm_link_window(hwnd: int, pid: int, point: tuple[int, int]) -> str | None:
+def rearm_link_window(hwnd: int, pid: int, point: tuple[int, int], *, deadline: float) -> str | None:
     """Request a native raise of the checked HUD window. The caller observes the result."""
     owned = {"hwnd": hwnd, "pid": pid}
     foreground = foreground_identity()
-    if _window_identity(hwnd) != owned or not user32.IsWindowVisible(hwnd):
+    point_owner = window_at(point)
+    if (_window_identity(hwnd) != owned or not user32.IsWindowVisible(hwnd)
+            or time.monotonic() >= deadline):
         return None
     if foreground != owned:
         user32.SetForegroundWindow(hwnd)
         return "activate"
-    if window_at(point) != owned:
+    if point_owner != owned:
         user32.SetWindowPos(hwnd, HWND_TOP, 0, 0, 0, 0,
                             SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_ASYNCWINDOWPOS)
         return "raise"

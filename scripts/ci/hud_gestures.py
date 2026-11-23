@@ -82,6 +82,10 @@ class Refused(RuntimeError):
     """A guard refused to inject input or to run against something not owned."""
 
 
+class PartialButtonBatch(Refused):
+    """A native click may have left a button down. End input on this desktop."""
+
+
 class ScenarioFailed(AssertionError):
     def __init__(self, step: str, last: object) -> None:
         super().__init__(step)
@@ -619,7 +623,8 @@ class Run:
         self.step(f"click {target or ''}".rstrip())
 
     def click_link(self, point: tuple[int, int], *, repeat: int = 1,
-                   confirm: Callable[[], None] | None = None, hwnd: int | None = None) -> None:
+                   confirm: Callable[[], None] | None = None, hwnd: int | None = None,
+                   deadline: float | None = None) -> None:
         """At a link, check the physical click target after the normal Windows guard."""
         if self.injector != "sendinput":
             self.inj.click(repeat=repeat)
@@ -651,6 +656,10 @@ class Run:
                 if at_target:
                     last.update(foreign_link_point_details(at_cursor, self.pid))
                 raise ScenarioFailed("owned HUD at the link click target", last)
+            if deadline is not None and time.monotonic() >= deadline:
+                raise ScenarioFailed("within the card link press deadline", {
+                    "intended_point": list(point), "click_target_before_send": observed,
+                })
 
         self.inj.click(repeat=repeat, before_send=check_target)
 
@@ -1030,13 +1039,14 @@ def scenario_keyboard(run: Run) -> None:
         raise ScenarioFailed("keyboard-only submit", {"items": items})
 
 
-def open_card(run: Run, key: str, *, actions: list[dict] | None = None) -> dict:
+def open_card(run: Run, key: str, *, actions: list[dict] | None = None, park_pointer: bool = True) -> dict:
     """Publish through MCP, then wait for the actual drawn card, never its estimate.
 
-    The pointer is parked first: a card that arrives under a resting pointer
-    ignores presses for `notification.press_guard.ms` (scenario press-guard).
+    Parking avoids the temporary press guard for a card drawn under a resting
+    pointer. Hosted card-link defers pointer input until it owns the link point.
     """
-    run.glide(1, 1)
+    if park_pointer:
+        run.glide(1, 1)
     run.publish("zone:notification-area", key=key, ttl_ms=0,
                 content={"body": "Owned gesture check", "actions": actions or [
                     {"label": "First", "callback_id": f"{key}-first"},
@@ -1542,7 +1552,7 @@ def press_hosted_card_link(run: Run, key: str, label: str, point: tuple[int, int
             stable = 0
             if last != requested:
                 confirm_card()
-                if operation := WIN.rearm_link_window(hwnd, pid, point):
+                if operation := WIN.rearm_link_window(hwnd, pid, point, deadline=deadline):
                     run.timeline.append({
                         "t": round(time.monotonic(), 3), "step": f"card link {press} requested {operation}",
                         "owned_window": identity, "intended_point": list(point), "card_link_point": last,
@@ -1563,9 +1573,11 @@ def press_hosted_card_link(run: Run, key: str, label: str, point: tuple[int, int
     if not cursor_at_link(WIN.click_target_snapshot()["cursor"], point):
         run.inj.move_abs(*point, before_send=confirm_input)
     pressed = time.monotonic()
-    run.click_link(point, confirm=confirm_input, hwnd=hwnd)
+    run.click_link(point, confirm=confirm_input, hwnd=hwnd, deadline=deadline)
     receipt = run.inj.calls[-1]
-    if receipt["sent"] != 2:
+    if 0 < receipt["sent"] < receipt["requested"]:
+        raise PartialButtonBatch(f"partial native button batch for the card link {press}")
+    if receipt["sent"] != receipt["requested"]:
         raise ScenarioFailed(f"complete native input for the card link {press}", {"sendinput": receipt})
     return pressed
 
@@ -1575,10 +1587,15 @@ def scenario_card_link(run: Run) -> None:
     key = "gesture-card-link"
     label = "Open test page"
     target = f"zone:notification-area/{key}/0"
-    open_card(run, key, actions=[{"label": label, "url": "https://example.invalid/"}])
-    status = run.status()
+    hosted = run.injector == "sendinput"
+    open_card(run, key, actions=[{"label": label, "url": "https://example.invalid/"}], park_pointer=not hosted)
+    if hosted:
+        status = run.expect("card link clear of its publication press guard", lambda s: bool(
+            (card := notification_entry(s, key)) and not card.get("guarded")))
+    else:
+        status = run.status()
     before = status["link_launches"]
-    if run.injector == "sendinput":
+    if hosted:
         # The preceding portal scenario can still be bringing up its browser.
         point = resolve_target(status, target)
         first = press_hosted_card_link(run, key, label, point, deadline=time.monotonic() + 2.0, press="first press")
@@ -1589,7 +1606,7 @@ def scenario_card_link(run: Run) -> None:
     run.expect("one accepted link launch", lambda s: s["link_launches"] == before + 1,
                timeout_s=1.0, interval_s=0.02)
     expect_link_feedback(run)
-    if run.injector == "sendinput":
+    if hosted:
         press_hosted_card_link(run, key, label, point, deadline=first + 1.8, press="second press")
     else:
         run.click_link(point)
@@ -2847,6 +2864,7 @@ def main(argv: list[str] | None = None) -> int:
     started = time.monotonic()
     results: list[dict] = []
     failure = None
+    partial_button_batch = False
     try:
         run.start()
         status = run.status()
@@ -2861,6 +2879,7 @@ def main(argv: list[str] | None = None) -> int:
             failure = f"{unacked} un-acked hud_input item(s) at exit"
     except Refused as err:
         failure = f"refused: {err}"
+        partial_button_batch = isinstance(err, PartialButtonBatch)
         results = getattr(err, "results", results)
     except Exception as err:  # noqa: BLE001
         failure = f"harness: {type(err).__name__}: {err}"
@@ -2890,6 +2909,7 @@ def main(argv: list[str] | None = None) -> int:
     if failure:
         print(f"FAIL harness: {failure}")
     verdict = gate_verdict(results, required, failure)
+    verdict["partial_button_batch"] = partial_button_batch
     (out / "verdict.json").write_text(json.dumps(verdict, indent=1))
     write_step_summary(args.injector, results, failure, passed, time.monotonic() - started, verdict)
     return 1 if verdict["blocking"] else 0

@@ -276,6 +276,13 @@ jobs:
               }
             }
           }
+          $fullscreenVerdict = Join-Path $env:RUNNER_TEMP "gestures/verdict.json"
+          if ((Test-Path $fullscreenVerdict) -and
+              ((Get-Content $fullscreenVerdict -Raw | ConvertFrom-Json).partial_button_batch -eq $true)) {
+            Write-Warning "Partial fullscreen button batch. Ending native input on this runner; required tray proof is unavailable."
+            "required_failed=true" >> $env:GITHUB_OUTPUT
+            exit 1
+          }
           # Install the software Vulkan ICD only after WARP has finished. The
           # wrapper verifies the pinned archive before extraction and removes
           # its exact registry value in finally, including on scenario failure.
