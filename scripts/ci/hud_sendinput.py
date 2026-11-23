@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import ctypes
 import json
+import ntpath
 import subprocess
 from ctypes import wintypes
 from typing import Callable
@@ -62,6 +63,10 @@ for fn, res, args in (
 kernel32.OpenProcess.restype = wintypes.HANDLE
 kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
 kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+kernel32.QueryFullProcessImageNameW.restype = wintypes.BOOL
+kernel32.QueryFullProcessImageNameW.argtypes = [
+    wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD),
+]
 kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
 
 # Per-monitor v2: GetSystemMetrics and SendInput coordinates are physical pixels.
@@ -98,6 +103,7 @@ MOUSE_MOVE, LEFT_DOWN, LEFT_UP, WHEEL, ABSOLUTE = 0x1, 0x2, 0x4, 0x800, 0x8000
 RIGHT_DOWN, RIGHT_UP = 0x8, 0x10
 GWL_EXSTYLE, WS_EX_TOPMOST, WS_EX_TRANSPARENT = -20, 0x8, 0x20
 WS_EX_NOACTIVATE = 0x08000000
+PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 KEY_UP, KEY_UNICODE = 0x2, 0x4
 WHEEL_DELTA = 120
 
@@ -265,7 +271,7 @@ def tray_rect(hwnd: int, icon_id: int, owned_pid: int, *, expected_tooltip: str,
 
 def process_alive(pid: int) -> bool:
     """os.kill(pid, 0) would terminate the process on Windows; ask the kernel instead."""
-    handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+    handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
     if not handle:
         return False
     try:
@@ -378,6 +384,30 @@ def click_target_snapshot() -> dict:
         "at_cursor": _window_identity(user32.WindowFromPoint(point)) if has_cursor else None,
         "foreground": foreground_identity(),
     }
+
+
+def window_owner_details(hwnd: int, pid: int) -> dict[str, str]:
+    """Describe an already sampled window if it still has the same owner."""
+    sampled = {"hwnd": hwnd, "pid": pid}
+    if _window_identity(hwnd) != sampled:
+        return {}
+
+    details = {}
+    class_name = ctypes.create_unicode_buffer(256)
+    if user32.GetClassNameW(hwnd, class_name, len(class_name)):
+        details["window_class"] = class_name.value
+
+    handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if handle:
+        try:
+            image_path = ctypes.create_unicode_buffer(32768)
+            length = wintypes.DWORD(len(image_path))
+            if kernel32.QueryFullProcessImageNameW(handle, 0, image_path, ctypes.byref(length)):
+                details["image_basename"] = ntpath.basename(image_path.value)[:255]
+        finally:
+            kernel32.CloseHandle(handle)
+
+    return details if _window_identity(hwnd) == sampled else {}
 
 
 def edit_rect(pid: int) -> tuple[int, int, int, int] | None:

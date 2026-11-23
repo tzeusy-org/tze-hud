@@ -178,7 +178,7 @@ class WindowsGuardTests(unittest.TestCase):
     def test_link_click_checks_the_owned_window_at_the_physical_cursor(self) -> None:
         native = native_input_boundary()
         run = g.Run(exe=Path("tze_hud.exe"), out=Path("."), injector="sendinput", owned_pids=[4242])
-        hud, browser = 0x123456780, 0x123456781
+        hud, browser, process = 0x123456780, 0x123456781, 0x123456782
         target = (891, 106)
         events = []
         run.inj = native.SendInput(lambda: events.append("ownership guard"))
@@ -198,36 +198,78 @@ class WindowsGuardTests(unittest.TestCase):
         def owner(hwnd, pid):
             if hwnd not in (hud, browser):
                 return 0
+            if hwnd == browser and unavailable == "stale" and native.kernel32.CloseHandle.called:
+                return 0  # The sampled window went away during the lookup.
             pid._obj.value = 4242 if hwnd == hud else 9900
+            return 1
+
+        def class_for_window(hwnd, buffer, size):
+            self.assertEqual(hwnd, browser)
+            self.assertEqual(size, 256)
+            buffer.value = "Fixture_Window"
+            return len(buffer.value)
+
+        def image_for_process(handle, flags, buffer, length):
+            self.assertEqual((handle, flags), (process, 0))
+            self.assertEqual(length._obj.value, len(buffer))
+            if unavailable == "image":
+                return 0
+            if unavailable == "error":
+                raise OSError("diagnostic unavailable")
+            buffer.value = r"C:\private-fixture\other-user\point-owner.exe"
+            length._obj.value = len(buffer.value)
             return 1
 
         native.user32.GetCursorPos.side_effect = cursor
         native.user32.WindowFromPoint.side_effect = window_at
         native.user32.GetWindowThreadProcessId.side_effect = owner
+        native.user32.GetClassNameW.side_effect = class_for_window
+        native.kernel32.QueryFullProcessImageNameW.side_effect = image_for_process
+        diagnostics = {"window_class": "Fixture_Window", "image_basename": "point-owner.exe"}
         cases = (
-            ("owned", target, hud, hud),
-            ("foreign point", target, browser, hud),
-            ("late foreign foreground", target, hud, browser),
-            ("unknown pointer window", target, None, hud),
-            ("unknown cursor", None, None, hud),
-            ("wrong point", (10, 20), hud, hud),
+            ("owned", (892, 105), hud, hud, None, None),
+            ("foreign point", target, browser, hud, None, diagnostics),
+            ("access denied", target, browser, hud, "process", {"window_class": "Fixture_Window"}),
+            ("image unavailable", target, browser, hud, "image", {"window_class": "Fixture_Window"}),
+            ("native lookup error", target, browser, hud, "error", None),
+            ("stale foreign window", target, browser, hud, "stale", None),
+            ("late foreign foreground", target, hud, browser, None, None),
+            ("unknown pointer window", target, None, hud, None, None),
+            ("unknown cursor", None, None, hud, None, None),
+            ("wrong point", (10, 20), browser, hud, None, None),
         )
-        for case, actual, point_hwnd, foreground in cases:
+        for case, actual, point_hwnd, foreground, unavailable, expected_details in cases:
             with self.subTest(case=case), mock.patch.object(g, "WIN", native, create=True), \
                     mock.patch.object(native.ctypes, "get_last_error", return_value=0, create=True):
                 events.clear()
                 run.timeline.clear()
                 run.inj.calls.clear()
+                for call in (native.user32.GetClassNameW, native.kernel32.OpenProcess,
+                             native.kernel32.QueryFullProcessImageNameW, native.kernel32.CloseHandle):
+                    call.reset_mock()
+                native.kernel32.OpenProcess.return_value = 0 if unavailable == "process" else process
                 native.user32.GetForegroundWindow.return_value = foreground
                 if case == "owned":
                     run.click_link(target, repeat=2)
                     self.assertEqual(events, ["ownership guard", "cursor observation", "SendInput"])
                     self.assertEqual(run.inj.calls[-1]["sent"], 4)
                 else:
-                    with self.assertRaises(g.ScenarioFailed):
+                    with self.assertRaises(g.ScenarioFailed) as refusal:
                         run.click_link(target, repeat=2)
                     self.assertEqual(events, ["ownership guard", "cursor observation"])
                     self.assertEqual(run.inj.calls, [])
+                    self.assertEqual(refusal.exception.step, "owned HUD at the link click target")
+                    self.assertEqual(refusal.exception.last.get("point_owner_details"), expected_details)
+                if expected_details or unavailable in {"error", "stale"}:
+                    native.kernel32.OpenProcess.assert_called_once_with(0x1000, False, 9900)
+                    if unavailable == "process":
+                        native.kernel32.QueryFullProcessImageNameW.assert_not_called()
+                        native.kernel32.CloseHandle.assert_not_called()
+                    else:
+                        native.kernel32.CloseHandle.assert_called_once_with(process)
+                else:
+                    native.user32.GetClassNameW.assert_not_called()
+                    native.kernel32.OpenProcess.assert_not_called()
                 observation = run.timeline[-1]["click_target_before_send"]
                 self.assertEqual(observation["foreground"]["hwnd"], foreground)
                 self.assertEqual(observation["cursor"], list(actual) if actual else None)
@@ -236,6 +278,7 @@ class WindowsGuardTests(unittest.TestCase):
                     self.assertIsNone(window)
                 else:
                     self.assertEqual(window, {"hwnd": point_hwnd, "pid": 4242 if point_hwnd == hud else 9900})
+        native.user32.GetWindowTextW.assert_not_called()
 
         events.clear()
         run.timeline.clear()
