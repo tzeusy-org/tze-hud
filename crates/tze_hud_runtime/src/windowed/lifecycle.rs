@@ -33,6 +33,7 @@ use super::portal::{
     apply_drag_handle_pointer_event, apply_portal_resize_pointer_event, drag_feedback_target,
     reconcile_drag_feedback,
 };
+use super::window_go_to::GoToOrigin;
 use super::{WindowedQuiescentEfficiencyConfig, WinitApp};
 
 #[cfg(target_os = "windows")]
@@ -2394,6 +2395,7 @@ impl WinitApp {
     pub(super) fn deliver_notification_activation(
         &mut self,
         outcome: tze_hud_scene::graph::NotificationActivation,
+        go_to_origin: GoToOrigin,
     ) {
         match outcome {
             tze_hud_scene::graph::NotificationActivation::Callback(wake) => wake.notify(),
@@ -2413,7 +2415,13 @@ impl WinitApp {
                 token,
                 attempted_at_mono_us,
                 bounds,
-            } => self.press_go_to(publication_id, token, attempted_at_mono_us, bounds),
+            } => self.press_go_to(
+                publication_id,
+                token,
+                attempted_at_mono_us,
+                bounds,
+                go_to_origin,
+            ),
         }
     }
 
@@ -2911,7 +2919,11 @@ impl WinitApp {
                 self.state.pending_pointer_move = true;
                 self.schedule_shared_scene_availability_wake();
             } else {
-                self.retain_pointer_button(kind, Instant::now());
+                self.retain_pointer_button(
+                    kind,
+                    Instant::now(),
+                    self.pointer_notification_observation(),
+                );
             }
             return;
         }
@@ -2922,14 +2934,19 @@ impl WinitApp {
     /// with everything it arrived with: cursor position, pressed window and
     /// time. Bounded: under pathological contention the oldest entry is
     /// dropped rather than growing memory.
-    fn retain_pointer_button(&mut self, kind: PointerEventKind, at: Instant) {
+    fn retain_pointer_button(
+        &mut self,
+        kind: PointerEventKind,
+        at: Instant,
+        notification: PointerNotificationObservation,
+    ) {
         let event = RetainedPointerEvent::Button {
             kind,
             x: self.state.cursor_x,
             y: self.state.cursor_y,
             press_window: self.state.press_window,
             at,
-            notification_permitted: self.notification_pointer_permitted(),
+            notification,
         };
         self.retain_pointer(event);
     }
@@ -2964,14 +2981,24 @@ impl WinitApp {
     /// Run one pointer event through hit-testing and the scene. Returns false
     /// when a press or release could not reach the scene; with `retain` it is
     /// then queued, while a replay leaves it at the queue's front.
+    fn pointer_notification_observation(&self) -> PointerNotificationObservation {
+        PointerNotificationObservation {
+            permitted: self.notification_pointer_permitted(),
+            foreground: self.state.window_go_to.foreground(),
+        }
+    }
+
     fn process_pointer_event(
         &mut self,
         kind: PointerEventKind,
         retain: bool,
         at: Instant,
-        notification_permitted: Option<bool>,
+        notification: Option<PointerNotificationObservation>,
     ) -> bool {
+        let notification = (kind != PointerEventKind::Move)
+            .then(|| notification.unwrap_or_else(|| self.pointer_notification_observation()));
         if kind == PointerEventKind::Down && self.state.answer_keyboard.focus.take().is_some() {
+            self.state.answer_keyboard.invalidate_visit();
             self.state.input_processor.chrome_feedback_cancel_pending = true;
         }
         if self.state.context_menu_press.is_some() {
@@ -3007,7 +3034,7 @@ impl WinitApp {
                     return true;
                 }
                 if retain {
-                    self.retain_pointer_button(kind, at);
+                    self.retain_pointer_button(kind, at, notification.expect("button observation"));
                 }
                 return false;
             }
@@ -3043,7 +3070,7 @@ impl WinitApp {
         self.state.input_processor.notification_actions_enabled = self
             .notification_feedback_permitted(pointer_event.kind == PointerEventKind::Down)
             && (pointer_event.kind != PointerEventKind::Down
-                || notification_permitted.unwrap_or(true));
+                || notification.is_some_and(|observed| observed.permitted));
         // Acquire the scene lock directly (without going through SharedState) so that
         // the main-thread input path does not contend with session handlers that hold
         // both the SharedState lock and the scene lock.
@@ -3442,11 +3469,22 @@ impl WinitApp {
                                     | ZoneInteractionKind::Action { .. }
                             );
                             let allowed = self.notification_pointer_permitted()
-                                && notification_permitted.unwrap_or(true);
+                                && notification.is_some_and(|observed| observed.permitted);
                             (!notification || allowed).then(|| interaction_id.clone())
                         }
                         _ => None,
                     };
+                    self.state.window_go_to.pointer_foreground = self
+                        .state
+                        .zone_press
+                        .as_ref()
+                        .filter(|id| {
+                            scene.overlay.zone_hit_regions.iter().any(|region| {
+                                region.interaction_id == **id
+                                    && region.kind == ZoneInteractionKind::GoTo
+                            })
+                        })
+                        .map(|_| notification.expect("down observation").foreground);
                     // A destructive action starts a hold instead of firing on Up.
                     let held = self.state.zone_press.as_ref().and_then(|id| {
                         scene
@@ -3469,6 +3507,11 @@ impl WinitApp {
                 }
                 if pointer_event.kind == PointerEventKind::Up {
                     let pressed = self.state.zone_press.take();
+                    let go_to_origin = self.state.window_go_to.pointer_foreground.take();
+                    let current_go_to = go_to_origin.is_some_and(|foreground| {
+                        notification.is_some_and(|up| up.foreground == foreground)
+                            && self.state.window_go_to.foreground() == foreground
+                    });
                     // Releasing before the hold completes fires nothing.
                     if scene
                         .overlay
@@ -3489,13 +3532,14 @@ impl WinitApp {
                         ref interaction_id,
                     } = result.hit
                         && pressed.as_deref() == Some(interaction_id.as_str())
+                        && (*kind != ZoneInteractionKind::GoTo || current_go_to)
                         && (!matches!(
                             kind,
                             ZoneInteractionKind::Dismiss
                                 | ZoneInteractionKind::GoTo
                                 | ZoneInteractionKind::Action { .. }
                         ) || (self.notification_pointer_permitted()
-                            && notification_permitted.unwrap_or(true)))
+                            && notification.is_some_and(|observed| observed.permitted)))
                     {
                         match kind {
                             ZoneInteractionKind::Dismiss
@@ -3716,7 +3760,8 @@ impl WinitApp {
             }
         }
         for outcome in pending_notification_outcomes {
-            self.deliver_notification_activation(outcome);
+            let foreground = notification.and_then(|observed| observed.foreground);
+            self.deliver_notification_activation(outcome, GoToOrigin::Pointer(foreground));
         }
         if let Some(effect) = reading_effect {
             self.perform_reading_effect(effect);
@@ -3805,7 +3850,7 @@ impl WinitApp {
         if let Some(kind) = retain_button
             && retain
         {
-            self.retain_pointer_button(kind, at);
+            self.retain_pointer_button(kind, at, notification.expect("button observation"));
         }
         reached
     }
@@ -3950,7 +3995,7 @@ impl WinitApp {
                     y,
                     press_window,
                     at,
-                    notification_permitted,
+                    notification,
                 } => {
                     let live = (
                         self.state.cursor_x,
@@ -3966,12 +4011,7 @@ impl WinitApp {
                     // press-drag whose moves were deferred still travels.
                     let reached = (kind != PointerEventKind::Up
                         || self.process_pointer_event(PointerEventKind::Move, false, at, None))
-                        && self.process_pointer_event(
-                            kind,
-                            false,
-                            at,
-                            Some(notification_permitted),
-                        );
+                        && self.process_pointer_event(kind, false, at, Some(notification));
                     (
                         self.state.cursor_x,
                         self.state.cursor_y,
@@ -4013,6 +4053,14 @@ pub(super) struct RetainedButton {
     pub(super) event: RetainedPointerEvent,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct PointerNotificationObservation {
+    /// A denied edge cannot inherit a later native press's authorization.
+    permitted: bool,
+    /// An old Go to press cannot adopt a foreground observed during replay.
+    foreground: Option<isize>,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub(super) enum RetainedPointerEvent {
     Button {
@@ -4021,9 +4069,7 @@ pub(super) enum RetainedPointerEvent {
         y: f32,
         press_window: Option<winit::window::WindowId>,
         at: Instant,
-        /// A denied edge cannot inherit a later native press's authorization.
-        /// Replay still checks current permission, so faults remain fail-closed.
-        notification_permitted: bool,
+        notification: PointerNotificationObservation,
     },
     /// Wheel deltas that arrived behind a retained press or release,
     /// coalesced as `pending_scroll` coalesces them.

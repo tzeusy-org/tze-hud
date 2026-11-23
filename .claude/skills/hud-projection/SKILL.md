@@ -42,8 +42,7 @@ On Windows, a notification card offers **Go to** when its scoped label
 title as a whole token. An explicit owner press raises that window. Windows
 Terminal exposes only the active tab's title, and a matching tmux terminal can
 only be raised as a whole window. A session without a window on the HUD
-machine has no match. A local terminal showing SSH can match when its title
-carries the label. Set `CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1` to preserve a
+machine has no match. A locally displayed remote terminal can match when its title carries the label. Set `CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1` to preserve a
 shell's folder-based title at the cost of Claude Code's conversation titles
 and status glyph.
 

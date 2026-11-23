@@ -5472,6 +5472,218 @@ mod tests {
         assert!(!harness.scene().overlay.notification_go_to.contains_key(&a));
     }
 
+    #[test]
+    fn go_to_cancels_a_pending_switch_on_nested_escape_or_hidden_card() {
+        use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
+        use tze_hud_scene::graph::{SurfaceClasses, overlay::GoToCue};
+
+        for hide in [false, true] {
+            let mut harness = approve_reject_notification_harness();
+            let (zone, content) = {
+                let scene = harness.scene();
+                (
+                    scene.zone_registry.zones["notification-area"].clone(),
+                    scene.zone_registry.active_for_zone("notification-area")[0]
+                        .content
+                        .clone(),
+                )
+            };
+            harness.focus_composer();
+            {
+                let mut scene = harness.scene();
+                scene.register_zone(zone);
+                scene
+                    .publish_to_zone(
+                        "notification-area",
+                        content,
+                        "notif-agent",
+                        None,
+                        None,
+                        None,
+                    )
+                    .unwrap();
+            }
+            let card = publish_go_to_card(&mut harness, "go-to", "nested");
+            let pairs = Arc::new(AtomicUsize::new(0));
+            let (started_tx, started_rx) = std::sync::mpsc::channel();
+            let (release_tx, release_rx) = std::sync::mpsc::channel();
+            let release = std::sync::Mutex::new(release_rx);
+            harness.app.state.window_go_to.inject(
+                move || {
+                    if pairs.fetch_add(1, SeqCst) == 1 {
+                        started_tx.send(()).unwrap();
+                        release.lock().unwrap().recv_timeout(SCENE_WAIT).unwrap();
+                    }
+                    go_to_windows("nested", 1)
+                },
+                |_| panic!("cancelled owner intent cannot activate"),
+            );
+            // The real foreground remains the same HWND when nested Esc
+            // leaves the card and returns to a composer in the HUD.
+            harness.app.state.window_go_to.test_foreground = Some(Box::new(|| Some(10)));
+            present_go_to_card(&mut harness, true);
+            wait_for_go_to(&mut harness, |scene| {
+                scene
+                    .overlay
+                    .notification_go_to
+                    .get(&card)
+                    .is_some_and(|state| state.available)
+            });
+
+            if hide {
+                let point = go_to_point(&harness, card).unwrap();
+                click_at(&mut harness, point);
+            } else {
+                assert_eq!(harness.app.focus_newest_question(true), Ok(true));
+                assert!(harness.app.state.answer_keyboard.focus.unwrap().nested);
+                let mut step = key_down("Tab", "Tab", 100);
+                let PendingKeyboardEvent::KeyDown(raw) = &mut step else {
+                    unreachable!()
+                };
+                raw.modifiers.shift = true;
+                harness.enqueue(step);
+                harness.enqueue(key_up("Tab", "Tab", 110));
+                harness.drain();
+                harness.press_named_key("Enter");
+            }
+            started_rx.recv_timeout(SCENE_WAIT).unwrap();
+            assert_eq!(
+                harness.scene().overlay.notification_go_to[&card].cue,
+                Some(GoToCue::Switching)
+            );
+            if hide {
+                harness.scene().set_owner_hidden(SurfaceClasses {
+                    zones: true,
+                    ..SurfaceClasses::NONE
+                });
+                assert!(harness.tick());
+                assert!(go_to_point(&harness, card).is_none());
+            } else {
+                harness.press_named_key("Escape");
+                assert!(harness.app.state.answer_keyboard.focus.is_none());
+                assert!(harness.composer_draft().is_some());
+            }
+            release_tx.send(()).unwrap();
+            wait_for_go_to(&mut harness, |scene| {
+                scene.overlay.notification_go_to[&card].cue.is_none()
+            });
+            if hide {
+                harness.scene().set_owner_hidden(SurfaceClasses::NONE);
+                assert!(harness.tick());
+                assert!(go_to_point(&harness, card).is_some());
+            }
+            assert_eq!(harness.app.state.window_go_to.activations, 0);
+            assert!(harness.scene().pending_actions.is_empty());
+        }
+    }
+
+    #[test]
+    fn go_to_does_not_rebase_retained_pointer_consent_onto_a_new_foreground() {
+        use super::super::lifecycle::ChromeCaptureTestScope;
+        use std::sync::atomic::{AtomicIsize, AtomicUsize, Ordering::SeqCst};
+
+        let mut harness = approve_reject_notification_harness();
+        let card = publish_go_to_card(&mut harness, "go-to", "retained");
+        let lookups = Arc::new(AtomicUsize::new(0));
+        harness.app.state.window_go_to.inject(
+            {
+                let lookups = lookups.clone();
+                move || {
+                    lookups.fetch_add(1, SeqCst);
+                    go_to_windows("retained", 1)
+                }
+            },
+            |_| panic!("a stale click cannot activate"),
+        );
+        let foreground = Arc::new(AtomicIsize::new(30));
+        harness.app.state.window_go_to.test_foreground = Some(Box::new({
+            let foreground = foreground.clone();
+            move || Some(foreground.load(SeqCst))
+        }));
+        present_go_to_card(&mut harness, true);
+        wait_for_go_to(&mut harness, |scene| {
+            scene
+                .overlay
+                .notification_go_to
+                .get(&card)
+                .is_some_and(|state| state.available)
+        });
+        let point = go_to_point(&harness, card).unwrap();
+
+        let scene_handle = Arc::clone(&harness.app.state.shared_state.blocking_lock().scene);
+        let held = scene_handle.blocking_lock();
+        (harness.app.state.cursor_x, harness.app.state.cursor_y) = point;
+        let window = winit::window::WindowId::dummy();
+        let native = ChromeCaptureTestScope::new(window);
+        for down in [true, false] {
+            let receipt = native.begin(down);
+            harness
+                .app
+                .handle_mouse_button(winit::event::MouseButton::Left, down, window, None);
+            native.complete(receipt);
+        }
+        assert_eq!(harness.app.state.pending_pointer_buttons.len(), 2);
+        foreground.store(31, SeqCst);
+        drop(held);
+        assert!(harness.tick());
+        assert!(harness.app.state.pending_pointer_buttons.is_empty());
+        let state = &harness.scene().overlay.notification_go_to[&card];
+        assert_eq!(state.attempted_at_mono_us, None);
+        assert_eq!(state.cue, None);
+        assert_eq!(lookups.load(SeqCst), 1);
+    }
+
+    #[test]
+    fn go_to_counts_success_only_after_observing_the_destination_foreground() {
+        use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering::SeqCst};
+        use tze_hud_scene::graph::overlay::GoToCue;
+
+        let mut harness = approve_reject_notification_harness();
+        let card = publish_go_to_card(&mut harness, "go-to", "observed");
+        let requested = Arc::new(AtomicBool::new(false));
+        let foreground = Arc::new(AtomicIsize::new(30));
+        harness
+            .app
+            .state
+            .window_go_to
+            .inject(|| go_to_windows("observed", 1), {
+                let requested = requested.clone();
+                move |_| {
+                    requested.store(true, SeqCst);
+                    true
+                }
+            });
+        harness.app.state.window_go_to.test_foreground = Some(Box::new({
+            let foreground = foreground.clone();
+            move || Some(foreground.load(SeqCst))
+        }));
+        present_go_to_card(&mut harness, true);
+        wait_for_go_to(&mut harness, |scene| {
+            scene
+                .overlay
+                .notification_go_to
+                .get(&card)
+                .is_some_and(|state| state.available)
+        });
+        let point = go_to_point(&harness, card).unwrap();
+        click_at(&mut harness, point);
+        wait_for_go_to(&mut harness, |_| requested.load(SeqCst));
+        assert_eq!(harness.app.state.window_go_to.activations, 0);
+        assert_eq!(
+            harness.scene().overlay.notification_go_to[&card].cue,
+            Some(GoToCue::Switching)
+        );
+
+        let check = harness.app.state.window_go_to.next_deadline().unwrap();
+        foreground.store(1, SeqCst);
+        harness.app.settle_go_to(check);
+        assert_eq!(harness.app.state.window_go_to.activations, 1);
+        wait_for_go_to(&mut harness, |scene| {
+            scene.overlay.notification_go_to[&card].cue.is_none()
+        });
+        assert!(harness.scene().pending_actions.is_empty());
+    }
+
     /// Settle until the pressed link shows `state` (the worker reports on its
     /// own thread), returning what the scene and the admin mirror show.
     fn settle_link_to(

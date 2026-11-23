@@ -17,6 +17,7 @@ pub(super) struct AnswerKeyboardState {
     /// A tray click: questions only, and a stale click opens the panel.
     pub tray_requested: Arc<Mutex<Option<TrayVisit>>>,
     pub focus: Option<AnswerFocus>,
+    pub visit: u64,
     pub return_key: Option<String>,
     /// The key holding a destructive action; its release ends the hold.
     pub hold_key: Option<String>,
@@ -187,6 +188,10 @@ fn newest_waiting_portal(
 }
 
 impl AnswerKeyboardState {
+    pub(super) fn invalidate_visit(&mut self) {
+        self.visit = self.visit.wrapping_add(1);
+    }
+
     /// The tray's answer handoff: the chord's main-thread path, marked as a
     /// tray visit.
     #[cfg(any(target_os = "windows", test, feature = "test-harness"))]
@@ -439,6 +444,7 @@ impl WinitApp {
         // a key; it must not suppress this new answer or its characters.
         self.state.notification_keydowns.clear();
         self.state.answer_keyboard.return_key = None;
+        self.state.answer_keyboard.invalidate_visit();
         self.state.answer_keyboard.focus = Some(focus);
         self.focus_native_window_at(
             bounds.x + bounds.width * 0.5,

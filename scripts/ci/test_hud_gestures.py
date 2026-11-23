@@ -470,7 +470,7 @@ class RequiredGateTests(unittest.TestCase):
             self.assertEqual(overlay.main(["--exe", "x.exe", "--out", directory, "--required", "tray"]), 0)
             argv = scenarios.call_args.args[0]
             self.assertEqual(argv[argv.index("--required") + 1], "tray")
-            self.assertEqual(argv[-3:], ["overlay-pointer", "tray", "tray-answer"])
+            self.assertEqual(argv[-4:], ["go-to-session", "overlay-pointer", "tray", "tray-answer"])
 
 
 class OverlayInstallerTests(unittest.TestCase):
@@ -552,6 +552,14 @@ class TargetTests(unittest.TestCase):
         self.assertEqual(g.resolve_target(STATUS, "zone:notification-area/card/close"), (688, 22))
         self.assertEqual(g.resolve_target(STATUS, "widget:main-status"), (170, 550))
         self.assertEqual(g.resolve_target(STATUS, "widget:main-status/hover"), (310, 516))
+
+    def test_go_to_resolves_only_the_admin_rect_for_that_card(self) -> None:
+        entry = STATUS["notifications"][0]
+        rect = {"x": 600, "y": 15, "w": 46, "h": 20}
+        status = {**STATUS, "notifications": [{**entry, "goto": rect}]}
+        self.assertEqual(g.resolve_target(status, "zone:notification-area/card/goto"), (623, 25))
+        with self.assertRaisesRegex(LookupError, "not shown"):
+            g.resolve_target(STATUS, "zone:notification-area/card/goto")
 
     def test_hidden_or_missing_targets_raise(self) -> None:
         with self.assertRaisesRegex(LookupError, "not shown"):

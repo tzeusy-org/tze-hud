@@ -1946,11 +1946,11 @@ async fn test_session_caption_takes_one_secondary_line_above_the_title() {
 #[tokio::test]
 async fn go_to_uses_existing_caption_geometry_and_draws_local_cues() {
     use tze_hud_scene::graph::overlay::{GoToCue, NotificationGoTo};
-    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
+    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(1024, 720).await);
     compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
     compositor.set_token_map(HashMap::from([("motion.enter.ms".into(), "0".into())]));
     let mut scene =
-        SceneGraph::new_with_clock(1280.0, 720.0, Arc::new(tze_hud_scene::TestClock::new(1000)));
+        SceneGraph::new_with_clock(1024.0, 720.0, Arc::new(tze_hud_scene::TestClock::new(1000)));
     scene.register_zone(ZoneDefinition {
         id: SceneId::new(),
         name: "notification-area".into(),
@@ -1958,7 +1958,7 @@ async fn go_to_uses_existing_caption_geometry_and_draws_local_cues() {
         geometry_policy: GeometryPolicy::Relative {
             x_pct: 0.1,
             y_pct: 0.1,
-            width_pct: 0.45,
+            width_pct: 0.24,
             height_pct: 0.7,
         },
         accepted_media_types: vec![ZoneMediaType::ShortTextWithIcon],
@@ -1995,10 +1995,12 @@ async fn go_to_uses_existing_caption_geometry_and_draws_local_cues() {
         )
         .unwrap();
 
-    compositor.populate_zone_hit_regions(&mut scene, 1280.0, 720.0);
+    compositor.populate_zone_hit_regions(&mut scene, 1024.0, 720.0);
     let baseline = scene.overlay.notification_geometry[0].clone();
     assert!(baseline.has_window_caption);
     assert!(baseline.goto.is_none());
+    compositor.prime_markdown_cache(&scene);
+    compositor.prime_truncation_cache(&scene);
     compositor.render_frame_headless(&mut scene, &surface);
     let plain_pixels = surface.read_pixels(&compositor.device);
 
@@ -2009,7 +2011,7 @@ async fn go_to_uses_existing_caption_geometry_and_draws_local_cues() {
             ..Default::default()
         },
     );
-    compositor.populate_zone_hit_regions(&mut scene, 1280.0, 720.0);
+    compositor.populate_zone_hit_regions(&mut scene, 1024.0, 720.0);
     let card = &scene.overlay.notification_geometry[0];
     assert_eq!(card.bounds, baseline.bounds);
     assert_eq!(card.close, baseline.close);
@@ -2029,7 +2031,7 @@ async fn go_to_uses_existing_caption_geometry_and_draws_local_cues() {
         let top = bounds.y.ceil() as usize;
         let bottom = (bounds.y + bounds.height).floor() as usize;
         (top..bottom)
-            .flat_map(|y| pixels[(y * 1280 + left) * 4..(y * 1280 + right) * 4].to_vec())
+            .flat_map(|y| pixels[(y * 1024 + left) * 4..(y * 1024 + right) * 4].to_vec())
             .collect::<Vec<_>>()
     };
     let mut previous_pixels = pixels_in(&plain_pixels);
@@ -2045,7 +2047,7 @@ async fn go_to_uses_existing_caption_geometry_and_draws_local_cues() {
             .get_mut(&baseline.publication_id)
             .unwrap()
             .cue = cue;
-        let items = compositor.collect_text_items(&scene, 1280.0, 720.0);
+        let items = compositor.collect_text_items(&scene, 1024.0, 720.0);
         let goto = items.iter().find(|item| &*item.text == label).unwrap();
         let caption = items
             .iter()
@@ -2053,7 +2055,17 @@ async fn go_to_uses_existing_caption_geometry_and_draws_local_cues() {
             .unwrap();
         assert_eq!(goto.pixel_y, caption.pixel_y);
         assert_eq!(goto.color, caption.color);
-        assert_eq!(goto.bounds_width, bounds.width);
+        assert_eq!(goto.pixel_x + goto.bounds_width, bounds.x + bounds.width);
+        let measured = compositor
+            .text_rasterizer
+            .as_mut()
+            .unwrap()
+            .measure_single_line(label, goto.font_size_px, goto.font_family, goto.font_weight);
+        assert!(
+            measured <= goto.bounds_width,
+            "{label}: measured {measured}, available {}",
+            goto.bounds_width
+        );
         compositor.prime_truncation_cache(&scene);
         compositor.render_frame_headless(&mut scene, &surface);
         let pixels = pixels_in(&surface.read_pixels(&compositor.device));

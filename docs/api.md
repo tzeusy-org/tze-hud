@@ -215,7 +215,7 @@ with the same cancellation and idle semantics as a `hud_input` wait.
   answered card's exit. Waiting cards add no timer, countdown or periodic
   reshape/repaint; existing Stack TTL fade is the only waiting time cue.
   Bare Tab/Shift+Tab joins visible notification controls at the content focus
-  cycle's wrap boundary in this order: ×, Go to when shown, then publisher
+  cycle's wrap boundary in the order ×, Go to when shown, then publisher
   actions. Cards
   placed on several displays are visited in the one stack order they would
   draw in on a single display (unanswered questions first, newest first);

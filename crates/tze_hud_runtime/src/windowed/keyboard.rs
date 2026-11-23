@@ -1713,6 +1713,7 @@ impl WinitApp {
         };
         if answer_exit {
             self.state.answer_keyboard.focus = None;
+            self.state.answer_keyboard.invalidate_visit();
         }
         if return_focus {
             self.return_focus_after_key(raw);
@@ -1732,7 +1733,7 @@ impl WinitApp {
                 .insert(keyboard_key_identity(&raw.key_code, &raw.key));
         }
         if let Some(wake) = wake {
-            self.deliver_notification_activation(wake);
+            self.deliver_notification_activation(wake, super::window_go_to::GoToOrigin::Keyboard);
         }
         Ok(consumed)
     }

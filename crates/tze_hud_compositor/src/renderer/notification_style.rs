@@ -585,9 +585,14 @@ pub(super) fn go_to_control(
     if !state.available {
         return None;
     }
-    // Reserve room for failure text without moving the caption row or the
-    // rest of the card. The caption and control can each ellipsize.
-    let width = (style.body.size * 13.0).min((card.width * 0.5 - style.padding_h).max(1.0));
+    // Keep the label at the same right edge. A result can borrow room from
+    // the caption for longer text without changing the row or card size.
+    let row_width = (card.width - 2.0 * style.padding_h).max(1.0);
+    let width = if state.cue.is_some() {
+        (style.body.size * 15.0).min(row_width)
+    } else {
+        (style.body.size * 5.0).min(row_width * 0.5)
+    };
     let bounds = Rect::new(
         card.x + card.width - style.padding_h - width,
         card.y + style.padding_v,

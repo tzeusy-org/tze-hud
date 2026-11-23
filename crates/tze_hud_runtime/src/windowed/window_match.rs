@@ -43,25 +43,32 @@ fn matches_title(title: &str, token: &str) -> bool {
     let token = token.to_lowercase();
     let is_token_byte = |c: &u8| c.is_ascii_alphanumeric() || b"._-".contains(c);
     !token.is_empty()
-        && title.match_indices(&token).any(|(start, _)| {
+        && title.char_indices().any(|(start, _)| {
+            if !title[start..].starts_with(&token) {
+                return false;
+            }
             let before = start.checked_sub(1).and_then(|i| title.as_bytes().get(i));
             let after = title.as_bytes().get(start + token.len());
             !before.is_some_and(is_token_byte) && !after.is_some_and(is_token_byte)
         })
 }
 
+fn eligible(window: &Window, current_pid: u32, apps: &[String], token: &str) -> bool {
+    window.visible
+        && !window.owned
+        && !window.cloaked
+        && !window.tool
+        && window.target.pid != current_pid
+        && apps
+            .iter()
+            .any(|app| window.image.eq_ignore_ascii_case(app))
+        && matches_title(&window.title, token)
+}
+
 pub(super) fn find(windows: &[Window], current_pid: u32, apps: &[String], token: &str) -> Match {
-    let mut eligible = windows.iter().filter(|window| {
-        window.visible
-            && !window.owned
-            && !window.cloaked
-            && !window.tool
-            && window.target.pid != current_pid
-            && apps
-                .iter()
-                .any(|app| window.image.eq_ignore_ascii_case(app))
-            && matches_title(&window.title, token)
-    });
+    let mut eligible = windows
+        .iter()
+        .filter(|window| eligible(window, current_pid, apps, token));
     let Some(first) = eligible.next() else {
         return Match::None;
     };
@@ -71,6 +78,22 @@ pub(super) fn find(windows: &[Window], current_pid: u32, apps: &[String], token:
     } else {
         Match::Multiple(1 + rest)
     }
+}
+
+/// The full press scan decides uniqueness. Before acting, confirm that its
+/// one destination still has the same identity, qualifying title and state.
+#[cfg(any(target_os = "windows", test))]
+pub(super) fn revalidate(
+    target: Target,
+    apps: &[String],
+    token: &str,
+    observe: impl FnOnce(Target) -> Option<Window>,
+) -> Option<Target> {
+    let window = observe(target)?;
+    (window.target.hwnd == target.hwnd
+        && window.target.pid == target.pid
+        && eligible(&window, std::process::id(), apps, token))
+    .then_some(window.target)
 }
 
 /// Main-thread activation seam. Failed overlay-assisted attempts put back
@@ -197,6 +220,10 @@ pub(super) mod native {
         }
     }
 
+    pub(in crate::windowed) fn observe(target: Target) -> Option<Window> {
+        read_window(hwnd(target)?)
+    }
+
     pub(in crate::windowed) fn hwnd(target: Target) -> Option<HWND> {
         let hwnd = HWND(target.hwnd as *mut std::ffi::c_void);
         let mut pid = 0;
@@ -233,6 +260,7 @@ mod tests {
         for (title, token) in [
             ("shell: TZGO-7F3A · Terminal", "tzgo-7f3a"),
             ("— Build Box —", "build box"),
+            ("xa a a", "a a"),
             ("tze-é", "TZE-É"),
         ] {
             assert!(
@@ -271,6 +299,44 @@ mod tests {
                 "tzgo-7f3a"
             ),
             Match::Multiple(2),
+        );
+    }
+
+    #[test]
+    fn go_to_rejects_a_changed_title_or_eligibility_on_the_same_hwnd() {
+        let target = Target {
+            hwnd: 4,
+            pid: std::process::id() + 1,
+            minimized: false,
+        };
+        let apps = ["Code.exe".to_string()];
+        let observe = |title: &str, cloaked| Window {
+            target: Target {
+                minimized: true,
+                ..target
+            },
+            title: title.into(),
+            image: "Code.exe".into(),
+            visible: true,
+            owned: false,
+            cloaked,
+            tool: false,
+        };
+        let token = "build box";
+        assert_eq!(
+            revalidate(target, &apps, token, |_| Some(observe("renamed", false))),
+            None
+        );
+        assert_eq!(
+            revalidate(target, &apps, token, |_| Some(observe(token, true))),
+            None
+        );
+        assert_eq!(
+            revalidate(target, &apps, token, |_| Some(observe(token, false))),
+            Some(Target {
+                minimized: true,
+                ..target
+            }),
         );
     }
 
