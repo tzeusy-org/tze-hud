@@ -939,6 +939,7 @@ impl Compositor {
             &tv.vertices,
             view,
             &inputs,
+            &tv.textured_cmds,
             tv.width,
             tv.height,
             self.overlay_mode,
@@ -947,7 +948,7 @@ impl Compositor {
         );
 
         // ── Image pass: draw textured quads on top of color geometry ─────────
-        self.encode_image_pass(&mut encoder, view, &tv.textured_cmds, sw, sh);
+        self.encode_image_pass(&mut encoder, view, &tv.textured_cmds, sw, sh, None);
 
         // ── Widget pass: composite pre-synced textures above zone content ────
         self.encode_widget_pass_prepared(&mut encoder, view, tv.widget_quads, sw, sh);
@@ -1242,7 +1243,10 @@ impl Compositor {
                 continue;
             }
             resource_id.hash(&mut hasher);
-            source.hash(&mut hasher);
+            std::mem::discriminant(source).hash(&mut hasher);
+            if let super::draw_cmds::ImageSource::Resident { layer, .. } = source {
+                std::mem::discriminant(layer).hash(&mut hasher);
+            }
             hash_f32s(&mut hasher, &[*x, *y, *cw, *ch]);
             hash_f32s(&mut hasher, uv_rect);
             hash_f32s(&mut hasher, tint);
@@ -1465,6 +1469,7 @@ impl Compositor {
             &vertices,
             &frame.view,
             scene,
+            &textured_cmds,
             surf_w,
             surf_h,
             false,
@@ -1474,7 +1479,7 @@ impl Compositor {
         telemetry.stage6_render_encode_us = encode_us;
 
         // ── Image pass: draw textured quads on top of color geometry ─────────
-        self.encode_image_pass(&mut encoder, &frame.view, &textured_cmds, sw, sh);
+        self.encode_image_pass(&mut encoder, &frame.view, &textured_cmds, sw, sh, None);
 
         // ── Widget pass: composite pre-synced textures above zone content ────
         if scene.widgets_shown() {

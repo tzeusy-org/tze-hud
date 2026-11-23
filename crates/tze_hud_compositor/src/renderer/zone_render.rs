@@ -181,8 +181,11 @@ impl Compositor {
                             ZoneContent::StaticImage(resource_id) => {
                                 // If a GPU texture is cached, emit a textured draw command
                                 // filling this publication's slot.
-                                let source = if record.resident_raster.is_some() {
-                                    super::draw_cmds::ImageSource::Resident
+                                let source = if let Some(proof) = &record.resident_raster {
+                                    super::draw_cmds::ImageSource::Resident {
+                                        proof: proof.clone(),
+                                        layer: zone_def.layer_attachment,
+                                    }
                                 } else {
                                     super::draw_cmds::ImageSource::Generic
                                 };
@@ -332,8 +335,11 @@ impl Compositor {
                         ZoneContent::StaticImage(resource_id) => {
                             // If a GPU texture is cached, emit a textured draw command
                             // filling the zone.
-                            let source = if latest.resident_raster.is_some() {
-                                super::draw_cmds::ImageSource::Resident
+                            let source = if let Some(proof) = &latest.resident_raster {
+                                super::draw_cmds::ImageSource::Resident {
+                                    proof: proof.clone(),
+                                    layer: zone_def.layer_attachment,
+                                }
                             } else {
                                 super::draw_cmds::ImageSource::Generic
                             };

@@ -310,3 +310,155 @@ async fn resident_raster_gpu_budget_and_degradation_keep_store_cpu_charge() {
         "policy invalidation releases resident GPU charge"
     );
 }
+
+#[tokio::test]
+async fn resident_raster_stale_draw_denies_revoked_source_with_live_same_hash_peer() {
+    use crate::surface::CompositorSurface;
+    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(128, 64).await);
+    let (mut scene, _store, ledger, directory, source_a) = resident_raster_scene(64).await;
+    compositor.set_resident_ledger(ledger);
+    // Renderer seam fixture: grant B the already validated allocation. Real
+    // first-grant admission is covered separately through the tonic handler.
+    let auth_b = tze_hud_scene::config::agents::PairingAuthorization::default();
+    auth_b.with_live_grants(|grants| {
+        grants.insert(*source_a.resource_id().as_bytes());
+    });
+    let (pixels, width, height) = source_a.pixels_if_authorized().unwrap();
+    let source_b = std::sync::Arc::new(ResidentRasterSource::new(
+        source_a.resource_id(),
+        width,
+        height,
+        pixels,
+        auth_b,
+    ));
+    scene
+        .publish(
+            &tze_hud_scene::Publisher {
+                resident_raster: Some(source_b),
+                ..tze_hud_scene::Publisher::namespace("raster-b")
+            },
+            &tze_hud_scene::Publication::Zone {
+                zone_name: "generic".into(),
+                content: ZoneContent::StaticImage(source_a.resource_id()),
+                merge_key: None,
+                expires_at_wall_us: None,
+                content_classification: None,
+                breakpoints: Vec::new(),
+                held: false,
+            },
+        )
+        .unwrap();
+    let (_, commands, _, _) =
+        compositor.build_frame_vertices(&scene, 128.0, 64.0, &mut FrameTelemetry::default());
+    assert_eq!(commands.len(), 2);
+    assert_eq!(compositor.resident_image_texture_cache.len(), 1);
+    // Both exact draw commands were selected while A was live. B's live source
+    // keeps the shared GPU cache entry after A is revoked before encoding.
+    directory.with_agents_of(Default::default());
+    let frame = surface.acquire_frame().unwrap();
+    let (encoder, _, _) =
+        compositor.encode_frame(&[], &frame.view, &scene, &commands, 128, 64, false, 0, 0);
+    compositor.queue.submit(std::iter::once(encoder.finish()));
+    let pixels = surface.read_pixels(&compositor.device);
+    assert_ne!(
+        pixel_at(&pixels, 128, 8, 32),
+        [255, 0, 0, 255],
+        "stale A command cannot borrow B's live texture"
+    );
+    assert_pixel_color(
+        &pixels,
+        128,
+        72,
+        32,
+        [255, 0, 0, 255],
+        8,
+        "authorized B remains visible",
+    )
+    .unwrap();
+}
+
+#[tokio::test]
+async fn resident_raster_respects_background_and_content_bands() {
+    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(128, 64).await);
+    for layer in [LayerAttachment::Background, LayerAttachment::Content] {
+        let (mut scene, _store, _ledger, _directory, _source) = resident_raster_scene(64).await;
+        scene
+            .zone_registry
+            .zones
+            .get_mut("resident")
+            .unwrap()
+            .layer_attachment = layer;
+        let mut foreground = scene.zone_registry.zones["generic"].clone();
+        foreground.name = "foreground".into();
+        foreground.id = SceneId::new();
+        foreground.layer_attachment = LayerAttachment::Chrome;
+        foreground.geometry_policy = GeometryPolicy::Relative {
+            x_pct: 0.25,
+            y_pct: 0.0,
+            width_pct: 0.25,
+            height_pct: 1.0,
+        };
+        scene.register_zone(foreground);
+        scene
+            .publish_to_zone(
+                "foreground",
+                ZoneContent::SolidColor(Rgba::new(0.0, 0.0, 1.0, 1.0)),
+                "peer",
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        let tab = scene.create_tab("foreground tile", 0).unwrap();
+        let lease = scene.grant_lease("peer", 60_000);
+        let tile = scene
+            .create_tile(tab, "peer", lease, Rect::new(16.0, 0.0, 16.0, 64.0), 1)
+            .unwrap();
+        scene
+            .set_tile_root(
+                tile,
+                solid_node(
+                    Rect::new(0.0, 0.0, 16.0, 64.0),
+                    Rgba::new(1.0, 1.0, 0.0, 1.0),
+                    None,
+                ),
+            )
+            .unwrap();
+        let pixels = render_pixels(&mut compositor, &mut scene, &surface);
+        assert_pixel_color(
+            &pixels,
+            128,
+            8,
+            32,
+            [255, 0, 0, 255],
+            8,
+            "uncovered resident",
+        )
+        .unwrap();
+        assert_pixel_color(
+            &pixels,
+            128,
+            56,
+            32,
+            [0, 0, 255, 255],
+            8,
+            "Chrome peer occludes resident",
+        )
+        .unwrap();
+        let expected = if layer == LayerAttachment::Background {
+            [255, 255, 0, 255]
+        } else {
+            [255, 0, 0, 255]
+        };
+        assert_pixel_color(
+            &pixels,
+            128,
+            24,
+            32,
+            expected,
+            8,
+            "tile respects resident band",
+        )
+        .unwrap();
+    }
+}

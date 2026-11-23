@@ -6,10 +6,13 @@ use tze_hud_scene::types::*;
 // ─── Image fit mode UV calculations ─────────────────────────────────────────
 
 /// Resident textures never enter the generic tile/icon/MCP image cache.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone)]
 pub(super) enum ImageSource {
     Generic,
-    Resident,
+    Resident {
+        proof: std::sync::Arc<ResidentRasterSource>,
+        layer: LayerAttachment,
+    },
 }
 
 /// A textured draw command collected during scene traversal.

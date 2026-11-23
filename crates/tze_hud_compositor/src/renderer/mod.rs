@@ -2976,6 +2976,7 @@ impl Compositor {
         vertices: &[RectVertex],
         frame_view: &wgpu::TextureView,
         inputs: &EncodeInputs,
+        textured_cmds: &[TexturedDrawCmd],
         surf_w: u32,
         surf_h: u32,
         use_overlay_pipeline: bool,
@@ -3014,11 +3015,28 @@ impl Compositor {
         // transparent quad that zeros out every pixel's alpha. Subsequent
         // content overwrites specific regions with their own alpha.
 
-        for pass in geometry_pass_plan(inputs, vertices.len(), bg_vertex_count, chrome_vertex_start)
+        for (pass_index, pass) in
+            geometry_pass_plan(inputs, vertices.len(), bg_vertex_count, chrome_vertex_start)
+                .into_iter()
+                .enumerate()
         {
             match pass {
                 GeometryPass::RoundedRects(cmds) => {
                     self.encode_rounded_rect_pass(&mut encoder, frame_view, cmds, sw, sh);
+                    let layer = match pass_index {
+                        1 => LayerAttachment::Background,
+                        3 => LayerAttachment::Content,
+                        5 => LayerAttachment::Chrome,
+                        _ => unreachable!("rounded rect band"),
+                    };
+                    self.encode_image_pass(
+                        &mut encoder,
+                        frame_view,
+                        textured_cmds,
+                        sw,
+                        sh,
+                        Some(layer),
+                    );
                 }
                 GeometryPass::Flat { vertices, clear } => {
                     // The initial Clear pass always runs, including an empty frame.
@@ -3214,6 +3232,7 @@ impl Compositor {
         vertices: &[RectVertex],
         frame_view: &wgpu::TextureView,
         scene: &SceneGraph,
+        textured_cmds: &[TexturedDrawCmd],
         surf_w: u32,
         surf_h: u32,
         use_overlay_pipeline: bool,
@@ -3225,6 +3244,7 @@ impl Compositor {
             vertices,
             frame_view,
             &inputs,
+            textured_cmds,
             surf_w,
             surf_h,
             use_overlay_pipeline,

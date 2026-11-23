@@ -810,6 +810,14 @@ impl super::Compositor {
         } else {
             (img_width, img_height)
         };
+        let max_dimension = self.device.limits().max_texture_dimension_2d;
+        if texture_width == 0
+            || texture_height == 0
+            || texture_width > max_dimension
+            || texture_height > max_dimension
+        {
+            return None;
+        }
         let scaled_rgba = reduce_quality.then(|| {
             downsample_rgba_nearest(
                 &rgba_data,
