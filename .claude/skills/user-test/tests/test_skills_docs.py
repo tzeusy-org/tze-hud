@@ -65,7 +65,8 @@ def operational_files():
 def test_operational_sources_do_not_use_retired_transports_or_doc_psks():
     sources = list(operational_files())
     # Fail if corpus changes silently drop executable skill or deployment sources.
-    assert ROOT / ".claude/skills/user-test/scripts/stress_test_zones.py" in sources
+    assert ROOT / ".claude/skills/user-test/scripts/hud_pair.py" in sources
+    assert ROOT / ".claude/skills/th-hud-publish/scripts/publish.py" in sources
     assert ROOT / "scripts/ci/windows/run-quiescent-efficiency.ps1" in sources
     assert ROOT / "scripts/dev-run.sh" in sources
     assert {".py", ".sh", ".ps1"} <= {p.suffix for p in sources}

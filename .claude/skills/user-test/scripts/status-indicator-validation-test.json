@@ -1,9 +1,0 @@
-[
-  {
-    "widget": "main-status",
-    "params": {
-      "status": "do-not-disturb"
-    },
-    "ttl_ms": 10000
-  }
-]

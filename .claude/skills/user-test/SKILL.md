@@ -1,6 +1,6 @@
 ---
 name: user-test
-description: Use when validating the Windows HUD end to end from an agent host with no remote shell - pair once, update the HUD to the dev build, publish zone and widget test content over MCP `hud_publish`, take a screenshot as evidence, and read logs on failure.
+description: Pair with a Windows HUD, update to dev, publish test content, capture a HUD screenshot, and read logs from an agent host without remote shell access.
 metadata:
   owner: tze
   authors:
@@ -8,162 +8,79 @@ metadata:
     - OpenAI Codex
     - Claude
   status: active
-  last_reviewed: "2026-10-04"
+  last_reviewed: "2026-11-23"
 ---
 
 # User Test
 
-Run the mechanical checks yourself first: `just gesture` drives a fresh Linux
-build on a private Xvfb display with real XTEST input (AGENTS.md, T13 in
-`docs/scope.md`), then the Windows tier: `gh workflow run windows.yml --ref
-<branch>` replays them with real `SendInput` on a hosted VM. Use the steps below
-on the owner's HUD only for what those cannot cover. Ask the owner only about
-the T13 residual list (visual preference, owner hardware, network/install,
-time-based behaviour), with a link to the evidence.
+Run the existing mechanical checks with `just gesture` and the hosted
+[Windows gesture workflow](../../../docs/development/windows.md#running-the-gates).
+Use this workflow on a designated dev HUD or for the owner checks listed in
+[T13](../../../docs/scope.md).
 
-Everything goes over the HUD's MCP port (default 9090) with your paired PSK.
-Contract: `docs/api.md` (pairing, `hud_*` verbs) and
-`docs/operations/windows-install.md` (`/admin/*`).
+Run from the repo root. Set `HUD_HOST` to the designated host, `host:port`, or
+HTTP URL. Bracket IPv6 addresses. The commands read the selected host's paired
+key from its private file. Keep keys out of commands, output, and evidence.
+See [connection setup](../th-hud-publish/references/connection.md) for host
+selection, pairing files, and the stdio adapter.
 
-`HUD_HOST` names the HUD (host, `host:port`, or HTTP URL; bracket IPv6 literals).
-The shared resolver uses the selected HTTP port or 9090 and reads
-`~/.config/tze-hud/<hostname>.psk`; the hostname excludes brackets and port.
-The paired gRPC endpoint is resolved separately. The PSK is never printed;
-do not read the file into context.
-
-Claude's project MCP entry uses a Linux/WSL stdio adapter: one paired host works
-without exporting `HUD_HOST`; multiple hosts require explicit selection. New
-pairing writes private nonsecret `<hostname>.endpoint.json` with the actual
-HTTP port and selected-key fingerprint. No endpoint metadata means legacy9090;
-an old custom port requires re-pairing or explicit `HUD_HOST`. Present invalid
-or stale metadata is refused. The established `.psk` store is the only raw-key
-file; no key belongs in MCP config, argv, environment or evidence. Ordinary
-admin scripts below still use explicit `HUD_HOST`. Fresh Claude authenticated
-five-tool discovery is separate live acceptance, not proven by fake fixtures.
-The adapter bounds four HTTP workers. Initialize has a 3s absolute startup
-deadline from frame acceptance, including DNS, connect and response/read;
-established calls such as `hud_input` retain their 60s absolute deadline,
-including queued time. Caught resolver failures name DNS, caught connect
-failures name TCP, and selected-key or HTTP401/403 refusals name auth. A worker
-deadline without a known phase reports DNS/TCP/startup with phase unavailable;
-it is not a DNS diagnosis. Errors omit credentials and exception details, with
-no fallback, re-pair, retry or replay. Adapter-interpreter startup before frame
-acceptance and subsequent TERM/KILL cleanup add scheduling-dependent time;
-the accepted-frame budget includes worker startup.
-EOF/signals
-abort with one global 1s TERM + 1s KILL/reap budget, subject to OS scheduling.
-Abrupt parent death relies on Linux kernel termination/OS adoption; native
-Windows/macOS client lifetime is unsupported. Remote accepted work is uncertain
-and never automatically replayed.
-
-## Steps
-
-1. **Owner, once:** double-click `tze_hud.exe` on the Windows host (installs
-   per user and autostarts). Until an agent is paired the HUD shows a 6-digit
-   code and its address; the owner reads you the code.
-2. **Pair, once per host:**
+1. **Pair.** For a first install the owner launches `tze_hud.exe` and reads the
+   six-digit code from the HUD. Use an approved admin pairing for update,
+   screenshots, and logs. With a valid existing admin pairing, proceed to update.
+   Re-pairing the same agent rotates its key.
 
    ```bash
-   export HUD_HOST=<host>
-   python3 .claude/skills/user-test/scripts/hud_pair.py --code 482913 --admin
+   export HUD_HOST=hud-host.example
+   PAIR=.claude/skills/user-test/scripts/hud_pair.py
+   python3 "$PAIR" --code "$PAIR_CODE" --admin
    ```
 
-   `--admin` is needed for steps 3, 5, and 6. Pairing the same agent again
-   rotates its key. `PAIR_CODE_INVALID`: wrong code, ask the owner for the
-   current one. `PAIRING_CLOSED`: the code is spent, expired, or cooling down
-   (60 s); the owner runs `tze_hud.exe --pair` or presses Ctrl+Shift+F10.
-3. **Update to the dev build:**
-   `python3 .claude/skills/user-test/scripts/hud_admin.py update --channel dev`.
-   `up_to_date` means nothing to do; otherwise the HUD installs the signed
-   build and relaunches itself, so poll `hud_admin.py status` until `sha`
-   changes. The same PSK keeps working.
-4. **Publish** zone and widget content (below).
-5. **Evidence:** `hud_admin.py screenshot -o /tmp/hud.png` returns the HUD's
-   own frame; view the PNG.
-6. **On failure:** `hud_admin.py logs --tail 200`, plus `status` (`last_update`,
-   `last_restart`, `safe_mode`). Quote exact error payloads.
+   `PAIR_CODE` is the current owner-provided code. If pairing is closed, the
+   owner can reopen it with `tze_hud.exe --pair` or Ctrl+Shift+F10.
 
-### Read-only diagnosis and authorized live smoke
+2. **Update.** Run the commands below. If the update responds with `updating`,
+   wait for status to report the returned `sha` after the HUD relaunches. An
+   `up_to_date` response confirms dev is already running. Keep the same key.
 
-`python3 .claude/skills/user-test/scripts/hud_admin.py doctor` checks DNS,
-TCP, authenticated `/admin/status`, tailnet inbound policy, then the running
-build commit against the resolved rolling `dev` tag. It stops at the first
-failure or unknown with an owner action; it never pairs, repairs, updates or
-restarts. A parent supervisor enforces each network layer's five-second
-deadline even while its local probe child blocks in DNS or response reads.
-Only that owned helper is terminated/killed and reaped, with at most 0.4 seconds
-of bounded termination waits; an unconfirmed exit is `cleanup_failed`.
-This command requires Linux/WSL pidfd and parent-death support; other hosts
-report `deadline_unavailable` without an unbounded probe. A 401 requires a valid pairing; 403 `NOT_ADMIN` requires the
-owner's admin pairing. Neither grants permission to elevate or re-pair.
+   ```bash
+   ADMIN=.claude/skills/user-test/scripts/hud_admin.py
+   python3 "$ADMIN" update --channel dev
+   python3 "$ADMIN" status
+   ```
 
-After authenticated status succeeds, doctor also prints bounded content-free
-holdings and startup warnings: up to eight whole owner/surface/kind/phase/expiry
-rows and four warning entries, within a 3072-byte result envelope. Omission
-counts/reasons qualify trimming; null means unknown. Pending fonts, absent
-producers, legacy HUDs and malformed metadata never appear as healthy empty
-lists. Later failures retain these diagnostics and the original failing layer;
-unauthenticated/forbidden responses disclose none. `status` provides the full
-bounded metadata schema ([API](../../../docs/api.md)).
+3. **Publish.** Discover before publishing test content requested for this run.
 
-After explicit authorization to publish test content, use:
+   ```bash
+   PUBLISH=.claude/skills/th-hud-publish/scripts/publish.py
+   python3 "$PUBLISH" --list-surfaces
+   ```
 
-```bash
-python3 scripts/ci/windows_smoke.py --url http://<host>:9090/mcp
-```
+   After successful discovery, use the reported surface names and parameter
+   types. This example assumes both surfaces are listed. If no widget is
+   listed, record that and run the zone step. Use an allocated, unheld widget
+   on a dedicated idle pairing.
 
-This smoke is **mutating**, unlike `doctor`. Use an idle dedicated paired
-agent with no concurrent or pending publications. Existing holdings/portals
-are refused; a unique smoke portal and touched surfaces are tracked for
-cleanup. MCP clears are agent-and-surface scoped, not atomic per-run tokens;
-other agents' content is untouched, but a concurrent use of the same pairing
-is unsupported. The URL route never owns or kills the HUD, seeds config or
-credentials, reopens pairing, restarts, updates, or repairs firewall rules.
-Owned startup/config/WARP, pair/wrong-code, executable restart/health,
-quiescent-efficiency emission, resident POC/orphan and theme/fixture capture
-checks are individually reported `UNEXECUTED owner-only`. They stay in the
-owned CI `--exe` route. This route does not replace the required owner-host acceptance run.
+   ```bash
+   python3 "$PUBLISH" --zone subtitle --content "Checking the dev HUD" --ttl-ms 60000
+   python3 "$PUBLISH" --surface widget:main-progress --params '{"progress":0.5}' --ttl-ms 60000
+   ```
 
-## Publish
+   The same command accepts a mixed `--messages-file`. Check every receipt and
+   retain tool failure codes and hints.
+   See [sample payloads](references/message-payloads.md).
 
-Discover first, never invent surface names:
-`publish_zone_batch.py --messages-file /dev/null --list-surfaces`.
+4. **Screenshot.** Run `python3 "$ADMIN" screenshot -o /tmp/hud.png` while the
+   content is live. Open the PNG and confirm the requested content. Record any
+   clipping or unexpected placement. Let test content expire after capture.
 
-```bash
-python3 .claude/skills/user-test/scripts/publish_zone_batch.py \
-  --messages-file /tmp/hud-zone-messages.json --list-surfaces
-python3 .claude/skills/user-test/scripts/publish_widget_batch.py \
-  --messages-file /tmp/hud-widget-messages.json --cleanup-on-exit
-```
+5. **Logs.** On failure, run `python3 "$ADMIN" logs --tail 200` and check
+   `python3 "$ADMIN" status` for `last_update`, `last_restart`, and `safe_mode`.
+   Share only the relevant, redacted evidence. For a connection failure, run the
+   bounded read-only `python3 "$ADMIN" doctor`.
+   [Windows diagnostics](../../../docs/operations/windows-install.md) documents
+   the returned status and next steps.
 
-Payload shapes, content types per zone, and widget params:
-[references/message-payloads.md](references/message-payloads.md). If
-`hud_surfaces` lists no widgets, skip widget publishing and say so. Clear
-durable widget state at the end (`--cleanup-on-exit` or
-`scripts/widget-cleanup.json`).
-
-## Behavior Rules
-
-- Require a successful `hud_surfaces` (or `hud_admin.py status`) before
-  claiming publish-path success.
-- Keep messages configurable from the user prompt; do not hardcode content.
-- Treat any publish error as actionable; include the exact response payload.
-- Never print, log, or commit the PSK. Pass `--psk-env NAME` only to override
-  the file.
-
-## Files
-
-- Admin and pairing: [scripts/hud_pair.py](scripts/hud_pair.py),
-  [scripts/hud_admin.py](scripts/hud_admin.py),
-  [scripts/hud_env.py](scripts/hud_env.py) (shared `HUD_HOST` and PSK-file resolution).
-- Batch publishers and fixtures: [scripts/publish_zone_batch.py](scripts/publish_zone_batch.py),
-  [scripts/publish_widget_batch.py](scripts/publish_widget_batch.py),
-  `scripts/*.json`.
-- Zone exemplars (subtitle, notification, alert-banner, status-bar,
-  ambient-background): [references/zone-exemplars.md](references/zone-exemplars.md).
-- Widget reactivity (gauge, status-indicator, progress-bar):
-  [references/widget-reactivity-tests.md](references/widget-reactivity-tests.md).
-- `scripts/stress_test_zones.py` measures paired MCP publishing latency and
-  throughput. Host CPU, memory and GPU telemetry are unavailable and reported as
-  such, with null metric values. For the HUD's process CPU metric, use
-  `hud_admin.py status` separately with an admin-paired key.
+For automated coverage, use the existing Windows smoke with its owned process.
+Its authorized `--url` mode publishes on an idle dedicated pairing with no
+pending work and reports which owned-process checks were skipped.
+See [Windows development](../../../docs/development/windows.md#running-the-gates).

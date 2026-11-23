@@ -170,7 +170,7 @@ def validate_key(value):
 
 def deliver(metadata, endpoint, token, widget, deadline):
     # Initial request and at most one newest-desire catch-up, never a retry.
-    import publish_widget_batch
+    from hud_mcp import call_tool
 
     with lock(metadata.directory / "delivery.lock"):
         for _ in range(2):
@@ -195,8 +195,8 @@ def deliver(metadata, endpoint, token, widget, deadline):
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 return
-            result = publish_widget_batch.rpc_call(endpoint["url"], token, tool, arguments, 1,
-                                                  timeout=remaining, response_limit=4096)
+            result = call_tool(endpoint["url"], token, tool, arguments, 1,
+                               timeout=remaining, response_limit=4096)
             # Even rejection is conservatively uncertain unless explicitly safe.
             cleared_absent = desired is None and result.get("error", {}).get("code") == "NOT_HELD"
             if result.get("result", {}).get("ok") is not True and not cleared_absent:

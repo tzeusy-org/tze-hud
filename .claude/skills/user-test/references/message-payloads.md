@@ -1,109 +1,31 @@
-# Message & Widget Payloads
+# Test publish payloads
 
-Payload reference for zone messages (`messages` input) and widget messages
-(`widget_messages` input). Used by Workflow Step 3 (publish zone messages) and
-Step 4 (publish widget messages) in [../SKILL.md](../SKILL.md).
-
-## Zone message shape
-
-Message shape — `content` is either a plain string (StreamText) or a typed JSON object:
+Use the [user-test workflow](../SKILL.md) to discover the available surfaces.
+Pass a JSON array to the [shared publisher](../../th-hud-publish/scripts/publish.py)
+with `--messages-file`. A row names a `zone`, a `widget` instance, or a full
+`surface` such as `zone:subtitle`. Pick only rows whose targets are allocated to
+the test and supported by discovery. Substitute the requested test content.
 
 ```json
 [
-  {
-    "zone": "alert-banner",
-    "content": "Deploy v2.1.0 started",
-    "ttl_ms": 30000
-  },
-  {
-    "zone": "subtitle",
-    "content": "Running integration tests...",
-    "ttl_ms": 60000
-  },
-  {
-    "zone": "status-bar",
-    "content": {"type": "status_bar", "entries": {"build": "passing", "agent": "butler", "target": "windows"}},
-    "key": "build-status",
-    "ttl_ms": 120000
-  },
-  {
-    "zone": "notification-area",
-    "content": {"body": "Build complete", "urgency": 1, "actions": [{"label": "Approve", "callback_id": "approve"}]},
-    "ttl_ms": 10000
-  },
-  {
-    "zone": "ambient-background",
-    "content": {"type": "solid_color", "r": 0.1, "g": 0.15, "b": 0.4, "a": 0.05},
-    "ttl_ms": 300000
-  },
-  {
-    "zone": "pip",
-    "content": {"type": "solid_color", "r": 0.2, "g": 0.8, "b": 0.2, "a": 0.05},
-    "ttl_ms": 60000
-  }
+  {"zone":"alert-banner","content":"Dev update complete","ttl_ms":30000},
+  {"zone":"subtitle","content":"Checking the dev HUD","ttl_ms":60000},
+  {"zone":"status-bar","content":{"type":"status_bar","entries":{"test":"passing"}},"key":"dev-check","ttl_ms":60000},
+  {"zone":"notification-area","content":{"body":"Build complete","urgency":1},"ttl_ms":30000},
+  {"zone":"ambient-background","content":{"type":"solid_color","r":0.1,"g":0.15,"b":0.4,"a":0.05},"ttl_ms":30000},
+  {"zone":"pip","content":{"type":"solid_color","r":0.2,"g":0.8,"b":0.2,"a":0.05},"ttl_ms":30000},
+  {"widget":"main-progress","params":{"progress":0.5,"label":"Dev check"},"ttl_ms":60000}
 ]
 ```
 
-**Content types by zone:**
-- `alert-banner`, `subtitle`: plain string (StreamText)
-- `status-bar`: `{"type":"status_bar","entries":{"key":"value",...}}` with `key`
-- `notification-area`: `{"body":"...","urgency":0-3,"title":"...","actions":[{"label":"Approve","callback_id":"approve"}]}` (`title` and `actions` optional; action fields must be non-empty strings)
-- `ambient-background`, `pip`: `{"type":"solid_color","r":0-1,"g":0-1,"b":0-1,"a":0-1}`
+Zone content can be plain text or a typed object. Widget values must match the
+discovered types and ranges. Use a finite, top-level `ttl_ms` for test content.
+See [HUD Publish](../../th-hud-publish/SKILL.md) for content shapes, keyed
+notifications, and input ownership if a test needs buttons.
 
-`key` and `ttl_ms` are optional per message. The publisher namespace is the
-agent the PSK belongs to; a message cannot set it. `type` may be omitted: the
-runtime infers it from what the zone accepts.
-
-Notification urgency, when supplied, is an integer 0–3; omission defaults to 1.
-Put TTL at the message/publish top level, never inside notification content.
-Every status entry must be a string; an empty string removes its key.
-Widget f32 values must satisfy their discovered ranges. Widget colors accept
-`#RRGGBB` or numeric `{r,g,b,a?}` in 0–1, with absent alpha defaulting to 1.
-
-- `widget_messages`: array of widget publishes (optional)
-
-Widget message shape:
-
-```json
-[
-  {
-    "widget": "gauge",
-    "params": {"level": 0.75, "label": "CPU Usage"},
-    "ttl_ms": 60000
-  },
-  {
-    "action": "clear",
-    "widget": "gauge"
-  }
-]
-```
-
-**Widget parameter types:**
-- `f32`: JSON number (e.g. `0.75`) — often with min/max range
-- `string`: JSON string (e.g. `"CPU Usage"`)
-- `color`: JSON object `{"r": 0-1, "g": 0-1, "b": 0-1, "a": 0-1}`
-- `enum`: JSON string from allowed values (e.g. `"warning"`)
-
-`ttl_ms` is optional per message (widgets are durable by default).
-
-**`widget` semantics: instance name, not type name**
-
-`widget` (the surface `widget:<name>`) identifies a *widget instance*, not a widget type.
-When the HUD starts, instances are created from `[[tabs.widgets]]` entries in the config,
-each with an `instance_id`. That `instance_id` is the name you pass as `widget`.
-
-For the production `tze_hud_app` deployment (see `app/tze_hud_app/config/production.toml`):
-
-| `widget` | Widget type | What it shows |
-|---|---|---|
-| `main-gauge` | `gauge` | Ring gauge (level, label, severity, hover readout) |
-| `main-progress` | `progress-bar` | Horizontal progress bar (progress, label) |
-| `main-status` | `status-indicator` | Status circle with label (online/away/busy/offline) |
-
-Use `hud_surfaces` to discover available instances:
-```bash
-python3 .claude/skills/user-test/scripts/publish_widget_batch.py \
-  --messages-file /dev/null --list-surfaces
-```
-`hud_surfaces` returns `widget:<name>` entries with their params — use those names as `widget`.
-If `hud_surfaces` returns no widget entries, the HUD binary is running without a config that declares instances.
+For runs without a screenshot, `--cleanup-on-exit` checks that batch widget
+targets are listed and unheld before publishing, then attempts to clear those
+it may have changed even if a request fails or the run is interrupted. Use it
+only on a dedicated pairing with no existing, scheduled, or concurrent work. After
+a screenshot, let finite TTLs expire or clear only your own dedicated widget
+with `--surface widget:<name> --clear`. Inspect the clear receipt.

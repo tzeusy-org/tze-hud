@@ -249,10 +249,9 @@ prints redacted discovery information without launching another window.
 The skill scripts are Python and take the MCP URL as input, so they run
 unchanged against `http://127.0.0.1:9090/mcp`:
 
-- `th-hud-publish`: `python .claude/skills/th-hud-publish/scripts/publish.py --url http://127.0.0.1:9090/mcp ...`
+- `th-hud-publish` and `user-test` use the shared publisher:
+  `python .claude/skills/th-hud-publish/scripts/publish.py --url http://127.0.0.1:9090/mcp ...`
 - `hud-projection`: set `HUD_MCP_URL=http://127.0.0.1:9090/mcp` and the agent PSK.
-- `user-test`: `publish_zone_batch.py` and `publish_widget_batch.py` work when
-  given a local `--url` (or `HUD_HOST=127.0.0.1`).
 
 ## Running the gates
 
