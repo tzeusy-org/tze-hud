@@ -173,7 +173,7 @@ async fn status_bar_card_hugs_rows_and_is_bottom_anchored() {
     let mut scene = scene_with_entries(policy, &[("build", "green")]);
     publish_entries(&mut scene, "second", [("agent", "Claude reviewing")]);
     let card = card_for(&compositor, &scene).unwrap();
-    let items = card.text_items(1.0);
+    let items = compositor.collect_text_items(&scene, SW, SH);
     assert!(items.iter().map(|item| item.text.as_ref()).eq([
         "agent",
         "Claude reviewing",
