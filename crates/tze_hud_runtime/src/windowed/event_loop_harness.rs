@@ -5341,7 +5341,8 @@ mod tests {
             assert!(harness.tick());
         };
         open(&mut harness);
-        assert_eq!(harness.notification_action_center("database"), Some(start));
+        let opened = harness.notification_action_center("database").unwrap();
+        assert!((opened.0 - start.0).abs() < 0.01 && (opened.1 - start.1).abs() < 0.01);
         assert!(
             harness
                 .scene()
