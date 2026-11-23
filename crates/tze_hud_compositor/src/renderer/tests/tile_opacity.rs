@@ -446,12 +446,12 @@ async fn hud_w41ef_portal_backdrop_opaque_after_resize_grow_no_fade() {
     };
     let default_backdrop_color = default_backdrop.color;
     use DegradationLevel::{Nominal, Simplified};
-    let custom = Some(Rgba::new(0.03, 0.07, 0.16, 0.35));
+    let translucent_backdrop = Rgba::new(0.03, 0.07, 0.16, 0.35);
     let transparent = Some(Rgba::new(0.03, 0.07, 0.16, 0.0));
     let custom_tints = [Rgba::new(0.0, 1.0, 0.0, 0.8), Rgba::new(1.0, 0.0, 0.0, 0.8)];
     let clear_tints = [Rgba::new(1.0, 0.0, 0.0, 0.0), Rgba::new(0.0, 1.0, 0.0, 0.0)];
     for (level, pane_color) in [Nominal, Simplified].into_iter().flat_map(|level| {
-        [None, transparent, custom]
+        [None, transparent, Some(translucent_backdrop)]
             .into_iter()
             .map(move |pane_color| (level, pane_color))
     }) {
@@ -475,7 +475,7 @@ async fn hud_w41ef_portal_backdrop_opaque_after_resize_grow_no_fade() {
                 assert_eq!([hovered, pressed], [idle; 2], "transparent pane");
             } else if opacity == 0.0 {
                 assert_eq!([hovered, pressed], [[0; 4]; 2]);
-            } else if pane_color == custom {
+            } else if pane_color == Some(translucent_backdrop) {
                 assert_tint(hovered, 1, "custom green hover");
                 assert_tint(pressed, 0, "custom red press");
             } else {
@@ -497,11 +497,11 @@ async fn hud_w41ef_portal_backdrop_opaque_after_resize_grow_no_fade() {
         }
     }
 
-    // Explicit zero-alpha overrides disable feedback on the visible default pane.
+    // Explicit zero-alpha overrides disable feedback on the translucent pane.
     let NodeData::SolidColor(fill) = &mut scene.nodes.get_mut(&input_backdrop).unwrap().data else {
         unreachable!()
     };
-    fill.color = default_backdrop_color;
+    fill.color = translucent_backdrop;
     scene.tiles.get_mut(&tile_id).unwrap().opacity = 1.0;
     scene.version += 1;
     prime_text(&mut compositor, &scene);
