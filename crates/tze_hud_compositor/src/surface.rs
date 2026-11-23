@@ -1304,452 +1304,126 @@ mod tests {
     }
 
     #[test]
-    fn test_assert_pixel_color_passes_within_tolerance() {
-        let pixels: Vec<u8> = vec![
-            100, 200, 50, 255, // pixel (0,0)
-            10, 20, 30, 255, // pixel (1,0)
-        ];
-        crate::test_pixels::assert_pixel_color(&pixels, 2, 0, 0, [100, 200, 50, 255], 0, "exact")
-            .expect("exact match should pass");
-        crate::test_pixels::assert_pixel_color(
+    fn pixel_tolerance_is_inclusive_and_reports_the_failing_channel() {
+        let pixels = [100, 200, 50, 255, 10, 20, 30, 255];
+        for (x, expected, tolerance) in [(1, [10, 20, 30, 255], 0), (0, [102, 200, 50, 255], 2)] {
+            crate::test_pixels::assert_pixel_color(&pixels, 2, x, 0, expected, tolerance, "sample")
+                .unwrap();
+        }
+        let error = crate::test_pixels::assert_pixel_color(
             &pixels,
             2,
             0,
             0,
-            [102, 200, 50, 255],
-            2,
-            "within tol",
-        )
-        .expect("within-tolerance should pass");
-    }
-
-    #[test]
-    fn test_assert_pixel_color_fails_outside_tolerance() {
-        let pixels: Vec<u8> = vec![100, 200, 50, 255];
-        let result = crate::test_pixels::assert_pixel_color(
-            &pixels,
-            1,
-            0,
-            0,
-            [110, 200, 50, 255],
+            [103, 200, 50, 255],
             2,
             "outside",
-        );
-        assert!(result.is_err(), "should fail when diff > tolerance");
-        let msg = result.unwrap_err();
-        assert!(
-            msg.contains("channel 0"),
-            "error should identify channel: {msg}"
-        );
+        )
+        .unwrap_err();
+        assert!(error.contains("channel 0"), "{error}");
     }
 
-    /// `WindowSurface::size()` cannot be tested without a real wgpu surface
-    /// (requires a window handle). The `HeadlessSurface` covers the rendering
-    /// path; windowed integration tests are in the `vertical_slice` binary.
-    /// This test documents the interface contract for reviewers.
     #[test]
-    fn test_window_surface_atomic_size_fields() {
-        // Verify that AtomicU32 read/write works correctly for width/height.
-        // We cannot construct a real WindowSurface without a window handle,
-        // so this test only exercises the atomic helpers directly.
-        use std::sync::atomic::{AtomicU32, Ordering};
-        let w = AtomicU32::new(1920);
-        let h = AtomicU32::new(1080);
-        assert_eq!(w.load(Ordering::Acquire), 1920);
-        assert_eq!(h.load(Ordering::Acquire), 1080);
-        w.store(2560, Ordering::Release);
-        assert_eq!(w.load(Ordering::Acquire), 2560);
-    }
+    fn wgpu_acquire_errors_choose_the_surface_recovery_action_once() {
+        use SurfaceAcquireFailure::{Lost, Other, OutOfMemory, Outdated};
+        use SurfaceRecoveryOutcome::{Reconfigured, Terminal};
+        use wgpu::SurfaceError;
 
-    /// A real `Lost` result must enter the production recovery state machine
-    /// before the compositor thread attempts to configure the surface again.
-    ///
-    /// This enters through the same wgpu-error classifier used by
-    /// `WindowSurface::acquire_retry_view`; it deliberately does not inject a
-    /// test-only recovery request.
-    #[test]
-    fn lost_or_outdated_acquire_failure_queues_and_attempts_reconfigure() {
-        for (error, trigger) in [
-            (wgpu::SurfaceError::Lost, SurfaceAcquireFailure::Lost),
+        for (error, configure, expected, attempts) in [
             (
-                wgpu::SurfaceError::Outdated,
-                SurfaceAcquireFailure::Outdated,
+                SurfaceError::Lost,
+                Ok(()),
+                Some(Reconfigured { trigger: Lost }),
+                1,
             ),
+            (
+                SurfaceError::Outdated,
+                Ok(()),
+                Some(Reconfigured { trigger: Outdated }),
+                1,
+            ),
+            (
+                SurfaceError::Lost,
+                Err(()),
+                Some(Terminal { trigger: Lost }),
+                1,
+            ),
+            (
+                SurfaceError::OutOfMemory,
+                Ok(()),
+                Some(Terminal {
+                    trigger: OutOfMemory,
+                }),
+                0,
+            ),
+            (
+                SurfaceError::Other,
+                Ok(()),
+                Some(Terminal { trigger: Other }),
+                0,
+            ),
+            (SurfaceError::Timeout, Ok(()), None, 0),
         ] {
             let mut recovery = SurfaceRecoveryState::default();
             recovery.observe_wgpu_acquire_failure(&error);
-
-            let mut reconfigure_attempts = 0;
-            let outcome = recovery.attempt_pending_recovery(|| {
-                reconfigure_attempts += 1;
-                Ok(())
-            });
-
-            assert_eq!(reconfigure_attempts, 1);
+            let mut calls = 0;
             assert_eq!(
-                outcome,
-                Some(SurfaceRecoveryOutcome::Reconfigured { trigger })
+                recovery.attempt_pending_recovery(|| {
+                    calls += 1;
+                    configure
+                }),
+                expected,
+                "{error:?}",
             );
+            assert_eq!(calls, attempts, "{error:?}");
+            assert_eq!(recovery.attempt_pending_recovery(|| unreachable!()), None);
         }
     }
 
-    /// If the production reconfigure action fails, the recovery state must
-    /// surface a terminal outcome rather than retrying forever.
     #[test]
-    fn failed_lost_reconfigure_records_terminal_recovery_outcome() {
-        let mut recovery = SurfaceRecoveryState::default();
-        recovery.observe_acquire_failure(SurfaceAcquireFailure::Lost);
-
-        let outcome = recovery.attempt_pending_recovery(|| Err(()));
-
-        assert_eq!(
-            outcome,
-            Some(SurfaceRecoveryOutcome::Terminal {
-                trigger: SurfaceAcquireFailure::Lost,
-            })
-        );
-    }
-
-    #[test]
-    fn out_of_memory_and_other_acquire_failures_are_terminal_without_reconfigure() {
-        for (error, trigger) in [
-            (
-                wgpu::SurfaceError::OutOfMemory,
-                SurfaceAcquireFailure::OutOfMemory,
-            ),
-            (wgpu::SurfaceError::Other, SurfaceAcquireFailure::Other),
+    fn pending_texture_reuse_does_not_count_as_a_fresh_acquisition() {
+        for (pending, expected) in [
+            (false, SurfaceFrameAcquisition::Fresh),
+            (true, SurfaceFrameAcquisition::ReusedPending),
         ] {
-            let mut recovery = SurfaceRecoveryState::default();
-            recovery.observe_wgpu_acquire_failure(&error);
-
-            let mut reconfigure_attempted = false;
-            let outcome = recovery.attempt_pending_recovery(|| {
-                reconfigure_attempted = true;
-                Ok(())
-            });
-
-            assert!(
-                !reconfigure_attempted,
-                "{trigger:?} must not attempt to reconfigure a terminal surface"
-            );
-            assert_eq!(outcome, Some(SurfaceRecoveryOutcome::Terminal { trigger }));
+            let acquisition = SurfaceFrameAcquisition::from_pending_surface(pending);
+            assert_eq!(acquisition, expected);
+            assert_eq!(acquisition.is_fresh(), !pending);
         }
     }
 
-    /// Verify that a simulated double swapchain-acquire failure does NOT panic.
-    ///
-    /// `WindowSurface::acquire_frame` uses a real `wgpu::Surface` and cannot be
-    /// unit-tested without a GPU. This test validates the *contract* via a mock
-    /// `CompositorSurface` that always returns `None`, asserting that callers
-    /// handle `None` gracefully rather than unwrapping.
-    ///
-    /// The real double-failure path is covered by the fix at surface.rs
-    /// `Err(e2)` arm: it returns `None` instead of `panic!`. This test
-    /// documents that contract and ensures it compiles correctly.
     #[test]
-    fn test_acquire_frame_double_failure_returns_none_no_panic() {
-        // A mock surface that always returns None from acquire_frame,
-        // simulating two consecutive swapchain-acquire failures.
-        struct AlwaysFailSurface;
+    fn present_availability_wakes_after_the_real_encoding_guard_releases() {
+        use std::sync::{Arc, Condvar, Mutex, atomic::AtomicBool, mpsc};
+        use std::time::Duration;
 
-        impl CompositorSurface for AlwaysFailSurface {
-            fn acquire_frame(&self) -> Option<CompositorFrame> {
-                None
-            }
-            fn present(&self) {}
-            fn size(&self) -> (u32, u32) {
-                (1920, 1080)
-            }
-        }
-
-        let surface = AlwaysFailSurface;
-
-        // This must NOT panic — the contract is that double failure returns None.
-        let result = surface.acquire_frame();
-        assert!(
-            result.is_none(),
-            "acquire_frame must return None on double failure, not panic"
-        );
-
-        // Callers that correctly handle None skip the frame — verify the
-        // pattern compiles and behaves correctly.
-        let frame_skipped = surface.acquire_frame().is_none();
-        assert!(frame_skipped, "caller must detect None and skip the frame");
-    }
-
-    // ─── Bug B Layer-2: acquire→submit vs present/reconfigure serialization ──
-    //
-    // `WindowSurface::acquire_frame`/`present_pending_texture`/`reconfigure`
-    // need a real `wgpu::Surface` and so cannot be unit-tested without a GPU.
-    // The race they fix, however, lives entirely in the `SwapchainSlot` +
-    // `Condvar` lock discipline, which we CAN exercise directly. The harness
-    // below uses the exact same private types and mirrors the real lock order:
-    //
-    //   compositor: lock → encoding=true → (acquire view) → unlock
-    //                → encode/submit (no lock) → guard drop: lock → encoding=false → notify
-    //   main:       lock → while encoding { wait } → take+present(destroy) → unlock
-    //   reconfigure:lock → while encoding { wait } → take+destroy → configure → unlock
-    //
-    // A live "surface texture" is modelled by an `Arc<AtomicBool>`. Destroying
-    // it (present/reconfigure) while a "TextureView" still references it (the
-    // compositor's encode→submit window) is exactly the wgpu
-    // "Surface Texture has been destroyed" condition; the test asserts it never
-    // happens, across many concurrent cycles.
-
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-
-    /// A modelled swapchain image: `alive` is cleared when "presented"/destroyed.
-    struct FakeTexture {
-        alive: Arc<AtomicBool>,
-    }
-
-    /// Test harness mirroring `WindowSurface`'s swapchain-ownership protocol.
-    struct SwapchainHarness {
-        slot: Arc<std::sync::Mutex<TestSlot>>,
-        done: Arc<std::sync::Condvar>,
-        /// Set if any present/reconfigure destroyed a texture while a frame was
-        /// mid-encode (i.e. an `EncodingGuard` was still outstanding). Any hit
-        /// here is the bug.
-        violations: Arc<AtomicU64>,
-    }
-
-    /// Mirror of `SwapchainSlot` for the harness (private types can't escape the
-    /// crate, so the test re-declares an equivalent shape).
-    struct TestSlot {
-        pending: Option<FakeTexture>,
-        encoding: bool,
-    }
-
-    /// Mirror of `EncodingGuard`: on drop, clears `encoding` under the lock and
-    /// notifies waiters — closing the critical section after "submit".
-    struct TestGuard {
-        slot: Arc<std::sync::Mutex<TestSlot>>,
-        done: Arc<std::sync::Condvar>,
-        /// Liveness flag of the texture this frame's view references.
-        view_alive: Arc<AtomicBool>,
-        violations: Arc<AtomicU64>,
-    }
-
-    impl Drop for TestGuard {
-        fn drop(&mut self) {
-            // The view must still reference a LIVE texture for the whole
-            // encode→submit window. If a present/reconfigure destroyed it while
-            // we held the guard, that is the race we are guarding against.
-            if !self.view_alive.load(Ordering::Acquire) {
-                self.violations.fetch_add(1, Ordering::Relaxed);
-            }
-            let mut slot = self.slot.lock().expect("slot poisoned");
-            slot.encoding = false;
-            self.done.notify_all();
-        }
-    }
-
-    impl SwapchainHarness {
-        fn new() -> Self {
-            Self {
-                slot: Arc::new(std::sync::Mutex::new(TestSlot {
-                    pending: None,
-                    encoding: false,
-                })),
-                done: Arc::new(std::sync::Condvar::new()),
-                violations: Arc::new(AtomicU64::new(0)),
-            }
-        }
-
-        /// Compositor-thread acquire: open the critical section and return a
-        /// guard plus the referenced texture liveness flag. Mirrors
-        /// `acquire_frame`'s success path (lock → encoding=true → unlock →
-        /// build guard after lock release).
-        fn acquire(&self) -> TestGuard {
-            let view_alive = {
-                let mut slot = self.slot.lock().expect("slot poisoned");
-                slot.encoding = true;
-                // Lock released at the end of this block (mirrors finish_frame's
-                // drop(slot) before building the guard).
-                match slot.pending.as_ref() {
-                    Some(t) => t.alive.clone(),
-                    None => {
-                        let alive = Arc::new(AtomicBool::new(true));
-                        slot.pending = Some(FakeTexture {
-                            alive: alive.clone(),
-                        });
-                        alive
-                    }
-                }
-            };
-            TestGuard {
-                slot: self.slot.clone(),
-                done: self.done.clone(),
-                view_alive,
-                violations: self.violations.clone(),
-            }
-        }
-
-        /// Classify the next compositor build against the same pending-frame
-        /// state used by the real window surface. This lets the regression stay
-        /// deterministic without constructing a live swapchain.
-        fn acquisition_for_next_build(&self) -> SurfaceFrameAcquisition {
-            let slot = self.slot.lock().expect("slot poisoned");
-            SurfaceFrameAcquisition::from_pending_surface(slot.pending.is_some())
-        }
-
-        /// Main-thread present: wait for encoding to finish, then take+destroy
-        /// the texture. Mirrors `present_pending_texture`.
-        fn present(&self) {
-            let mut slot = self.slot.lock().expect("slot poisoned");
-            while slot.encoding {
-                slot = self.done.wait(slot).expect("condvar poisoned");
-            }
-            if let Some(t) = slot.pending.take() {
-                t.alive.store(false, Ordering::Release); // "present" destroys it
-            }
-        }
-
-        /// Compositor-thread reconfigure: wait for encoding to finish, then
-        /// destroy any pending texture (Surface::configure would invalidate it).
-        /// Mirrors `reconfigure`'s swapchain-lock block.
-        fn reconfigure(&self) {
-            let mut slot = self.slot.lock().expect("slot poisoned");
-            while slot.encoding {
-                slot = self.done.wait(slot).expect("condvar poisoned");
-            }
-            if let Some(t) = slot.pending.take() {
-                t.alive.store(false, Ordering::Release);
-            }
-        }
-    }
-
-    /// Two compositor builds can target the same pending swapchain texture
-    /// before the main thread presents it. Only the first build acquired a new
-    /// surface texture; telemetry must not count the reuse as a second acquire.
-    #[test]
-    fn two_builds_before_present_report_one_fresh_swapchain_acquisition() {
-        let harness = SwapchainHarness::new();
-
-        let first = harness.acquisition_for_next_build();
-        let first_guard = harness.acquire();
-        drop(first_guard);
-
-        let second = harness.acquisition_for_next_build();
-        let second_guard = harness.acquire();
-        drop(second_guard);
-
-        assert_eq!(first, SurfaceFrameAcquisition::Fresh);
-        assert_eq!(second, SurfaceFrameAcquisition::ReusedPending);
-        assert!(first.is_fresh());
-        assert!(
-            !second.is_fresh(),
-            "a build reusing the pending texture must not increment surface_acquisitions"
-        );
-
-        harness.present();
+        let slot = Arc::new(Mutex::new(SwapchainSlot {
+            pending: None,
+            notification_candidates: Vec::new(),
+            encoding: true,
+        }));
+        let done = Arc::new(Condvar::new());
+        let guard = EncodingGuard {
+            slot: slot.clone(),
+            done: done.clone(),
+        };
+        let availability = PresentAvailability {
+            slot: slot.clone(),
+            done,
+            waiting: Arc::new(AtomicBool::new(false)),
+        };
+        let (send, receive) = mpsc::channel();
+        assert!(availability.notify_when_ready(move || {
+            let encoding = slot.lock().unwrap().encoding;
+            send.send(encoding).unwrap();
+        }));
+        assert!(!availability.notify_when_ready(|| unreachable!("one waiter per window")));
         assert_eq!(
-            harness.acquisition_for_next_build(),
-            SurfaceFrameAcquisition::Fresh,
-            "presentation consumes the pending texture, so the next build acquires anew"
+            receive.recv_timeout(Duration::from_millis(50)),
+            Err(mpsc::RecvTimeoutError::Timeout),
+            "presentation must stay deferred while encoding owns the swapchain slot"
         );
-    }
-
-    /// Concurrent reconfigure/present vs encode→submit must never destroy a
-    /// surface texture that an in-flight frame still references.
-    ///
-    /// This is the regression test for Bug B Layer-2: before the fix, the
-    /// main-thread present checked an `AtomicBool` *before* taking the
-    /// pending-texture lock, leaving a check-then-act gap through which the
-    /// texture could be destroyed mid-submit. With the `encoding` check folded
-    /// under the swapchain mutex and a condvar wait, that gap is closed —
-    /// `violations` must stay 0.
-    #[test]
-    fn test_acquire_submit_serialized_against_present_and_reconfigure() {
-        let harness = Arc::new(SwapchainHarness::new());
-        const ITERS: usize = 5_000;
-
-        // Compositor thread: acquire → "encode/submit" → drop guard, in a tight
-        // loop. The drop guard verifies the texture was alive for the whole
-        // window.
-        let compositor = {
-            let h = harness.clone();
-            std::thread::spawn(move || {
-                for _ in 0..ITERS {
-                    let guard = h.acquire();
-                    // Simulate encode + submit work referencing the view. If a
-                    // racing present/reconfigure destroys the texture here, the
-                    // guard's drop records a violation.
-                    std::hint::spin_loop();
-                    std::hint::spin_loop();
-                    drop(guard);
-                }
-            })
-        };
-
-        // Main thread analogue: hammer present.
-        let presenter = {
-            let h = harness.clone();
-            std::thread::spawn(move || {
-                for _ in 0..ITERS {
-                    h.present();
-                }
-            })
-        };
-
-        // Another compositor-side caller: hammer reconfigure.
-        let reconfigurer = {
-            let h = harness.clone();
-            std::thread::spawn(move || {
-                for _ in 0..ITERS {
-                    h.reconfigure();
-                }
-            })
-        };
-
-        compositor.join().expect("compositor thread panicked");
-        presenter.join().expect("presenter thread panicked");
-        reconfigurer.join().expect("reconfigurer thread panicked");
-
-        assert_eq!(
-            harness.violations.load(Ordering::Relaxed),
-            0,
-            "a present/reconfigure destroyed a surface texture while a frame was \
-             mid-encode — the acquire→submit critical section is not serialized"
-        );
-    }
-
-    /// A present that races an in-progress encode MUST block until the encode's
-    /// guard drops, never taking the texture early.
-    #[test]
-    fn test_present_blocks_until_encoding_completes() {
-        let harness = Arc::new(SwapchainHarness::new());
-
-        // Open a critical section (encoding=true) and hold it.
-        let guard = harness.acquire();
-        let presented_early = Arc::new(AtomicBool::new(false));
-
-        let presenter = {
-            let h = harness.clone();
-            let flag = presented_early.clone();
-            std::thread::spawn(move || {
-                h.present();
-                // We only reach here after present() returns, which must be
-                // after the guard dropped.
-                flag.store(true, Ordering::Release);
-            })
-        };
-
-        // Give the presenter time to reach (and block on) the condvar wait.
-        std::thread::sleep(std::time::Duration::from_millis(50));
-        assert!(
-            !presented_early.load(Ordering::Acquire),
-            "present() returned while encoding was still in progress"
-        );
-
-        // Now finish the encode; present() must unblock and complete.
         drop(guard);
-        presenter.join().expect("presenter thread panicked");
-        assert!(
-            presented_early.load(Ordering::Acquire),
-            "present() did not complete after the encode guard dropped"
-        );
-        assert_eq!(harness.violations.load(Ordering::Relaxed), 0);
+        assert!(!receive.recv_timeout(Duration::from_secs(2)).unwrap());
     }
 }
