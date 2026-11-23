@@ -476,18 +476,18 @@ mod tests {
         let title = "Nightly migration report for every production shard and region";
         let body = "The nightly migration finished but three shards reported checksum \
             drift that needs a manual look before tomorrow's deploy window opens";
-        let clipped = fit.notification(&scene, ZONE, &card(title, body, &[]), None);
+        let measure = |title: &str, body: &str, labels: &[&str]| {
+            fit.notification(&scene, ZONE, &card(title, body, labels), None)
+        };
+        let clipped = measure(title, body, &[]);
         let t = reported(&clipped, "title").expect("title cut");
         let b = reported(&clipped, "body").expect("body cut");
         assert!(t > 0 && t < title.chars().count(), "{clipped:?}");
         assert!(b > 0 && b < body.chars().count(), "{clipped:?}");
-        let again = fit.notification(
-            &scene,
-            ZONE,
-            &card(char_prefix(title, t), char_prefix(body, b), &[]),
-            None,
-        );
+        let again = measure(char_prefix(title, t), char_prefix(body, b), &[]);
         assert!(again.is_empty(), "{t}/{b}: {again:?}");
+        let short = measure("Build", "All tests passed.", &["Open", "Ok"]);
+        assert!(short.is_empty(), "{short:?}");
     }
 
     /// `actions` is the smallest count among the cut labels, each found
@@ -500,8 +500,10 @@ mod tests {
         let longer =
             "Roll back every region, then page the on-call engineer for a full incident review";
         let labels = [long, "Hold", longer];
+        let measure =
+            |labels: &[&str]| fit.notification(&scene, ZONE, &card("", "Deploy?", labels), None);
         PREFIX_PROBES.with(|p| p.set(0));
-        let clipped = fit.notification(&scene, ZONE, &card("", "Deploy?", &labels), None);
+        let clipped = measure(&labels);
         let probes = PREFIX_PROBES.with(std::cell::Cell::get);
         assert!(
             probes <= bound(long.chars().count()) + bound(longer.chars().count()),
@@ -511,29 +513,16 @@ mod tests {
         assert_eq!(clipped, [("actions", n)]);
         // Each cut label alone reports its own count; the reply carries the
         // smaller one.
-        let alone = |label: &str| {
-            reported(
-                &fit.notification(
-                    &scene,
-                    ZONE,
-                    &card("", "Deploy?", &[label, "Hold", "Ok"]),
-                    None,
-                ),
-                "actions",
-            )
-        };
+        let alone = |label: &str| reported(&measure(&[label, "Hold", "Ok"]), "actions");
         let (a, b) = (alone(long).unwrap(), alone(longer).unwrap());
         assert!(a > 0 && b > 0);
         assert_eq!(n, a.min(b), "smallest: {n} vs {a}/{b}");
         let shortened: Vec<&str> = labels.iter().map(|l| char_prefix(l, n)).collect();
-        let again = fit.notification(&scene, ZONE, &card("", "Deploy?", &shortened), None);
+        let again = measure(&shortened);
         assert!(again.is_empty(), "{n}: {again:?}");
         let one_more = [char_prefix(long, a + 1), "Hold", "Ok"];
         assert_eq!(
-            reported(
-                &fit.notification(&scene, ZONE, &card("", "Deploy?", &one_more), None),
-                "actions"
-            ),
+            reported(&measure(&one_more), "actions"),
             Some(a),
             "one more character is cut"
         );
@@ -544,25 +533,18 @@ mod tests {
     #[test]
     fn a_line_break_ends_the_label_count() {
         let (fit, scene) = measurer_and_scene();
-        let clipped = fit.notification(
-            &scene,
-            ZONE,
-            &card("", "Retry?", &["Retry\nwith detail", "No"]),
-            None,
-        );
+        let measure = |body: &str, label: &str| {
+            fit.notification(&scene, ZONE, &card("", body, &[label, "No"]), None)
+        };
+        let clipped = measure("Retry?", "Retry\nwith detail");
         assert_eq!(clipped, [("actions", 5)]);
 
         let line = "Deploy the release to every production region and every staging region";
         let label = format!("{line}\nthen page");
-        let clipped = fit.notification(&scene, ZONE, &card("", "Deploy?", &[&label, "No"]), None);
+        let clipped = measure("Deploy?", &label);
         let n = reported(&clipped, "actions").expect("cut");
         assert!(n > 0 && n < line.chars().count(), "{clipped:?}");
-        let again = fit.notification(
-            &scene,
-            ZONE,
-            &card("", "Deploy?", &[char_prefix(line, n), "No"]),
-            None,
-        );
+        let again = measure("Deploy?", char_prefix(line, n));
         assert!(again.is_empty(), "{n}: {again:?}");
     }
 
@@ -610,19 +592,6 @@ mod tests {
                 assert!(again.is_empty(), "{link} k={k} n={n}: {again:?}");
             }
         }
-    }
-
-    /// Text that fits reports nothing.
-    #[test]
-    fn a_card_that_fits_reports_nothing() {
-        let (fit, scene) = measurer_and_scene();
-        let clipped = fit.notification(
-            &scene,
-            ZONE,
-            &card("Build", "All tests passed.", &["Open", "Ok"]),
-            None,
-        );
-        assert!(clipped.is_empty(), "{clipped:?}");
     }
 
     fn bar_scene() -> (TextFitMeasurer, SceneGraph) {
