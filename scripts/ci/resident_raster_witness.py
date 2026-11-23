@@ -2,7 +2,7 @@
 
 Private Xvfb: .venv/bin/python3 scripts/ci/resident_raster_witness.py \
     --exe target/release-dev/tze_hud --out test_results/resident-raster
-The Windows workflow supplies its already-built WARP fullscreen executable.
+The Windows workflow supplies its already-built fullscreen executable on hosted Windows.
 """
 
 from __future__ import annotations
@@ -208,25 +208,27 @@ async def exercise(run: Run, report: dict, owner: Resident, peer: Resident) -> N
     await wait_due(denied_due, after_s=0.5)
     await capture(run, report, "after-denied-due", unchanged)
 
-    report["phase"] = "owner-schedule"
-    due = wall_us() + SCHEDULE_US
-    await owner.request("publish", image(PIP, digest, due=due))
-    await capture(run, report, "before-due", unchanged, before_us=due)
-    await wait_due(due)
-    await capture(run, report, "after-due", lambda s: matches(s["pip"], DIRECTIONAL, 16)
-                  and matches(s["ambient"], marker_pixels["ambient"], 6), settle_s=8)
-
     report["phase"] = "peer-first-grant"
     await peer.upload(data, digest, deduplicated=True)
     await peer.request("publish", image(AMBIENT, digest))
-    peer_pixels = await capture(run, report, "both-grants", lambda s: matches(s["pip"], DIRECTIONAL, 16)
-                                and matches(s["ambient"], DIRECTIONAL, 66), settle_s=6)
+    peer_pixels = await capture(run, report, "peer-image", lambda s: matches(s["ambient"], DIRECTIONAL, 66),
+                                settle_s=6)
+
+    def peer_unchanged(samples):
+        return all(matches(samples[zone], peer_pixels[zone], 6) for zone in POINTS)
+
+    report["phase"] = "owner-schedule"
+    due = wall_us() + SCHEDULE_US
+    await owner.request("publish", image(PIP, digest, due=due))
+    await capture(run, report, "before-due", peer_unchanged, before_us=due)
+    await wait_due(due)
+    await capture(run, report, "after-due", lambda s: matches(s["pip"], DIRECTIONAL, 16)
+                  and matches(s["ambient"], peer_pixels["ambient"], 6), settle_s=8)
 
     report["phase"] = "owner-clear"
     await owner.request("clear", session.Clear(surface=PIP))
-    # At these screen positions, the underlying full-screen image shows its right quadrants.
-    await capture(run, report, "after-clear", lambda s: matches(s["pip"], (GREEN, GREEN, YELLOW, YELLOW), 66)
-                  and matches(s["ambient"], peer_pixels["ambient"], 6), settle_s=6)
+    # Compare the same patches, including the ambient image's bilinear transitions.
+    await capture(run, report, "after-clear", peer_unchanged, settle_s=6)
 
     report["phase"] = "owner-reuse"
     await owner.upload(data, digest, deduplicated=True, reuse=True)
@@ -256,6 +258,14 @@ async def witness(run: Run, report: dict) -> None:
             await stream.send(session_close=session.SessionClose(reason="raster witness complete"))
 
 
+def build_identity(run: Run, checkout: str) -> dict:
+    status = run.status()
+    identity = dict(sha=status.get("sha"), pid=status.get("pid"))
+    assert identity["pid"] == run.pid, "operator status belongs to a different process"
+    assert identity["sha"] == checkout, "running build does not match the witness checkout"
+    return identity
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--exe", type=Path, required=True)
@@ -275,9 +285,12 @@ def main() -> int:
         with CONFIG.open("rb") as config:
             report["config_sha256"] = hashlib.file_digest(config, "sha256").hexdigest()
         run.start(resident_raster=True)
-        report.update(pid=run.pid, display=run.display or "primary", phase="authenticate")
+        report.update(pid=run.pid, display=run.display or "primary", phase="build-identity")
+        report["build_start"] = build_identity(run, checkout)
+        report["phase"] = "authenticate"
         asyncio.run(witness(run, report))
-        assert run.hud.poll() is None and run.status().get("pid") == run.pid, "owned HUD did not survive the witness"
+        report["build_end"] = build_identity(run, checkout)
+        assert run.hud.poll() is None, "owned HUD did not survive the witness"
         report.update(outcome="PASS", phase="complete")
     except Exception as error:  # Never log gRPC errors or protobufs containing a credential.
         report["error"] = type(error).__name__

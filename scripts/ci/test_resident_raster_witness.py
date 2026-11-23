@@ -11,6 +11,15 @@ from windows_smoke import encode_png_rgba
 
 
 class ResidentRasterWitnessTests(unittest.IsolatedAsyncioTestCase):
+    def test_running_build_identity_rejects_other_checkouts_and_processes(self) -> None:
+        run = mock.Mock(pid=42, **{"status.return_value": {"pid": 42, "sha": "a" * 40}})
+        self.assertEqual(raster.build_identity(run, "a" * 40), {"pid": 42, "sha": "a" * 40})
+        with self.assertRaisesRegex(AssertionError, "checkout"):
+            raster.build_identity(run, "b" * 40)
+        run.status.return_value = {"pid": 43, "sha": "a" * 40}
+        with self.assertRaisesRegex(AssertionError, "process"):
+            raster.build_identity(run, "a" * 40)
+
     async def test_capture_decodes_direction_and_rejects_an_early_frame_that_arrives_late(self) -> None:
         src = raster.directional_rgba()
         # Derive a fullscreen rendering from the uploaded texels without using
