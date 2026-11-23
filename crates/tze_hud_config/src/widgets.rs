@@ -70,7 +70,7 @@ pub struct LoadedWidgetType {
 /// - `errors`: Mutable error accumulator.
 ///
 /// Returns the set of loaded widget type names for downstream reference validation.
-pub fn validate_widget_bundles(
+pub(crate) fn validate_widget_bundles(
     raw: &RawConfig,
     config_parent: Option<&Path>,
     loaded_types: &[LoadedWidgetType],
@@ -132,7 +132,7 @@ pub fn validate_widget_bundles(
 /// - `type_map`: A map from widget type name to its parameter schema (for `initial_params`
 ///   validation). May be empty if no bundles were loaded.
 /// - `errors`: Mutable error accumulator.
-pub fn validate_widget_instances(
+pub(crate) fn validate_widget_instances(
     raw: &RawConfig,
     known_types: &HashSet<String>,
     type_map: &HashMap<String, LoadedWidgetType>,

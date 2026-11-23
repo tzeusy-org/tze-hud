@@ -75,7 +75,7 @@ pub fn match_display_key(configured: &str, connected: &[(&str, Option<&str>)]) -
 
 /// Validate `[displays]`: zones must be known zone instances and each zone may
 /// be assigned to at most one display.
-pub fn validate_displays(raw: &RawConfig, errors: &mut Vec<ConfigError>) {
+pub(crate) fn validate_displays(raw: &RawConfig, errors: &mut Vec<ConfigError>) {
     let Some(displays) = &raw.displays else {
         return;
     };

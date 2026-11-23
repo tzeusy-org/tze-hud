@@ -1588,10 +1588,10 @@ pub fn resolve_motion_duration_ms(tokens: &DesignTokenMap, key: &str) -> u32 {
 
 /// How long a destructive notification action must be held before it fires
 /// (ms). `0` turns the hold off.
-pub const NOTIFICATION_ACTION_HOLD_MS_KEY: &str = "notification.action.hold.ms";
+const NOTIFICATION_ACTION_HOLD_MS_KEY: &str = "notification.action.hold.ms";
 
 /// The longest hold [`NOTIFICATION_ACTION_HOLD_MS_KEY`] may ask for.
-pub const MAX_NOTIFICATION_ACTION_HOLD_MS: u32 = 3_000;
+const MAX_NOTIFICATION_ACTION_HOLD_MS: u32 = 3_000;
 
 fn parse_hold_ms(value: &str) -> Option<u32> {
     value
@@ -1601,8 +1601,8 @@ fn parse_hold_ms(value: &str) -> Option<u32> {
         .filter(|ms| *ms <= MAX_NOTIFICATION_ACTION_HOLD_MS)
 }
 
-/// The destructive-action hold in ms ([`NOTIFICATION_ACTION_HOLD_MS_KEY`]);
-/// the canonical default when unset or invalid.
+/// The destructive-action hold in ms from `notification.action.hold.ms`.
+/// Uses the canonical default when unset or invalid.
 pub fn notification_action_hold_ms(tokens: &DesignTokenMap) -> u32 {
     safety_interval_ms(tokens, NOTIFICATION_ACTION_HOLD_MS_KEY)
 }
@@ -1610,10 +1610,10 @@ pub fn notification_action_hold_ms(tokens: &DesignTokenMap) -> u32 {
 /// A card that an agent puts under a resting pointer ignores pointer presses
 /// on its controls for this long (ms). `0` turns the guard off. A safety
 /// interval, not motion: the OS animation preference leaves it alone.
-pub const NOTIFICATION_PRESS_GUARD_MS_KEY: &str = "notification.press_guard.ms";
+const NOTIFICATION_PRESS_GUARD_MS_KEY: &str = "notification.press_guard.ms";
 
-/// The fresh-card press guard in ms ([`NOTIFICATION_PRESS_GUARD_MS_KEY`]);
-/// the canonical default when unset or invalid.
+/// The fresh-card press guard in ms from `notification.press_guard.ms`.
+/// Uses the canonical default when unset or invalid.
 pub fn notification_press_guard_ms(tokens: &DesignTokenMap) -> u32 {
     safety_interval_ms(tokens, NOTIFICATION_PRESS_GUARD_MS_KEY)
 }
@@ -1709,8 +1709,7 @@ pub(crate) fn validate_canonical_value(key: &str, value: &str) -> Result<(), Str
 ///   ([`apply_os_text_and_caret`]). Unlike the motion layer, nothing in the
 ///   config overrides them.
 ///
-/// Every `runtime.px_scale@<zone>` key ([`ZONE_PX_SCALE_PREFIX`]) is
-/// reserved too ([`is_reserved_runtime_key`]).
+/// Every `runtime.px_scale@<zone>` key is reserved too.
 pub const RESERVED_RUNTIME_TOKEN_KEYS: &[&str] = &[
     "runtime.fonts_dir",
     PX_SCALE_KEY,
@@ -1720,7 +1719,7 @@ pub const RESERVED_RUNTIME_TOKEN_KEYS: &[&str] = &[
 ];
 
 /// Whether the runtime, not config, sets `key`.
-pub fn is_reserved_runtime_key(key: &str) -> bool {
+fn is_reserved_runtime_key(key: &str) -> bool {
     RESERVED_RUNTIME_TOKEN_KEYS.contains(&key) || key.starts_with(ZONE_PX_SCALE_PREFIX)
 }
 
@@ -1902,7 +1901,7 @@ pub const PX_SCALE_KEY: &str = "runtime.px_scale";
 /// Prefix of the px per dp of a zone placed on a secondary monitor:
 /// `runtime.px_scale@<zone>` overrides [`PX_SCALE_KEY`] for that zone
 /// ([`set_zone_px_scale`], [`for_zone`]).
-pub const ZONE_PX_SCALE_PREFIX: &str = "runtime.px_scale@";
+const ZONE_PX_SCALE_PREFIX: &str = "runtime.px_scale@";
 
 /// The map's `ui.scale`, clamped to [`UI_SCALE_RANGE`]; 1 when unset.
 pub fn ui_scale(tokens: &DesignTokenMap) -> f32 {
@@ -1975,16 +1974,6 @@ pub fn for_zone<'a>(tokens: &'a DesignTokenMap, zone: &str) -> Cow<'a, DesignTok
         }
         _ => Cow::Borrowed(tokens),
     }
-}
-
-/// The logical size token `key` (or `default` dp when absent or not a
-/// number) in physical px: the one place a dp size becomes pixels.
-pub fn token_px(tokens: &DesignTokenMap, key: &str, default: f32) -> f32 {
-    tokens
-        .get(key)
-        .and_then(|v| parse_numeric(v))
-        .unwrap_or(default)
-        * px_scale(tokens)
 }
 
 /// Validate the `[design_tokens]` section of a `RawConfig`.
@@ -2392,13 +2381,6 @@ mod tests {
         assert_eq!(px_scale(&tokens), 1.0, "unset means 1");
         set_px_scale(&mut tokens, 1.5);
         assert_eq!(px_scale(&tokens), 1.875);
-        assert_eq!(
-            token_px(&tokens, "space.m", 12.0),
-            22.5,
-            "absent: the default dp"
-        );
-        tokens.insert("space.m".into(), "8".into());
-        assert_eq!(token_px(&tokens, "space.m", 12.0), 15.0);
         set_px_scale(&mut tokens, f64::NAN);
         assert_eq!(px_scale(&tokens), 1.25, "a bogus monitor scale counts as 1");
     }
@@ -2413,7 +2395,6 @@ mod tests {
         let subtitle = for_zone(&tokens, "subtitle");
         assert!(matches!(subtitle, Cow::Owned(_)));
         assert_eq!(px_scale(&subtitle), 1.25);
-        assert_eq!(token_px(&subtitle, "space.m", 8.0), 10.0);
         assert!(matches!(for_zone(&tokens, "status-bar"), Cow::Borrowed(_)));
         let cached = secondary_zone_tokens(&tokens);
         assert_eq!(cached.keys().collect::<Vec<_>>(), ["subtitle"]);
@@ -2545,11 +2526,6 @@ mod tests {
         let mut s1 = at(1.25, "1");
         set_px_scale(&mut s1, 1.5);
         assert_eq!(px_scale(&s1), 1.875);
-        assert_eq!(
-            token_px(&s1, "type.body", 16.0),
-            30.0,
-            "16 dp body at 30 px"
-        );
         assert_eq!(ui_scale(&s1), 1.0, "the owner's Zoom is never rewritten");
     }
 

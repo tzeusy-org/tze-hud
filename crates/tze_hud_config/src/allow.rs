@@ -10,11 +10,11 @@
 //! - `*` — everything else.
 //!
 //! Inside the runtime, allow entries expand to the scene's internal
-//! permission strings via [`allow_to_permissions`]; nothing outside the
+//! permission strings via `allow_to_permissions`; nothing outside the
 //! runtime sees those strings.
 
 /// Validate one allow entry. Returns a hint for an unknown entry.
-pub fn validate_allow_entry(entry: &str) -> Result<(), String> {
+pub(crate) fn validate_allow_entry(entry: &str) -> Result<(), String> {
     match entry {
         "*" | "portal" | "admin" => Ok(()),
         _ => {
@@ -40,7 +40,7 @@ pub fn validate_allow_entry(entry: &str) -> Result<(), String> {
 /// Expand an allow list into the runtime's internal permission strings.
 ///
 /// `*` expands to the unrestricted marker `"*"`.
-pub fn allow_to_permissions(allow: &[String]) -> Vec<String> {
+pub(crate) fn allow_to_permissions(allow: &[String]) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let mut push = |p: &str| {
         if !out.iter().any(|e| e == p) {
@@ -80,7 +80,7 @@ impl Grant {
     pub const ALL: [Grant; 4] = [Grant::Zones, Grant::Widgets, Grant::Portal, Grant::Admin];
 
     /// The allow entry that grants the whole class.
-    pub fn entry(self) -> &'static str {
+    fn entry(self) -> &'static str {
         match self {
             Grant::Zones => "zone:*",
             Grant::Widgets => "widget:*",
@@ -100,7 +100,7 @@ impl Grant {
 /// `allow` with `grant` on or off. Withdrawing a class that `*` covered
 /// rewrites `*` as the classes that remain. Entries naming one zone or widget
 /// are kept either way.
-pub fn with_grant(allow: &[String], grant: Grant, on: bool) -> Vec<String> {
+pub(crate) fn with_grant(allow: &[String], grant: Grant, on: bool) -> Vec<String> {
     if grant.granted(allow) == on {
         return allow.to_vec();
     }
