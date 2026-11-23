@@ -37,7 +37,7 @@ use unicode_segmentation::UnicodeSegmentation;
 pub const MAX_DRAFT_BYTES: usize = 65_535;
 
 /// Default lower draft cap (suitable for typical composer inputs).
-pub const DEFAULT_DRAFT_CAP: usize = 4_096;
+pub(crate) const DEFAULT_DRAFT_CAP: usize = 4_096;
 
 // ─── Outcome types ────────────────────────────────────────────────────────────
 
@@ -267,7 +267,7 @@ impl ComposerVisualLayout {
     /// `goal_x` (px). `up` selects the previous row; otherwise the next. On the
     /// first row an upward step goes to byte 0; on the last row a downward step
     /// goes to `text_len`. Returns `None` when already at that boundary.
-    pub fn vertical_target(&self, cursor: usize, up: bool, goal_x: f32) -> Option<usize> {
+    fn vertical_target(&self, cursor: usize, up: bool, goal_x: f32) -> Option<usize> {
         let cur = self.line_of(cursor)?;
         if up {
             if cur == 0 {
@@ -425,7 +425,7 @@ impl ComposerDraft {
     }
 
     /// Whether the draft is at or exceeds the byte cap.
-    pub fn is_at_capacity(&self) -> bool {
+    pub(crate) fn is_at_capacity(&self) -> bool {
         self.text.len() >= self.cap
     }
 
@@ -435,7 +435,8 @@ impl ComposerDraft {
     }
 
     /// Whether the draft is suspended under safe mode.
-    pub fn is_suspended(&self) -> bool {
+    #[cfg(test)]
+    fn is_suspended(&self) -> bool {
         self.suspended
     }
 
@@ -502,7 +503,7 @@ impl ComposerDraft {
     /// is deleted first, then a single `\n` is inserted, honoring the byte cap
     /// (`\n` is one byte). Newline is subject to the same suspend/cap governance
     /// as any other edit; the submitted draft carries embedded newlines verbatim.
-    pub fn insert_newline(&mut self) -> EditOutcome {
+    fn insert_newline(&mut self) -> EditOutcome {
         if self.suspended {
             return EditOutcome::Suspended;
         }
@@ -603,7 +604,7 @@ impl ComposerDraft {
     /// Word-wise backspace: delete from cursor to the start of the preceding word.
     ///
     /// Mirrors the behaviour of Ctrl/Alt + Backspace in the exemplar adapter.
-    pub fn word_backspace(&mut self) -> EditOutcome {
+    fn word_backspace(&mut self) -> EditOutcome {
         if self.suspended {
             return EditOutcome::Suspended;
         }
@@ -621,7 +622,7 @@ impl ComposerDraft {
     }
 
     /// Word-wise forward delete: delete from cursor to the end of the next word.
-    pub fn word_delete_forward(&mut self) -> EditOutcome {
+    fn word_delete_forward(&mut self) -> EditOutcome {
         if self.suspended {
             return EditOutcome::Suspended;
         }
@@ -672,7 +673,7 @@ impl ComposerDraft {
     }
 
     /// Move the cursor to the start of the preceding word (collapsing selection).
-    pub fn move_word_left(&mut self) -> EditOutcome {
+    fn move_word_left(&mut self) -> EditOutcome {
         let target = word_delete_start(&self.text, self.cursor);
         if target == self.cursor && !self.has_selection() {
             return EditOutcome::Unchanged;
@@ -683,7 +684,7 @@ impl ComposerDraft {
     }
 
     /// Move the cursor to the end of the next word (collapsing selection).
-    pub fn move_word_right(&mut self) -> EditOutcome {
+    fn move_word_right(&mut self) -> EditOutcome {
         let target = word_delete_end(&self.text, self.cursor);
         if target == self.cursor && !self.has_selection() {
             return EditOutcome::Unchanged;
@@ -726,7 +727,7 @@ impl ComposerDraft {
     /// The caret's current column: grapheme clusters from the start of its
     /// logical line (the byte after the preceding '\n', or 0). Used to seed the
     /// vertical goal column.
-    pub fn current_col(&self) -> usize {
+    fn current_col(&self) -> usize {
         let line_start = logical_line_start(&self.text, self.cursor);
         grapheme_count(&self.text[line_start..self.cursor])
     }
@@ -776,7 +777,7 @@ impl ComposerDraft {
     }
 
     /// Move the caret up one logical line at `goal_col`, collapsing any selection.
-    pub fn move_up(&mut self, goal_col: usize) -> EditOutcome {
+    fn move_up(&mut self, goal_col: usize) -> EditOutcome {
         match self.vertical_target(true, goal_col) {
             Some(target) => {
                 self.cursor = target;
@@ -788,7 +789,7 @@ impl ComposerDraft {
     }
 
     /// Move the caret down one logical line at `goal_col`, collapsing any selection.
-    pub fn move_down(&mut self, goal_col: usize) -> EditOutcome {
+    fn move_down(&mut self, goal_col: usize) -> EditOutcome {
         match self.vertical_target(false, goal_col) {
             Some(target) => {
                 self.cursor = target;
@@ -801,7 +802,7 @@ impl ComposerDraft {
 
     /// Extend the selection up one logical line at `goal_col` (Shift+ArrowUp):
     /// moves the caret without collapsing the anchor.
-    pub fn select_up(&mut self, goal_col: usize) -> EditOutcome {
+    fn select_up(&mut self, goal_col: usize) -> EditOutcome {
         match self.vertical_target(true, goal_col) {
             Some(target) if target != self.cursor => {
                 self.cursor = target;
@@ -812,7 +813,7 @@ impl ComposerDraft {
     }
 
     /// Extend the selection down one logical line at `goal_col` (Shift+ArrowDown).
-    pub fn select_down(&mut self, goal_col: usize) -> EditOutcome {
+    fn select_down(&mut self, goal_col: usize) -> EditOutcome {
         match self.vertical_target(false, goal_col) {
             Some(target) if target != self.cursor => {
                 self.cursor = target;
@@ -827,7 +828,7 @@ impl ComposerDraft {
     /// byte from the compositor's wrapped-line layout. The byte is clamped to
     /// `text.len()` and snapped down to a char boundary so a stale layout can
     /// never place the caret mid-character.
-    pub fn move_to_byte(&mut self, byte: usize) -> EditOutcome {
+    fn move_to_byte(&mut self, byte: usize) -> EditOutcome {
         let target = self.snap_byte(byte);
         if target == self.cursor && !self.has_selection() {
             return EditOutcome::Unchanged;
@@ -839,7 +840,7 @@ impl ComposerDraft {
 
     /// Extend the selection to an absolute byte offset without collapsing the
     /// anchor (Shift + visual vertical move).
-    pub fn select_to_byte(&mut self, byte: usize) -> EditOutcome {
+    fn select_to_byte(&mut self, byte: usize) -> EditOutcome {
         let target = self.snap_byte(byte);
         if target == self.cursor {
             return EditOutcome::Unchanged;
@@ -940,7 +941,7 @@ impl ComposerDraft {
     /// (Shift+Ctrl+Left / Shift+Alt+Left). Moves the cursor to the word
     /// boundary **without** collapsing the selection anchor, so the highlighted
     /// range grows by a whole word rather than a single grapheme.
-    pub fn select_word_left(&mut self) -> EditOutcome {
+    fn select_word_left(&mut self) -> EditOutcome {
         let target = word_delete_start(&self.text, self.cursor);
         if target == self.cursor {
             return EditOutcome::Unchanged;
@@ -952,7 +953,7 @@ impl ComposerDraft {
     /// Extend the selection to the end of the next word
     /// (Shift+Ctrl+Right / Shift+Alt+Right). Moves the cursor to the word
     /// boundary **without** collapsing the selection anchor.
-    pub fn select_word_right(&mut self) -> EditOutcome {
+    fn select_word_right(&mut self) -> EditOutcome {
         let target = word_delete_end(&self.text, self.cursor);
         if target == self.cursor {
             return EditOutcome::Unchanged;
@@ -1227,19 +1228,19 @@ impl ComposerDraftManager {
     /// focused node's placeholder config. No-op in the sense that it does
     /// not validate a composer is actually focused — callers only invoke it
     /// from the focus-gained path.
-    pub fn set_focused_placeholder(&mut self, placeholder: Option<String>) {
+    pub(crate) fn set_focused_placeholder(&mut self, placeholder: Option<String>) {
         self.focused_placeholder = placeholder;
     }
 
     /// The composer-placeholder override for the currently focused composer
     /// node, if one was set via `set_focused_placeholder`. See
     /// `HitRegionNode::composer_placeholder` for the three-state convention.
-    pub fn focused_placeholder(&self) -> Option<String> {
+    pub(crate) fn focused_placeholder(&self) -> Option<String> {
         self.focused_placeholder.clone()
     }
 
     /// Keep a nonempty draft on blur; other composers' drafts are untouched.
-    pub fn on_focus_lost(&mut self) {
+    pub(crate) fn on_focus_lost(&mut self) {
         if let (Some(node_id), Some(draft)) = (self.focused_node.take(), self.draft.take())
             && !draft.text().is_empty()
         {
@@ -1301,7 +1302,7 @@ impl ComposerDraftManager {
     /// Returns `EditOutcome::Unchanged` when no composer is focused.
     ///
     /// pointer selection into the runtime-owned draft buffer.
-    pub fn route_pointer_selection(&mut self, anchor: usize, cursor: usize) -> EditOutcome {
+    pub(crate) fn route_pointer_selection(&mut self, anchor: usize, cursor: usize) -> EditOutcome {
         let Some(draft) = self.draft.as_mut() else {
             return EditOutcome::Unchanged;
         };
@@ -1518,7 +1519,7 @@ impl ComposerDraftManager {
     /// from the compositor (before dispatching an ArrowUp/ArrowDown). `None`
     /// clears it (no multi-line composer active), reverting to hard-newline
     /// vertical movement.
-    pub fn set_visual_layout(&mut self, layout: Option<ComposerVisualLayout>) {
+    pub(crate) fn set_visual_layout(&mut self, layout: Option<ComposerVisualLayout>) {
         self.latest_visual_layout = layout;
     }
 
@@ -1528,7 +1529,7 @@ impl ComposerDraftManager {
     }
 
     /// Returns the node_id of the currently focused composer region, if any.
-    pub fn focused_node(&self) -> Option<SceneId> {
+    pub(crate) fn focused_node(&self) -> Option<SceneId> {
         self.focused_node
     }
 
