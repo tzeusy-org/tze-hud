@@ -56,7 +56,7 @@ impl PortalWakeDeadline {
 
 /// Namespace of the scene leases and tiles the driver creates for portals.
 /// It is distinct from any agent-facing namespace.
-pub const PORTAL_DRIVER_NAMESPACE: &str = "tze_hud_portal_driver";
+pub(crate) const PORTAL_DRIVER_NAMESPACE: &str = "tze_hud_portal_driver";
 
 /// Default z-order for portal tiles created by the in-process driver.
 const PORTAL_Z_ORDER: u32 = 160;
@@ -99,7 +99,7 @@ impl Binding {
 
 /// Distinguishes raw tiles from portal submissions, including service refusal.
 #[derive(Debug)]
-pub enum PortalReplyOutcome {
+pub(crate) enum PortalReplyOutcome {
     NotPortal,
     Handled(Option<PortalInputFeedback>),
 }
@@ -283,7 +283,7 @@ impl PortalDriver {
         }
     }
 
-    pub fn portal_handle(&self) -> PortalHandle {
+    pub(crate) fn portal_handle(&self) -> PortalHandle {
         self.portals.clone()
     }
 
@@ -371,7 +371,7 @@ impl PortalDriver {
 
     /// Human close reclaims the portal and scene lease immediately. A later
     /// publish reattaches; hold is NOT_HELD and clear is an idempotent no-op.
-    pub fn viewer_dismiss_tile(
+    pub(crate) fn viewer_dismiss_tile(
         &mut self,
         scene: &mut SceneGraph,
         tile_id: SceneId,
@@ -390,12 +390,12 @@ impl PortalDriver {
     }
 
     /// Current wall-clock time (µs since the Unix epoch) from the driver's clock.
-    pub fn now_wall_us(&self) -> u64 {
+    pub(crate) fn now_wall_us(&self) -> u64 {
         self.portals.clock.now_us()
     }
 
     /// Submit to the bound full identity; service refusal never falls back to raw echo.
-    pub fn submit_reply_for_tile(
+    pub(crate) fn submit_reply_for_tile(
         &mut self,
         tile_id: SceneId,
         text: String,
@@ -441,7 +441,7 @@ impl PortalDriver {
     }
 
     /// Restyle live bindings and repaint attached portals on the next drain.
-    pub fn apply_token_map(&mut self, overrides: DesignTokenMap) {
+    pub(crate) fn apply_token_map(&mut self, overrides: DesignTokenMap) {
         self.update_binding_tokens(overrides);
         if let Some(mut hub) = self.lock_hub() {
             hub.restyle_all();
