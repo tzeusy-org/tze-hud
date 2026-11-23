@@ -525,8 +525,13 @@ async fn notification_actions_layout_matches_hit_regions() {
         compositor.populate_zone_hit_regions(&mut scene, 1280.0, 1080.0);
         let record = &scene.zone_registry.active_for_zone("notification-area")[1];
         let policy = &scene.zone_registry.zones["notification-area"].rendering_policy;
-        let descriptor =
-            compositor.notification_action_layout("notification-area", record, policy, 552.0);
+        let descriptor = compositor.notification_action_layout(
+            &scene,
+            "notification-area",
+            record,
+            policy,
+            552.0,
+        );
         let publication_id = record.publication_id;
         let ZoneContent::Notification(payload) = record.content.clone() else {
             unreachable!()

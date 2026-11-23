@@ -1450,7 +1450,7 @@ async fn test_stack_reflow_after_publication_pruned() {
     let policy = &scene.zone_registry.zones["notification-area"].rendering_policy;
     assert!(
         compositor
-            .notification_action_layout("notification-area", &newest, policy, 320.0)
+            .notification_action_layout(&scene, "notification-area", &newest, policy, 320.0)
             .stacked
     );
     scene.dismiss_notification("notification-area", newest.publication_id, "choice-agent");
@@ -1510,12 +1510,12 @@ async fn test_stack_reflow_after_publication_pruned() {
     // The mock's 368 dp card fits four short actions in one row.
     assert!(
         !compositor
-            .notification_action_layout("notification-area", &records[0], policy, 368.0)
+            .notification_action_layout(&scene, "notification-area", &records[0], policy, 368.0)
             .stacked
     );
     assert!(
         compositor
-            .notification_action_layout("notification-area", &records[1], policy, 368.0)
+            .notification_action_layout(&scene, "notification-area", &records[1], policy, 368.0)
             .stacked
     );
     compositor.populate_zone_hit_regions(&mut scene, 1280.0, 720.0);
