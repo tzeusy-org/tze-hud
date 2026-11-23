@@ -33,6 +33,7 @@ class CardWait:
             "key": self.kind,
             "ttl_ms": self.request.get("ttl_ms", CARD_TTL_MS),
             "content": {
+                "type": "notification",
                 "title": self.request["title"],
                 "body": self.request["body"],
                 "actions": [

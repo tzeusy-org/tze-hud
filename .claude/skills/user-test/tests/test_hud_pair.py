@@ -37,6 +37,9 @@ class FakeHud(BaseHTTPRequestHandler):
     opened = 0
     deletes = []  # (session id, monotonic time) per DELETE /mcp
     inputs = {}  # session id -> hud_input items for that session
+    parents = {}
+    card_slots = {}
+    card_refusal = False
 
     def do_DELETE(self):
         session = self.headers.get("Mcp-Session-Id")
@@ -44,6 +47,9 @@ class FakeHud(BaseHTTPRequestHandler):
             self.deletes.append((session, time.monotonic()))
             live = session in self.sessions
             self.sessions.discard(session)
+            for sibling, parent in self.parents.items():
+                if parent == session:
+                    self.sessions.discard(sibling)
             self.condition.notify_all()
         self.reply(202 if live else 404, b"")
 
@@ -123,12 +129,23 @@ class FakeHud(BaseHTTPRequestHandler):
                 result = {"protocolVersion": "2025-06-18", "serverInfo": {"name": "fake-upstream", "version": "fixture"},
                           "capabilities": {"tools": {"listChanged": False}}, "instructions": "upstream sentinel"}
                 with self.condition:
+                    parent = body.get("params", {}).get("_meta", {}).get("tze.hud/parent")
+                    if parent is not None and parent not in self.sessions:
+                        return self.reply(200, {"jsonrpc":"2.0", "id":request_id,
+                                                "error":{"code":-32602,"message":"invalid parent"}})
                     type(self).opened += 1
                     headers["Mcp-Session-Id"] = f"session-{type(self).opened}"
                     self.sessions.add(headers["Mcp-Session-Id"])
+                    if parent is not None:
+                        self.parents[headers["Mcp-Session-Id"]] = parent
             elif method == "tools/list":
                 result = {"tools": [{"name": name, "description": "upstream sentinel", "inputSchema": {"type": "object"}}
                                     for name in ["hud_surfaces", "hud_publish", "hud_hold", "hud_clear", "hud_input"]]}
+            elif method == "tools/call" and request_id == "tze-hud-card":
+                value = self.card_call(session, body["params"])
+                result = {"content": [{"type": "text", "text": json.dumps(value)}]}
+                if value is None:
+                    result["isError"] = True
             elif method == "tools/call" and body["params"].get("name") == "hud_input" and session in self.inputs:
                 text = json.dumps({"items": self.inputs[session]})
                 result = {"content": [{"type": "text", "text": text}]}
@@ -158,6 +175,34 @@ class FakeHud(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def card_call(self, session, params):
+        name, args = params["name"], params["arguments"]
+        with self.condition:
+            slots = self.card_slots.setdefault(session, {})
+            if name == "hud_publish":
+                if self.card_refusal:
+                    return None
+                assert args["content"]["type"] == "notification"
+                slots[args["key"]] = args
+                self.condition.notify_all()
+                return {"ok": True, "expires_in_ms": args["ttl_ms"]}
+            if name == "hud_clear":
+                slots.pop(args["key"], None)
+                self.condition.notify_all()
+                return {"ok": True}
+            if name == "hud_surfaces":
+                return {"surfaces": [{"s": "zone:notification-area", "held": bool(slots),
+                                      "expires_in_ms": max((a["ttl_ms"] for a in slots.values()), default=0)}]}
+            if name == "hud_input":
+                items = self.inputs.setdefault(session, [])
+                items[:] = [item for item in items if item["id"] not in args.get("ack", [])]
+                if args.get("max_items") == 0:
+                    return {"items": []}
+                self.condition.wait_for(lambda: items or session not in self.sessions,
+                                        args.get("wait_ms", 0) / 1000)
+                return {"items": list(items)}
+            raise AssertionError("unexpected hook card tool")
+
     def log_message(self, *args):
         pass
 
@@ -168,6 +213,7 @@ def hud(tmp_path):
     FakeHud.grpc_target = "h:50051"
     FakeHud.requests, FakeHud.modes, FakeHud.entered = [], {}, {}
     FakeHud.sessions, FakeHud.opened, FakeHud.deletes, FakeHud.inputs = set(), 0, [], {}
+    FakeHud.parents, FakeHud.card_slots, FakeHud.card_refusal = {}, {}, False
     FakeHud.release = threading.Event()
     server = ThreadingHTTPServer(("127.0.0.1", 0), FakeHud)
     # Teardown is fixture housekeeping, not part of an adapter deadline.
@@ -393,6 +439,93 @@ def wait_state(state, session=None):
     return wait_call(lambda entry: entry["body"]["method"] == STATE_METHOD
                      and entry["body"]["params"]["state"] == state
                      and (session is None or entry["session"] == session))
+
+
+def card_calls(name):
+    return [entry for entry in FakeHud.requests if entry["body"].get("id") == "tze-hud-card"
+            and entry["body"].get("params", {}).get("name") == name]
+
+
+def wait_card(kind="question"):
+    with FakeHud.condition:
+        assert FakeHud.condition.wait_for(
+            lambda: any(kind in slots for slots in FakeHud.card_slots.values()), 3,
+        )
+        return next((session, slots[kind]) for session, slots in FakeHud.card_slots.items() if kind in slots)
+
+
+def deliver_card_action(session, kind, item_id, action, **fields):
+    with FakeHud.condition:
+        items = FakeHud.inputs.setdefault(session, [])
+        items.append({"s": "zone:notification-area", "key": kind, "id": item_id,
+                      "action": action, **fields})
+        FakeHud.condition.notify_all()
+
+
+def card_peer(adapter, *, kind="question", ttl_ms=4000):
+    runtime = Path(adapter.env["XDG_RUNTIME_DIR"])
+    peer = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+    peer.settimeout(2)
+    peer.connect(str(runtime / "tze-hud" / f"claude-{os.getpid()}.sock"))
+    peer.sendall(json.dumps({"v":1, "op":"card", "kind":kind, "title":"fixture",
+                             "body":"", "actions":["Continue"], "ttl_ms":ttl_ms}).encode())
+    return peer
+
+
+def receive_card(peer):
+    return json.loads(peer.recv(16384))
+
+
+def test_card_client_uses_a_sibling_and_acks_only_its_input(hud):
+    host, home = hud
+    assert pair(host, home).returncode == 0
+    with tempfile.TemporaryDirectory(prefix="hud-card-") as runtime:
+        with AdapterProcess(home, host=host, runtime=runtime) as adapter:
+            adapter.ready()
+            command = [sys.executable, "-c",
+                       "import json,runpy,sys; request=runpy.run_path(sys.argv[1])['request_card']; "
+                       "print(json.dumps(request('question','Fixture','', ['dismiss'], timeout_ms=4000)))",
+                       str(HOOK)]
+            with subprocess.Popen(command, env=adapter.env, stdout=subprocess.PIPE,
+                                  stderr=subprocess.PIPE) as client:
+                sibling, card = wait_card()
+                primary = FakeHud.parents[sibling]
+                assert sibling != primary
+                assert card["surface"] == "zone:notification-area" and card["key"] == "question"
+                action = card["content"]["actions"][0]["callback_id"]
+                assert re.fullmatch(r"[0-9a-f]{16}\.0", action)
+                deliver_card_action(sibling, "question", "answer1", action)
+                out, err = client.communicate(timeout=3)
+                assert (client.returncode, err, json.loads(out)) == (0, b"", {"end":"answer", "index":0})
+            assert wait_call(lambda entry: entry["body"].get("params", {}).get("arguments", {}).get("ack")
+                             == ["answer1"])["session"] == sibling
+            with FakeHud.condition:
+                FakeHud.inputs[primary] = []
+            adapter.send("tools/call", 99, {"name":"hud_input", "arguments":{"ack":["answer1"]}})
+            assert json.loads(adapter.receive()["result"]["content"][0]["text"]) == {"items":[]}
+            assert not card_calls("hud_clear")
+            assert sum(entry["body"]["params"]["arguments"].get("wait_ms") == 0
+                       for entry in card_calls("hud_input")) == 1
+
+
+def test_disconnect_clears_one_card_and_refusal_logs_no_content(hud):
+    host, home = hud
+    assert pair(host, home).returncode == 0
+    with tempfile.TemporaryDirectory(prefix="hud-card-") as runtime:
+        with AdapterProcess(home, host=host, runtime=runtime) as adapter:
+            adapter.ready()
+            with card_peer(adapter, kind="nudge") as peer:
+                assert receive_card(peer) == {"ok": True, "expires_in_ms": 4000}
+            clear = wait_call(lambda entry: entry["body"].get("params", {}).get("name") == "hud_clear")
+            assert clear["body"]["params"]["arguments"] == {
+                "surface":"zone:notification-area", "key":"nudge",
+            }
+            FakeHud.card_refusal = True
+            with card_peer(adapter) as peer:
+                assert receive_card(peer) == {"end":"error"}
+            assert len(card_calls("hud_clear")) == 1
+        assert re.search(r"card delivery failed \[[a-f0-9]{12}\]", adapter.stderr)
+        assert "fixture" not in adapter.stderr and FakeHud.last_psk not in adapter.stderr
 
 
 def test_live_hook_state_and_mirror_share_the_primary_scope(hud):
@@ -1701,6 +1834,7 @@ def reinit_adapter(monkeypatch):
                            initializing=False, stop=False, fatal=False, owner=None,
                            had_session=True, session=None, presence=module["SessionPresence"](False),
                            init_request={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})
+    client.cards = module["CardLane"](client)
     exits = {}  # pid -> exit code once the worker has exited
     workers = []
 
@@ -1788,7 +1922,7 @@ def test_a_reinitialize_refused_for_capacity_fails_the_waiting_call(monkeypatch)
     assert client.reap() and abandoned.cancelled and abandoned in client.tasks
     client.output.clear()
     busy = [SimpleNamespace(request={"jsonrpc": "2.0", "id": f"busy-{n}", "method": "ping"},
-                            internal=False, cancelled=False, presence=None)
+                            internal=False, cancelled=False, presence=None, card=None)
             for n in range(module["MAX_WORKERS"] - 1)]
     client.tasks.extend(busy)
 

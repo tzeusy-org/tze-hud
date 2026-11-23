@@ -271,8 +271,8 @@ and keyboard callers share this producer; neither hit regions nor zone records
 need a second routing-key field. MCP tools and gRPC lifecycle verbs validate
 before lease renewal or scheduling and use the same scene contracts. Generic
 widget contention and portal ownership remain with their existing owners.
-The key-only core provides no generation arbitration: `hud-bz9bv.7` owns broker
-callback nonces and owner-D stale-cancellation behavior.
+The stdio adapter owns callback nonces and option D stale-cancellation
+behavior for its linked hook-card scope (`hud-rf026.3.2`).
 The hub is keyed by authenticated agent and portal id; its time-dependent
 operations take injected time. The driver materializes scene tiles, mirrors
 liveness onto leases, and connects composer submissions back to the hub.

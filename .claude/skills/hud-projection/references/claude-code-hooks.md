@@ -184,18 +184,42 @@ The hook and adapter find the socket by their immediate Claude parent PID.
 The path is `$XDG_RUNTIME_DIR/tze-hud/claude-<pid>.sock` when the runtime
 directory belongs to the user, with `~/.cache/tze-hud/run` as the fallback.
 The adapter checks ownership and private modes. Both ends verify that the
-peer has the same Unix UID. The hook uses one nonblocking connect and send,
-then exits silently. The hook has no credential or HTTP path. Only the existing
-adapter worker uses the paired credential for a HUD request. The design uses
-one adapter per session and no daemon, heartbeat or polling.
+peer has the same Unix UID. State and mirror events use one nonblocking
+connect and send, then exit silently. Only the adapter worker uses the
+paired credential for a HUD request. The design uses one adapter per session
+and leaves idle connections alone.
 
 The adapter keeps prompt boundaries, activity and mirror ordering in memory.
 It drops late tool events for closed prompts and replaces a running tool
-stage only with a terminal stage. It coalesces queued updates and uses one
-bounded internal HTTP lane beside the four model-call slots. The mirror renews
+stage only with a terminal stage. It coalesces queued updates on a bounded
+HTTP lane beside the four model-call slots and the independent card lane.
+The mirror renews
 a finite `hud_hold(ttl_ms=600000)` after a successful publish when the last
 acknowledged hold is at least 60 seconds old. A failed delivery can leave an
 already accepted request visible until its hold expires or the scope ends.
+
+## Hook cards
+
+Hook consumers can call
+`portal_hook.request_card(kind, title, body, actions, timeout_ms=..., ttl_ms=...)`
+from the same Claude session. Use `question`, `permission`, or `nudge` and one
+to four action labels. The call has a one-second acceptance window, including
+the first card's sibling initialization, and returns a dictionary with `end`.
+An `answer` includes the zero-based action `index`. Other outcomes are
+`dismissed`, `expired`, `cancelled`, `superseded`, and `error`. A caller that
+disconnects before an answer requests one keyed clear. The caller owns its
+terminal fallback and timeout.
+
+The adapter publishes under a sibling scope with the primary session's
+caption and reads only the sibling's input while a card is live. Model
+polling stays on the primary scope. A new card of the same kind supersedes its
+waiter. Under option D, a late human × or keyed clear may cancel the
+replacement. Only its own callback nonce can answer it. If the notification
+zone remains held past a deadline, the wait extends to the zone's reported
+expiry plus 250 ms. This includes a held or frozen card and may keep a waiter
+pending behind another live kind until the zone empties or the caller times
+out. Cancelled questions fall through to the terminal and cancelled nudges
+stay silent.
 
 ## Verification and remaining acceptance
 

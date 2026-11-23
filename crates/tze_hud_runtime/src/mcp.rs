@@ -768,17 +768,20 @@ async fn handle_admin(
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
+mod sibling_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::Arc;
     use tokio::sync::Mutex;
     use tze_hud_scene::graph::SceneGraph;
 
-    fn make_scene() -> Arc<Mutex<SceneGraph>> {
+    pub(super) fn make_scene() -> Arc<Mutex<SceneGraph>> {
         Arc::new(Mutex::new(SceneGraph::new(1920.0, 1080.0)))
     }
 
-    fn make_config(port: u16, psk: &str) -> McpServerConfig {
+    pub(super) fn make_config(port: u16, psk: &str) -> McpServerConfig {
         McpServerConfig {
             startup: None,
             text_fit: None,
@@ -825,7 +828,7 @@ mod tests {
     }
 
     /// Raw request helper for routing tests.
-    async fn http_raw(addr: SocketAddr, request: &str) -> String {
+    pub(super) async fn http_raw(addr: SocketAddr, request: &str) -> String {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         let mut conn = tokio::net::TcpStream::connect(addr).await.expect("connect");
         conn.write_all(request.as_bytes()).await.expect("write");
