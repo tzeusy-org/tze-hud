@@ -238,6 +238,19 @@ nested primary/secondary takes preserve it. A keyboard answer or outer Esc may
 return only while an installed HUD HWND still owns the foreground and the saved
 origin is live. User app switches win. A sent reply retains composer focus.
 
+Notification publication never activates an OS window. The owner's press on
+a card's Go to control can activate one eligible whole-title-token match,
+with no position or size chosen by the runtime. The presentation lookup can
+only decorate the card. A press repeats the lookup and goes through the
+ordinary exact-publication input guard and local two-second limit. Successful
+activation clears saved return focus. A replaced or expired card cannot
+activate a window from a pending lookup, and neither a lookup nor a switch
+queues agent input.
+`go_to_looks_up_once_after_present_and_rechecks_owner_pointer_and_keys` and
+`go_to_drops_a_replaced_press_while_another_card_rechecks` cover the runtime
+paths. The hosted `go-to-session` gesture checks a real switch and unchanged
+window bounds.
+
 The fourth owner chord (`answer_hotkey`, Ctrl+Shift+F9) pins the newest rendered
 unanswered callback card. With no card it targets the newest waiting portal's
 composer; no target is a no-op; safe mode still captures input.

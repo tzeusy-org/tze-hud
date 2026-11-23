@@ -211,9 +211,9 @@ async fn sessions_clear_and_hold_only_their_own_content() {
         .zone_registry
         .active_for_zone("notification-area")
         .iter()
-        .map(|r| r.caption.clone())
+        .map(|r| (r.caption.clone(), r.window_token.clone()))
         .collect();
-    assert!(captions.contains(&Some("release bot".into())));
+    assert!(captions.contains(&(Some("release bot".into()), Some("release bot".into()))));
     let (err, is_error) = call_as(&server, &unscoped, "hud_publish", named).await;
     assert!(is_error);
     assert_eq!(err["code"], "INVALID_ARGUMENT");

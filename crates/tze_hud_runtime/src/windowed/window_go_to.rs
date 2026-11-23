@@ -86,14 +86,18 @@ pub(super) struct WindowGoTo {
 impl WindowGoTo {
     #[cfg(target_os = "windows")]
     pub(super) fn new(apps: Option<Vec<String>>) -> Self {
+        let apps = apps.unwrap_or_else(|| {
+            window_match::DEFAULT_APPS
+                .iter()
+                .map(|app| (*app).into())
+                .collect()
+        });
+        if apps.is_empty() {
+            return Self::default();
+        }
         Self {
             inspector: Some(Arc::new(Inspector {
-                apps: apps.unwrap_or_else(|| {
-                    window_match::DEFAULT_APPS
-                        .iter()
-                        .map(|app| (*app).into())
-                        .collect()
-                }),
+                apps,
                 windows: Box::new(window_match::native::enumerate),
             })),
             ..Self::default()
@@ -116,6 +120,11 @@ impl WindowGoTo {
                     .map(|pending| pending.press.until),
             )
             .min()
+    }
+
+    #[cfg(test)]
+    pub(super) fn press_pending_for_test(&self) -> bool {
+        !self.presses.is_empty()
     }
 
     #[cfg(test)]
@@ -381,7 +390,7 @@ impl WinitApp {
                 .and_then(|index| self.state.secondaries.get(index))
                 .map(|display| &display.window)
                 .or(self.state.window.as_ref())
-                .and_then(lifecycle::hwnd_for_window);
+                .and_then(|window| lifecycle::hwnd_for_window(window));
             windows_activate(target, overlay)
         }
         #[cfg(not(target_os = "windows"))]

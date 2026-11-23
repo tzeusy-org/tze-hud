@@ -37,6 +37,16 @@ Hard boundaries:
   ephemeral state (visible transcript window, pending input, lifecycle). The
   session owns its own history.
 
+On Windows, a notification card offers **Go to** when its scoped label
+(the folder or `display_name`) matches exactly one eligible top-level window
+title as a whole token. An explicit owner press raises that window. Windows
+Terminal exposes only the active tab's title, and a matching tmux terminal can
+only be raised as a whole window. A session without a window on the HUD
+machine has no match. A local terminal showing SSH can match when its title
+carries the label. Set `CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1` to preserve a
+shell's folder-based title at the cost of Claude Code's conversation titles
+and status glyph.
+
 ## Tools
 
 A portal is the surface `portal:<projection_id>`. It uses the same MCP verbs as

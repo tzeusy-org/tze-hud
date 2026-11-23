@@ -1810,10 +1810,10 @@ def scenario_go_to_session(run: Run) -> None:
 
     def open_editor(name):
         # Keep the token bounded whether this Notepad includes the extension
-        # in its title. A second file also works on tab-capable Notepad.
+        # in its title. The acceptance check requires distinct top-level
+        # windows, each owned by the harness.
         path = run.home / (name + ".txt")
-        path.write_text("Go to session gesture
-", encoding="utf-8")
+        path.write_text("Go to session gesture\n", encoding="utf-8")
         editor = subprocess.Popen(["notepad.exe", str(path)])
         notepads.append(editor)
         run.helper_pids.append(editor.pid)

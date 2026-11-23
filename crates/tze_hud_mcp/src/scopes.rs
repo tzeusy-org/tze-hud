@@ -36,7 +36,11 @@ pub struct Scope {
 impl Scope {
     /// The caption for this session's content, if it has one.
     pub fn label(&self) -> Option<String> {
-        self.session_label().map(|label| label.caption)
+        self.label
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .as_ref()
+            .map(|label| label.caption.clone())
     }
 
     pub(crate) fn session_label(&self) -> Option<SessionLabel> {
@@ -239,7 +243,17 @@ mod tests {
         let scopes = Scopes::default();
         let open = |label| scopes.open("claude", Some(label), |_| true).0;
         let first = open("tze-hud");
-        assert_eq!(open("tze-hud").label().as_deref(), Some("tze-hud (2)"));
+        let duplicate = open("tze-hud");
+        assert_eq!(duplicate.label().as_deref(), Some("tze-hud (2)"));
+        assert_eq!(
+            duplicate.session_label().unwrap().window_token.as_deref(),
+            Some("tze-hud")
+        );
+        let literal = open("tze-hud (2)");
+        assert_eq!(
+            literal.session_label().unwrap().window_token.as_deref(),
+            Some("tze-hud (2)")
+        );
         assert_eq!(open("tze-hud").label().as_deref(), Some("tze-hud (3)"));
         scopes.close("claude", &first.id).unwrap();
         assert_eq!(open("tze-hud").label().as_deref(), Some("tze-hud"));

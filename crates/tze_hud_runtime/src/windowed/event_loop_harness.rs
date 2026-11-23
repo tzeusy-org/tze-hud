@@ -5142,6 +5142,336 @@ mod tests {
         harness.drain();
     }
 
+    fn publish_go_to_card(
+        harness: &mut HeadlessEventLoopHarness,
+        key: &str,
+        token: &str,
+    ) -> SceneId {
+        let mut scene = harness.scene();
+        let zone = "notification-area";
+        let content = scene.zone_registry.active_for_zone(zone)[0].content.clone();
+        let session = tze_hud_scene::scope::scoped_namespace("notif-agent", "go-to");
+        scene.set_scoped_session_label(
+            &session,
+            Some(tze_hud_scene::scope::SessionLabel {
+                caption: token.into(),
+                window_token: Some(token.into()),
+            }),
+        );
+        scene
+            .publish_to_zone(zone, content, &session, Some(key.into()), None, None)
+            .unwrap();
+        scene
+            .zone_registry
+            .active_for_zone(zone)
+            .iter()
+            .find(|record| {
+                record.publisher_namespace == session && record.merge_key.as_deref() == Some(key)
+            })
+            .unwrap()
+            .publication_id
+    }
+
+    fn go_to_windows(token: &str, count: usize) -> Vec<super::super::window_match::Window> {
+        use super::super::window_match::{Target, Window};
+        (0..count)
+            .map(|index| Window {
+                target: Target {
+                    hwnd: index as isize + 1,
+                    pid: std::process::id() + 1,
+                    minimized: false,
+                },
+                title: format!("{token} — editor"),
+                image: "Code.exe".into(),
+                visible: true,
+                owned: false,
+                cloaked: false,
+                tool: false,
+            })
+            .collect()
+    }
+
+    fn present_go_to_card(harness: &mut HeadlessEventLoopHarness, success: bool) {
+        assert!(harness.tick());
+        harness
+            .app
+            .state
+            .frame_ready_tx
+            .as_ref()
+            .unwrap()
+            .send(true)
+            .unwrap();
+        harness.app.maybe_present_frame_with(|| Some(success));
+    }
+
+    fn wait_for_go_to(
+        harness: &mut HeadlessEventLoopHarness,
+        predicate: impl Fn(&SceneGraph) -> bool,
+    ) {
+        let deadline = std::time::Instant::now() + SCENE_WAIT;
+        loop {
+            harness.tick();
+            if predicate(&harness.scene()) {
+                return;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "Go to never reached the expected state"
+            );
+            std::thread::yield_now();
+        }
+    }
+
+    fn go_to_point(harness: &HeadlessEventLoopHarness, id: SceneId) -> Option<(f32, f32)> {
+        harness
+            .scene()
+            .overlay
+            .notification_geometry
+            .iter()
+            .find(|card| card.publication_id == id)
+            .and_then(|card| card.goto)
+            .map(|r| (r.x + r.width * 0.5, r.y + r.height * 0.5))
+    }
+
+    #[test]
+    fn go_to_looks_up_once_after_present_and_rechecks_owner_pointer_and_keys() {
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering::SeqCst};
+        use tze_hud_scene::graph::overlay::GoToCue;
+
+        let token = "tzgo-7f3a";
+        let clock = Arc::new(tze_hud_scene::TestClock::new(1000));
+        let mut harness = approve_reject_notification_harness_on(clock.clone());
+        let card = publish_go_to_card(&mut harness, "go-to", token);
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let release = std::sync::Mutex::new(release_rx);
+        let looks = Arc::new(AtomicUsize::new(0));
+        let matches = Arc::new(AtomicUsize::new(1));
+        let can_activate = Arc::new(AtomicBool::new(false));
+        let activations = Arc::new(AtomicUsize::new(0));
+        harness.app.state.window_go_to.inject(
+            {
+                let (looks, matches) = (looks.clone(), matches.clone());
+                move || {
+                    if looks.fetch_add(1, SeqCst) == 0 {
+                        started_tx.send(()).unwrap();
+                        release.lock().unwrap().recv_timeout(SCENE_WAIT).unwrap();
+                    }
+                    go_to_windows(token, matches.load(SeqCst))
+                }
+            },
+            {
+                let (can_activate, activations) = (can_activate.clone(), activations.clone());
+                move |_| {
+                    activations.fetch_add(1, SeqCst);
+                    can_activate.load(SeqCst)
+                }
+            },
+        );
+        present_go_to_card(&mut harness, false);
+        assert_eq!(looks.load(SeqCst), 0);
+        assert!(go_to_point(&harness, card).is_none());
+
+        present_go_to_card(&mut harness, true);
+        started_rx.recv_timeout(SCENE_WAIT).unwrap();
+        assert_eq!(harness.app.state.wake.counters().snapshot().presents, 1);
+        assert!(
+            go_to_point(&harness, card).is_none(),
+            "card present before the worker answers"
+        );
+        release_tx.send(()).unwrap();
+        wait_for_go_to(&mut harness, |scene| {
+            scene
+                .overlay
+                .notification_geometry
+                .iter()
+                .any(|geometry| geometry.publication_id == card && geometry.goto.is_some())
+        });
+        let point = go_to_point(&harness, card).unwrap();
+        assert!(
+            harness
+                .scene()
+                .overlay
+                .notification_geometry
+                .iter()
+                .any(|geometry| !geometry.has_window_caption && geometry.goto.is_none())
+        );
+        assert_eq!(activations.load(SeqCst), 0, "decoration cannot activate");
+
+        let cue = |scene: &SceneGraph| scene.overlay.notification_go_to[&card].cue;
+        matches.store(0, SeqCst);
+        present_go_to_card(&mut harness, true);
+        assert_eq!(go_to_point(&harness, card), Some(point));
+        assert_eq!(
+            looks.load(SeqCst),
+            1,
+            "no refresh while the card stays live"
+        );
+        click_at(&mut harness, point);
+        click_at(&mut harness, point);
+        wait_for_go_to(&mut harness, |scene| cue(scene) == Some(GoToCue::NotFound));
+        assert_eq!(looks.load(SeqCst), 2, "one lookup for two close presses");
+        let until = harness.app.state.window_go_to.next_deadline().unwrap();
+        assert!(
+            !harness
+                .app
+                .settle_go_to(until - std::time::Duration::from_millis(1))
+        );
+        assert!(harness.app.settle_go_to(until));
+        assert_eq!(cue(&harness.scene()), None);
+
+        clock.advance(2000);
+        matches.store(2, SeqCst);
+        click_at(&mut harness, point);
+        wait_for_go_to(&mut harness, |scene| {
+            cue(scene) == Some(GoToCue::Ambiguous(2))
+        });
+        assert_eq!(activations.load(SeqCst), 0);
+
+        clock.advance(2000);
+        matches.store(1, SeqCst);
+        click_at(&mut harness, point);
+        wait_for_go_to(&mut harness, |scene| cue(scene) == Some(GoToCue::Blocked));
+        assert_eq!(activations.load(SeqCst), 1);
+        assert_eq!(harness.app.state.window_go_to.activations, 0);
+
+        clock.advance(2000);
+        can_activate.store(true, SeqCst);
+        harness
+            .app
+            .state
+            .answer_keyboard
+            .requested
+            .store(true, SeqCst);
+        harness.drain();
+        assert_eq!(
+            harness
+                .app
+                .state
+                .answer_keyboard
+                .focus
+                .unwrap()
+                .publication_id,
+            card
+        );
+        let tab = |h: &mut HeadlessEventLoopHarness, reverse: bool| {
+            let mut event = key_down("Tab", "Tab", 100);
+            let PendingKeyboardEvent::KeyDown(raw) = &mut event else {
+                unreachable!()
+            };
+            raw.modifiers.shift = reverse;
+            h.enqueue(event);
+            h.enqueue(key_up("Tab", "Tab", 110));
+            h.drain();
+        };
+        let focus_is = |h: &HeadlessEventLoopHarness, kind| {
+            let scene = h.scene();
+            let focused = scene.overlay.notification_focus.as_deref();
+            assert!(scene.overlay.zone_hit_regions.iter().any(|region| {
+                region.publication_id == card
+                    && region.kind == kind
+                    && Some(region.interaction_id.as_str()) == focused
+            }));
+        };
+        tab(&mut harness, true);
+        focus_is(&harness, ZoneInteractionKind::GoTo);
+        tab(&mut harness, true);
+        focus_is(&harness, ZoneInteractionKind::Dismiss);
+        tab(&mut harness, false);
+        focus_is(&harness, ZoneInteractionKind::GoTo);
+        harness.press_named_key("Enter");
+        wait_for_go_to(&mut harness, |scene| {
+            scene.overlay.notification_focus.is_none()
+        });
+        assert!(harness.app.state.answer_keyboard.focus.is_none());
+        assert!(harness.app.state.answer_keyboard.return_key.is_none());
+        assert_eq!(
+            harness
+                .app
+                .state
+                .surface_ui
+                .lock()
+                .unwrap()
+                .window_activations,
+            1
+        );
+        assert_eq!(activations.load(SeqCst), 2);
+        assert!(go_to_point(&harness, card).is_some());
+        assert!(
+            harness.scene().pending_actions.is_empty(),
+            "Go to never queues agent input"
+        );
+    }
+
+    #[test]
+    fn go_to_drops_a_replaced_press_while_another_card_rechecks() {
+        use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
+        use tze_hud_scene::graph::overlay::GoToCue;
+
+        let mut harness = approve_reject_notification_harness();
+        let a = publish_go_to_card(&mut harness, "first", "first-token");
+        let b = publish_go_to_card(&mut harness, "second", "second-token");
+        let looks = Arc::new(AtomicUsize::new(0));
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let release = std::sync::Mutex::new(release_rx);
+        harness.app.state.window_go_to.inject(
+            {
+                let looks = looks.clone();
+                move || match looks.fetch_add(1, SeqCst) {
+                    0 => go_to_windows("first-token", 1)
+                        .into_iter()
+                        .chain(go_to_windows("second-token", 1))
+                        .collect(),
+                    1 => {
+                        started_tx.send(()).unwrap();
+                        release.lock().unwrap().recv_timeout(SCENE_WAIT).unwrap();
+                        go_to_windows("first-token", 1)
+                    }
+                    _ => Vec::new(),
+                }
+            },
+            |_| panic!("neither surviving lookup may activate a target"),
+        );
+        present_go_to_card(&mut harness, true);
+        wait_for_go_to(&mut harness, |scene| {
+            [a, b].iter().all(|id| {
+                scene
+                    .overlay
+                    .notification_geometry
+                    .iter()
+                    .any(|card| card.publication_id == *id && card.goto.is_some())
+            })
+        });
+        let (first, second) = (
+            go_to_point(&harness, a).unwrap(),
+            go_to_point(&harness, b).unwrap(),
+        );
+        click_at(&mut harness, first);
+        started_rx.recv_timeout(SCENE_WAIT).unwrap();
+        click_at(&mut harness, second);
+        wait_for_go_to(&mut harness, |scene| {
+            scene.overlay.notification_go_to[&b].cue == Some(GoToCue::NotFound)
+        });
+        assert_eq!(
+            looks.load(SeqCst),
+            3,
+            "the other card runs its own press lookup"
+        );
+
+        let replacement = publish_go_to_card(&mut harness, "first", "first-token");
+        assert_ne!(replacement, a);
+        release_tx.send(()).unwrap();
+        let end = std::time::Instant::now() + SCENE_WAIT;
+        while harness.app.state.window_go_to.press_pending_for_test() {
+            harness.tick();
+            assert!(std::time::Instant::now() < end);
+            std::thread::yield_now();
+        }
+        assert_eq!(harness.app.state.window_go_to.activations, 0);
+        assert!(!harness.scene().overlay.notification_go_to.contains_key(&a));
+    }
+
     /// Settle until the pressed link shows `state` (the worker reports on its
     /// own thread), returning what the scene and the admin mirror show.
     fn settle_link_to(

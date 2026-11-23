@@ -1943,6 +1943,135 @@ async fn test_session_caption_takes_one_secondary_line_above_the_title() {
     assert!(items.iter().any(|i| &*i.text == "tze-hud"));
 }
 
+#[tokio::test]
+async fn go_to_uses_existing_caption_geometry_and_draws_local_cues() {
+    use tze_hud_scene::graph::overlay::{GoToCue, NotificationGoTo};
+    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
+    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+    compositor.set_token_map(HashMap::from([("motion.enter.ms".into(), "0".into())]));
+    let mut scene =
+        SceneGraph::new_with_clock(1280.0, 720.0, Arc::new(tze_hud_scene::TestClock::new(1000)));
+    scene.register_zone(ZoneDefinition {
+        id: SceneId::new(),
+        name: "notification-area".into(),
+        description: "session caption control".into(),
+        geometry_policy: GeometryPolicy::Relative {
+            x_pct: 0.1,
+            y_pct: 0.1,
+            width_pct: 0.45,
+            height_pct: 0.7,
+        },
+        accepted_media_types: vec![ZoneMediaType::ShortTextWithIcon],
+        rendering_policy: RenderingPolicy::default(),
+        contention_policy: ContentionPolicy::Stack { max_depth: 2 },
+        max_publishers: 2,
+        auto_clear_ms: None,
+        ephemeral: false,
+        layer_attachment: LayerAttachment::Chrome,
+    });
+    let session = tze_hud_scene::scope::scoped_namespace("claude", "s1");
+    scene.set_scoped_session_label(
+        &session,
+        Some(tze_hud_scene::scope::SessionLabel {
+            caption: "test folder".into(),
+            window_token: Some("test folder".into()),
+        }),
+    );
+    scene
+        .publish_to_zone(
+            "notification-area",
+            ZoneContent::Notification(NotificationPayload {
+                title: "Question".into(),
+                text: "Body".into(),
+                icon: String::new(),
+                urgency: 1,
+                ttl_ms: None,
+                actions: vec![],
+            }),
+            &session,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+    compositor.populate_zone_hit_regions(&mut scene, 1280.0, 720.0);
+    let baseline = scene.overlay.notification_geometry[0].clone();
+    assert!(baseline.has_window_caption);
+    assert!(baseline.goto.is_none());
+    compositor.render_frame_headless(&mut scene, &surface);
+    let plain_pixels = surface.read_pixels(&compositor.device);
+
+    scene.overlay.notification_go_to.insert(
+        baseline.publication_id,
+        NotificationGoTo {
+            available: true,
+            ..Default::default()
+        },
+    );
+    compositor.populate_zone_hit_regions(&mut scene, 1280.0, 720.0);
+    let card = &scene.overlay.notification_geometry[0];
+    assert_eq!(card.bounds, baseline.bounds);
+    assert_eq!(card.close, baseline.close);
+    assert_eq!(card.actions, baseline.actions);
+    let bounds = card.goto.unwrap();
+    let control = scene
+        .overlay
+        .zone_hit_regions
+        .iter()
+        .find(|hit| hit.kind == tze_hud_scene::ZoneInteractionKind::GoTo)
+        .unwrap()
+        .clone();
+    assert_eq!(control.bounds, bounds);
+    let pixels_in = |pixels: &[u8]| {
+        let left = bounds.x.ceil() as usize;
+        let right = (bounds.x + bounds.width).floor() as usize;
+        let top = bounds.y.ceil() as usize;
+        let bottom = (bounds.y + bounds.height).floor() as usize;
+        (top..bottom)
+            .flat_map(|y| pixels[(y * 1280 + left) * 4..(y * 1280 + right) * 4].to_vec())
+            .collect::<Vec<_>>()
+    };
+    let mut previous_pixels = pixels_in(&plain_pixels);
+    for (cue, label) in [
+        (None, "Go to"),
+        (Some(GoToCue::NotFound), "Window not found"),
+        (Some(GoToCue::Ambiguous(2)), "2 windows match"),
+        (Some(GoToCue::Blocked), "Windows blocked the switch"),
+    ] {
+        scene
+            .overlay
+            .notification_go_to
+            .get_mut(&baseline.publication_id)
+            .unwrap()
+            .cue = cue;
+        let items = compositor.collect_text_items(&scene, 1280.0, 720.0);
+        let goto = items.iter().find(|item| &*item.text == label).unwrap();
+        let caption = items
+            .iter()
+            .find(|item| &*item.text == "test folder")
+            .unwrap();
+        assert_eq!(goto.pixel_y, caption.pixel_y);
+        assert_eq!(goto.color, caption.color);
+        assert_eq!(goto.bounds_width, bounds.width);
+        compositor.prime_truncation_cache(&scene);
+        compositor.render_frame_headless(&mut scene, &surface);
+        let pixels = pixels_in(&surface.read_pixels(&compositor.device));
+        assert_ne!(
+            pixels, previous_pixels,
+            "{label} reaches the caption-row pixels"
+        );
+        previous_pixels = pixels;
+    }
+    scene.set_chrome_hovered(&control.interaction_id, true);
+    compositor.render_frame_headless(&mut scene, &surface);
+    assert_ne!(
+        pixels_in(&surface.read_pixels(&compositor.device)),
+        previous_pixels,
+        "the control draws token-resolved hover fill"
+    );
+}
+
 /// A caption longer than the column ellipsizes on its one line; the title,
 /// × and action row move down by exactly that line at unchanged widths. A
 /// labeled session's alert banner draws no caption.
