@@ -53,7 +53,7 @@ class ConstrainedEnvelopeCheckerTests(unittest.TestCase):
                 "verified_software": True,
             },
             "viewport": {"width": 1920, "height": 1080},
-            "calibration_vector_version": "tze_hud.cpu-gpu-upload.v1",
+            "calibration_vector_version": "tze_hud.cpu-gpu-upload.v2",
         }
 
     @classmethod
@@ -77,7 +77,7 @@ class ConstrainedEnvelopeCheckerTests(unittest.TestCase):
         return {
             "constrained_profile": cls._valid_profile(),
             "calibration": {
-                "factors": {"cpu": 0.854, "gpu": 0.338, "upload": 0.215}
+                "factors": dict(check_constrained_envelope.windows_budgets.REFERENCE_FACTORS)
             },
             "sessions": [
                 {"name": name, "summary": dict(base_summary)}
@@ -125,7 +125,9 @@ class ConstrainedEnvelopeCheckerTests(unittest.TestCase):
 
     def test_normalized_value_is_explicit_and_uses_vector_dimension(self) -> None:
         artifact = self._valid_artifact()
-        artifact["calibration"]["factors"]["gpu"] = 0.169
+        artifact["calibration"]["factors"]["gpu"] = (
+            check_constrained_envelope.windows_budgets.REFERENCE_FACTORS["gpu"] / 2
+        )
         report = check_constrained_envelope.build_report(artifact, "benchmark.json")
         frame_result = next(
             result

@@ -69,7 +69,7 @@ class WindowsPerfBudgetCheckerTests(unittest.TestCase):
         if paced_contention_summary_overrides:
             paced_summary.update(paced_contention_summary_overrides)
         return {
-            "calibration": {"factors": {"cpu": 0.854, "gpu": 0.338, "upload": 0.215}},
+            "calibration": {"factors": dict(check_windows_perf_budgets.REFERENCE_FACTORS)},
             "sessions": [
                 {"name": name, "summary": dict(base_summary)}
                 for name in check_windows_perf_budgets.PUBLISH_SESSIONS

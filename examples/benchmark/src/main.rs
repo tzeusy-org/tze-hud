@@ -14,11 +14,15 @@
 //!
 //! ## Calibration workloads
 //!
-//! 1. **CPU** — scene-graph mutations via [`cpu_calibration::calibrate`].
-//! 2. **GPU** — fill/composition: render a fixed multi-tile scene at target
-//!    resolution, measure frames per second over a warmup + timed window.
-//! 3. **Upload** — texture upload: create and update texture-backed tiles
-//!    in rapid succession, measure throughput.
+//! 1. **CPU** — the scene commits of zone and widget publishes, plus hit
+//!    tests, via [`cpu_calibration::calibrate`].
+//! 2. **GPU** — fill/composition: render a fixed overlay composed by
+//!    publishes (translucent full-display ambient fill, notifications, status
+//!    bar, subtitle, a grid of SVG gauges) at target resolution, measure
+//!    frames per second over a warmup + timed window.
+//! 3. **Upload** — texture upload: publish a new level to every SVG gauge
+//!    each frame, so each re-rasterizes and uploads its texture; measure
+//!    uploads per second.
 //!
 //! ## Scenarios
 //!
@@ -53,7 +57,7 @@ use tze_hud_telemetry::SessionSummary;
 use validation::{HardwareFactors, ValidationReport};
 
 #[cfg(feature = "headless")]
-const CALIBRATION_VECTOR_VERSION: &str = "tze_hud.cpu-gpu-upload.v1";
+const CALIBRATION_VECTOR_VERSION: &str = "tze_hud.cpu-gpu-upload.v2";
 #[cfg(feature = "headless")]
 const BENCHMARK_WIDTH: u32 = 1920;
 #[cfg(feature = "headless")]
@@ -164,8 +168,8 @@ pub struct GpuCalibrationResult {
 /// Texture-upload calibration result.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct UploadCalibrationResult {
-    /// Tile operations per second achieved during upload calibration.
-    pub tile_ops_per_sec: f64,
+    /// Widget textures re-rasterized and uploaded per second.
+    pub widget_uploads_per_sec: f64,
     /// Hardware factor: reference_ops / observed_ops.
     pub upload_factor: f64,
     /// Duration of the calibration run in microseconds.
@@ -221,32 +225,114 @@ mod headless_impl {
 
     use tze_hud_telemetry::FrameTelemetry;
 
-    use crate::cpu_calibration::calibrate as calibrate_cpu;
+    use crate::cpu_calibration::{calibrate as calibrate_cpu, level, register_instances};
     use tze_hud_runtime::headless::{HeadlessConfig, HeadlessRuntime};
     use tze_hud_scene::graph::SceneGraph;
-    use tze_hud_scene::mutation::{MutationBatch, SceneMutation};
-    use tze_hud_scene::types::{Node, NodeData, Rect, Rgba, SceneId, SolidColorNode};
+    use tze_hud_scene::types::{
+        GeometryPolicy, NotificationPayload, Rgba, StatusBarPayload, ZoneContent,
+    };
 
     // ── Budget constants ─────────────────────────────────────────────────────
 
-    /// Reference GPU throughput: frames per second on reference hardware
-    /// (modern dGPU, simple multi-tile scene, 1920x1080).
-    const REFERENCE_GPU_FPS: f64 = 500.0;
+    /// Reference GPU throughput: frames per second rendering the publish-composed
+    /// calibration overlay at 1920x1080. The earlier 20-tile scene's reference
+    /// (500 fps) scaled by the ratio of the two scenes' frame rates on one host
+    /// (111 / 193 fps, llvmpipe, debug build), so a host keeps its factor.
+    const REFERENCE_GPU_FPS: f64 = 288.0;
 
     /// Number of calibration frames to render for GPU calibration.
     const GPU_CALIBRATION_FRAMES: u64 = 50;
 
-    /// Tile count for GPU calibration scene (multi-tile with alpha blending).
-    const GPU_CALIBRATION_TILES: usize = 20;
+    /// SVG gauges in the GPU calibration overlay (a 5 x 3 grid).
+    const GPU_CALIBRATION_WIDGETS: usize = 15;
 
-    /// Reference upload throughput: tile create+update+delete ops/sec on reference hardware.
-    const REFERENCE_UPLOAD_OPS_PER_SEC: f64 = 5_000.0;
+    /// Reference upload throughput: widget textures re-rasterized and
+    /// uploaded per second. The earlier tile create/delete reference (5,000
+    /// ops/s) scaled by the two workloads' throughput ratio on one host
+    /// (1,348 uploads/s / 6,563 tile ops/s), like [`REFERENCE_GPU_FPS`].
+    const REFERENCE_UPLOADS_PER_SEC: f64 = 1_030.0;
 
     /// Number of upload calibration cycles.
     const UPLOAD_CALIBRATION_CYCLES: usize = 100;
 
-    /// Tiles per upload cycle.
-    const UPLOAD_TILES_PER_CYCLE: usize = 10;
+    /// SVG gauges updated each upload cycle.
+    const UPLOAD_WIDGETS: usize = 10;
+
+    /// Cell `i` of a `cols`-wide grid of `w_pct` x `h_pct` cells.
+    fn grid_cell(i: usize, cols: usize, w_pct: f32, h_pct: f32) -> GeometryPolicy {
+        GeometryPolicy::Relative {
+            x_pct: (i % cols) as f32 * w_pct,
+            y_pct: (i / cols) as f32 * h_pct,
+            width_pct: w_pct,
+            height_pct: h_pct,
+        }
+    }
+
+    /// Publish the GPU calibration overlay. The gauges use the built-in
+    /// `gauge` bundle, so each one is a textured, alpha-blended SVG.
+    fn publish_calibration_overlay(scene: &mut SceneGraph) -> Result<(), String> {
+        const AGENT: &str = "gpu_calibration";
+        let tab_id = scene
+            .create_tab("gpu_calibration", 0)
+            .map_err(|e| format!("create_tab: {e:?}"))?;
+        register_instances(
+            scene,
+            tab_id,
+            "gauge",
+            "gauge",
+            GPU_CALIBRATION_WIDGETS,
+            |i| Some(grid_cell(i, 5, 0.2, 0.3)),
+        );
+        let mut publish = |zone: &str, content: ZoneContent, key: Option<String>| {
+            scene
+                .publish_to_zone(zone, content, AGENT, key, None, None)
+                .map_err(|e| format!("{zone}: {e:?}"))
+        };
+        publish(
+            "ambient-background",
+            ZoneContent::SolidColor(Rgba::new(0.1, 0.3, 0.6, 0.8)),
+            None,
+        )?;
+        for n in 0..3 {
+            publish(
+                "notification-area",
+                ZoneContent::Notification(NotificationPayload {
+                    title: format!("Calibration {n}"),
+                    text: "A notification body long enough to wrap onto a second line.".into(),
+                    ..Default::default()
+                }),
+                None,
+            )?;
+        }
+        for k in 0..4 {
+            publish(
+                "status-bar",
+                ZoneContent::StatusBar(StatusBarPayload {
+                    entries: [(format!("k{k}"), format!("value {k}"))].into(),
+                }),
+                Some(format!("k{k}")),
+            )?;
+        }
+        publish(
+            "subtitle",
+            ZoneContent::StreamText("A subtitle line rendered over the overlay.".into()),
+            None,
+        )?;
+        for i in 0..GPU_CALIBRATION_WIDGETS {
+            scene
+                .publish_to_widget_for_lease(
+                    &format!("gauge-{i}"),
+                    level(i as f32 / GPU_CALIBRATION_WIDGETS as f32),
+                    AGENT,
+                    None,
+                    0,
+                    None,
+                    None,
+                )
+                .map_err(|e| format!("gauge-{i}: {e:?}"))?;
+        }
+        Ok(())
+    }
 
     async fn scene_handle(runtime: &HeadlessRuntime) -> Arc<Mutex<SceneGraph>> {
         let state = runtime.state.lock().await;
@@ -454,8 +540,8 @@ mod headless_impl {
 
     /// Run the GPU fill/composition calibration workload.
     ///
-    /// Renders a fixed multi-tile scene with overlapping alpha-blended tiles at
-    /// target resolution (1920x1080). Returns FPS and the hardware factor.
+    /// Renders the fixed publish-composed overlay at target resolution
+    /// (1920x1080). Returns FPS and the hardware factor.
     pub(crate) async fn calibrate_gpu() -> GpuCalibrationResult {
         let start = Instant::now();
 
@@ -497,60 +583,37 @@ mod headless_impl {
             verified_software,
         });
 
-        // Set up a multi-tile scene with overlapping alpha-blended tiles
+        // Compose a fixed overlay through publishes: a translucent full-display
+        // ambient fill (the largest blended area an agent can cause), a stack
+        // of notifications, a status bar, a subtitle line and a grid of
+        // textured SVG gauges over it.
         {
             let scene_arc = scene_handle(&runtime).await;
             let mut scene = scene_arc.lock().await;
-            let tab_id = match scene.create_tab("gpu_calibration", 0) {
-                Ok(id) => id,
-                Err(e) => {
-                    warn!("GPU calibration: create_tab failed: {:?}", e);
-                    return GpuCalibrationResult {
-                        fps: 0.0,
-                        gpu_factor: f64::NAN,
-                        calibration_duration_us: start.elapsed().as_micros() as u64,
-                        adapter: selected_adapter,
-                    };
-                }
-            };
-
-            let lease_id = scene.grant_lease("gpu_calibration", 300_000);
-            if let Some(lease) = scene.leases.get_mut(&lease_id) {
-                lease.resource_budget.max_tiles = (GPU_CALIBRATION_TILES + 5) as u32;
-            }
-
-            let cols = 5usize;
-            for i in 0..GPU_CALIBRATION_TILES {
-                let col = i % cols;
-                let row = i / cols;
-                // Tiles overlap slightly for alpha-blending composition load
-                let bounds = Rect::new(col as f32 * 350.0, row as f32 * 250.0, 380.0, 270.0);
-                if let Ok(tile_id) =
-                    scene.create_tile(tab_id, "gpu_calibration", lease_id, bounds, (i + 1) as u32)
-                {
-                    let alpha = if i % 2 == 0 { 1.0f32 } else { 0.7f32 };
-                    let node = Node {
-                        layout: Default::default(),
-                        id: SceneId::new(),
-                        children: vec![],
-                        data: NodeData::SolidColor(SolidColorNode {
-                            color: Rgba::new(
-                                i as f32 / GPU_CALIBRATION_TILES as f32,
-                                0.5,
-                                0.8,
-                                alpha,
-                            ),
-                            bounds: Rect::new(0.0, 0.0, 380.0, 270.0),
-                            radius: None,
-                        }),
-                    };
-                    let _ = scene.set_tile_root(tile_id, node);
-                }
+            if let Err(e) = publish_calibration_overlay(&mut scene) {
+                warn!("GPU calibration: overlay publish failed: {e}");
+                return GpuCalibrationResult {
+                    fps: 0.0,
+                    gpu_factor: f64::NAN,
+                    calibration_duration_us: start.elapsed().as_micros() as u64,
+                    adapter: selected_adapter,
+                };
             }
         }
 
-        // Warmup: 5 frames (not measured)
-        for _ in 0..5 {
+        // Warmup: 5 frames (not measured). The first rasterizes every gauge;
+        // an overlay missing them would measure a lighter scene.
+        let first = runtime.render_frame().await.widget_rasterized.len();
+        if first != GPU_CALIBRATION_WIDGETS {
+            warn!("GPU calibration: {first} of {GPU_CALIBRATION_WIDGETS} gauges rendered");
+            return GpuCalibrationResult {
+                fps: 0.0,
+                gpu_factor: f64::NAN,
+                calibration_duration_us: start.elapsed().as_micros() as u64,
+                adapter: selected_adapter,
+            };
+        }
+        for _ in 1..5 {
             runtime.render_frame().await;
         }
 
@@ -577,8 +640,8 @@ mod headless_impl {
 
     /// Run the texture-upload calibration workload.
     ///
-    /// Creates and destroys tiles in rapid succession to measure the create/update/delete
-    /// throughput, which is the primary bottleneck for texture-upload-heavy workloads.
+    /// Publishes a new level to every SVG gauge per frame, so each frame
+    /// re-rasterizes and uploads that many widget textures.
     pub(crate) async fn calibrate_upload() -> UploadCalibrationResult {
         let start = Instant::now();
 
@@ -589,114 +652,74 @@ mod headless_impl {
             Err(e) => {
                 warn!("Upload calibration failed to init runtime: {}", e);
                 return UploadCalibrationResult {
-                    tile_ops_per_sec: 0.0,
+                    widget_uploads_per_sec: 0.0,
                     upload_factor: f64::NAN,
                     calibration_duration_us: start.elapsed().as_micros() as u64,
                 };
             }
         };
 
-        let tab_id;
-        let lease_id;
         {
             let scene_arc = scene_handle(&runtime).await;
             let mut scene = scene_arc.lock().await;
-            tab_id = match scene.create_tab("upload_calibration", 0) {
+            let tab_id = match scene.create_tab("upload_calibration", 0) {
                 Ok(id) => id,
                 Err(e) => {
                     warn!("Upload calibration: create_tab failed: {:?}", e);
                     return UploadCalibrationResult {
-                        tile_ops_per_sec: 0.0,
+                        widget_uploads_per_sec: 0.0,
                         upload_factor: f64::NAN,
                         calibration_duration_us: start.elapsed().as_micros() as u64,
                     };
                 }
             };
-            lease_id = scene.grant_lease("upload_calibration", 300_000);
-            if let Some(lease) = scene.leases.get_mut(&lease_id) {
-                lease.resource_budget.max_tiles = (UPLOAD_TILES_PER_CYCLE + 5) as u32;
-            }
+            register_instances(&mut scene, tab_id, "gauge", "gauge", UPLOAD_WIDGETS, |i| {
+                Some(grid_cell(i, 5, 0.2, 0.2))
+            });
         }
 
-        // Timed upload cycle: create N tiles, render, delete N tiles, repeat
+        // Each cycle publishes a new level to every gauge and renders the
+        // frame, which re-rasterizes each changed SVG and uploads its texture.
+        // Only uploads the frame reports are counted.
         let timed_start = Instant::now();
-        let mut total_ops: u64 = 0;
-
+        let mut uploads: u64 = 0;
         for cycle in 0..UPLOAD_CALIBRATION_CYCLES {
-            let mut tile_ids = Vec::with_capacity(UPLOAD_TILES_PER_CYCLE);
-
-            // Create UPLOAD_TILES_PER_CYCLE tiles
             {
                 let scene_arc = scene_handle(&runtime).await;
                 let mut scene = scene_arc.lock().await;
-                for i in 0..UPLOAD_TILES_PER_CYCLE {
-                    let bounds = Rect::new(
-                        (i as f32 % 10.0) * 190.0,
-                        (i as f32 / 10.0).floor() * 180.0,
-                        180.0,
-                        170.0,
-                    );
-                    if let Ok(tile_id) = scene.create_tile(
-                        tab_id,
+                let value = ((cycle % 2) as f32).mul_add(0.5, 0.25);
+                for i in 0..UPLOAD_WIDGETS {
+                    let _ = scene.publish_to_widget_for_lease(
+                        &format!("gauge-{i}"),
+                        level(value),
                         "upload_calibration",
-                        lease_id,
-                        bounds,
-                        (i + 1) as u32,
-                    ) {
-                        let node = Node {
-                            layout: Default::default(),
-                            id: SceneId::new(),
-                            children: vec![],
-                            data: NodeData::SolidColor(SolidColorNode {
-                                color: Rgba::new(
-                                    cycle as f32 / UPLOAD_CALIBRATION_CYCLES as f32,
-                                    0.5,
-                                    0.5,
-                                    1.0,
-                                ),
-                                bounds: Rect::new(0.0, 0.0, 180.0, 170.0),
-                                radius: None,
-                            }),
-                        };
-                        // Count create unconditionally (it succeeded); count
-                        // set_root only if it also succeeds, to avoid inflating
-                        // throughput when the scene mutation fails.
-                        total_ops += 1; // create
-                        if scene.set_tile_root(tile_id, node).is_ok() {
-                            total_ops += 1; // set_root
-                        }
-                        tile_ids.push(tile_id);
-                    }
+                        None,
+                        0,
+                        None,
+                        None,
+                    );
                 }
             }
-
-            // Render one frame with the tiles visible
-            runtime.render_frame().await;
-
-            // Delete all tiles (models a full tile lifecycle per cycle)
-            {
-                let scene_arc = scene_handle(&runtime).await;
-                let mut scene = scene_arc.lock().await;
-                for tile_id in &tile_ids {
-                    let batch = MutationBatch {
-                        batch_id: SceneId::new(),
-                        agent_namespace: "upload_calibration".to_string(),
-                        mutations: vec![SceneMutation::DeleteTile { tile_id: *tile_id }],
-                        timing_hints: None,
-                        lease_id: None,
-                    };
-                    let _ = scene.apply_batch(&batch);
-                    total_ops += 1;
-                }
-            }
+            uploads += runtime.render_frame().await.widget_rasterized.len() as u64;
         }
 
         let timed_elapsed_secs = timed_start.elapsed().as_secs_f64();
-        let tile_ops_per_sec = total_ops as f64 / timed_elapsed_secs.max(1e-9);
-        let upload_factor = (REFERENCE_UPLOAD_OPS_PER_SEC / tile_ops_per_sec).clamp(0.01, 100.0);
+        let expected = (UPLOAD_CALIBRATION_CYCLES * UPLOAD_WIDGETS) as u64;
+        if uploads != expected {
+            // A publish that does not reach the texture is not a fast upload.
+            warn!("Upload calibration: {uploads} of {expected} widget uploads happened");
+            return UploadCalibrationResult {
+                widget_uploads_per_sec: 0.0,
+                upload_factor: f64::NAN,
+                calibration_duration_us: start.elapsed().as_micros() as u64,
+            };
+        }
+        let widget_uploads_per_sec = uploads as f64 / timed_elapsed_secs.max(1e-9);
+        let upload_factor =
+            (REFERENCE_UPLOADS_PER_SEC / widget_uploads_per_sec.max(1e-9)).clamp(0.01, 100.0);
 
         UploadCalibrationResult {
-            tile_ops_per_sec,
+            widget_uploads_per_sec,
             upload_factor,
             calibration_duration_us: start.elapsed().as_micros() as u64,
         }
@@ -970,8 +993,8 @@ mod headless_impl {
                 warn!("  Upload calibration failed; using uncalibrated mode");
             } else {
                 info!(
-                    "  Upload: tile_ops/s={:.0}, upload_factor={:.2}",
-                    upload.tile_ops_per_sec, upload.upload_factor,
+                    "  Upload: widget_uploads/s={:.0}, upload_factor={:.2}",
+                    upload.widget_uploads_per_sec, upload.upload_factor,
                 );
             }
 
@@ -1192,7 +1215,7 @@ mod tests {
                 width: 1920,
                 height: 1080,
             },
-            calibration_vector_version: "tze_hud.cpu-gpu-upload.v1".to_string(),
+            calibration_vector_version: "tze_hud.cpu-gpu-upload.v2".to_string(),
         };
 
         let json = serde_json::to_value(&profile).unwrap();
@@ -1258,12 +1281,12 @@ mod tests {
     #[test]
     fn test_upload_calibration_result_serializes() {
         let r = UploadCalibrationResult {
-            tile_ops_per_sec: 3_500.0,
+            widget_uploads_per_sec: 3_500.0,
             upload_factor: 1.43,
             calibration_duration_us: 200_000,
         };
         let json = serde_json::to_string(&r).unwrap();
-        assert!(json.contains("tile_ops_per_sec"));
+        assert!(json.contains("widget_uploads_per_sec"));
         assert!(json.contains("upload_factor"));
     }
 

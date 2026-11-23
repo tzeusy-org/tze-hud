@@ -28,9 +28,16 @@ REFERENCE_HARDWARE_TAG = (
 # From docs/reports/windows_perf_baseline_2026-05.md, layer3_benchmark_600.json.
 # The benchmark artifact factors are relative to the harness' internal reference
 # constants, so Windows-locked reference budgets scale by current/reference factor.
+# Calibration vector v2 (publish-composed workloads) raised the GPU factor
+# on the Windows runner by 1.72x: tile-era mean 4.65 (runs 45035349087,
+# 43846975978, 42601128070, 41426435432), v2 mean 8.01 (45057598818,
+# 45057651755). The GPU reference is scaled by the same ratio (0.338 ->
+# 0.582) so scaled budgets keep their size on that runner. The CPU factor
+# moved within its own noise (6.58 -> 6.84) and stays; no budget scales by
+# upload.
 REFERENCE_FACTORS = {
     "cpu": 0.854,
-    "gpu": 0.338,
+    "gpu": 0.582,
     "upload": 0.215,
 }
 
