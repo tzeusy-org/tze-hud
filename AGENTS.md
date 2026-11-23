@@ -187,6 +187,11 @@ checked out. Its lock serializes hooks, not other Cargo processes.
 
 ## Git / GitHub Workflow
 
+- A PR labelled `owner-merge` waits for the owner. Sessions and the fleet must
+  never enqueue or merge it. From this checkout, run
+  `python3 .claude/skills/hud-projection/scripts/hud_pr.py hold <N>` to hand it
+  to the owner, or run `release <N>` through the same script to return it to
+  the fleet. See [Held pull requests](.claude/skills/hud-projection/references/claude-code-hooks.md#held-pull-requests).
 - `main` takes no direct merges: the `main merge queue` ruleset requires every PR to land through the queue, so the older `gh pr merge <N> --squash [--delete-branch]` recipes no longer apply. Enqueue instead (CI / Build below) and confirm the landing with `gh pr view <N> --json state,mergedAt`.
 - `beads-pr-reviewer-worker`: automated reviewer threads (Copilot, Gemini) are left by bots and count toward `UNRESOLVED_COUNT`; they must be replied to and resolved before merge just like human threads.
 - `beads-pr-reviewer-worker`: the `list_review_threads.py` helper may return 0 threads even when threads exist; always verify with `evaluate_merge_readiness.py` or `gh api repos/.../pulls/<N>/comments` before treating unresolved count as zero.

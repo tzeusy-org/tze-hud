@@ -277,3 +277,35 @@ Remove only the copied entries; preserve unrelated hooks and do not set global
 `disableAllHooks`. After owned children terminate, remove only this hook's
 metadata cache if desired. Use your ordinary paired client to clear this portal.
 No pairing, auth, runtime state/schema or global settings change is needed.
+## Held pull requests
+
+`hud_pr.py` runs on the Linux or WSL agent host with Python 3.10+, an authenticated
+`gh`, and a paired HUD. From this checkout:
+
+```sh
+python3 .claude/skills/hud-projection/scripts/hud_pr.py hold 123
+python3 .claude/skills/hud-projection/scripts/hud_pr.py list
+python3 .claude/skills/hud-projection/scripts/hud_pr.py release 123
+```
+
+`hold` adds `owner-merge` and starts one detached watcher. Pass
+`--review-url https://example.com/review/123` to use a specific HTTPS review
+page. Run `hold` again to change the next card's Review link or re-arm an
+exited watcher. When multiple HUDs are paired, set `HUD_HOST` to select one.
+Without a selected pairing, `hold` still labels the PR and reports
+`no HUD pairing: no card`. The fleet and agent sessions skip labelled PRs.
+
+When a held PR targeting `main` passes its required checks, the watcher can
+show a ten-minute card captioned `PR #123`. Review opens the page and keeps
+the card. Merge re-checks the label and asks GitHub to enqueue the exact
+commit shown by the card. A push can make that request fail, and the watcher
+reports the failure before watching the current head. Later, ×, and expiry
+bring the card back after an hour if the same head is still green and held.
+
+`list` shows open held PRs and their local status, including the UTC return
+time after Later. A watcher stops on merge, closure, release, successful
+queueing, or after 24 hours. A queue outcome stays up for up to 15 seconds
+within that window. `release` removes the label and stops the local watcher,
+which releases its card's HUD session. A hard-killed watcher's card
+expires by its TTL. State and logs are private files under
+`${XDG_STATE_HOME:-~/.local/state}/tze-hud/hud_pr/`.

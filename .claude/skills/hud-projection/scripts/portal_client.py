@@ -166,14 +166,15 @@ def ask_endpoint():
 class AskSession:
     """One scoped question, with optional follow-up tools in the same scope."""
 
-    def __init__(self, label=None):
+    def __init__(self, label=None, *, connection=None):
         self.label = label
+        self.connection = connection
         self.session_id = None
         self.key = None
         self.cleared = False
 
     def __enter__(self):
-        self.url, self.token = ask_endpoint()
+        self.url, self.token = self.connection or ask_endpoint()
         folder = os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
         label = Path(folder).name if self.label is None else self.label
         try:
