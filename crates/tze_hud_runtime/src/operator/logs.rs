@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 pub const MAX_LOG_BYTES: u64 = 10 * 1024 * 1024;
 
 /// Most lines one tail request may return.
-pub const MAX_TAIL_LINES: usize = 2000;
+const MAX_TAIL_LINES: usize = 2000;
 
 pub const LOG_FILE_NAME: &str = "tze_hud.log";
 
@@ -46,7 +46,7 @@ pub fn set_file_level(level: &str) -> Result<(), String> {
 }
 
 /// The log file's level, if logging has a file layer.
-pub fn file_level() -> Option<String> {
+pub(crate) fn file_level() -> Option<String> {
     FILE_LEVEL
         .get()
         .map(|(_, current)| current.lock().unwrap_or_else(|e| e.into_inner()).clone())
@@ -138,7 +138,7 @@ fn process_paths() -> LogPaths {
         .unwrap_or_else(|| LogPaths::from_environment(None, false))
 }
 
-pub fn log_dir() -> PathBuf {
+pub(crate) fn log_dir() -> PathBuf {
     process_paths().directory
 }
 
@@ -300,7 +300,7 @@ fn last_lines(path: &Path, n: usize) -> io::Result<Vec<String>> {
 
 /// The last `n` (clamped to [`MAX_TAIL_LINES`]) lines of the log at `path`,
 /// continuing into `<path>.1` when the current file is shorter than `n`.
-pub fn tail(path: &Path, n: usize) -> String {
+pub(crate) fn tail(path: &Path, n: usize) -> String {
     let n = n.min(MAX_TAIL_LINES);
     if n == 0 {
         return String::new();
