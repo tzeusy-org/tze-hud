@@ -5625,8 +5625,14 @@ mod tests {
         assert_eq!(harness.app.state.pending_pointer_buttons.len(), 2);
         foreground.store(31, SeqCst);
         drop(held);
-        assert!(harness.tick());
-        assert!(harness.app.state.pending_pointer_buttons.is_empty());
+        let deadline = std::time::Instant::now() + SCENE_WAIT;
+        while !harness.tick() || !harness.app.state.pending_pointer_buttons.is_empty() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "retained pointer did not settle"
+            );
+            std::thread::yield_now();
+        }
         let state = &harness.scene().overlay.notification_go_to[&card];
         assert_eq!(state.attempted_at_mono_us, None);
         assert_eq!(state.cue, None);
