@@ -56,8 +56,7 @@ pub mod upload;
 pub mod verbs;
 
 pub use budget_gate::{
-    MutationBudgetDecision, MutationBudgetEnforcer, MutationBudgetUsage,
-    SharedMutationBudgetEnforcer,
+    MutationBudgetDecision, MutationBudgetEnforcer, SharedMutationBudgetEnforcer,
 };
 pub use degradation_notice_bus::{DegradationNoticeReceiver, DegradationNoticeSender};
 use element_persist::{

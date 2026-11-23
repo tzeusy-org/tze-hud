@@ -173,10 +173,6 @@ fn start_enabled_network_services(
         budget_enforcer: Some(std::sync::Arc::new(
             crate::mutation_budget_bridge::RuntimeMutationBudgetEnforcer::with_limits(
                 runtime_context.operational_envelope.max_resident_sessions,
-                runtime_context.operational_envelope.max_leased_tiles,
-                runtime_context
-                    .operational_envelope
-                    .max_agent_leased_texture_bytes,
             ),
         )),
         render_wake,

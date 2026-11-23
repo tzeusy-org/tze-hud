@@ -713,10 +713,6 @@ impl HeadlessRuntime {
                     self.runtime_context
                         .operational_envelope
                         .max_resident_sessions,
-                    self.runtime_context.operational_envelope.max_leased_tiles,
-                    self.runtime_context
-                        .operational_envelope
-                        .max_agent_leased_texture_bytes,
                 ),
             )),
             degradation_notices: self.degradation_notices.clone(),

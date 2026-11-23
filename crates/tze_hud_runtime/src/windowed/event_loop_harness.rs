@@ -434,10 +434,6 @@ impl HeadlessEventLoopHarness {
             budget_enforcer: Some(Arc::new(
                 crate::mutation_budget_bridge::RuntimeMutationBudgetEnforcer::with_limits(
                     runtime_context.operational_envelope.max_resident_sessions,
-                    runtime_context.operational_envelope.max_leased_tiles,
-                    runtime_context
-                        .operational_envelope
-                        .max_agent_leased_texture_bytes,
                 ),
             )),
             ..SessionDeps::new(Arc::clone(&state.shared_state), Arc::clone(&cfg.agents))
