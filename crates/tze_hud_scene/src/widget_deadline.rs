@@ -206,7 +206,7 @@ impl WidgetDeadline {
 
     /// The first wall instant at which `display_at` changes. Never a periodic
     /// retry, and never due now: expiry has a stable zero display and no wake.
-    pub fn next_change_wall_us(&self, now_wall_us: u64) -> Option<u64> {
+    fn next_change_wall_us(&self, now_wall_us: u64) -> Option<u64> {
         if self.counts_up {
             let elapsed = self.elapsed_us(now_wall_us);
             let next = Self::elapsed_next_change(elapsed)?;
