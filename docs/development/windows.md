@@ -675,6 +675,17 @@ also carries the informational `tray-answer` (a real tray left click with a
 question waiting, then Esc and a keystroke that must reach Notepad); an icon
 in overflow leaves it a limited proof. This checks hosted software-rendered mechanics; owner GPU,
 DWM transparency, multiple monitors and DPI acceptance remain separate.
+
+On the disposable GitHub-hosted runner, the fullscreen step attempts to
+suppress Edge onboarding through a browser policy and restores the previous
+value afterward. The link scenarios still hand their URLs to the Windows
+default browser. [Edge first-run policy](https://learn.microsoft.com/en-us/deployedge/microsoft-edge-policies/hidefirstrunexperience)
+
+Each link click checks the physical cursor and records the HWND and PID under
+it and in the foreground immediately before SendInput. These samples describe
+the windows observed before injection. The HUD's launch count and feedback are
+the link activation evidence.
+
 An original scenario failure is preserved if its failure screenshot also
 fails (`diagnostic_error`). Desktop captures check GDI results and release
 their owned DCs and bitmap on error.
