@@ -1546,9 +1546,9 @@ impl SceneGraph {
                 .flatten()
                 .any(|r| r.lease_id.is_none() && r.publication_origin == Some(origin))
             || self
-                .scheduled_batches
+                .scheduled_publications
                 .iter()
-                .any(|s| s.batch.lease_id.is_none() && s.publication_origin == Some(origin))
+                .any(|s| s.has_origin(origin))
     }
 
     /// Keep orphan state bounded by the current publications, never request history.
@@ -1587,10 +1587,10 @@ impl SceneGraph {
                 r.publication_origin = None;
             }
         }
-        for s in &mut self.scheduled_batches {
-            if s.batch.lease_id.is_none() && s.publication_origin == Some(origin) {
-                s.batch.lease_id = Some(lease_id);
-                s.publication_origin = None;
+        for s in &mut self.scheduled_publications {
+            if s.has_origin(origin) {
+                s.publisher.lease_id = Some(lease_id);
+                s.publisher.origin = None;
             }
         }
         self.publication_orphans.remove(&origin);
@@ -1619,15 +1619,15 @@ impl SceneGraph {
             self.refresh_widget_current_params(&name);
         }
         let pending_waits: Vec<_> = self
-            .scheduled_batches
+            .scheduled_publications
             .iter()
             .filter_map(|s| s.notification_publication)
             .collect();
-        self.scheduled_batches
-            .retain(|s| s.publication_origin != Some(origin) || s.batch.lease_id.is_some());
+        self.scheduled_publications
+            .retain(|s| !s.has_origin(origin));
         for id in pending_waits {
             if !self
-                .scheduled_batches
+                .scheduled_publications
                 .iter()
                 .any(|s| s.notification_publication == Some(id))
             {
@@ -1641,28 +1641,28 @@ impl SceneGraph {
         self.version += 1;
     }
 
-    /// Clear active publications and whole scheduled batches owned by `lease_id`.
+    /// Clear active and scheduled publications owned by `lease_id`.
     ///
     /// Called when a lease reaches a terminal state (expired after grace,
     /// revoked). Publications by the same namespace under another lease
     /// (e.g. an operator session's MCP notifications) are untouched.
     pub fn clear_publications_for_lease(&mut self, lease_id: SceneId) {
-        let pending_before = self.scheduled_batches.len();
+        let pending_before = self.scheduled_publications.len();
         let pending_waits: Vec<_> = self
-            .scheduled_batches
+            .scheduled_publications
             .iter()
-            .filter(|batch| batch.batch.lease_id == Some(lease_id))
-            .filter_map(|batch| batch.notification_publication)
+            .filter(|s| s.publisher.lease_id == Some(lease_id))
+            .filter_map(|s| s.notification_publication)
             .collect();
-        self.scheduled_batches
-            .retain(|scheduled| scheduled.batch.lease_id != Some(lease_id));
+        self.scheduled_publications
+            .retain(|s| s.publisher.lease_id != Some(lease_id));
         for id in pending_waits {
             self.finish_notification_wait(
                 id,
                 super::NotificationOutcome::Gone(super::NotificationGone::Cleared),
             );
         }
-        let pending_changed = self.scheduled_batches.len() != pending_before;
+        let pending_changed = self.scheduled_publications.len() != pending_before;
         let mut zone_changed = false;
         for publishes in self.zone_registry.active_publishes.values_mut() {
             let before = publishes.len();

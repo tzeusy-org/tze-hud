@@ -394,13 +394,13 @@ async fn test_durable_widget_publish_receives_result() {
     );
     {
         let scene = scene_ref.lock().await;
-        assert_eq!(scene.scheduled_batches.len(), 1);
+        assert_eq!(scene.scheduled_publications.len(), 1);
         assert_eq!(scene.agent_holdings("widget-agent").widgets, 1);
         assert!(scene.widget_registry.active_for_widget("gauge").is_empty());
     }
     {
         let mut scene = scene_ref.lock().await;
-        assert_eq!(scene.scheduled_batches[0].batch.lease_id, None);
+        assert_eq!(scene.scheduled_publications[0].publisher.lease_id, None);
         scene.pause_widget_ttls();
         scene.suspend_all_leases(clock.now_millis());
     }
@@ -408,10 +408,10 @@ async fn test_durable_widget_publish_receives_result() {
     {
         let mut scene = scene_ref.lock().await;
         assert!(
-            scene.apply_due_batches().is_empty(),
+            scene.apply_due_publications().is_empty(),
             "unleased gRPC widget cannot snapshot during pause"
         );
-        assert_eq!(scene.scheduled_batches.len(), 1);
+        assert_eq!(scene.scheduled_publications.len(), 1);
         assert_eq!(scene.next_timed_content_wall_us(), None);
         assert!(scene.widget_registry.active_for_widget("gauge").is_empty());
     }
@@ -420,7 +420,7 @@ async fn test_durable_widget_publish_receives_result() {
         let mut scene = scene_ref.lock().await;
         scene.resume_all_leases(clock.now_millis());
         scene.resume_widget_ttls();
-        assert!(scene.apply_due_batches()[0].applied);
+        assert!(scene.apply_due_publications()[0].result.is_ok());
         let record = &scene.widget_registry.active_for_widget("gauge")[0];
         let tze_hud_scene::WidgetParameterValue::Deadline(deadline) = &record.params["ends_in_ms"]
         else {
@@ -430,7 +430,7 @@ async fn test_durable_widget_publish_receives_result() {
         assert_eq!(record.expires_at_wall_us, Some(clock.now_us() + 20_000_000));
         assert_eq!(record.publication_origin, Some(origin));
         assert_eq!(record.ttl_paused_us, 0);
-        assert!(scene.scheduled_batches.is_empty());
+        assert!(scene.scheduled_publications.is_empty());
     }
     assert!(
         request(
@@ -458,7 +458,7 @@ async fn test_durable_widget_publish_receives_result() {
         .await
         .ok
     );
-    assert!(scene_ref.lock().await.scheduled_batches.is_empty());
+    assert!(scene_ref.lock().await.scheduled_publications.is_empty());
     for (index, ttl_ms) in [18_446_744_073_709_552, u64::MAX].into_iter().enumerate() {
         for (delayed_index, delayed) in [false, true].into_iter().enumerate() {
             let sequence = 100 + index as u64 * 10 + delayed_index as u64 * 3;
@@ -499,18 +499,18 @@ async fn test_durable_widget_publish_receives_result() {
             {
                 let mut scene = scene_ref.lock().await;
                 if delayed {
-                    let tze_hud_scene::mutation::SceneMutation::PublishToWidget {
+                    let tze_hud_scene::Publication::Widget {
                         ttl_us,
                         expires_at_wall_us,
                         ..
-                    } = &scene.scheduled_batches[0].batch.mutations[0]
+                    } = &scene.scheduled_publications[0].publication
                     else {
                         panic!("pending widget")
                     };
                     assert_eq!(*ttl_us, Some(u64::MAX - hold_now));
                     assert_eq!(*expires_at_wall_us, None);
                     clock.advance(2_000);
-                    assert!(scene.apply_due_batches()[0].applied);
+                    assert!(scene.apply_due_publications()[0].result.is_ok());
                 }
                 let record = &scene.widget_registry.active_for_widget("gauge")[0];
                 assert_eq!(record.expires_at_wall_us, Some(u64::MAX));

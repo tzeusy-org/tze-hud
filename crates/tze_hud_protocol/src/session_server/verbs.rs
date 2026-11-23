@@ -15,8 +15,6 @@ use tonic::Status;
 use tze_hud_scene::ValidationError;
 use tze_hud_scene::element_store::ElementType;
 use tze_hud_scene::error_codes::{ERROR_CODES, validation_error_code};
-use tze_hud_scene::mutation::{MutationBatch as SceneMutationBatch, SceneMutation};
-use tze_hud_scene::types::SceneId;
 
 use crate::proto::session::server_message::Payload as ServerPayload;
 use crate::proto::session::*;
@@ -323,38 +321,42 @@ fn publish_zone(
                 )
             })
     });
-    let batch = SceneMutationBatch {
-        batch_id: SceneId::new(),
-        agent_namespace: session.namespace.clone(),
-        mutations: vec![SceneMutation::PublishToZone {
-            zone_name: zone.to_string(),
-            content,
-            publish_token: tze_hud_scene::types::ZonePublishToken { token: Vec::new() },
-            merge_key: (!publish.key.is_empty()).then(|| publish.key.clone()),
-            // Content expiry (invariant 1): expires_at wins, else ttl_ms
-            // counts from presentation.
-            expires_at_wall_us: expiry,
-            content_classification: None,
-            breakpoints: publish.breakpoints.clone(),
-            held: false,
-        }],
-        timing_hints: None,
-        lease_id: None,
+    let publication = tze_hud_scene::Publication::Zone {
+        zone_name: zone.to_string(),
+        content,
+        merge_key: (!publish.key.is_empty()).then(|| publish.key.clone()),
+        // Content expiry (invariant 1): expires_at wins, else ttl_ms
+        // counts from presentation.
+        expires_at_wall_us: expiry,
+        content_classification: None,
+        breakpoints: publish.breakpoints.clone(),
+        held: false,
     };
     // present_at in the future: hold the publish until due (invariant 1).
-    if publish.present_at_us > now {
-        scene.schedule_batch_for_origin(
-            publish.present_at_us,
-            batch,
-            Some(session.publication_origin),
-        );
+    present_or_schedule(scene, session, seq, publish.present_at_us, now, publication)
+}
+
+/// Commit now, or hold until `present_at_us` (invariant 1).
+fn present_or_schedule(
+    scene: &mut tze_hud_scene::graph::SceneGraph,
+    session: &StreamSession,
+    seq: u64,
+    present_at_us: u64,
+    now: u64,
+    publication: tze_hud_scene::Publication,
+) -> RequestResult {
+    let publisher = tze_hud_scene::Publisher {
+        namespace: session.namespace.clone(),
+        lease_id: None,
+        origin: Some(session.publication_origin),
+    };
+    if present_at_us > now {
+        scene.schedule_publication(present_at_us, publisher, publication);
         return ok(seq);
     }
-    let result = scene.apply_batch_for_origin(&batch, Some(session.publication_origin));
-    match result.error {
-        None if result.applied => ok(seq),
-        Some(e) => fail(seq, validation_error_code(&e), e.to_string()),
-        None => fail(seq, "INTERNAL", "zone publish was not applied"),
+    match scene.publish(&publisher, &publication) {
+        Ok(()) => ok(seq),
+        Err(e) => fail(seq, validation_error_code(&e), e.to_string()),
     }
 }
 
@@ -415,40 +417,21 @@ fn publish_widget(
     if let Some((code, message)) = timing_error(publish, now, widget, true) {
         return fail(seq, code, message);
     }
-    let batch = SceneMutationBatch {
-        batch_id: SceneId::new(),
-        agent_namespace: session.namespace.clone(),
-        mutations: vec![SceneMutation::PublishToWidget {
-            widget_name: widget.into(),
-            params,
-            merge_key: (!publish.key.is_empty()).then(|| publish.key.clone()),
-            // Windows "Show animations" off snaps explicit transitions
-            // (hud-ljhku.13).
-            transition_ms: if scene.widget_registry.reduce_motion {
-                0
-            } else {
-                publish.transition_ms
-            },
-            ttl_us: (publish.ttl_ms > 0).then(|| publish.ttl_ms.saturating_mul(1_000)),
-            expires_at_wall_us: (publish.expires_at_us > 0).then_some(publish.expires_at_us),
-        }],
-        timing_hints: None,
-        lease_id: None,
+    let publication = tze_hud_scene::Publication::Widget {
+        widget_name: widget.into(),
+        params,
+        merge_key: (!publish.key.is_empty()).then(|| publish.key.clone()),
+        // Windows "Show animations" off snaps explicit transitions
+        // (hud-ljhku.13).
+        transition_ms: if scene.widget_registry.reduce_motion {
+            0
+        } else {
+            publish.transition_ms
+        },
+        ttl_us: (publish.ttl_ms > 0).then(|| publish.ttl_ms.saturating_mul(1_000)),
+        expires_at_wall_us: (publish.expires_at_us > 0).then_some(publish.expires_at_us),
     };
-    if publish.present_at_us > now {
-        scene.schedule_batch_for_origin(
-            publish.present_at_us,
-            batch,
-            Some(session.publication_origin),
-        );
-        return ok(seq);
-    }
-    let result = scene.apply_batch_for_origin(&batch, Some(session.publication_origin));
-    match result.error {
-        None if result.applied => ok(seq),
-        Some(error) => fail(seq, validation_error_code(&error), error.to_string()),
-        None => fail(seq, "INTERNAL", "widget publish was not applied"),
-    }
+    present_or_schedule(scene, session, seq, publish.present_at_us, now, publication)
 }
 
 /// Absolute content expiry: `expires_at_us` if set, else `ttl_ms` counted
@@ -618,7 +601,7 @@ mod tests {
             Surface::parse("widget:gauge"),
             Ok(Surface::Widget("gauge".into()))
         );
-        let id = SceneId::new();
+        let id = tze_hud_scene::types::SceneId::new();
         assert!(Surface::parse(&format!("tile:{}", id.as_uuid())).is_err());
         assert!(Surface::parse("tile:nope").is_err());
         assert!(Surface::parse("zone:").is_err());

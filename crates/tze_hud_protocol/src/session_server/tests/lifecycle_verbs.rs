@@ -91,9 +91,9 @@ async fn hold_zone_publication() {
             .ok
         );
         let mut scene = shared_scene.lock().await;
-        let tze_hud_scene::mutation::SceneMutation::PublishToZone {
+        let tze_hud_scene::Publication::Zone {
             expires_at_wall_us, ..
-        } = &scene.scheduled_batches[0].batch.mutations[0]
+        } = &scene.scheduled_publications[0].publication
         else {
             panic!("pending subtitle")
         };
@@ -293,9 +293,9 @@ async fn hold_and_clear_reach_a_pending_delayed_publish() {
     {
         let st = state.lock().await;
         let scene = st.scene.lock().await;
-        let tze_hud_scene::mutation::SceneMutation::PublishToZone {
+        let tze_hud_scene::Publication::Zone {
             expires_at_wall_us, ..
-        } = &scene.scheduled_batches[0].batch.mutations[0]
+        } = &scene.scheduled_publications[0].publication
         else {
             panic!("scheduled a zone publish");
         };
@@ -314,7 +314,7 @@ async fn hold_and_clear_reach_a_pending_delayed_publish() {
     assert!(c.ok, "{c:?}");
     let st = state.lock().await;
     let scene = st.scene.lock().await;
-    assert!(scene.scheduled_batches.is_empty());
+    assert!(scene.scheduled_publications.is_empty());
     assert_eq!(scene.next_timed_content_wall_us(), None);
     drop(scene);
     drop(st);
@@ -364,9 +364,9 @@ async fn hold_and_clear_reach_a_pending_delayed_publish() {
     );
     {
         let scene = shared_scene.lock().await;
-        assert_eq!(scene.scheduled_batches.len(), 1);
+        assert_eq!(scene.scheduled_publications.len(), 1);
         assert!(
-            matches!(&scene.scheduled_batches[0].batch.mutations[0],tze_hud_scene::mutation::SceneMutation::PublishToZone {merge_key:Some(key),..} if key=="second")
+            matches!(&scene.scheduled_publications[0].publication,tze_hud_scene::Publication::Zone {merge_key:Some(key),..} if key=="second")
         );
     }
     assert!(

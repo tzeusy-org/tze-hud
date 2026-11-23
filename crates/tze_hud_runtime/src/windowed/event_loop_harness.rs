@@ -3328,8 +3328,8 @@ mod tests {
         for batches in [1, 2] {
             sink.0.lock().unwrap().clear();
             let (batch_ids, expected_version) = {
-                use tze_hud_scene::mutation::{MutationBatch, SceneMutation};
-                use tze_hud_scene::types::{ZoneContent, ZonePublishToken, ZoneRegistry};
+                use tze_hud_scene::types::{ZoneContent, ZoneRegistry};
+                use tze_hud_scene::{Publication, Publisher};
                 let mut scene = runtime.events.scene();
                 scene.zone_registry = ZoneRegistry::with_defaults();
                 scene
@@ -3343,27 +3343,22 @@ mod tests {
                 let due = scene.now_wall_us() + 3_000_000;
                 let mut ids = Vec::new();
                 for _ in 0..batches {
-                    let id = SceneId::new();
-                    ids.push(id);
-                    scene.schedule_batch(
+                    ids.push(scene.schedule_publication(
                         due,
-                        MutationBatch {
-                            batch_id: id,
-                            agent_namespace: "delayed".into(),
+                        Publisher {
                             lease_id: Some(lease),
-                            timing_hints: None,
-                            mutations: vec![SceneMutation::PublishToZone {
-                                zone_name: "subtitle".into(),
-                                content: ZoneContent::StreamText("capture".into()),
-                                publish_token: ZonePublishToken { token: Vec::new() },
-                                merge_key: None,
-                                expires_at_wall_us: Some(due + 20_000_000),
-                                content_classification: None,
-                                breakpoints: Vec::new(),
-                                held: false,
-                            }],
+                            ..Publisher::namespace("delayed")
                         },
-                    );
+                        Publication::Zone {
+                            zone_name: "subtitle".into(),
+                            content: ZoneContent::StreamText("capture".into()),
+                            merge_key: None,
+                            expires_at_wall_us: Some(due + 20_000_000),
+                            content_classification: None,
+                            breakpoints: Vec::new(),
+                            held: false,
+                        },
+                    ));
                 }
                 (ids, scene.version)
             };
@@ -3604,8 +3599,8 @@ mod tests {
             scene.widget_registry.register_definition(bundle.definition);
         }
         call(addr, "hud_publish", serde_json::json!({"surface":"widget:clock", "params":{"ends_in_ms":300000}, "delay_ms":10000, "ttl_ms":20000})).await;
-        let pending_lease = runtime.events.scene().scheduled_batches[0]
-            .batch
+        let pending_lease = runtime.events.scene().scheduled_publications[0]
+            .publisher
             .lease_id
             .expect("MCP publication has an explicit lease");
         let shared = runtime.events.shared_state();
@@ -3626,12 +3621,12 @@ mod tests {
         {
             let scene = runtime.events.scene();
             assert_eq!(
-                scene.scheduled_batches.len(),
+                scene.scheduled_publications.len(),
                 1,
                 "accepted delayed MCP publication must remain pending during pause"
             );
             assert_eq!(
-                scene.scheduled_batches[0].batch.lease_id,
+                scene.scheduled_publications[0].publisher.lease_id,
                 Some(pending_lease)
             );
             assert_eq!(scene.next_timed_content_wall_us(), None);
@@ -3664,7 +3659,7 @@ mod tests {
             assert_eq!(record.expires_at_wall_us, Some(clock.now_us() + 20_000_000));
             assert_eq!(record.lease_id, Some(pending_lease));
             assert_eq!(record.ttl_paused_us, 0, "never materialized during pause");
-            assert!(scene.scheduled_batches.is_empty());
+            assert!(scene.scheduled_publications.is_empty());
         }
         call(
             addr,

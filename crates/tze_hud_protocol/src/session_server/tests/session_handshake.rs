@@ -1193,7 +1193,7 @@ async fn removed_client_request_numbers_decode_to_empty_payload() {
         let scene = state.scene.lock().await;
         (
             serde_json::to_value(&*scene).unwrap(),
-            scene.scheduled_batches.len(),
+            scene.scheduled_publications.len(),
         )
     };
 
@@ -1284,7 +1284,7 @@ async fn removed_client_request_numbers_decode_to_empty_payload() {
         let state = state.lock().await;
         let scene = state.scene.lock().await;
         assert_eq!(serde_json::to_value(&*scene).unwrap(), scene_before);
-        assert_eq!(scene.scheduled_batches.len(), scheduled_before);
+        assert_eq!(scene.scheduled_publications.len(), scheduled_before);
     }
 }
 

@@ -436,9 +436,9 @@ async fn bad_arguments_are_invalid_argument_tool_errors() {
         (
             serde_json::to_value(scene).unwrap(),
             scene
-                .scheduled_batches
+                .scheduled_publications
                 .iter()
-                .map(|s| (s.present_at_wall_us, s.batch.batch_id))
+                .map(|s| (s.present_at_wall_us, s.id))
                 .collect::<Vec<_>>(),
             scene.next_timed_content_wall_us(),
         )
@@ -484,14 +484,10 @@ async fn bad_arguments_are_invalid_argument_tool_errors() {
                         .collect::<Vec<_>>()
                 } else {
                     scene
-                        .scheduled_batches
+                        .scheduled_publications
                         .iter()
-                        .flat_map(|s| &s.batch.mutations)
-                        .filter_map(|m| match m {
-                            tze_hud_scene::mutation::SceneMutation::PublishToZone {
-                                content,
-                                ..
-                            } => Some(content),
+                        .filter_map(|s| match &s.publication {
+                            tze_hud_scene::Publication::Zone { content, .. } => Some(content),
                             _ => None,
                         })
                         .collect::<Vec<_>>()
@@ -638,10 +634,8 @@ async fn bad_arguments_are_invalid_argument_tool_errors() {
                         .unwrap()
                         .content
                 } else {
-                    match &scene.scheduled_batches.last().unwrap().batch.mutations[0] {
-                        tze_hud_scene::mutation::SceneMutation::PublishToZone {
-                            content, ..
-                        } => content,
+                    match &scene.scheduled_publications.last().unwrap().publication {
+                        tze_hud_scene::Publication::Zone { content, .. } => content,
                         _ => panic!("publish"),
                     }
                 };
@@ -667,7 +661,7 @@ async fn bad_arguments_are_invalid_argument_tool_errors() {
             let scene = server.scene.lock().await;
             (
                 scene.zone_registry.active_publishes.clone(),
-                scene.scheduled_batches.len(),
+                scene.scheduled_publications.len(),
                 scene.leases.len(),
             )
         };
@@ -686,7 +680,7 @@ async fn bad_arguments_are_invalid_argument_tool_errors() {
         assert_eq!(
             (
                 scene.zone_registry.active_publishes.clone(),
-                scene.scheduled_batches.len(),
+                scene.scheduled_publications.len(),
                 scene.leases.len()
             ),
             before
@@ -1105,7 +1099,7 @@ async fn delay_ms_holds_content_until_due() {
     .await;
     assert_eq!(v["expires_in_ms"], 6000);
     let mut scene = server.scene.lock().await;
-    scene.apply_due_batches();
+    scene.apply_due_publications();
     assert!(
         scene
             .zone_registry
@@ -1115,7 +1109,7 @@ async fn delay_ms_holds_content_until_due() {
         "not shown before present_at"
     );
     clock.advance(5_000);
-    scene.apply_due_batches();
+    scene.apply_due_publications();
     let rec = &scene.zone_registry.active_publishes["subtitle"][0];
     assert_eq!(
         rec.expires_at_wall_us,
@@ -1170,7 +1164,7 @@ async fn delayed_notification_expiry_matches_immediate() {
             clock.advance(5_000);
             {
                 let mut scene = server.scene.lock().await;
-                scene.apply_due_batches();
+                scene.apply_due_publications();
                 assert_eq!(
                     scene.zone_registry.active_publishes["notification-area"][0].expires_at_wall_us,
                     expected
@@ -1276,7 +1270,7 @@ async fn clear_cancels_only_own_pending_delayed_publish() {
     }
     {
         let scene = server.scene.lock().await;
-        assert_eq!(scene.scheduled_batches.len(), 1, "b's batch survives");
+        assert_eq!(scene.scheduled_publications.len(), 1, "b's batch survives");
         assert_eq!(
             scene.next_timed_content_wall_us(),
             Some(1_000_000 + 8_000_000)
@@ -1284,7 +1278,7 @@ async fn clear_cancels_only_own_pending_delayed_publish() {
     }
     clock.advance(8_000);
     let mut scene = server.scene.lock().await;
-    scene.apply_due_batches();
+    scene.apply_due_publications();
     let pubs = &scene.zone_registry.active_publishes["subtitle"];
     assert_eq!(pubs.len(), 1);
     assert_eq!(pubs[0].publisher_namespace, "b");
@@ -1304,12 +1298,13 @@ async fn clear_cancels_only_own_pending_delayed_publish() {
     {
         let mut scene = server.scene.lock().await;
         let pending = scene
-            .scheduled_batches
-            .iter_mut()
-            .find(|s| s.batch.agent_namespace == "a")
+            .scheduled_publications
+            .iter()
+            .find(|s| s.publisher.namespace == "a")
             .unwrap();
-        let mut remainder = pending.batch.mutations[0].clone();
-        if let tze_hud_scene::mutation::SceneMutation::PublishToZone {
+        let (present_at, publisher) = (pending.present_at_wall_us, pending.publisher.clone());
+        let mut remainder = pending.publication.clone();
+        if let tze_hud_scene::Publication::Zone {
             zone_name,
             content,
             merge_key,
@@ -1320,7 +1315,7 @@ async fn clear_cancels_only_own_pending_delayed_publish() {
             *content = tze_hud_scene::types::ZoneContent::StreamText("mixed remainder".into());
             *merge_key = None;
         }
-        pending.batch.mutations.push(remainder);
+        scene.schedule_publication(present_at, publisher, remainder);
     }
     let (value, error) = call_as(
         &server,
@@ -1341,7 +1336,12 @@ async fn clear_cancels_only_own_pending_delayed_publish() {
     );
     clock.advance(5000);
     let mut scene = server.scene.lock().await;
-    assert!(scene.apply_due_batches().iter().all(|r| r.applied));
+    assert!(
+        scene
+            .apply_due_publications()
+            .iter()
+            .all(|r| r.result.is_ok())
+    );
     let notifications = scene.zone_registry.active_for_zone("notification-area");
     assert_eq!(notifications.len(), 2);
     assert!(
@@ -1373,7 +1373,7 @@ async fn clear_of_last_pending_publish_drops_the_wake_deadline() {
     clock.advance(10_000);
     let mut scene = server.scene.lock().await;
     assert_eq!(scene.next_timed_content_wall_us(), None);
-    scene.apply_due_batches();
+    scene.apply_due_publications();
     assert!(scene.zone_registry.active_publishes.is_empty());
 
     drop(scene);
@@ -1389,9 +1389,9 @@ async fn clear_of_last_pending_publish_drops_the_wake_deadline() {
     assert!(!error, "{value}");
     clock.advance(5000);
     let mut scene = server.scene.lock().await;
-    assert!(scene.scheduled_batches.is_empty());
+    assert!(scene.scheduled_publications.is_empty());
     assert_eq!(scene.next_timed_content_wall_us(), None);
-    assert!(scene.apply_due_batches().is_empty());
+    assert!(scene.apply_due_publications().is_empty());
     assert!(
         scene
             .zone_registry
@@ -1433,7 +1433,7 @@ async fn hold_retimes_own_pending_delayed_publish() {
     assert_eq!(own["expires_in_ms"], 8000);
     clock.advance(5_000);
     let mut scene = server.scene.lock().await;
-    scene.apply_due_batches();
+    scene.apply_due_publications();
     let rec = &scene.zone_registry.active_publishes["subtitle"][0];
     assert_eq!(
         rec.expires_at_wall_us,
@@ -2127,11 +2127,11 @@ async fn widget_publish_hold_clear() {
             );
             let mut scene = server.scene.lock().await;
             if delayed {
-                let tze_hud_scene::mutation::SceneMutation::PublishToWidget {
+                let tze_hud_scene::Publication::Widget {
                     ttl_us,
                     expires_at_wall_us,
                     ..
-                } = &scene.scheduled_batches[0].batch.mutations[0]
+                } = &scene.scheduled_publications[0].publication
                 else {
                     panic!("pending widget publish")
                 };
@@ -2145,7 +2145,7 @@ async fn widget_publish_hold_clear() {
                     }
                 );
                 clock.advance(2_000);
-                assert!(scene.apply_due_batches()[0].applied);
+                assert!(scene.apply_due_publications()[0].result.is_ok());
             }
             let record = &scene.widget_registry.active_for_widget("gauge")[0];
             assert_eq!(
@@ -2601,7 +2601,7 @@ async fn label_only_duplicates_and_dismiss_are_refused() {
                 .zone_registry
                 .active_for_zone("notification-area")
                 .len(),
-            scene.scheduled_batches.len(),
+            scene.scheduled_publications.len(),
             scene.pending_actions.len(),
         )
     };
@@ -3221,7 +3221,11 @@ async fn publish_wait_endings_deadline_delay_and_validation() {
         );
         clock.advance(5000);
         tokio::time::advance(std::time::Duration::from_millis(5000)).await;
-        assert!(server.scene.lock().await.apply_due_batches()[0].applied);
+        assert!(
+            server.scene.lock().await.apply_due_publications()[0]
+                .result
+                .is_ok()
+        );
         assert!(ask.as_mut().poll(&mut context).is_pending());
         activate_card(&server, latest_card(&server).await, false).await;
         let Poll::Ready(answer) = ask.as_mut().poll(&mut context) else {
@@ -3246,7 +3250,11 @@ async fn publish_wait_endings_deadline_delay_and_validation() {
         if delayed {
             tokio::time::advance(std::time::Duration::from_millis(40000)).await;
             clock.advance(40000);
-            assert!(server.scene.lock().await.apply_due_batches()[0].applied);
+            assert!(
+                server.scene.lock().await.apply_due_publications()[0]
+                    .result
+                    .is_ok()
+            );
             assert!(ask.as_mut().poll(&mut context).is_pending());
         }
         let rest = if delayed { 14999 } else { 54999 };
@@ -4608,8 +4616,8 @@ async fn hud_publish_in_safe_mode_returns_safe_mode_active() {
     let snapshot = |scene: &SceneGraph| {
         json!({
             "scene": scene,
-            "pending": scene.scheduled_batches.iter().map(|scheduled|
-                (scheduled.present_at_wall_us, &scheduled.batch)).collect::<Vec<_>>(),
+            "pending": scene.scheduled_publications.iter().map(|scheduled|
+                (scheduled.present_at_wall_us, format!("{:?}", (&scheduled.publisher, &scheduled.publication)))).collect::<Vec<_>>(),
         })
     };
     let mut failures = Vec::new();
@@ -4628,7 +4636,7 @@ async fn hud_publish_in_safe_mode_returns_safe_mode_active() {
             call(&isolated, "hud_publish", publish).await;
         }
         let mut scene = isolated.scene.lock().await;
-        assert_eq!(scene.scheduled_batches.len(), 1);
+        assert_eq!(scene.scheduled_publications.len(), 1);
         let lease_id = *scene.leases.keys().next().unwrap();
         let mut holding = Box::pin(call_err(
             &isolated,
@@ -4710,17 +4718,16 @@ async fn hud_publish_in_safe_mode_returns_safe_mode_active() {
             scene.widget_registry.active_for_widget("gauge")[0].expires_at_wall_us
         };
         assert!(expiry.is_none(), "resumed Hold0 clears active expiry");
-        match &scene.scheduled_batches[0].batch.mutations[0] {
-            tze_hud_scene::mutation::SceneMutation::PublishToZone {
+        match &scene.scheduled_publications[0].publication {
+            tze_hud_scene::Publication::Zone {
                 expires_at_wall_us, ..
             }
-            | tze_hud_scene::mutation::SceneMutation::PublishToWidget {
+            | tze_hud_scene::Publication::Widget {
                 expires_at_wall_us, ..
             } => assert!(
                 expires_at_wall_us.is_none(),
                 "resumed Hold0 clears delayed expiry"
             ),
-            other => panic!("unexpected pending mutation: {other:?}"),
         }
     }
     assert!(failures.is_empty(), "paused Hold failures: {failures:?}");
@@ -5032,7 +5039,7 @@ async fn user_test_zone_fixtures_and_documented_examples_match_production_parser
                 "bad content must not grant a lease"
             );
             assert!(
-                scene.apply_due_batches().is_empty(),
+                scene.apply_due_publications().is_empty(),
                 "bad content must not schedule"
             );
         }
@@ -5070,7 +5077,7 @@ async fn user_test_zone_fixtures_and_documented_examples_match_production_parser
         let mut scene = server.scene.lock().await;
         assert_eq!(scene.version, before.0);
         assert_eq!(scene.leases, before.1);
-        assert!(scene.apply_due_batches().is_empty());
+        assert!(scene.apply_due_publications().is_empty());
         let pubs = &scene.zone_registry.active_publishes[zone];
         assert_eq!(pubs.len(), 1);
         assert_eq!(pubs[0].content, before.2);
@@ -5792,7 +5799,7 @@ async fn elapsed_timer_runs_from_one_publish() {
     .await;
     clock.advance(5_000);
     let mut scene = server.scene.lock().await;
-    scene.apply_due_batches();
+    scene.apply_due_publications();
     assert_eq!(shown(&scene), "0:00");
 }
 

@@ -1999,37 +1999,34 @@ fn batch_clear_zone_does_not_cancel_later_pending_publish() {
     use crate::mutation::{MutationBatch, SceneMutation};
     let (mut scene, clock) = scene_with_test_clock();
     scene.register_zone(make_subtitle_zone());
-    let batch = |mutation| MutationBatch {
-        batch_id: SceneId::new(),
-        agent_namespace: "agent".to_string(),
-        mutations: vec![mutation],
-        timing_hints: None,
-        lease_id: None,
-    };
     let now = scene.now_wall_us();
-    scene.schedule_batch(
-        now + 1_000,
-        batch(SceneMutation::ClearZone {
-            zone_name: "subtitle".to_string(),
-            publish_token: dummy_token(),
-        }),
-    );
-    scene.schedule_batch(
+    scene.schedule_publication(
         now + 5_000_000,
-        batch(SceneMutation::PublishToZone {
+        crate::Publisher::namespace("agent"),
+        crate::Publication::Zone {
             zone_name: "subtitle".to_string(),
             content: ZoneContent::StreamText("B".to_string()),
-            publish_token: dummy_token(),
             merge_key: None,
             expires_at_wall_us: None,
             content_classification: None,
             breakpoints: Vec::new(),
             held: true,
-        }),
+        },
     );
+    let clear = MutationBatch {
+        batch_id: SceneId::new(),
+        agent_namespace: "agent".to_string(),
+        mutations: vec![SceneMutation::ClearZone {
+            zone_name: "subtitle".to_string(),
+            publish_token: dummy_token(),
+        }],
+        timing_hints: None,
+        lease_id: None,
+    };
+    assert!(scene.apply_batch(&clear).applied);
     clock.advance(1);
-    assert_eq!(scene.apply_due_batches().len(), 1);
-    assert_eq!(scene.scheduled_batches.len(), 1, "B stays scheduled");
+    assert!(scene.apply_due_publications().is_empty());
+    assert_eq!(scene.scheduled_publications.len(), 1, "B stays scheduled");
 }
 
 #[test]

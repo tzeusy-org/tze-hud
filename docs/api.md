@@ -482,8 +482,8 @@ portal is degraded after 30 s with no publish, poll, or hold, and reclaimed
 instance, or a portal (detach). With a nonempty key, it clears only that
 publisher's matching notification in a notification-capable zone, including
 matching delayed notification publishes. Sibling keys, foreign publishers and
-nonnotification content in mixed zones or scheduled batches survive. A missing
-match succeeds; emptied batches leave no wake deadline. Missing or empty keys
+nonnotification content in mixed zones or other scheduled publications survive.
+A missing match succeeds; a cancelled publication leaves no wake deadline. Missing or empty keys
 retain clear-all-own behavior, including the caller's delayed publishes.
 The same exact 256-byte key bound applies before mutation. Nonempty keys on
 widget, portal or nonnotification-zone clears return `INVALID_ARGUMENT`.

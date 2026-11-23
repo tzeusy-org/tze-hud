@@ -566,7 +566,7 @@ moving their original publication timestamp. Countdown and elapsed parameter
 deadlines are absolute wall time: they keep passing, retain their last pixels
 without retries while paused, and refresh to the current time on resume
 ([`widget_elapsed_presentation_retention_cadence_and_safe_mode`](../crates/tze_hud_scene/src/graph/widget_tests.rs)).
-Already accepted widget-containing scheduled batches wait atomically through
+Already accepted scheduled widget publications wait through
 pause, without an overdue wake or materializing under a suspended lease. On
 resume their deadline and relative TTL start at actual presentation; new incoming
 updates remain rejected while paused. Fresh zone/widget Hold is also refused

@@ -47,6 +47,8 @@ pub use graph::{
     MAX_TABS,
     MAX_TILES_PER_TAB,
     PendingAction,
+    Publication,
+    Publisher,
     RuntimeOverlayState,
     SceneGraph,
     // zone band reservation
