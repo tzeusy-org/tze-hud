@@ -4,8 +4,9 @@ use serde_json::{Value, json};
 use std::time::Duration;
 use tze_hud_mcp::scopes::MAX_SCOPES_PER_AGENT;
 use tze_hud_mcp::server::{CallerContext, SessionReply};
-use tze_hud_scene::config::{AgentDirectory, hash_psk};
-use tze_hud_scene::types::ZoneRegistry;
+use tze_hud_scene::config::{AgentDirectory, DEFAULT_MCP_AGENT_ID, hash_psk};
+use tze_hud_scene::scope::scoped_namespace;
+use tze_hud_scene::types::{Rect, ZoneHitRegion, ZoneInteractionKind, ZoneRegistry};
 
 fn initialize(meta: Value) -> Value {
     json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"_meta":meta}})
@@ -62,6 +63,15 @@ fn id(response: &str) -> Option<&str> {
     response
         .lines()
         .find_map(|s| s.strip_prefix("Mcp-Session-Id: "))
+}
+
+fn tool_body(response: &str) -> Value {
+    let body = body(response);
+    let text = body["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap_or_else(|| panic!("{response}"));
+    assert!(body["result"]["isError"].is_null(), "{response}");
+    serde_json::from_str(text).unwrap()
 }
 
 async fn open(addr: SocketAddr, bearer: &str, init: Value) -> String {
@@ -130,10 +140,8 @@ async fn sibling_initialization_requires_one_live_same_agent_primary() {
     assert_eq!(row["sibling"]["label"], "Work");
     assert_eq!(row["sibling"]["holdings"], 1);
     assert!(row["sibling"]["state"].is_null());
-    assert!(
-        !admin.contains(&parent) && !admin.contains(&sibling),
-        "session IDs stay private"
-    );
+    let rows = admin_body["sessions"].to_string();
+    assert!(!rows.contains(&parent) && !rows.contains(&sibling));
     shutdown.trigger(crate::threads::ShutdownReason::Clean);
     handle.await.unwrap();
 }
@@ -162,22 +170,23 @@ async fn sibling_release_follows_http_delete_eviction_and_restart() {
             "{published}"
         );
         if end == "evict-sibling" {
-            // Make the sibling idle and older than its parent and the filler scopes.
-            post(
-                addr,
-                "k",
-                Some(&sibling),
-                tool(
-                    "hud_clear",
-                    json!({"surface":"zone:notification-area", "key":"question"}),
-                ),
-            )
-            .await;
+            // Touch the parent later and fill every scope with holdings so that
+            // LRU can release the oldest sibling while its card is still live.
             post(addr, "k", Some(&parent), ping.clone()).await;
+            scene
+                .lock()
+                .await
+                .grant_lease(&scoped_namespace(DEFAULT_MCP_AGENT_ID, &parent), 60_000);
         }
         if end.starts_with("evict") {
             for _ in 0..MAX_SCOPES_PER_AGENT - 2 {
-                open(addr, "k", initialize(json!({}))).await;
+                let filler = open(addr, "k", initialize(json!({}))).await;
+                if end == "evict-sibling" {
+                    scene
+                        .lock()
+                        .await
+                        .grant_lease(&scoped_namespace(DEFAULT_MCP_AGENT_ID, &filler), 60_000);
+                }
             }
         }
         tokio::time::timeout(Duration::from_secs(1), async {
@@ -221,7 +230,7 @@ async fn sibling_release_follows_http_delete_eviction_and_restart() {
             let response = post(addr, "k", Some(session), ping.clone()).await;
             assert!(
                 response.starts_with(&format!("HTTP/1.1 {status} ")),
-                "{end}: {response}"
+                "{end}, expected {status}: {response}"
             );
         }
         shutdown.trigger(crate::threads::ShutdownReason::Clean);
@@ -272,17 +281,16 @@ async fn trusted_scope_release_clears_active_and_delayed_sibling_publications() 
                 .len(),
             1
         );
-        let ns = tze_hud_scene::scope::scoped_namespace(
-            tze_hud_scene::config::DEFAULT_MCP_AGENT_ID,
-            &sibling,
-        );
+        let ns = scoped_namespace(DEFAULT_MCP_AGENT_ID, &sibling);
         assert!(graph.holding_namespaces().contains(&ns));
+        assert_eq!(
+            graph
+                .scheduled_zone_publication_expiries("notification-area", &ns)
+                .count(),
+            1
+        );
     }
-    assert!(
-        server
-            .release_session(tze_hud_scene::config::DEFAULT_MCP_AGENT_ID, &parent)
-            .await
-    );
+    assert!(server.release_session(DEFAULT_MCP_AGENT_ID, &parent).await);
     let graph = scene.lock().await;
     assert!(
         graph
@@ -292,4 +300,81 @@ async fn trusted_scope_release_clears_active_and_delayed_sibling_publications() 
     );
     assert!(graph.holding_namespaces().is_empty());
     assert!(server.scopes().list().is_empty());
+}
+
+#[tokio::test]
+async fn sibling_receipts_retain_a_key_only_dismiss_across_all_delivery_stages() {
+    let scene = make_scene();
+    scene.lock().await.zone_registry = ZoneRegistry::with_defaults();
+    let shutdown = ShutdownToken::new();
+    let (handle, addrs) = start_mcp_http_server(
+        Arc::clone(&scene),
+        make_config(0, "k"),
+        shutdown.clone(),
+        None,
+    )
+    .await
+    .unwrap();
+    let addr = addrs[0];
+    let parent = open(addr, "k", initialize(json!({}))).await;
+    let sibling = open(addr, "k", linked(&parent)).await;
+    let input = || tool("hud_input", json!({}));
+    for source in ["scene", "retained", "encoded"] {
+        assert_eq!(
+            tool_body(&post(addr, "k", Some(&sibling), card()).await)["ok"],
+            true
+        );
+        {
+            let mut graph = scene.lock().await;
+            let old = &graph.zone_registry.active_for_zone("notification-area")[0];
+            let dismiss = ZoneHitRegion {
+                publication_id: old.publication_id,
+                zone_name: old.zone_name.clone(),
+                published_at_wall_us: old.published_at_wall_us,
+                publisher_namespace: old.publisher_namespace.clone(),
+                bounds: Rect::new(0.0, 0.0, 20.0, 20.0),
+                kind: ZoneInteractionKind::Dismiss,
+                interaction_id: "fixture-dismiss".into(),
+                tab_order: 0,
+            };
+            graph.overlay.zone_hit_regions.push(dismiss.clone());
+            assert!(graph.activate_notification(&dismiss, 0).is_some());
+        }
+        let first = if source == "scene" {
+            None
+        } else {
+            Some(post(addr, "k", Some(&sibling), input()).await)
+        };
+        let mut replacement = card();
+        replacement["params"]["arguments"]["content"]["title"] = json!("Replacement");
+        assert_eq!(
+            tool_body(&post(addr, "k", Some(&sibling), replacement).await)["ok"],
+            true
+        );
+        let redelivered = tool_body(&post(addr, "k", Some(&sibling), input()).await);
+        let items = redelivered["items"].as_array().unwrap();
+        assert_eq!(items.len(), 1, "{source}: {redelivered}");
+        let old_item_id = items[0]["id"].as_str().unwrap();
+        assert_eq!(
+            items[0],
+            json!({"id":old_item_id, "s":"zone:notification-area",
+            "key":"question", "action":"dismiss", "kind":"dismiss"})
+        );
+        if let Some(first) = first {
+            assert_eq!(tool_body(&first), redelivered);
+        }
+        let ack = || tool("hud_input", json!({"ack":[old_item_id]}));
+        let primary = tool_body(&post(addr, "k", Some(&parent), ack()).await);
+        assert_eq!(primary["items"], json!([]));
+        assert_eq!(
+            tool_body(&post(addr, "k", Some(&sibling), input()).await),
+            redelivered
+        );
+        assert_eq!(
+            tool_body(&post(addr, "k", Some(&sibling), ack()).await)["items"],
+            json!([])
+        );
+    }
+    shutdown.trigger(crate::threads::ShutdownReason::Clean);
+    handle.await.unwrap();
 }

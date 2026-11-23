@@ -40,6 +40,8 @@ class FakeHud(BaseHTTPRequestHandler):
     parents = {}
     card_slots = {}
     card_refusal = False
+    card_encoded_gate = None
+    card_delayed_clears = None
 
     def do_DELETE(self):
         session = self.headers.get("Mcp-Session-Id")
@@ -130,7 +132,7 @@ class FakeHud(BaseHTTPRequestHandler):
                           "capabilities": {"tools": {"listChanged": False}}, "instructions": "upstream sentinel"}
                 with self.condition:
                     parent = body.get("params", {}).get("_meta", {}).get("tze.hud/parent")
-                    if parent is not None and parent not in self.sessions:
+                    if parent is not None and (parent not in self.sessions or self.card_refusal == "link"):
                         return self.reply(200, {"jsonrpc":"2.0", "id":request_id,
                                                 "error":{"code":-32602,"message":"invalid parent"}})
                     type(self).opened += 1
@@ -146,6 +148,14 @@ class FakeHud(BaseHTTPRequestHandler):
                 result = {"content": [{"type": "text", "text": json.dumps(value)}]}
                 if value is None:
                     result["isError"] = True
+                gate = None
+                with self.condition:
+                    if self.card_encoded_gate and value and value.get("items"):
+                        gate = self.card_encoded_gate
+                        type(self).card_encoded_gate = None
+                if gate:
+                    gate[0].set()
+                    gate[1].wait(3)
             elif method == "tools/call" and body["params"].get("name") == "hud_input" and session in self.inputs:
                 text = json.dumps({"items": self.inputs[session]})
                 result = {"content": [{"type": "text", "text": text}]}
@@ -187,7 +197,10 @@ class FakeHud(BaseHTTPRequestHandler):
                 self.condition.notify_all()
                 return {"ok": True, "expires_in_ms": args["ttl_ms"]}
             if name == "hud_clear":
-                slots.pop(args["key"], None)
+                if self.card_delayed_clears is None:
+                    slots.pop(args["key"], None)
+                else:
+                    self.card_delayed_clears.append((session, args["key"]))
                 self.condition.notify_all()
                 return {"ok": True}
             if name == "hud_surfaces":
@@ -214,6 +227,7 @@ def hud(tmp_path):
     FakeHud.requests, FakeHud.modes, FakeHud.entered = [], {}, {}
     FakeHud.sessions, FakeHud.opened, FakeHud.deletes, FakeHud.inputs = set(), 0, [], {}
     FakeHud.parents, FakeHud.card_slots, FakeHud.card_refusal = {}, {}, False
+    FakeHud.card_encoded_gate, FakeHud.card_delayed_clears = None, None
     FakeHud.release = threading.Event()
     server = ThreadingHTTPServer(("127.0.0.1", 0), FakeHud)
     # Teardown is fixture housekeeping, not part of an adapter deadline.
@@ -454,10 +468,10 @@ def wait_card(kind="question"):
         return next((session, slots[kind]) for session, slots in FakeHud.card_slots.items() if kind in slots)
 
 
-def deliver_card_action(session, kind, item_id, action, **fields):
+def deliver_card_action(session, key, item_id, action, **fields):
     with FakeHud.condition:
         items = FakeHud.inputs.setdefault(session, [])
-        items.append({"s": "zone:notification-area", "key": kind, "id": item_id,
+        items.append({"s": "zone:notification-area", "key": key, "id": item_id,
                       "action": action, **fields})
         FakeHud.condition.notify_all()
 
@@ -526,6 +540,183 @@ def test_disconnect_clears_one_card_and_refusal_logs_no_content(hud):
             assert len(card_calls("hud_clear")) == 1
         assert re.search(r"card delivery failed \[[a-f0-9]{12}\]", adapter.stderr)
         assert "fixture" not in adapter.stderr and FakeHud.last_psk not in adapter.stderr
+
+
+@pytest.mark.parametrize("source", ["retained", "encoded", "old-callback"])
+def test_replacement_keeps_option_d_when_old_input_crosses_the_worker(hud, source):
+    host, home = hud
+    assert pair(host, home).returncode == 0
+    with tempfile.TemporaryDirectory(prefix="hud-card-") as runtime:
+        with AdapterProcess(home, host=host, runtime=runtime) as adapter:
+            adapter.ready()
+            with card_peer(adapter) as old:
+                assert receive_card(old)["ok"] is True
+                sibling, old_card = wait_card()
+                old_action = old_card["content"]["actions"][0]["callback_id"]
+                if source == "encoded":
+                    encoded, release = threading.Event(), threading.Event()
+                    FakeHud.card_encoded_gate = (encoded, release)
+                    deliver_card_action(sibling, "question", "old", "dismiss", kind="dismiss")
+                    assert encoded.wait(2)
+                with card_peer(adapter) as new:
+                    assert receive_card(new)["ok"] is True
+                    assert receive_card(old) == {"end":"superseded"}
+                    current = wait_card()[1]["content"]["actions"][0]["callback_id"]
+                    assert current != old_action
+                    if source == "encoded":
+                        release.set()
+                    elif source == "retained":
+                        deliver_card_action(sibling, "question", "old", "dismiss", kind="dismiss")
+                    else:
+                        deliver_card_action(sibling, "question", "old", old_action)
+                        deliver_card_action(sibling, "question", "old", old_action)
+                    ack = wait_call(lambda entry: "old" in entry["body"].get("params", {})
+                                    .get("arguments", {}).get("ack", []))
+                    assert ack["session"] == sibling
+                    if source == "old-callback":
+                        deliver_card_action(sibling, "question", "actual", current)
+                        assert receive_card(new) == {"end":"answer", "index":0}
+                    else:
+                        assert receive_card(new) == {"end":"dismissed"}
+                assert not card_calls("hud_clear")
+
+
+@pytest.mark.parametrize("cascade", [False, True])
+def test_scope_loss_cancels_waiters_and_relinks_on_the_next_card(hud, cascade):
+    host, home = hud
+    assert pair(host, home).returncode == 0
+    with tempfile.TemporaryDirectory(prefix="hud-card-") as runtime:
+        with AdapterProcess(home, host=host, runtime=runtime) as adapter:
+            adapter.ready()
+            with card_peer(adapter) as live:
+                assert receive_card(live)["ok"] is True
+                old_sibling, _ = wait_card()
+                old_parent = FakeHud.parents[old_sibling]
+                with FakeHud.condition:
+                    FakeHud.sessions.remove(old_sibling)
+                    FakeHud.card_slots.pop(old_sibling)
+                    if cascade:
+                        FakeHud.sessions.remove(old_parent)
+                    FakeHud.condition.notify_all()
+                assert receive_card(live) == {"end":"cancelled"}
+            assert FakeHud.opened == 2
+            with card_peer(adapter) as next_card:
+                assert receive_card(next_card)["ok"] is True
+                sibling, card = wait_card()
+                parent = FakeHud.parents[sibling]
+                assert sibling != old_sibling
+                assert (parent != old_parent) == cascade
+                links = [e["body"]["params"]["_meta"]["tze.hud/parent"] for e in FakeHud.requests
+                         if "tze.hud/parent" in e["body"].get("params", {}).get("_meta", {})]
+                assert links == [old_parent, parent]
+                deliver_card_action(sibling, "question", "new", card["content"]["actions"][0]["callback_id"])
+                assert receive_card(next_card) == {"end":"answer", "index":0}
+
+
+@pytest.mark.parametrize("failure", ["link", "unreachable"])
+def test_card_admission_fails_without_a_wait_or_a_second_initialize(hud, failure):
+    host, home = hud
+    assert pair(host, home).returncode == 0
+    with tempfile.TemporaryDirectory(prefix="hud-card-") as runtime:
+        with AdapterProcess(home, host=host, runtime=runtime) as adapter:
+            adapter.ready()
+            if failure == "link":
+                FakeHud.card_refusal = "link"
+            else:
+                FakeHud.modes["tze-hud-card"] = "drop"
+            started = time.monotonic()
+            with card_peer(adapter) as peer:
+                assert receive_card(peer) == {"end":"error"}
+            assert time.monotonic() - started < 1
+            linked = [entry for entry in FakeHud.requests if entry["body"].get("id") == "tze-hud-card"]
+            assert len(linked) == 1 and linked[0]["body"]["method"] == "initialize"
+            assert not card_calls("hud_input") and not card_calls("hud_publish")
+
+
+@pytest.mark.parametrize("other_kind", [False, True])
+def test_card_zone_hold_rearms_without_clearing(hud, other_kind):
+    host, home = hud
+    assert pair(host, home).returncode == 0
+    with tempfile.TemporaryDirectory(prefix="hud-card-") as runtime:
+        with AdapterProcess(home, host=host, runtime=runtime) as adapter:
+            adapter.ready()
+            with card_peer(adapter, ttl_ms=180) as question:
+                assert receive_card(question)["expires_in_ms"] == 180
+                sibling, card = wait_card()
+                if other_kind:
+                    nudge = card_peer(adapter, kind="nudge", ttl_ms=700)
+                    assert receive_card(nudge)["ok"] is True
+                    with FakeHud.condition:
+                        FakeHud.card_slots[sibling].pop("question")
+                else:
+                    nudge = None
+                try:
+                    wait_call(lambda entry: entry["body"].get("params", {}).get("name") == "hud_surfaces")
+                    question.settimeout(0.08)
+                    with pytest.raises(TimeoutError):
+                        receive_card(question)
+                    question.settimeout(3)
+                    if other_kind:
+                        with FakeHud.condition:
+                            FakeHud.card_slots[sibling].clear()
+                        assert receive_card(question) == {"end":"expired"}
+                        assert receive_card(nudge) == {"end":"expired"}
+                    else:
+                        deliver_card_action(sibling, "question", "unlocked", card["content"]["actions"][0]["callback_id"])
+                        assert receive_card(question) == {"end":"answer", "index":0}
+                    assert not card_calls("hud_clear")
+                finally:
+                    if nudge is not None:
+                        nudge.close()
+
+
+def test_delayed_clear_may_cancel_replacement_and_is_not_retried(hud):
+    host, home = hud
+    assert pair(host, home).returncode == 0
+    with tempfile.TemporaryDirectory(prefix="hud-card-") as runtime:
+        with AdapterProcess(home, host=host, runtime=runtime) as adapter:
+            adapter.ready()
+            FakeHud.card_delayed_clears = []
+            with card_peer(adapter) as old:
+                assert receive_card(old)["ok"] is True
+                sibling, _ = wait_card()
+            with FakeHud.condition:
+                assert FakeHud.condition.wait_for(lambda: bool(FakeHud.card_delayed_clears), 2)
+            with card_peer(adapter, ttl_ms=180) as new:
+                assert receive_card(new)["ok"] is True
+                with FakeHud.condition:
+                    assert FakeHud.card_delayed_clears == [(sibling, "question")]
+                    FakeHud.card_slots[sibling].pop("question")
+                assert receive_card(new) == {"end":"expired"}
+            assert len(card_calls("hud_clear")) == 1
+            assert len(card_calls("hud_surfaces")) == 1
+
+
+def test_two_adapters_isolate_cards_and_keep_all_four_model_slots(hud):
+    host, home = hud
+    assert pair(host, home).returncode == 0
+    with tempfile.TemporaryDirectory(prefix="hud-a-") as runtime_a, tempfile.TemporaryDirectory(prefix="hud-b-") as runtime_b:
+        with AdapterProcess(home, host=host, runtime=runtime_a) as first, AdapterProcess(home, host=host, runtime=runtime_b) as second:
+            first.ready()
+            second.ready()
+            for request_id in range(50, 54):
+                FakeHud.modes[request_id] = "hold"
+                second.send("ping", request_id)
+                wait_call(lambda entry: entry["body"].get("id") == request_id)
+            with card_peer(first) as a:
+                assert receive_card(a)["ok"] is True
+                a_scope, a_card = wait_card()
+                with card_peer(second) as b:
+                    assert receive_card(b)["ok"] is True
+                    b_scope, = FakeHud.card_slots.keys() - {a_scope}
+                    b_card = FakeHud.card_slots[b_scope]["question"]
+                    assert FakeHud.parents[a_scope] != FakeHud.parents[b_scope]
+                    deliver_card_action(b_scope, "question", "B", b_card["content"]["actions"][0]["callback_id"])
+                    assert receive_card(b) == {"end":"answer", "index":0}
+                    deliver_card_action(a_scope, "question", "A", a_card["content"]["actions"][0]["callback_id"])
+                    assert receive_card(a) == {"end":"answer", "index":0}
+            FakeHud.release.set()
+            assert {second.receive()["id"] for _ in range(4)} == set(range(50, 54))
 
 
 def test_live_hook_state_and_mirror_share_the_primary_scope(hud):

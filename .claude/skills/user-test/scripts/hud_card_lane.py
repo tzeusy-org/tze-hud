@@ -177,6 +177,7 @@ class CardLane:
             if isinstance(opened, str) and isinstance(response, dict) and isinstance(response.get("result"), dict):
                 self.session = opened
                 return
+            self.check_parent = True
             self.fail_pending(op)
             return
         if op.name == "parent":
