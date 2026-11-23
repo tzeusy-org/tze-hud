@@ -224,9 +224,10 @@ impl SceneGraph {
 
 #[cfg(test)]
 mod tests {
-    use super::super::test_helpers::make_scene;
+    use super::super::test_helpers::{make_scene, scene_with_gauge};
     use super::super::tests::make_subtitle_zone;
     use super::*;
+    use crate::types::ContentionPolicy;
 
     fn subtitle(text: &str) -> Publication {
         Publication::Zone {
@@ -272,6 +273,67 @@ mod tests {
             scene.sequence_number,
             sequence + 1,
             "refusals commit nothing"
+        );
+        assert!(scene.drain_present_ack_batch_ids().is_empty());
+    }
+
+    #[test]
+    fn refused_first_stack_zone_publication_creates_no_entry() {
+        let mut scene = make_scene();
+        let mut zone = make_subtitle_zone();
+        zone.contention_policy = ContentionPolicy::Stack { max_depth: 4 };
+        zone.max_publishers = 0;
+        scene.register_zone(zone);
+        let version = scene.version;
+
+        assert_eq!(
+            scene.publish(&Publisher::namespace("agent"), &subtitle("refused")),
+            Err(ValidationError::ZoneMaxPublishersReached {
+                zone: "subtitle".into(),
+                max: 0,
+            }),
+        );
+        assert!(
+            !scene
+                .zone_registry
+                .active_publishes
+                .contains_key("subtitle")
+        );
+        assert_eq!(scene.version, version);
+        assert!(scene.drain_present_ack_batch_ids().is_empty());
+    }
+
+    #[test]
+    fn refused_first_stack_widget_publication_creates_no_entry() {
+        let (mut scene, _) = scene_with_gauge(ContentionPolicy::Stack { max_depth: 4 });
+        scene
+            .widget_registry
+            .definitions
+            .get_mut("gauge")
+            .unwrap()
+            .max_publishers = 0;
+        let version = scene.version;
+        let publication = Publication::Widget {
+            widget_name: "gauge".into(),
+            params: HashMap::from([("level".into(), WidgetParameterValue::F32(0.5))]),
+            merge_key: None,
+            transition_ms: 0,
+            ttl_us: None,
+            expires_at_wall_us: None,
+        };
+
+        assert_eq!(
+            scene.publish(&Publisher::namespace("agent"), &publication),
+            Err(ValidationError::WidgetMaxPublishersReached {
+                widget: "gauge".into(),
+                max: 0,
+            }),
+        );
+        assert!(!scene.widget_registry.active_publishes.contains_key("gauge"));
+        assert_eq!(scene.version, version);
+        assert_eq!(
+            scene.widget_registry.instances["gauge"].current_params["level"],
+            WidgetParameterValue::F32(0.0)
         );
         assert!(scene.drain_present_ack_batch_ids().is_empty());
     }

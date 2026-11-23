@@ -111,8 +111,8 @@ input; it never adds a periodic poll to an idle runtime.
 A notification key names one exact-byte slot within a zone and authenticated
 publisher. Replacing it retains its position and zone enter progress while
 issuing fresh publication identity. Selective clear removes only matching active
-and delayed notifications while preserving sibling keys and foreign publications. Neither operation retracts accepted input: the activation snapshots
-its original optional key before removal, and its FIFO record and stable ACK id
+and delayed notifications while preserving sibling keys and foreign
+publications. Activation snapshots its original optional key before removal, and its FIFO record and stable ACK id
 survive replacement, clear and expiry. A reused key is not a generation nonce;
 owner option D permits stale cancellation, never a stale answer. The broker
 owns per-request callback routing and its accepted-race proof.
@@ -574,8 +574,9 @@ leases, including a request queued behind pause at the scene lock. A suspended
 MCP lease refuses Hold before mutation even if its early pause flag was false.
 An already completed gRPC sequence replays its cached result without retiming
 content; normal finite and indefinite Hold work again after resume.
-Terminal lease cleanup still removes its queued publications during pause, including
-revocation at the maximum suspension bound; other owners' queued work survives.
+Terminal lease cleanup still removes its queued publications during pause,
+including revocation at the maximum suspension bound. Other owners' queued
+publications survive.
 
 - `tze_hud_runtime` [`test_ttl_excluded_during_suspension`](../crates/tze_hud_runtime/src/shell/safe_mode.rs),
   [`test_lease_identity_preserved_across_suspend_resume`](../crates/tze_hud_runtime/src/shell/safe_mode.rs),

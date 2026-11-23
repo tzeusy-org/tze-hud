@@ -852,7 +852,7 @@ mod tests {
         .await
         .expect("runtime init");
 
-        let (scene_arc, changed_tile_id, changed_node_id, tile_nodes) = {
+        let (scene_arc, lease_id, changed_tile_id, changed_node_id, tile_nodes) = {
             let shared_state = runtime.shared_state().lock().await;
             let scene_arc = Arc::clone(&shared_state.scene);
             drop(shared_state);
@@ -925,7 +925,13 @@ mod tests {
             }
             let (changed_tile_id, changed_node_id) = changed.expect("first tile exists");
             drop(scene);
-            (scene_arc, changed_tile_id, changed_node_id, tile_nodes)
+            (
+                scene_arc,
+                lease_id,
+                changed_tile_id,
+                changed_node_id,
+                tile_nodes,
+            )
         };
 
         // Render the initial text and warm the ordinary shaping cache.
