@@ -65,10 +65,9 @@ async fn test_session_registration_rejections_carry_recovery_hints() {
         fn register_session(
             &self,
             _session_id: SceneId,
-            _namespace: String,
+            _namespace: &str,
             _budget: ResourceBudget,
             _resident: bool,
-            _initial_usage: MutationBudgetUsage,
         ) -> MutationBudgetDecision {
             MutationBudgetDecision::Reject {
                 error_code: "RESOURCE_EXHAUSTED",
@@ -78,25 +77,6 @@ async fn test_session_registration_rejections_carry_recovery_hints() {
 
         fn remove_session(&self, _session_id: SceneId) {
             panic!("a rejected session was never registered");
-        }
-
-        fn reserve_mutation(
-            &self,
-            _session_id: SceneId,
-            _delta_tiles: i32,
-            _delta_texture_bytes: i64,
-            _max_nodes_in_batch: u32,
-        ) -> MutationBudgetDecision {
-            panic!("a rejected session cannot mutate");
-        }
-
-        fn rollback_mutation(
-            &self,
-            _session_id: SceneId,
-            _delta_tiles: i32,
-            _delta_texture_bytes: i64,
-        ) {
-            panic!("a rejected session cannot mutate");
         }
     }
 
@@ -545,13 +525,13 @@ async fn test_graceful_disconnect_session_close() {
         .expect("real session cleanup did not complete")
         .expect("cleanup witness dropped before normal cleanup completed");
 
-    // Observe the existing protocol-facing ownership contract; this witness
-    // does not reproduce the runtime's aggregate resource or rate policy.
+    // Observe ownership and removal through the actual stream handler. The
+    // runtime gate's own tests cover capacity arithmetic.
     struct RecordingEnforcer {
         state: Arc<Mutex<SharedState>>,
-        entries: std::sync::Mutex<HashMap<SceneId, (String, MutationBudgetUsage)>>,
+        entries: std::sync::Mutex<HashMap<SceneId, String>>,
         removals: std::sync::Mutex<HashMap<SceneId, usize>>,
-        registered: tokio::sync::mpsc::UnboundedSender<(SceneId, String, MutationBudgetUsage)>,
+        registered: tokio::sync::mpsc::UnboundedSender<(SceneId, String)>,
         block_next: std::sync::Mutex<bool>,
         barrier: std::sync::Mutex<Option<tokio::sync::OwnedMutexGuard<SharedState>>>,
     }
@@ -560,10 +540,9 @@ async fn test_graceful_disconnect_session_close() {
         fn register_session(
             &self,
             id: SceneId,
-            namespace: String,
+            namespace: &str,
             _budget: ResourceBudget,
             _resident: bool,
-            usage: MutationBudgetUsage,
         ) -> MutationBudgetDecision {
             if namespace == "budget-rejected" {
                 return MutationBudgetDecision::Reject {
@@ -575,11 +554,11 @@ async fn test_graceful_disconnect_session_close() {
                 self.entries
                     .lock()
                     .unwrap()
-                    .insert(id, (namespace.clone(), usage))
+                    .insert(id, namespace.to_owned())
                     .is_none()
             );
             if std::mem::take(&mut *self.block_next.lock().unwrap()) {
-                // Init and Resume release earlier state/token/usage locks before
+                // Init and Resume release earlier state and token locks before
                 // register_session. Take this real lock before returning Allow,
                 // so their next awaited state lock is deterministically pending.
                 let guard = Arc::clone(&self.state)
@@ -587,7 +566,7 @@ async fn test_graceful_disconnect_session_close() {
                     .expect("registration barrier must acquire the actual test state");
                 assert!(self.barrier.lock().unwrap().replace(guard).is_none());
             }
-            self.registered.send((id, namespace, usage)).unwrap();
+            self.registered.send((id, namespace.to_owned())).unwrap();
             MutationBudgetDecision::Allow
         }
 
@@ -595,18 +574,6 @@ async fn test_graceful_disconnect_session_close() {
             self.entries.lock().unwrap().remove(&id);
             *self.removals.lock().unwrap().entry(id).or_default() += 1;
         }
-
-        fn reserve_mutation(
-            &self,
-            _id: SceneId,
-            _tiles: i32,
-            _texture_bytes: i64,
-            _nodes: u32,
-        ) -> MutationBudgetDecision {
-            MutationBudgetDecision::Allow
-        }
-
-        fn rollback_mutation(&self, _id: SceneId, _tiles: i32, _texture_bytes: i64) {}
     }
 
     async fn open_owned_stream(
@@ -648,20 +615,15 @@ async fn test_graceful_disconnect_session_close() {
     }
 
     async fn registered_id(
-        registered: &mut tokio::sync::mpsc::UnboundedReceiver<(
-            SceneId,
-            String,
-            MutationBudgetUsage,
-        )>,
+        registered: &mut tokio::sync::mpsc::UnboundedReceiver<(SceneId, String)>,
         namespace: &str,
     ) -> SceneId {
-        let (id, actual_namespace, usage) =
+        let (id, actual_namespace) =
             tokio::time::timeout(Duration::from_secs(5), registered.recv())
                 .await
                 .expect("real handshake did not register a budget entry")
                 .expect("registration witness closed");
         assert_eq!(actual_namespace, namespace);
-        assert_eq!(usage, MutationBudgetUsage::default());
         id
     }
 

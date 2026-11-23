@@ -563,8 +563,7 @@ leased content. No public scene snapshot exposes that origin or scene nodes.
 
 - `tze_hud_protocol` [`disconnect_transitions_to_orphaned_and_sets_disconnection_badge`](../crates/tze_hud_protocol/tests/lease_governance.rs),
   [`grace_period_expiry_removes_tile_and_nodes`](../crates/tze_hud_protocol/tests/lease_governance.rs)
-- `tze_hud_runtime` [`portal_degrade_then_publish_within_grace_resumes_same_tile`](../crates/tze_hud_runtime/src/portal.rs),
-  [`resumed_session_restores_usage_before_accepting_new_mutations`](../crates/tze_hud_runtime/src/mutation_budget_bridge.rs)
+- `tze_hud_runtime` [`portal_degrade_then_publish_within_grace_resumes_same_tile`](../crates/tze_hud_runtime/src/portal.rs)
 - `tze_hud_protocol` (gRPC session) [`grpc_disconnect_orphans_publications_without_touching_peer`](../crates/tze_hud_protocol/src/session_server/tests/invariants.rs),
   [`grpc_resume_within_grace_restores_publication_origin`](../crates/tze_hud_protocol/src/session_server/tests/invariants.rs),
   [`grpc_grace_expiry_reclaims_publications_and_rejects_resume`](../crates/tze_hud_protocol/src/session_server/tests/invariants.rs)
@@ -623,20 +622,45 @@ scene access and `CompositorDegradationPolicy` carries no suppression set.
 - `tze_hud_compositor` [`significant_degradation_preserves_hidden_tiles_and_opaques_visible_tiles`](../crates/tze_hud_compositor/src/renderer/tile_render.rs)
 - `tze_hud_runtime` [`degradation::tests::sustained_overload_does_not_escalate_past_simplified`](../crates/tze_hud_runtime/src/degradation.rs)
 
-## 7. Budgets are hard caps, not negotiations
+## 7. Agent-facing caps bound retained work
 
-Per-agent and runtime-wide limits on tiles, texture bytes, update rate, and
-nodes per tile. An over-budget batch is rejected whole with a structured
-error; nothing escalates, throttles, or partially applies.
+gRPC session admission enforces separate resident and guest capacity pools. A full pool refuses a new session with its recovery hint. MCP bounds its scoped sessions per agent and releases the least recently used scope when it needs space.
 
-- `tze_hud_runtime` [`mutation_budget_bridge::tests::registered_budget_rejects_mutation_above_tile_limit`](../crates/tze_hud_runtime/src/mutation_budget_bridge.rs),
-  [`aggregate_limits_are_atomic_across_agents`](../crates/tze_hud_runtime/src/mutation_budget_bridge.rs)
-- `tze_hud_resource` `store_behavior`: [`agent_texture_budget_rejects_whole_upload_and_stores_nothing`](../crates/tze_hud_resource/tests/store_behavior.rs),
+Zone admission honors the configured contention, publisher caps, and stack depth. A full stack follows its published trim policy and keeps a bounded set of cards. Portal publish bounds each payload and its retained transcript, and coalesces render work at its render interval. Its reply queue bounds count and bytes, refuses overflow, and keeps accepted replies until acknowledgement or expiry.
+
+Resident resource upload enforces runtime-wide texture memory and resource count, per-resource raw and decoded size, concurrent upload slots, and the upload byte rate. A rejected resource adds no stored object, and its upload reservation is released on failed completion or abort. The upload lane applies byte-rate backpressure while the resident session can still acknowledge heartbeats.
+
+At capacity, MCP releases the least recently called idle scope first. If each
+scope owns state, it releases the least recently called scope overall.
+
+- gRPC admission and recovery hints are covered by
+  [`guest_sessions_use_a_separate_enforced_pool`](../crates/tze_hud_runtime/src/mutation_budget_bridge.rs)
+  and [`test_session_registration_rejections_carry_recovery_hints`](../crates/tze_hud_protocol/src/session_server/tests/session_handshake.rs).
+- MCP eviction is covered through the server by
+  [`the_session_table_is_bounded_per_agent`](../crates/tze_hud_mcp/src/server/tests/scopes.rs).
+- Zone and widget admission keep their publisher caps. See
+  [`test_contention_zone_max_publishers_rejected`](../crates/tze_hud_scene/src/graph/tests.rs),
+  [`test_contention_widget_max_publishers_rejected`](../crates/tze_hud_scene/src/graph/tests.rs)
+  and [`full_stack_trims_oldest_status_and_keeps_the_question_on_both_planes`](../crates/tze_hud_scene/src/graph/stack_trim_tests.rs).
+- Portal payload, retention and render pacing are covered by
+  [`publish_attaches_implicitly_and_lists_for_owner_only`](../crates/tze_hud_portal/src/hub.rs),
+  [`transcript_retention_trims_head_past_256k_keeps_16k_visible`](../crates/tze_hud_portal/src/hub.rs)
+  and [`take_due_paces_renders_at_the_render_interval`](../crates/tze_hud_portal/src/hub.rs).
+  [`portal_input_queue_matches_its_model`](../crates/tze_hud_portal/tests/input_queue.rs)
+  covers reply bounds, acknowledgement and expiry.
+- Resource admission is covered by
   [`runtime_wide_texture_cap_is_shared_across_agents`](../crates/tze_hud_resource/tests/store_behavior.rs),
   [`resource_count_cap_rejects_the_extra_resource`](../crates/tze_hud_resource/tests/store_behavior.rs),
   [`per_resource_size_cap_rejects_chunked_upload_at_start`](../crates/tze_hud_resource/tests/store_behavior.rs),
-  [`upload_slot_cap_is_per_agent_and_freed_by_abort`](../crates/tze_hud_resource/tests/store_behavior.rs),
-  [`chunked_upload_rejected_at_complete_frees_its_slot_and_stores_nothing`](../crates/tze_hud_resource/tests/store_behavior.rs)
+  [`rejections_carry_stable_wire_code_and_actionable_detail`](../crates/tze_hud_resource/tests/store_behavior.rs),
+  [`upload_slot_cap_is_per_agent_and_freed_by_abort`](../crates/tze_hud_resource/tests/store_behavior.rs)
+  and [`chunked_upload_rejected_at_complete_frees_its_slot_and_stores_nothing`](../crates/tze_hud_resource/tests/store_behavior.rs).
+  [`test_resource_upload_backpressure_keeps_heartbeat_responsive`](../crates/tze_hud_protocol/src/session_server/tests/resource_upload.rs)
+  covers transport throttling.
+
+Internal scene tiles keep their structural guards, covered by
+[`tile_limit_1024_per_tab_enforced`](../crates/tze_hud_scene/src/graph/limits_tests.rs)
+and [`node_limit_64_per_tile_enforced`](../crates/tze_hud_scene/src/graph/limits_tests.rs).
 
 ## 8. Errors are affordances for the model
 

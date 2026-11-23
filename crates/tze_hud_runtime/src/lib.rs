@@ -7,7 +7,7 @@
 //! | Authority | Module | Role |
 //! |-----------|--------|------|
 //! | Resource accounting | `tze_hud_resource` | Decoded-byte budget registry; dedup |
-//! | Mutation budgets | `tze_hud_runtime::mutation_budget_bridge` | Per-session and aggregate hard caps |
+//! | Session admission | `tze_hud_runtime::mutation_budget_bridge` | Separate resident and guest session caps |
 //! | Override state | `tze_hud_runtime::shell::safe_mode` | Sole writer of safe-mode state |
 //! | Scene orchestration | `tze_hud_runtime` (this crate) | Wires authority modules; drives pipeline |
 //!

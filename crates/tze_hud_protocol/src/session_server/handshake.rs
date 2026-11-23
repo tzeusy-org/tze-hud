@@ -203,10 +203,9 @@ pub(super) async fn handle_session_init(
             message,
         } = enforcer.register_session(
             scene_session_id,
-            namespace.clone(),
-            resource_budget.clone(),
+            &namespace,
+            resource_budget,
             agents.contains(&namespace),
-            super::MutationBudgetUsage::default(),
         ) {
             let _ = tx
                 .send(Ok(ServerMessage {
@@ -375,17 +374,15 @@ pub(super) async fn handle_session_resume(
     let new_resume_token = uuid::Uuid::now_v7().as_bytes().to_vec();
     let scene_session_id = tze_hud_scene::SceneId::from_uuid(session_uuid);
     let resource_budget = resource_budget.clone();
-    let restored_usage = super::MutationBudgetUsage::default();
     let registration_guard = if let Some(enforcer) = budget_enforcer {
         if let super::MutationBudgetDecision::Reject {
             error_code,
             message,
         } = enforcer.register_session(
             scene_session_id,
-            namespace.clone(),
-            resource_budget.clone(),
+            &namespace,
+            resource_budget,
             agents.contains(&namespace),
-            restored_usage,
         ) {
             let _ = tx
                 .send(Ok(ServerMessage {
