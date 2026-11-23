@@ -5,8 +5,6 @@ use winit::event::MouseScrollDelta;
 use crate::os_prefs::WheelLines;
 use tze_hud_input::{WHEEL_LINE_PX, WheelStep};
 
-use tze_hud_scene::MonoUs;
-
 /// A wheel event as `(delta_x px, delta_y, unit of delta_y)`, positive
 /// scrolling down/right (hud-ljhku.13).
 ///
@@ -42,14 +40,6 @@ pub(super) fn nanoseconds_since_start() -> u64 {
     static START: OnceLock<Instant> = OnceLock::new();
     let start = START.get_or_init(Instant::now);
     start.elapsed().as_nanos() as u64
-}
-
-/// Monotonic microseconds since process start for `_mono_us` input payloads.
-///
-/// `MonoUs(0)` is the protocol's "not set" sentinel, so production dispatches
-/// clamp the first sub-microsecond sample to one.
-pub(super) fn monotonic_us_since_start() -> MonoUs {
-    MonoUs((nanoseconds_since_start() / 1_000).max(1))
 }
 
 /// Map a winit `PhysicalKey` to the DOM `KeyboardEvent.code`-style string
