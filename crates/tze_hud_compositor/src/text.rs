@@ -4043,20 +4043,41 @@ mod tests {
         let mut tail = item("one\nélan\nlast", 80.0, 40.0);
         tail.viewport = TruncationViewport::TailAnchored;
         tail.styled_runs = [styled(0..3), styled(1..9), styled(10..14)].into();
-        let color_runs = [color(0..3), color(1..9), color(10..14)];
+        let color_runs = [
+            ColorRunItem {
+                color: [255, 128, 0, 255],
+                ..color(0..3)
+            },
+            ColorRunItem {
+                color: [0, 128, 255, 255],
+                ..color(1..9)
+            },
+            color(10..14),
+        ];
         for (text, spans) in [
-            ("…\nélan\nlast", &[(4, 9, "élan"), (10, 14, "last")][..]),
-            ("…last", &[(3, 7, "last")][..]),
+            (
+                "…\nélan\nlast",
+                &[
+                    (4, 9, "élan", [0, 128, 255, 255]),
+                    (10, 14, "last", [10, 20, 30, 255]),
+                ][..],
+            ),
+            ("…last", &[(3, 7, "last", [10, 20, 30, 255])][..]),
             ("…\nél…\nlast", &[][..]),
         ] {
             let styles = effective_styled_runs_for_item(&tail, Some(text));
             let colors = reslice_color_runs_tail_anchored(&tail.text, text, &color_runs);
             assert_eq!(styles.len(), spans.len(), "{text}");
             assert_eq!(colors.len(), spans.len(), "{text}");
-            for ((style, color), &(start, end, word)) in styles.iter().zip(&colors).zip(spans) {
+            for ((style, color), &(start, end, word, rgba)) in styles.iter().zip(&colors).zip(spans)
+            {
                 assert_eq!((style.start_byte, style.end_byte), (start, end));
-                assert_eq!((color.start_byte, color.end_byte), (start, end));
+                assert_eq!(
+                    (color.start_byte, color.end_byte, color.color),
+                    (start, end, rgba)
+                );
                 assert_eq!(&text[start..end], word);
+                assert_eq!(style.weight, Some(700));
                 assert_eq!(style.size_scale, Some(1.2));
                 assert!(style.italic);
             }
