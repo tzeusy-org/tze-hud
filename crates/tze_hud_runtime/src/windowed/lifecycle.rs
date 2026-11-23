@@ -2710,6 +2710,9 @@ impl WinitApp {
         if secondary.is_none() {
             self.panel_window_focus(focused);
         }
+        if focused {
+            self.state.keyboard_window = secondary;
+        }
         if !focused {
             // A key hold ends when the HUD loses keyboard focus.
             self.state.answer_keyboard.hold_key = None;

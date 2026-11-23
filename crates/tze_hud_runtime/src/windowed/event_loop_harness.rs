@@ -157,6 +157,7 @@ impl WindowedRuntimeState {
             display_keys: Vec::new(),
             zone_targets: Default::default(),
             cursor_window: None,
+            keyboard_window: None,
             secondary_recreates: Default::default(),
             overlay_refits: Default::default(),
             press_window: None,
@@ -1087,8 +1088,17 @@ impl HeadlessEventLoopHarness {
         if turn.work.is_none() {
             // GPU-free callers need approximate notification geometry, but do
             // not claim render/snapshot/presentation evidence.
-            tze_hud_compositor::renderer::hit_regions::populate_notification_hit_regions(
+            let layout = self
+                .app
+                .state
+                .display_targets
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .layout
+                .clone();
+            tze_hud_compositor::renderer::hit_regions::populate_notification_hit_regions_on(
                 &mut scene,
+                &layout,
                 width as f32,
                 height as f32,
                 &std::collections::HashMap::new(),
@@ -1544,6 +1554,7 @@ mod tests {
 
     mod hold;
     mod press_guard;
+    mod question_displays;
     use tze_hud_input::{KeyboardModifiers, RawCharacterEvent, RawKeyDownEvent, RawKeyUpEvent};
     use tze_hud_protocol::proto::input_envelope::Event as ProtoInputEvent;
     use tze_hud_protocol::proto::{CommandAction, CommandSource};

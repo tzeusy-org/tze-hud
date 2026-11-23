@@ -1573,6 +1573,8 @@ impl WinitApp {
         let mut wake = None;
         let mut answer_exit = false;
         let mut return_focus = false;
+        // Tab onto a control: its bounds, to move keys to its display's window.
+        let mut tabbed_to = None;
         let consumed = {
             let state = spin_acquire(&self.state.shared_state, INTERACTION_LOCK_BUDGET).ok_or(())?;
             let mut scene = spin_acquire(&state.scene, INTERACTION_LOCK_BUDGET).ok_or(())?;
@@ -1644,6 +1646,7 @@ impl WinitApp {
                                 scene.focus_notification(Some(
                                     controls[next].interaction_id.clone(),
                                 ));
+                                tabbed_to = Some(controls[next].bounds);
                             }
                             true
                         }
@@ -1662,6 +1665,7 @@ impl WinitApp {
                             };
                             scene.overlay.notification_focus_entered_reverse = raw.modifiers.shift;
                             scene.focus_notification(Some(controls[next].interaction_id.clone()));
+                            tabbed_to = Some(controls[next].bounds);
                         }
                         true
                     } else {
@@ -1711,6 +1715,15 @@ impl WinitApp {
         }
         if return_focus {
             self.return_focus_after_key(raw);
+        }
+        if let Some(bounds) = tabbed_to {
+            let (x, y) = (
+                bounds.x + bounds.width * 0.5,
+                bounds.y + bounds.height * 0.5,
+            );
+            if self.display_window_at(x, y) != self.state.keyboard_window {
+                self.focus_native_window_at(x, y);
+            }
         }
         if consumed {
             self.state

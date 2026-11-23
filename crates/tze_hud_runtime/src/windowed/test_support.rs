@@ -315,6 +315,7 @@ pub(super) fn make_windowed_keyboard_test_app(
         display_keys: Vec::new(),
         zone_targets: Default::default(),
         cursor_window: None,
+        keyboard_window: None,
         secondary_recreates: Default::default(),
         overlay_refits: Default::default(),
         press_window: None,

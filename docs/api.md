@@ -215,7 +215,11 @@ with the same cancellation and idle semantics as a `hud_input` wait.
   answered card's exit. Waiting cards add no timer, countdown or periodic
   reshape/repaint; existing Stack TTL fade is the only waiting time cue.
   Bare Tab/Shift+Tab joins visible notification controls at the content focus
-  cycle's wrap boundary, in dismiss-then-publication-action order. HUD keyboard
+  cycle's wrap boundary, in dismiss-then-publication-action order. Cards
+  placed on several displays are visited in the one stack order they would
+  draw in on a single display (unanswered questions first, newest first);
+  stepping onto a card on another display moves keyboard focus to that
+  display's overlay window. HUD keyboard
   focus loss to another app clears card focus even when the pointer is over
   another overlay; moving keyboard focus between HUD monitors preserves it.
   Enter/Space uses the same exact-publication activation as pointer release. Publication
@@ -1221,7 +1225,8 @@ never causes another window to be raised. Sending a portal reply keeps focus
 in its composer.
 
 The answer chord targets the newest visible unanswered card with callback
-actions. With no such card it focuses the composer of the newest portal
+actions, on whichever display it was placed; that display's overlay window
+takes keyboard focus. With no such card it focuses the composer of the newest portal
 waiting for a reply (shown, not degraded, its latest output published with
 `expects_reply: true`; newest by that output's time), exactly as a click there
 would: the draft and caret are kept and the origin app is remembered. With

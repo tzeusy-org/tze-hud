@@ -640,6 +640,25 @@ impl Compositor {
         )
     }
 
+    /// The order a stack draws (and tabs through) its publications.
+    pub(super) fn stack_order(
+        scene: &SceneGraph,
+        zone_name: &str,
+        publishes: &[ZonePublishRecord],
+    ) -> Vec<usize> {
+        if is_alert_banner_zone(zone_name) {
+            sort_alert_banner_indices(publishes)
+        } else {
+            // A spared question must stay reachable when the bounded zone
+            // cannot draw every retained card. Keep newest-first within each
+            // group and use the same answered/expiry predicate as admission.
+            let mut indices: Vec<_> = (0..publishes.len()).rev().collect();
+            // Evaluate expiry once per card so its key cannot change mid-sort.
+            indices.sort_by_cached_key(|&index| !scene.is_unanswered_question(&publishes[index]));
+            indices
+        }
+    }
+
     /// [`Self::zone_slot_layout`] without a compositor, so GPU-free hit-region
     /// population lays slots out with the exact same function as drawing.
     pub(super) fn zone_slot_layout_with_tokens(
@@ -652,17 +671,7 @@ impl Compositor {
         layouts: &std::cell::RefCell<super::notification_layout::NotificationLayoutCache>,
     ) -> super::ZoneSlotLayout {
         let (zw, zh) = size;
-        let ordered_indices: Vec<usize> = if is_alert_banner_zone(zone_name) {
-            sort_alert_banner_indices(publishes)
-        } else {
-            // A spared question must stay reachable when the bounded zone
-            // cannot draw every retained card. Keep newest-first within each
-            // group and use the same answered/expiry predicate as admission.
-            let mut indices: Vec<_> = (0..publishes.len()).rev().collect();
-            // Evaluate expiry once per card so its key cannot change mid-sort.
-            indices.sort_by_cached_key(|&index| !scene.is_unanswered_question(&publishes[index]));
-            indices
-        };
+        let ordered_indices = Self::stack_order(scene, zone_name, publishes);
 
         let ordered_refs: Vec<&ZonePublishRecord> =
             ordered_indices.iter().map(|&i| &publishes[i]).collect();
