@@ -428,8 +428,8 @@
     }
   },
   "approval": {
-    "status": "pending_owner_review",
-    "decision_reference": "hud-ljhku.8 R8.5 approves the progress and copy schema changes. The measured tools/list byte delta awaits owner review on the implementation PR.",
+    "status": "owner_approved",
+    "decision_reference": "hud-ljhku.8 R8.5: the owner accepted the exact 2,749 model-visible bytes and 635 tokens for PR #1723 at 71036719056f90e044551134bb77bc975f69fce4 through questionnaire decision card-formula-tools-list, option A, on 2026-11-23.",
     "basis": "Two byte-identical measurements at 73fe42f4 record tools/list 2,729 to 2,749 model-visible bytes / 627 to 635 tokens (wire 2,831 to 2,851 bytes / 664 to 672 tokens). All other flow fingerprints and metrics and the action-limit error are identical. Ceilings, tokenizer, flow version 4 and accounting are unchanged."
   },
   "previous_approval": {
