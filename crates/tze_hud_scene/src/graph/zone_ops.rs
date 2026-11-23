@@ -661,6 +661,7 @@ impl SceneGraph {
             None,
             false,
             None,
+            None,
         )
     }
 
@@ -689,6 +690,7 @@ impl SceneGraph {
             None,
             false,
             Some(id),
+            None,
         )
     }
 
