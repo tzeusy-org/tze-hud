@@ -55,6 +55,10 @@ def in_test_dir(path: str) -> bool:
     return any(p in ("tests", "benches") for p in PurePosixPath(path).parts[:-1])
 
 
+def counted_markdown(path: str) -> bool:
+    return path.endswith(".md") and not path.startswith(MARKDOWN_SKIP)
+
+
 def rust_test_lines(text: str) -> tuple[int, list[str]]:
     """Inline test-module lines, and the names of `#[cfg(test)] mod x;` files."""
     lines = text.split("\n")
@@ -107,7 +111,7 @@ def count(files: dict[str, str]) -> dict[str, dict[str, int]]:
             row["rust_test"] += test
         elif path.endswith(".py"):
             row["python_test" if name.startswith("test_") or in_test_dir(path) else "python"] += lines
-        elif path.endswith(".md") and not path.startswith(MARKDOWN_SKIP):
+        elif counted_markdown(path):
             row["markdown"] += lines
     return {s: r for s, r in rows.items() if any(r.values())}
 
@@ -182,7 +186,7 @@ def line_limits(values: dict, fields: Collection[str]) -> bool:
     )
 
 
-def size_targets(path: Path) -> dict[str, Target]:
+def size_targets(path: Path, known_surfaces: set[str] | None) -> dict[str, Target]:
     with path.open("rb") as source:
         policy = tomllib.load(source)
     entries = policy.get("targets")
@@ -205,6 +209,10 @@ def size_targets(path: Path) -> dict[str, Target]:
             raise ValueError(f"{name}: target needs named report surfaces")
         if len(set(surfaces)) != len(surfaces) or seen_surfaces.intersection(surfaces):
             raise ValueError(f"{name}: report surfaces must appear only once")
+        if known_surfaces is not None:
+            unknown = set(surfaces) - known_surfaces
+            if unknown:
+                raise ValueError(f"{name}: unknown report surface(s): {', '.join(sorted(unknown))}")
         if not line_limits(ceilings, COLUMNS):
             raise ValueError(f"{name}: target needs valid line ceilings")
         targets[name] = Target(tuple(surfaces), ceilings, dict.fromkeys(ceilings, 0))
@@ -216,7 +224,7 @@ def size_targets(path: Path) -> dict[str, Target]:
         if not isinstance(grant, dict) or not all(
             isinstance(grant.get(key), str) and grant[key].strip() for key in required
         ):
-            raise ValueError("size allowance needs a feature, owner approval and target")
+            raise ValueError("size allowance needs a feature, owner approval reference and target")
         target = targets.get(grant["target"])
         key = (grant["feature"], grant["target"])
         values = {field: value for field, value in grant.items() if field not in required}
@@ -230,7 +238,7 @@ def size_targets(path: Path) -> dict[str, Target]:
 
 def target_report(rows: dict, targets: dict[str, Target], base: dict | None) -> tuple[str, list[str]]:
     report = [
-        "\n| Target surface | Metric | Current | Base | Sketch target | Signed allowances | Distance to target |",
+        "\n| Target surface | Metric | Current | Base | Sketch target | Recorded allowances | Distance to target |",
         "|---|---|--:|--:|--:|--:|--:|",
     ]
     failures = []
@@ -259,14 +267,24 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--output-dir", type=Path, help="also write size-report.md/.json here")
     ap.add_argument("--base", help="check growth against this Git commit")
     args = ap.parse_args(argv)
-    rows = count(tracked(args.root))
+    files = tracked(args.root)
+    rows = count(files)
     text = table(rows)
     failures = []
     policy = args.root / "scripts/ci/size_targets.toml"
     try:
-        base = None if args.base is None else count(committed(args.root, args.base))
+        base = None
+        known_surfaces = None
+        if args.base is not None:
+            base_files = committed(args.root, args.base)
+            base = count(base_files)
+            # The report omits all-zero rows. Use filenames to recognize empty surfaces.
+            known_surfaces = {
+                surface(path) for path in files.keys() | base_files.keys()
+                if path.endswith((".rs", ".py")) or counted_markdown(path)
+            }
         if args.base is not None or policy.exists():
-            target_text, failures = target_report(rows, size_targets(policy), base)
+            target_text, failures = target_report(rows, size_targets(policy, known_surfaces), base)
             text += target_text
     except subprocess.CalledProcessError:
         print(f"size gate: cannot read comparison commit {args.base!r}", file=sys.stderr)

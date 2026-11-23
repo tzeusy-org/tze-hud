@@ -132,6 +132,43 @@ class SizeGateTest(unittest.TestCase):
         self.assertIn("| docs | 0 | 0 | 0 | 0 | 1 |", out)
         self.assertEqual((self.root / "out/size-report.md").read_text(), out)
 
+    def test_rejects_unknown_mapping_that_would_hide_growth(self):
+        self.write("crates/a/src/lib.rs", "// a\n" * 7)
+        self.write("scripts/ci/size_targets.toml", TARGETS.replace('"crates/a"', '"crates/aa"'))
+        status, _, err = self.report("--base", "HEAD")
+        self.assertEqual((status, err.strip()), (
+            2, "size gate: engine: unknown report surface(s): crates/aa",
+        ))
+
+    def test_entirely_removed_surface_is_counted_as_zero(self):
+        self.git("rm", "-q", "crates/b/src/lib.rs")
+        status, out, err = self.report("--base", "HEAD")
+        self.assertEqual(status, 0, err)
+        self.assertIn("| engine | rust | 6 | 10 | 5 | 0 | +1 |", out)
+
+    def test_new_mapped_surface_can_be_empty_or_use_an_allowance(self):
+        self.write("scripts/ci/size_targets.toml", TARGETS + """
+[targets.new_surface]
+surfaces = ["crates/new"]
+rust = 0
+
+[[allowances]]
+feature = "new-feature"
+approval = "owner-signed feature spec"
+target = "new_surface"
+rust = 1
+""")
+        path = "crates/new/src/lib.rs"
+        self.write(path, "")
+        self.git("add", path)
+        status, out, err = self.report("--base", "HEAD")
+        self.assertEqual(status, 0, err)
+        self.assertIn("| new_surface | rust | 0 | 0 | 0 | 1 | +0 |", out)
+        self.write(path, "// new surface\n")
+        status, out, err = self.report("--base", "HEAD")
+        self.assertEqual(status, 0, err)
+        self.assertIn("| new_surface | rust | 1 | 0 | 0 | 1 | +1 |", out)
+
     def test_over_target_flat_or_declining_passes(self):
         self.assertEqual(self.report("--base", "HEAD")[0], 0)
         self.write("crates/a/src/lib.rs", "// a\n" * 5)
