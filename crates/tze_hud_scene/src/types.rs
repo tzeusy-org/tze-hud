@@ -632,48 +632,25 @@ pub struct Tab {
     pub created_at_ms: u64,
 }
 
-/// Per-agent resource envelope enforced by the budget enforcement ladder.
+/// Legacy scene budget metadata and the session's default admission rate.
 ///
-/// This is the single canonical resource budget type for the entire tze_hud
-/// system. It covers both the scene-model dimensions (used in `Tile`/`Lease`
-/// for persistence and wire serialization) and the enforcement dimensions
-/// (used by `tze_hud_scene::lease::budget` and `tze_hud_runtime::budget` for
-/// per-mutation admission checks).
-///
-/// # Defaults
-///
-/// | Field               | Default   | Hard max |
-/// |---------------------|-----------|----------|
-/// | max_tiles           | 8         | 64       |
-/// | max_texture_bytes   | 256 MiB   | 2 GiB    |
-/// | max_update_rate_hz  | 30.0      | 120.0    |
-/// | max_nodes_per_tile  | 32        | 64       |
-/// | max_active_leases   | 8         | 64       |
-/// | max_concurrent_streams | 0      | 0 (v1)   |
-///
-/// # Memory layout
-///
-/// The `Tile` struct embeds this type by value., `Tile` must
-/// remain under 200 bytes. Additions to this struct that would push `Tile` past
-/// that limit require a corresponding RFC amendment.
+/// `Tile` and `Lease` retain these fields in their serialized representation.
+/// `Tile` embeds this type and has a 200-byte size limit.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ResourceBudget {
-    /// Maximum number of tiles this agent may hold simultaneously.
+    /// Legacy per-agent tile limit.
     /// Range [1, 64]. Default: 8.
     pub max_tiles: u32,
-    /// Maximum texture memory across all tiles, in bytes.
+    /// Legacy per-agent tile texture limit, in bytes.
     /// Default: 256 MiB.
     pub max_texture_bytes: u64,
-    /// Maximum scene mutation rate in Hz (sliding window over last 1 second).
+    /// Update rate in Hz used for session registration.
     /// Default: 30.0 Hz.
     pub max_update_rate_hz: f32,
-    /// Maximum nodes per individual tile.
+    /// Legacy per-agent node limit per tile.
     /// Range [1, 64]. Default: 32.
     pub max_nodes_per_tile: u32,
-    /// Maximum concurrent active leases for this agent.
-    ///
-    /// Checked at lease-grant time and re-verified at mutation intake
-    /// (defence-in-depth). Range [1, 64]. Default: 8.
+    /// Legacy per-agent active lease limit.
     ///
     /// Serialized with a default of 8 so that scene snapshots serialized
     /// before this field was added deserialize correctly.
@@ -1139,10 +1116,6 @@ impl Default for HitRegionNode {
 /// scene snapshots reference resources by `ResourceId` only — blob data is NOT
 /// embedded.  On restart, the resource store is empty; agents must re-upload
 /// referenced resources before the scene can fully render.
-///
-/// The `decoded_bytes` field is set at mutation time (from the resource store
-/// record) so that the scene graph can enforce texture budget limits without
-/// holding raw pixel data.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct StaticImageNode {
     /// Content-addressed identity of the image resource (BLAKE3 hash of raw bytes).
@@ -1154,11 +1127,7 @@ pub struct StaticImageNode {
     pub width: u32,
     /// Height of the image in pixels (metadata from upload).
     pub height: u32,
-    /// Decoded in-memory size in bytes, recorded at mutation time for budget
-    /// accounting.  Does NOT store the actual pixels.
-    ///
-    /// Using `u64` to match scene budget accounting types (`ResourceBudget.max_texture_bytes`)
-    /// and the protobuf wire type, avoiding lossy casts on 32-bit targets.
+    /// Decoded size metadata retained in the serialized scene representation.
     pub decoded_bytes: u64,
     /// How the image is fitted within `bounds`.
     pub fit_mode: ImageFitMode,
@@ -1265,40 +1234,6 @@ impl std::fmt::Display for LeaseError {
 }
 
 impl std::error::Error for LeaseError {}
-
-/// Error returned when a mutation batch would exceed budget limits.
-#[derive(Clone, Debug, PartialEq)]
-pub struct BudgetError {
-    /// Which resource dimension was exceeded (e.g. "tiles", "texture_bytes").
-    pub resource: String,
-    /// Current usage before the mutation.
-    pub current: u64,
-    /// The configured limit.
-    pub limit: u64,
-    /// How much the mutation batch would add.
-    pub requested: u64,
-}
-
-impl std::fmt::Display for BudgetError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}: current={}, limit={}, requested={}",
-            self.resource, self.current, self.limit, self.requested
-        )
-    }
-}
-
-/// Current resource usage for a lease.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct ResourceUsage {
-    /// Number of tiles owned by this lease.
-    pub tiles: u32,
-    /// Total texture bytes across all tiles.
-    pub texture_bytes: u64,
-    /// Node count per tile (tile_id -> count).
-    pub nodes_per_tile: HashMap<SceneId, u32>,
-}
 
 /// Information about an expired or cleaned-up lease.
 #[derive(Clone, Debug, PartialEq)]

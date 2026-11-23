@@ -12,7 +12,7 @@ use tze_hud_resource::{
 };
 use tze_hud_scene::{
     MAX_MARKDOWN_BYTES, ZONE_TILE_Z_MIN,
-    graph::{MAX_NODES_PER_TILE, SceneGraph},
+    graph::SceneGraph,
     lease::LeaseState,
     types::{
         FontFamily, HitRegionNode, ImageFitMode, InputMode, Node, NodeData, Rect, SceneId,
@@ -764,17 +764,16 @@ fn expanded_transcript_materialization_is_bounded_to_viewport_and_budget() {
             color_runs: Box::default(),
         }),
     };
+    let root_id = root.id;
+    let transcript_id = transcript.id;
     let apply = set_portal_root(&mut scene, tile_id, root, vec![transcript], "portal-agent");
     assert!(
         apply.is_ok(),
         "bounded expanded transcript batch must apply"
     );
-    let usage = scene.lease_resource_usage(&lease_id);
-    let tile_nodes = usage.nodes_per_tile.get(&tile_id).copied().unwrap_or(0);
-    assert!(
-        (tile_nodes as usize) <= MAX_NODES_PER_TILE,
-        "expanded pilot node count must stay under per-tile node budget"
-    );
+    assert_eq!(scene.tiles[&tile_id].root_node, Some(root_id));
+    assert_eq!(scene.nodes[&root_id].children, [transcript_id]);
+    assert!(scene.nodes.contains_key(&transcript_id));
 }
 
 #[tokio::test]
@@ -914,12 +913,9 @@ fn portal_typing_indicator_updates_use_transient_in_place_path() {
     let apply = set_portal_root(&mut scene, tile_id, root, nodes, namespace);
     assert!(apply.is_ok());
     let activity_node_id = find_text_node_in_tile(&scene, tile_id, "typing...");
-    let nodes_before = scene
-        .lease_resource_usage(&lease_id)
-        .nodes_per_tile
-        .get(&tile_id)
-        .copied()
-        .unwrap_or(0);
+    let root_id = scene.tiles[&tile_id].root_node.unwrap();
+    let children_before = scene.nodes[&root_id].children.clone();
+    let node_count_before = scene.nodes.len();
 
     for content in ["typing...", "57 unread", "idle"] {
         let mut text = text_markdown_from_node(&scene, activity_node_id);
@@ -934,16 +930,9 @@ fn portal_typing_indicator_updates_use_transient_in_place_path() {
             .expect("refresh activity in place");
     }
 
-    let nodes_after = scene
-        .lease_resource_usage(&lease_id)
-        .nodes_per_tile
-        .get(&tile_id)
-        .copied()
-        .unwrap_or(0);
-    assert_eq!(
-        nodes_after, nodes_before,
-        "typing/activity indicator updates should not take a transactional structural path"
-    );
+    assert_eq!(scene.tiles[&tile_id].root_node, Some(root_id));
+    assert_eq!(scene.nodes[&root_id].children, children_before);
+    assert_eq!(scene.nodes.len(), node_count_before);
     let final_text = text_markdown_from_node(&scene, activity_node_id);
     assert_eq!(final_text.content, "idle");
     assert!(

@@ -5,7 +5,7 @@
 //! Covers (Lease Governance Lifecycle) and (Namespace Isolation)
 //! plus the following requirements:
 //! - Lease orphan handling on disconnect (3 scenarios)
-//! - Lease expiry without renewal removes the tile (2 scenarios)
+//! - Lease expiry without renewal removes the tile
 //! - Namespace isolation enforcement
 //!
 //! All tests are headless Layer 0: no display server or GPU required.
@@ -21,8 +21,7 @@
 //!    ORPHANED→EXPIRED, tile and all nodes removed from scene graph.
 //! 4. Explicit `LeaseRelease` → lease transitions ACTIVE→RELEASED, tile
 //!    removed cleanly (via `revoke_lease` on the scene graph).
-//! 5. Resource cleanup: on lease expiry, icon image resource `ref_count` drops;
-//!    modelled using `SceneGraph::expire_leases` and ref-count assertions.
+//! 5. Grace expiry releases the image resource held by the removed tile.
 //! 6. Namespace isolation: second agent session cannot mutate dashboard tile
 //!    (rejected with `NamespaceMismatch`).
 //! 7. Namespace isolation: dashboard agent cannot mutate tiles owned by a
@@ -309,10 +308,10 @@ fn grace_period_expiry_removes_tile_and_nodes() {
     );
 }
 
-/// Grace expiry also removes all nodes that were part of the tile.
+/// Grace expiry removes the tile and releases resources held by its nodes.
 #[test]
-fn grace_period_expiry_removes_all_tile_nodes() {
-    use tze_hud_scene::types::NodeData;
+fn grace_period_expiry_removes_tile_nodes_and_releases_image_resources() {
+    use tze_hud_scene::types::{ImageFitMode, NodeData, ResourceId, StaticImageNode};
 
     let (mut scene, clock) = make_scene(0);
     let tab_id = setup_active_tab(&mut scene);
@@ -320,19 +319,18 @@ fn grace_period_expiry_removes_all_tile_nodes() {
     let lease_id = grant_lease(&mut scene, "node-agent");
     let tile_id = create_tile(&mut scene, tab_id, "node-agent", lease_id);
 
-    // Add a child node to the tile.
+    let resource_id = ResourceId::from_bytes([0xAB; 32]);
+    scene.register_resource(resource_id);
     let node = tze_hud_scene::types::Node {
         layout: Default::default(),
         id: SceneId::new(),
-        data: NodeData::SolidColor(tze_hud_scene::types::SolidColorNode {
-            color: tze_hud_scene::types::Rgba {
-                r: 0.07,
-                g: 0.07,
-                b: 0.07,
-                a: 0.9,
-            },
+        data: NodeData::StaticImage(StaticImageNode {
+            resource_id,
+            width: 48,
+            height: 48,
+            decoded_bytes: 9216,
+            fit_mode: ImageFitMode::Contain,
             bounds: Rect::new(0.0, 0.0, 400.0, 300.0),
-            radius: None,
         }),
         children: vec![],
     };
@@ -345,6 +343,7 @@ fn grace_period_expiry_removes_all_tile_nodes() {
         scene.nodes.contains_key(&node_id),
         "node must exist before expiry"
     );
+    assert!(scene.is_resource_registered(&resource_id));
 
     // Disconnect and advance past grace period.
     clock.advance(500);
@@ -363,6 +362,7 @@ fn grace_period_expiry_removes_all_tile_nodes() {
         !scene.tiles.contains_key(&tile_id),
         "tile must also be gone after grace period expiry"
     );
+    assert!(!scene.is_resource_registered(&resource_id));
 }
 
 // ─── Scenario 10.5: Explicit LeaseRelease removes tile cleanly ───────────────
@@ -452,90 +452,7 @@ fn explicit_lease_release_removes_all_nodes() {
     );
 }
 
-// ─── Scenario 10.6: Resource cleanup on expiry ───────────────────────────────
-
-/// Lease Expiry Without Renewal Removes Tile —
-/// Scenario: Resources freed after expiry
-///
-/// WHEN the lease expires and the tile is removed
-/// THEN the icon image resource ref_count SHALL drop.
-///
-/// This test models the ref-count contract using `SceneGraph`'s resource usage
-/// tracking (which counts texture bytes / nodes, not a separate ResourceStore).
-/// A StaticImageNode with a `resource_id` causes the lease's texture budget to
-/// be consumed; after expiry the tile removal drops those bytes.
-///
-/// Because the runtime's `ResourceStore` (ref-counting) is a separate trait with
-/// no in-tree concrete implementation yet (see resource/mod.rs test harness), we
-/// test the scene-layer resource tracking that is implemented: `ResourceUsage`
-/// (tile count, node count, texture_bytes) which drops on tile removal.
-#[test]
-fn resource_ref_count_drops_after_lease_expiry() {
-    use tze_hud_scene::types::{ImageFitMode, NodeData, ResourceId, StaticImageNode};
-
-    let (mut scene, clock) = make_scene(0);
-    let tab_id = setup_active_tab(&mut scene);
-
-    let lease_id = grant_lease(&mut scene, "resource-agent");
-    let tile_id = create_tile(&mut scene, tab_id, "resource-agent", lease_id);
-
-    // Set a tile root with a StaticImageNode referencing a resource.
-    // The resource_id is a placeholder (48×48 PNG; 48×48×4 = 9216 bytes decoded).
-    let resource_id = ResourceId::from_bytes([0xAB; 32]);
-    scene.register_resource(resource_id);
-    let node = tze_hud_scene::types::Node {
-        layout: Default::default(),
-        id: SceneId::new(),
-        data: NodeData::StaticImage(StaticImageNode {
-            resource_id,
-            width: 48,
-            height: 48,
-            bounds: Rect::new(16.0, 16.0, 48.0, 48.0),
-            fit_mode: ImageFitMode::Contain,
-            decoded_bytes: 9216, // 48×48×4 RGBA8
-        }),
-        children: vec![],
-    };
-    scene
-        .set_tile_root_checked(tile_id, node, "resource-agent")
-        .unwrap();
-
-    // Resource usage before expiry: 1 tile, 1 node, some texture bytes.
-    let usage_before = scene.lease_resource_usage(&lease_id);
-    assert_eq!(usage_before.tiles, 1, "lease should reference 1 tile");
-    assert!(
-        usage_before.texture_bytes > 0,
-        "lease should have texture bytes from StaticImageNode"
-    );
-
-    // Disconnect and expire past grace.
-    clock.advance(500);
-    scene
-        .disconnect_lease(&lease_id, clock.now_millis())
-        .unwrap();
-    clock.advance(31_000); // past 30s grace
-    scene.expire_leases();
-
-    // Tile must be gone.
-    assert!(
-        !scene.tiles.contains_key(&tile_id),
-        "tile must be removed after expiry"
-    );
-
-    // Resource usage after expiry: tile is gone so tile count = 0.
-    // (If the lease entry is still in the map, its usage drops to 0.)
-    let usage_after = scene.lease_resource_usage(&lease_id);
-    assert_eq!(
-        usage_after.tiles, 0,
-        "lease resource usage (tiles) must drop to 0 after tile removal"
-    );
-    assert_eq!(
-        usage_after.texture_bytes, 0,
-        "lease resource usage (texture bytes) must drop to 0 after tile removal"
-    );
-}
-
-/// TTL expiry without reconnect also removes tile and drops resource usage.
+/// TTL expiry without reconnect also removes the tile.
 #[test]
 fn ttl_expiry_without_renewal_removes_tile() {
     use tze_hud_scene::types::NodeData;

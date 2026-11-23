@@ -789,23 +789,8 @@ impl SceneGraph {
             }
         }
 
-        // Budget re-accounting for StaticImage replacement.
-        //
-        // Proto ingest always sets `decoded_bytes = 0` on inbound `StaticImageNode`
-        // payloads because `decoded_bytes` is runtime-owned metadata that the client
-        // must not supply (see `convert.rs`).  If we blindly wrote the incoming zero
-        // into the graph the texture-budget tracking in `sum_texture_bytes` /
-        // `lease_resource_usage` would under-report actual GPU memory usage after
-        // the replacement.
-        //
-        // Preservation rule:
-        //   • Same resource_id AND incoming decoded_bytes == 0 → preserve the
-        //     stored decoded_bytes (the image content has not changed; the stored
-        //     value is authoritative for budget accounting).
-        //   • resource_id changed OR incoming decoded_bytes > 0 → use the incoming
-        //     value.  The caller (session server or test) is responsible for
-        //     populating decoded_bytes from the resource store when the resource
-        //     changes.
+        // Preserve serialized image metadata when the image is unchanged and
+        // its replacement supplies no decoded size.
         {
             let node = self
                 .nodes
