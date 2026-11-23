@@ -209,10 +209,14 @@ class CardLane:
             if result is None:
                 self.log_failure(op)
             return
-        if op.name == "poll" and result is not None and isinstance(result.get("items"), list):
-            self.ack, finished = self.cards.input(result["items"])
-            for waiter, reply in finished:
-                self.finish(waiter, reply)
+        if op.name == "poll" and self.deliver_input(result):
+            self.final_ack = not self.cards.live
+            return
+        if op.name == "settle":
+            if not self.deliver_input(result):
+                self.log_failure(op)
+            for waiter in self.cards.observe_zone(op.due, now, False, None):
+                self.finish(waiter, {"end": "expired"})
             self.final_ack = not self.cards.live
             return
         if op.name == "inspect" and result is not None and isinstance(result.get("surfaces"), list):
@@ -220,16 +224,31 @@ class CardLane:
                          if isinstance(entry, dict) and entry.get("s") == CARD_SURFACE), {})
             held = zone.get("held") is True
             expires = zone.get("expires_in_ms")
-            if not held or (type(expires) is int and 0 <= expires <= (1 << 64) - 1):
-                for waiter in self.cards.observe_zone(op.due, now, held, expires):
-                    self.finish(waiter, {"end": "expired"})
-                self.final_ack = not self.cards.live
+            if not held:
+                if self.cards.live:
+                    # A press can remove the last card before hud_surfaces
+                    # reads it. Drain any accepted receipt before expiring.
+                    self.call(CardOp("settle", due=op.due), "hud_input",
+                              {"ack": self.ack, "wait_ms": 0}, now + CARD_ADMISSION_SECONDS)
+                else:
+                    self.final_ack = True
+                return
+            if type(expires) is int and 0 <= expires <= (1 << 64) - 1:
+                self.cards.observe_zone(op.due, now, True, expires)
                 return
         self.log_failure(op)
         for waiter in tuple(self.cards.live.values()):
             self.cards.pop(waiter)
             self.finish(waiter, {"end": "error"})
         self.final_ack = True
+
+    def deliver_input(self, result):
+        if result is None or not isinstance(result.get("items"), list):
+            return False
+        self.ack, finished = self.cards.input(result["items"])
+        for waiter, reply in finished:
+            self.finish(waiter, reply)
+        return True
 
     def fail_pending(self, op):
         self.log_failure(op)

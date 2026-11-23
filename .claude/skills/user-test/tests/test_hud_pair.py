@@ -41,6 +41,7 @@ class FakeHud(BaseHTTPRequestHandler):
     card_slots = {}
     card_refusal = False
     card_encoded_gate = None
+    card_inspect_gate = None
     card_delayed_clears = None
 
     def do_DELETE(self):
@@ -144,6 +145,10 @@ class FakeHud(BaseHTTPRequestHandler):
                 result = {"tools": [{"name": name, "description": "upstream sentinel", "inputSchema": {"type": "object"}}
                                     for name in ["hud_surfaces", "hud_publish", "hud_hold", "hud_clear", "hud_input"]]}
             elif method == "tools/call" and request_id == "tze-hud-card":
+                if body["params"]["name"] == "hud_surfaces" and self.card_inspect_gate:
+                    observed, released = self.card_inspect_gate
+                    observed.set()
+                    released.wait(3)
                 value = self.card_call(session, body["params"])
                 result = {"content": [{"type": "text", "text": json.dumps(value)}]}
                 if value is None:
@@ -193,9 +198,10 @@ class FakeHud(BaseHTTPRequestHandler):
                 if self.card_refusal:
                     return None
                 assert args["content"]["type"] == "notification"
-                slots[args["key"]] = args
+                ttl_ms = args.get("ttl_ms", 60_000)
+                slots[args["key"]] = {**args, "ttl_ms": ttl_ms}
                 self.condition.notify_all()
-                return {"ok": True, "expires_in_ms": args["ttl_ms"]}
+                return {"ok": True, "expires_in_ms": ttl_ms}
             if name == "hud_clear":
                 if self.card_delayed_clears is None:
                     slots.pop(args["key"], None)
@@ -228,6 +234,7 @@ def hud(tmp_path):
     FakeHud.sessions, FakeHud.opened, FakeHud.deletes, FakeHud.inputs = set(), 0, [], {}
     FakeHud.parents, FakeHud.card_slots, FakeHud.card_refusal = {}, {}, False
     FakeHud.card_encoded_gate, FakeHud.card_delayed_clears = None, None
+    FakeHud.card_inspect_gate = None
     FakeHud.release = threading.Event()
     server = ThreadingHTTPServer(("127.0.0.1", 0), FakeHud)
     # Teardown is fixture housekeeping, not part of an adapter deadline.
@@ -508,14 +515,16 @@ def test_card_client_uses_a_sibling_and_acks_only_its_input(hud):
                 assert card["surface"] == "zone:notification-area" and card["key"] == "question"
                 action = card["content"]["actions"][0]["callback_id"]
                 assert re.fullmatch(r"[0-9a-f]{16}\.0", action)
+                FakeHud.inputs[primary] = []
+                FakeHud.modes[99] = "hold"
+                adapter.send("tools/call", 99, {"name":"hud_input", "arguments":{"wait_ms":1000}})
+                assert wait_call(lambda entry: entry["body"].get("id") == 99)["session"] == primary
                 deliver_card_action(sibling, "question", "answer1", action)
                 out, err = client.communicate(timeout=3)
                 assert (client.returncode, err, json.loads(out)) == (0, b"", {"end":"answer", "index":0})
             assert wait_call(lambda entry: entry["body"].get("params", {}).get("arguments", {}).get("ack")
                              == ["answer1"])["session"] == sibling
-            with FakeHud.condition:
-                FakeHud.inputs[primary] = []
-            adapter.send("tools/call", 99, {"name":"hud_input", "arguments":{"ack":["answer1"]}})
+            FakeHud.release.set()
             assert json.loads(adapter.receive()["result"]["content"][0]["text"]) == {"items":[]}
             assert not card_calls("hud_clear")
             assert sum(entry["body"]["params"]["arguments"].get("wait_ms") == 0
@@ -690,6 +699,27 @@ def test_delayed_clear_may_cancel_replacement_and_is_not_retried(hud):
                 assert receive_card(new) == {"end":"expired"}
             assert len(card_calls("hud_clear")) == 1
             assert len(card_calls("hud_surfaces")) == 1
+
+
+def test_accepted_action_wins_when_it_empties_the_zone_during_expiry_inspection(hud):
+    host, home = hud
+    assert pair(host, home).returncode == 0
+    with tempfile.TemporaryDirectory(prefix="hud-card-") as runtime:
+        with AdapterProcess(home, host=host, runtime=runtime) as adapter:
+            adapter.ready()
+            inspection, release = threading.Event(), threading.Event()
+            FakeHud.card_inspect_gate = (inspection, release)
+            with card_peer(adapter, ttl_ms=50) as peer:
+                assert receive_card(peer)["ok"] is True
+                sibling, card = wait_card()
+                assert inspection.wait(2)
+                with FakeHud.condition:
+                    FakeHud.card_slots[sibling].pop("question")
+                deliver_card_action(sibling, "question", "during-inspect",
+                                    card["content"]["actions"][0]["callback_id"])
+                release.set()
+                assert receive_card(peer) == {"end":"answer", "index":0}
+            assert not card_calls("hud_clear")
 
 
 def test_two_adapters_isolate_cards_and_keep_all_four_model_slots(hud):

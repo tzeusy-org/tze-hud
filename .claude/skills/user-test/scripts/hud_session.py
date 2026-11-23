@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import hashlib
 import math
 
-from hud_hook_socket import CARD_TTL_MS, TOOL_EVENTS
+from hud_hook_socket import TOOL_EVENTS
 
 STATE_METHOD = "notifications/tze/session_state"
 HOLD_MS = 600000
@@ -28,10 +28,9 @@ class CardWait:
         return self.request["kind"]
 
     def publish_arguments(self):
-        return {
+        arguments = {
             "surface": CARD_SURFACE,
             "key": self.kind,
-            "ttl_ms": self.request.get("ttl_ms", CARD_TTL_MS),
             "content": {
                 "type": "notification",
                 "title": self.request["title"],
@@ -42,6 +41,9 @@ class CardWait:
                 ],
             },
         }
+        if "ttl_ms" in self.request:
+            arguments["ttl_ms"] = self.request["ttl_ms"]
+        return arguments
 
     def rearm(self, now, expires_ms):
         self.deadline = now + expires_ms / 1000 + CARD_DEADLINE_GRACE

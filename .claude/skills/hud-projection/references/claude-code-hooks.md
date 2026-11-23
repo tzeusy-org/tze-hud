@@ -205,6 +205,7 @@ Hook consumers can call
 from the same Claude session. Use `question`, `permission`, or `nudge` and one
 to four action labels. The call has a one-second acceptance window, including
 the first card's sibling initialization, and returns a dictionary with `end`.
+Leave `ttl_ms` out to use the HUD's configured answer window.
 An `answer` includes the zero-based action `index`. Other outcomes are
 `dismissed`, `expired`, `cancelled`, `superseded`, and `error`. A caller that
 disconnects before an answer requests one keyed clear. The caller owns its
@@ -218,7 +219,8 @@ replacement. Only its own callback nonce can answer it. If the notification
 zone remains held past a deadline, the wait extends to the zone's reported
 expiry plus 250 ms. This includes a held or frozen card and may keep a waiter
 pending behind another live kind until the zone empties or the caller times
-out. Cancelled questions fall through to the terminal and cancelled nudges
+out. Once the zone empties, the adapter checks for an already accepted press
+before reporting expiry. Cancelled questions fall through to the terminal and cancelled nudges
 stay silent.
 
 ## Verification and remaining acceptance

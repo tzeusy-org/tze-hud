@@ -2,19 +2,18 @@
 """Bounded Linux/WSL stdio client for the HUD's existing authenticated HTTP MCP.
 
 Initialize has a 3s absolute startup deadline; established messages retain 60s.
-Each owns one of four child slots until reaped. Cancellation is local best effort: a POST
-already accepted remotely is never replayed or rolled back. Native macOS and
-Windows client lifetime primitives are unsupported; the Windows HUD is unchanged.
+Each model call owns one of four child slots until reaped. Presence and hook
+cards each have a separate serialized slot. Cancellation is local best effort.
+An accepted POST can finish remotely. The adapter runs on Linux and WSL.
 
-The runtime ignores `notifications/*`; this adapter consumes
-`notifications/initialized` locally and does not forward it, so the runtime
-must not require it. A session is ready once that notice follows a successful
-initialize, and no HUD request can undo that.
+The adapter consumes the model's `notifications/initialized` locally.
+A session is ready once that notice follows a successful initialize.
 
-Each adapter is one HUD session: initialize sends the working folder's name
+Each adapter opens a primary HUD session. Initialize sends the working folder's name
 as the session label (`_meta`, outside model context) and keeps the returned
 `Mcp-Session-Id` for later calls, so this client owns only its own content and
-input. A clean stop (stdin EOF, SIGTERM, SIGINT or SIGHUP) sends `DELETE /mcp`
+input. Hook cards lazily open a sibling with its own input and holdings.
+A clean stop (stdin EOF, SIGTERM, SIGINT or SIGHUP) sends `DELETE /mcp`
 with a 1 s deadline, even with calls in flight, releasing the session. A 404
 (the HUD restarted or released the session) re-initializes once, single-flight
 across concurrent calls and replaying the client's initialize, and retries

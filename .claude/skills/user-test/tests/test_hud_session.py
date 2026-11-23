@@ -170,6 +170,7 @@ def test_option_d_keeps_callbacks_generation_bound(stale_dismiss):
     old, new = card("question", "old"), card("question", "new")
     cards.admit(old, 0, 100)
     assert cards.admit(new, 1, 100) is old
+    assert "ttl_ms" not in new.publish_arguments()
     assert new.publish_arguments()["content"]["actions"][0] == {
         "label": "dismiss", "callback_id": "new.0",
     }
