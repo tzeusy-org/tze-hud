@@ -17,7 +17,7 @@
 //!   portal composer regions with local echo, caret/selection/word-delete/capped
 //!   paste, coalescible state-stream notifications, and transactional submit
 //!
-//! - [`pointer`] — rich pointer event types (PointerDownEvent, ClickEvent, etc.)
+//! - [`mod@pointer`] — rich pointer event types (PointerDownEvent, ClickEvent, etc.)
 //! - [`events`] — RouteTarget, SceneLocalPatch, InputEnvelope, EventBatch
 //! - `local_feedback` — rollback tracker
 //! - `scroll` — `ScrollConfig`, `ScrollState`, scroll-local-first processing
@@ -816,7 +816,7 @@ impl InputProcessor {
     /// Process a keyboard-originated scroll event through the runtime-owned scroll path.
     ///
     /// This is the command-input path for PgUp/PgDn on portal tiles. It applies
-    /// the same local offset update as [`process_scroll_event`] but targets the
+    /// the same local offset update as [`Self::process_scroll_event`] to the
     /// tile resolved by keyboard focus, independent of pointer position.
     ///
     /// Returns the changed tile and absolute offset when the event updates a
@@ -1357,8 +1357,8 @@ impl InputProcessor {
     /// back to its own default hint); `Some("")` — explicit opt-out; `Some(text)`
     /// — this composer's own hint copy.
     ///
-    /// Used by the windowed runtime to push a [`LocalComposerState`]-equivalent
-    /// snapshot to the compositor thread after every composer mutation.
+    /// The windowed runtime sends this draft state to the compositor thread
+    /// after every composer mutation.
     ///
     /// local feedback first — the snapshot is pushed WITHOUT an
     /// adapter round-trip so the compositor can render the echo on the next
