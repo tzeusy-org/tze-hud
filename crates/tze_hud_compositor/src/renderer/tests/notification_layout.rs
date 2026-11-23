@@ -2002,6 +2002,26 @@ async fn go_to_uses_existing_caption_geometry_and_draws_local_cues() {
     compositor.prime_markdown_cache(&scene);
     compositor.prime_truncation_cache(&scene);
     compositor.render_frame_headless(&mut scene, &surface);
+    // The presentation identity participates in the relevant display's
+    // signature even when a replacement has identical pixels.
+    let mut build = compositor.build_windowed_frame(&mut scene, 1024, 720);
+    build.bind_notification_candidates(&scene);
+    let here = crate::FrameTarget::primary(1024, 720);
+    let away = crate::FrameTarget {
+        x: 1024.0,
+        primary: false,
+        ..here
+    };
+    let signatures = [
+        compositor.frame_signature(&build, &here),
+        compositor.frame_signature(&build, &away),
+    ];
+    scene.overlay.notification_geometry[0].publication_id = SceneId::new();
+    build.bind_notification_candidates(&scene);
+    assert_ne!(compositor.frame_signature(&build, &here), signatures[0]);
+    assert_eq!(compositor.frame_signature(&build, &away), signatures[1]);
+    scene.overlay.notification_geometry[0].publication_id = baseline.publication_id;
+
     let plain_pixels = surface.read_pixels(&compositor.device);
 
     scene.overlay.notification_go_to.insert(

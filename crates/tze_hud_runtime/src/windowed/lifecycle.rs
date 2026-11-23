@@ -4143,14 +4143,18 @@ impl WinitApp {
     /// texture the compositor actually rendered into.
     pub(super) fn maybe_present_frame(&mut self) {
         let surface = self.state.window_surface.clone();
-        self.maybe_present_frame_with(|| {
-            use tze_hud_compositor::surface::PendingPresent;
-            surface.and_then(|surface| match surface.present_pending_texture_status() {
-                PendingPresent::Presented => Some(true),
-                PendingPresent::Empty => None,
-                PendingPresent::DeferredEncoding => Some(false),
-            })
-        });
+        self.maybe_present_frame_with_secondaries(
+            || {
+                use tze_hud_compositor::surface::PendingPresent;
+                let (status, cards) = surface?.present_pending_texture_with_cards();
+                match status {
+                    PendingPresent::Presented => Some((true, cards)),
+                    PendingPresent::Empty => None,
+                    PendingPresent::DeferredEncoding => Some((false, Vec::new())),
+                }
+            },
+            Self::present_secondaries,
+        );
     }
 
     pub(super) fn defer_present_until_available(
@@ -4168,11 +4172,15 @@ impl WinitApp {
     /// path while the headless harness substitutes only the swapchain operation.
     /// `Some(false)` means deferred encoding; `None` means no pending image.
     /// A newer ready generation arriving during this attempt remains unread.
+    #[cfg(test)]
     pub(super) fn maybe_present_frame_with(
         &mut self,
         present_primary: impl FnOnce() -> Option<bool>,
     ) {
-        self.maybe_present_frame_with_secondaries(present_primary, Self::present_secondaries);
+        self.maybe_present_frame_with_secondaries(
+            || present_primary().map(|presented| (presented, Vec::new())),
+            Self::present_secondaries,
+        );
     }
 
     /// Substitute only final swapchain operations in the headless harness.
@@ -4180,7 +4188,7 @@ impl WinitApp {
     /// a new secondary submission during a slow present must remain unread.
     pub(super) fn maybe_present_frame_with_secondaries(
         &mut self,
-        present_primary: impl FnOnce() -> Option<bool>,
+        present_primary: impl FnOnce() -> Option<(bool, Vec<tze_hud_scene::SceneId>)>,
         present_secondaries: impl FnOnce(&Self) -> super::displays::SecondaryPresentation,
     ) {
         let ready = self.state.frame_ready_rx.has_changed().unwrap_or(false);
@@ -4190,15 +4198,16 @@ impl WinitApp {
             if ready {
                 let _ = self.state.frame_ready_rx.borrow_and_update();
             }
-            let (secondary_presented, mut deferred) = present_secondaries(self);
+            let (secondary_presented, mut deferred, mut cards) = present_secondaries(self);
             self.state.deferred_present = false;
             let mut primary_presented = false;
-            if let Some(presented) = present_primary() {
+            if let Some((presented, primary_cards)) = present_primary() {
                 // Present under the same mutex that guards pending swapchain
                 // ownership so acquire/present cannot interleave into a
                 // double-acquire validation error on some backends.
                 if presented {
                     primary_presented = true;
+                    cards.extend(primary_cards);
                     self.state.wake.counters().record_present();
                     if let Some(measurement) = self.state.quiescent_efficiency.as_mut() {
                         measurement.record_first_present(Instant::now());
@@ -4210,8 +4219,8 @@ impl WinitApp {
                     }
                 }
             }
-            if primary_presented || secondary_presented {
-                self.go_to_presented();
+            if !cards.is_empty() {
+                self.go_to_presented(cards);
             }
             self.state.deferred_present |= !deferred.is_empty();
             for availability in deferred {

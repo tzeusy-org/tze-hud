@@ -3182,7 +3182,7 @@ mod tests {
         runtime
             .events
             .app
-            .maybe_present_frame_with_secondaries(|| None, |_| (false, vec![secondary]));
+            .maybe_present_frame_with_secondaries(|| None, |_| (false, vec![secondary], vec![]));
         assert!(runtime.events.app.state.deferred_present);
         wake.notify_main(crate::idle_efficiency::RuntimeWakeupSource::OperatorCapture);
         wake.take_main_source();
@@ -3195,7 +3195,7 @@ mod tests {
         runtime
             .events
             .app
-            .maybe_present_frame_with_secondaries(|| None, |_| (true, vec![]));
+            .maybe_present_frame_with_secondaries(|| None, |_| (true, vec![], vec![]));
         assert!(!runtime.events.app.state.deferred_present);
         assert_eq!(wake.counters().snapshot(), primary_counters);
         let sender = runtime
@@ -3211,7 +3211,7 @@ mod tests {
             || None,
             |_| {
                 sender.send(true).unwrap();
-                (true, vec![])
+                (true, vec![], vec![])
             },
         );
         assert!(
@@ -5191,8 +5191,22 @@ mod tests {
             .collect()
     }
 
-    fn present_go_to_card(harness: &mut HeadlessEventLoopHarness, success: bool) {
-        assert!(harness.tick());
+    fn go_to_receipt(harness: &HeadlessEventLoopHarness) -> Vec<SceneId> {
+        harness
+            .scene()
+            .overlay
+            .notification_geometry
+            .iter()
+            .filter(|card| card.has_window_caption && card.chosen.is_none())
+            .map(|card| card.publication_id)
+            .collect()
+    }
+
+    fn present_go_to_receipt(
+        harness: &mut HeadlessEventLoopHarness,
+        success: bool,
+        ids: Vec<SceneId>,
+    ) {
         harness
             .app
             .state
@@ -5201,7 +5215,16 @@ mod tests {
             .unwrap()
             .send(true)
             .unwrap();
-        harness.app.maybe_present_frame_with(|| Some(success));
+        harness.app.maybe_present_frame_with_secondaries(
+            || Some((success, ids)),
+            |_| (false, Vec::new(), Vec::new()),
+        );
+    }
+
+    fn present_go_to_card(harness: &mut HeadlessEventLoopHarness, success: bool) {
+        assert!(harness.tick());
+        let ids = go_to_receipt(harness);
+        present_go_to_receipt(harness, success, ids);
     }
 
     fn wait_for_go_to(
@@ -5231,6 +5254,64 @@ mod tests {
             .find(|card| card.publication_id == id)
             .and_then(|card| card.goto)
             .map(|r| (r.x + r.width * 0.5, r.y + r.height * 0.5))
+    }
+
+    #[test]
+    fn go_to_matches_only_cards_on_the_presented_texture() {
+        use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
+        let mut harness = approve_reject_notification_harness();
+        let first = publish_go_to_card(&mut harness, "first-frame", "first-token");
+        assert!(harness.tick());
+        let first_receipt = go_to_receipt(&harness);
+        assert_eq!(first_receipt, [first]);
+
+        let next = publish_go_to_card(&mut harness, "next-frame", "next-token");
+        assert!(harness.tick());
+        let next_receipt = go_to_receipt(&harness);
+        assert!(next_receipt.contains(&next));
+        let lookups = Arc::new(AtomicUsize::new(0));
+        harness.app.state.window_go_to.inject(
+            {
+                let lookups = lookups.clone();
+                move || {
+                    lookups.fetch_add(1, SeqCst);
+                    go_to_windows("first-token", 1)
+                        .into_iter()
+                        .chain(go_to_windows("next-token", 1))
+                        .collect()
+                }
+            },
+            |_| panic!("a presented card cannot activate"),
+        );
+
+        // The renderer has built B, but only A's texture has flipped.
+        present_go_to_receipt(&mut harness, true, first_receipt);
+        wait_for_go_to(&mut harness, |scene| {
+            scene
+                .overlay
+                .notification_go_to
+                .get(&first)
+                .is_some_and(|state| state.available)
+        });
+        assert!(
+            !harness
+                .scene()
+                .overlay
+                .notification_go_to
+                .contains_key(&next)
+        );
+        assert_eq!(lookups.load(SeqCst), 1);
+
+        present_go_to_receipt(&mut harness, true, next_receipt);
+        wait_for_go_to(&mut harness, |scene| {
+            scene
+                .overlay
+                .notification_go_to
+                .get(&next)
+                .is_some_and(|state| state.available)
+        });
+        assert_eq!(lookups.load(SeqCst), 2);
+        assert_eq!(harness.app.state.window_go_to.activations, 0);
     }
 
     #[test]

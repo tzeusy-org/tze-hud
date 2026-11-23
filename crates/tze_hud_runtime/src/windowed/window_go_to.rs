@@ -1,11 +1,11 @@
 //! Go to session is a local card control. Discover titles off-thread; only an
 //! explicit press can carry a result back to the winit thread for activation.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
-use tze_hud_scene::graph::overlay::{GoToCue, NotificationGeometry};
+use tze_hud_scene::graph::overlay::GoToCue;
 use tze_hud_scene::render_wake::RenderWakeNotifier;
 use tze_hud_scene::{Rect, SceneGraph, SceneId};
 
@@ -103,7 +103,7 @@ const FOREGROUND_CONFIRM_TIMEOUT: Duration = Duration::from_millis(180);
 #[derive(Default)]
 pub(super) struct WindowGoTo {
     inspector: Option<Arc<Inspector>>,
-    scan_due: bool,
+    presented: HashSet<SceneId>,
     scan: Option<mpsc::Receiver<Vec<SceneId>>>,
     presses: Vec<PendingPress>,
     handoffs: Vec<PendingHandoff>,
@@ -141,6 +141,10 @@ impl WindowGoTo {
     #[cfg(not(target_os = "windows"))]
     pub(super) fn new(_apps: Option<Vec<String>>) -> Self {
         Self::default()
+    }
+
+    pub(super) fn enabled(&self) -> bool {
+        self.inspector.is_some()
     }
 
     pub(super) fn foreground(&self) -> Option<isize> {
@@ -188,41 +192,38 @@ impl WindowGoTo {
     }
 }
 
-fn presented_candidates(scene: &SceneGraph) -> Candidates {
-    scene
-        .overlay
-        .notification_geometry
-        .iter()
-        .filter(|card| {
-            card.chosen.is_none()
-                && card.has_window_caption
-                && !scene
-                    .overlay
-                    .notification_go_to
-                    .contains_key(&card.publication_id)
-        })
-        .filter_map(|card| card_token(scene, card).map(|token| (card.publication_id, token.into())))
-        .collect()
-}
-
-fn card_token<'a>(scene: &'a SceneGraph, card: &NotificationGeometry) -> Option<&'a str> {
+fn presented_candidates(scene: &SceneGraph, presented: &HashSet<SceneId>) -> Candidates {
     let now = scene.now_wall_us();
     scene
         .zone_registry
-        .active_for_zone(&card.zone_name)
-        .iter()
-        .find(|record| {
-            record.publication_id == card.publication_id
+        .active_publishes
+        .values()
+        .flatten()
+        .filter(|record| {
+            presented.contains(&record.publication_id)
                 && record.expires_at_wall_us.is_none_or(|expiry| expiry > now)
-        })?
-        .window_token
-        .as_deref()
+                && !scene
+                    .overlay
+                    .notification_go_to
+                    .contains_key(&record.publication_id)
+                && !scene
+                    .overlay
+                    .notification_choices
+                    .contains_key(&record.publication_id)
+        })
+        .filter_map(|record| {
+            record
+                .window_token
+                .as_ref()
+                .map(|token| (record.publication_id, token.clone()))
+        })
+        .collect()
 }
 
 impl WinitApp {
-    pub(super) fn go_to_presented(&mut self) {
-        if self.state.window_go_to.inspector.is_some() {
-            self.state.window_go_to.scan_due = true;
+    pub(super) fn go_to_presented(&mut self, ids: Vec<SceneId>) {
+        if self.state.window_go_to.enabled() {
+            self.state.window_go_to.presented.extend(ids);
             if self.settle_go_to(Instant::now()) {
                 self.state
                     .wake
@@ -284,7 +285,7 @@ impl WinitApp {
 
     pub(super) fn settle_go_to(&mut self, now: Instant) -> bool {
         let state = &mut self.state.window_go_to;
-        if !state.scan_due
+        if state.presented.is_empty()
             && state.scan.is_none()
             && state.presses.is_empty()
             && state
@@ -315,29 +316,35 @@ impl WinitApp {
                 }
             }
         }
-        if state.scan_due && state.scan.is_none() {
-            state.scan_due = false;
-            let candidates = presented_candidates(&scene);
-            if !candidates.is_empty() {
+        if !state.presented.is_empty() {
+            let candidates = presented_candidates(&scene, &state.presented);
+            state.presented.clear();
+            if state.scan.is_some() {
+                // Keep only active publications while the previous one-shot
+                // query finishes, even if newer frames keep replacing cards.
+                state
+                    .presented
+                    .extend(candidates.into_iter().map(|(id, _)| id));
+            } else if !candidates.is_empty()
+                && let Some(probe) = state.inspector.clone()
+            {
                 for (id, _) in &candidates {
                     scene.overlay.notification_go_to.entry(*id).or_default();
                 }
-                if let Some(probe) = state.inspector.clone() {
-                    state.scan = inspect(
-                        move || {
-                            let windows = (probe.windows)();
-                            candidates
-                                .into_iter()
-                                .filter(|(_, token)| {
-                                    matches!(probe.matches(&windows, token), Match::One(_))
-                                })
-                                .map(|(id, _)| id)
-                                .collect()
-                        },
-                        self.state.wake.main_work_notifier(),
-                    )
-                    .ok();
-                }
+                state.scan = inspect(
+                    move || {
+                        let windows = (probe.windows)();
+                        candidates
+                            .into_iter()
+                            .filter(|(_, token)| {
+                                matches!(probe.matches(&windows, token), Match::One(_))
+                            })
+                            .map(|(id, _)| id)
+                            .collect()
+                    },
+                    self.state.wake.main_work_notifier(),
+                )
+                .ok();
             }
         }
         state.cue_deadlines.retain(|id, (stamp, due)| {

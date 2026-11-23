@@ -1646,6 +1646,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         let mut tokens_seen = self.state.tokens_seen;
         let mut closed_notice_seen = 0u64;
         let capture_inbox = self.state.capture_inbox.clone();
+        let match_presented_windows = self.state.window_go_to.enabled();
         let display_targets = Arc::clone(&self.state.display_targets);
         let displays_dirty = Arc::clone(&self.state.displays_dirty);
         // A handed-over instance reports ready after its first submitted frame.
@@ -2035,7 +2036,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                             // `WindowedFrameBuild`. Crucially this phase does NOT
                             // touch the swapchain surface — so it never blocks on
                             // vsync while the lock is held.
-                            let build = render.expect("full frame plan builds a frame");
+                            let mut build = render.expect("full frame plan builds a frame");
                             // Hand the panel the geometry this frame draws, so a
                             // click hits what is on screen.
                             if let Some(panel) = &control_panel_for_compositor
@@ -2054,6 +2055,9 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                                 &mut scene,
                                 surface_for_compositor.as_ref(),
                             );
+                            if match_presented_windows {
+                                build.bind_notification_candidates(&scene);
+                            }
                             let new_snap = crate::pipeline::HitTestSnapshot::from_scene(&scene);
                             hit_test_snapshot.store(Arc::new(new_snap));
                             let built_scene_version = scene.version;
@@ -2805,6 +2809,10 @@ impl WindowedRuntime {
             .config_toml
             .as_deref()
             .and_then(|toml| toml::from_str(toml).ok());
+        let go_to_apps = raw_config_for_startup
+            .as_ref()
+            .and_then(|raw| raw.runtime.as_ref())
+            .and_then(|runtime| runtime.go_to_apps.clone());
         let zone_displays = raw_config_for_startup
             .as_ref()
             .map(tze_hud_config::displays::zone_display_assignments)
@@ -3435,12 +3443,7 @@ impl WindowedRuntime {
             press_guard: Default::default(),
             notification_link_opener,
             link_feedback: None,
-            window_go_to: window_go_to::WindowGoTo::new(
-                raw_config_for_startup
-                    .as_ref()
-                    .and_then(|raw| raw.runtime.as_ref())
-                    .and_then(|runtime| runtime.go_to_apps.clone()),
-            ),
+            window_go_to: window_go_to::WindowGoTo::new(go_to_apps),
             context_menu_press: None,
             context_menu_open: false,
             context_menu_dismiss_pending: false,
