@@ -1997,6 +1997,38 @@ def expect_overlay_capture(run: Run, wanted: bool, what: str) -> None:
     run.step(f"ok {what}: {state}")
 
 
+def live_windows_owners(run: Run) -> list[int]:
+    return sorted({pid for pid in (run.pid, *run.helper_pids) if pid and pid_alive(pid)})
+
+
+def alt_tab_to_owned_editor(run: Run, editor_pids: set[int], attempt: int) -> int:
+    before = WIN.foreground_identity()
+    before_pid = before["pid"] if before else None
+    observation = {"attempt": attempt, "before": before, "eligible_editor_pids": sorted(editor_pids),
+                   "live_owned_pids_before": live_windows_owners(run)}
+    last = None
+
+    def switched_owned_editor():
+        nonlocal last
+        last = WIN.foreground_identity()
+        # A changed PID is insufficient. Observe one of this test's two editors.
+        return bool(last and last["pid"] in editor_pids and last["pid"] != before_pid), last
+
+    try:
+        run.key("alt+Tab")
+        try:
+            switched, _ = wait_until(switched_owned_editor, what="real Alt-Tab reaches an owned editor",
+                                     timeout_s=SETTLE_S)
+        except AssertionError as error:
+            raise ScenarioFailed(str(error), observation) from error
+        return switched["pid"]
+    finally:
+        observation["last"] = last
+        observation["live_owned_pids_after"] = live_windows_owners(run)
+        run.step("real Alt-Tab foreground")
+        run.timeline[-1]["alt_tab_foreground"] = observation
+
+
 def overlay_focus_etiquette(run: Run, notepad_pid: int, surface: str) -> None:
     """Real overlay focus: pane/button no-activate, registered answer chord and return.
 
@@ -2098,21 +2130,16 @@ def overlay_focus_etiquette(run: Run, notepad_pid: int, surface: str) -> None:
         # Windows' current selection, one switch reaches the editor or its
         # immediately preceding owned helper; both requests use real Alt-Tab.
         switches = []
-        for _ in range(2):
-            before = WIN.foreground_pid()
-            run.key("alt+Tab")
-            # A changed PID alone does not establish the intended destination.
-            # Observe an owned editor before any subsequent guarded input.
-            def switched_owned_editor():
-                pid = WIN.foreground_pid()
-                return pid in {notepad_pid, third.pid} and pid != before, pid
-            switched, _ = wait_until(switched_owned_editor,
-                                    what="real Alt-Tab reaches an owned editor", timeout_s=SETTLE_S)
+        for attempt in (1, 2):
+            switched = alt_tab_to_owned_editor(run, {notepad_pid, third.pid}, attempt)
             switches.append(switched)
-            if switches[-1] == third.pid:
+            if switched == third.pid:
                 break
-        if WIN.foreground_pid() != third.pid:
-            raise ScenarioFailed("Alt-Tab reaches the third owned app", {"switches": switches})
+        final_foreground = WIN.foreground_identity()
+        if final_foreground is None or final_foreground["pid"] != third.pid:
+            raise ScenarioFailed("Alt-Tab reaches the third owned app",
+                                 {"switches": switches, "foreground": final_foreground,
+                                  "live_owned_pids": live_windows_owners(run)})
         run.step(f"ok real Alt-Tab reaches third app: {switches}")
         run.observe_for("user app switch is not undone", lambda _: WIN.foreground_pid() == third.pid, 0.25)
         enter(f"zone:notification-area/{key}/0")
@@ -2309,11 +2336,25 @@ def scenario_safe_mode(run: Run) -> None:
 def scenario_tray(run: Run) -> None:
     """Windows tray registration/tooltip, real hide chord, idle proof; real native Hide/Show when the icon is exposed."""
     status = run.expect("tray registered", lambda st: st.get("tray", {}).get("registered") is True)
-    # The hide chord toggles Hide all from whatever app is foreground; the
-    # tray mirrors the result (spec R5.1 S1/S2, informational).
+
+    def hud_foreground():
+        hud_pid = run.pid
+        if not hud_pid or not pid_alive(hud_pid):
+            raise Refused("no owned HUD process")
+        pid = WIN.foreground_pid()
+        if pid != hud_pid:
+            WIN.bring_to_front(hud_pid)
+            pid = WIN.foreground_pid()
+        return pid == hud_pid, pid
+
+    # Keep an owned foreground app when available. Startup and a previous
+    # scenario's cleanup can leave a foreign app active.
     if (status.get("hide_hotkey") or {}).get("registered") is True:
         chord = status["hide_hotkey"]["chord"].lower()
         foreground = WIN.foreground_pid()
+        if foreground not in live_windows_owners(run):
+            foreground, _ = wait_until(hud_foreground, what="owned HUD foreground before hide chord",
+                                       timeout_s=SETTLE_S)
         for hidden in (True, False):
             run.key(chord)
             # The pill names what is hidden while the panel is closed.
@@ -2336,13 +2377,7 @@ def scenario_tray(run: Run) -> None:
     frames, since = idle["frames_presented"], idle["idle_since_ms"]
     run.observe_for("tray schedules no idle frames", lambda st:
                     st["frames_presented"] == frames and st["idle_since_ms"] >= since, 0.5)
-    # Overlay startup need not activate a window. Prepare only our own HUD,
-    # including when this scenario runs without overlay-pointer before it.
-    def foreground():
-        if WIN.foreground_pid() != run.pid:
-            WIN.bring_to_front(run.pid)
-        return WIN.foreground_pid() == run.pid, WIN.foreground_pid()
-    wait_until(foreground, what="owned HUD foreground before tray input", timeout_s=SETTLE_S)
+    wait_until(hud_foreground, what="owned HUD foreground before tray input", timeout_s=SETTLE_S)
     probe = {}
     try:
         rect = WIN.tray_rect(tray["hwnd"], tray["icon_id"], run.pid,

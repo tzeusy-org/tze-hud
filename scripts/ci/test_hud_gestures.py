@@ -372,6 +372,81 @@ class WindowsGuardTests(unittest.TestCase):
                 self.assertEqual(len(result["windows"]), len(rows))
                 self.assertEqual(result["matching_overlays"], 0 if case == "no-overlay" else 2 if case == "ambiguous" else 1)
 
+    def test_alt_tab_keeps_bounded_foreground_evidence_on_timeout(self) -> None:
+        run = g.Run(exe=Path("tze_hud.exe"), out=Path("."), injector="sendinput",
+                    owned_pids=[4242], helper_pids=[77, 78, 79])
+        before = {"hwnd": 0x123456780, "pid": 77}
+        foreign = {"hwnd": 0x123456781, "pid": 9900}
+        win = mock.Mock()
+        win.foreground_identity.side_effect = [before, foreign]
+        alive = {4242, 77, 78}
+        with mock.patch.object(g, "WIN", win, create=True), \
+                mock.patch.object(g, "pid_alive", side_effect=alive.__contains__), \
+                mock.patch.object(g, "SETTLE_S", 0), \
+                mock.patch.object(run, "key") as key, \
+                self.assertRaisesRegex(g.ScenarioFailed, "real Alt-Tab reaches an owned editor") as failure:
+            g.alt_tab_to_owned_editor(run, {77, 78}, 2)
+        key.assert_called_once_with("alt+Tab")
+        self.assertEqual(run.timeline[-1]["alt_tab_foreground"], failure.exception.last)
+        self.assertEqual(failure.exception.last, {
+            "attempt": 2, "before": before, "last": foreign, "eligible_editor_pids": [77, 78],
+            "live_owned_pids_before": [77, 78, 4242], "live_owned_pids_after": [77, 78, 4242],
+        })
+
+    def test_tray_prepares_only_foreign_foreground_and_keeps_the_input_guard(self) -> None:
+        status = {"pid": 4242, "hide_hotkey": {"registered": True, "chord": "Ctrl+Shift+F8"},
+                  "tray": {"registered": True, "hwnd": 99, "icon_id": 1, "tooltip": "First\nSecond"}}
+        for initial, steals_after_prep in ((9900, False), (77, False), (9900, True)):
+            with self.subTest(initial=initial, steals_after_prep=steals_after_prep):
+                run = g.Run(exe=Path("tze_hud.exe"), out=Path("."), injector="sendinput",
+                            owned_pids=[4242], helper_pids=[77])
+                run.smoke = mock.Mock(url="http://127.0.0.1:5555/mcp")
+                foreground = initial
+                events = []
+                win = mock.Mock()
+                win.foreground_pid.side_effect = lambda: foreground
+                win.tray_rect.return_value = None
+
+                def bring_to_front(pid):
+                    nonlocal foreground
+                    self.assertEqual(pid, run.pid)
+                    foreground = pid
+                    events.append(("foreground", pid))
+
+                def mark():
+                    nonlocal foreground
+                    if steals_after_prep:
+                        foreground = 9900
+
+                def guarded_key(chord):
+                    run.guard()
+                    events.append((chord, foreground))
+
+                win.bring_to_front.side_effect = bring_to_front
+                run.inj = mock.Mock()
+                run.inj.key.side_effect = guarded_key
+                with mock.patch.object(g, "WIN", win, create=True), \
+                        mock.patch.object(g, "pid_alive", return_value=True), \
+                        mock.patch.dict(g.os.environ, {"GITHUB_ACTIONS": "true"}), \
+                        mock.patch.object(run, "mark", side_effect=mark), \
+                        mock.patch.object(run, "status", return_value=status), \
+                        mock.patch.object(run, "expect", return_value=status), \
+                        mock.patch.object(run, "settle", return_value={"frames_presented": 1, "idle_since_ms": 300}), \
+                        mock.patch.object(run, "observe_for"):
+                    if steals_after_prep:
+                        with self.assertRaisesRegex(g.Refused, "foreground window belongs to pid 9900"):
+                            g.scenario_tray(run)
+                        self.assertEqual(events, [("foreground", 4242)])
+                        win.tray_rect.assert_not_called()
+                    else:
+                        g.scenario_tray(run)
+                        if initial == 77:
+                            self.assertEqual(events, [("ctrl+shift+f8", 77), ("ctrl+shift+f8", 77),
+                                                      ("foreground", 4242)])
+                        else:
+                            self.assertEqual(events, [("foreground", 4242), ("ctrl+shift+f8", 4242),
+                                                      ("ctrl+shift+f8", 4242)])
+
     def test_tray_rect_requires_documented_success_and_owned_icon(self) -> None:
         native = native_input_boundary()
 
