@@ -632,7 +632,7 @@ current pairing authority with storage and CPU admission. Equal validated images
 share one retained pixel allocation and CPU charge. Immediate and scheduled image
 admission require that pairing's grant and the zone's static-image allowlist; due
 application and retained draw encoding recheck current authority. Unpair or re-pair
-revokes only that incarnation, and old work cannot grant or mutate its replacement's
+revokes only that incarnation, and old resident operations cannot grant or mutate its replacement's
 content. Typed/wire snapshots retain hashes, not raster authority. GPU textures use
 the existing budget/degradation policy in the configured layer and stay isolated
 from generic tile, icon and MCP lookup.
