@@ -3161,48 +3161,6 @@ async fn publish_wait_endings_deadline_delay_and_validation() {
         deadline_failures.join("\n")
     );
 
-    // A later invalid mutation rolls back the clear AND its terminal/wake debt.
-    {
-        use tze_hud_scene::{
-            mutation::{MutationBatch, SceneMutation},
-            types::ZonePublishToken,
-        };
-        let (server, _) = self::server();
-        let mut ask = Box::pin(call(&server, "hud_publish", question(30000)));
-        assert!(ask.as_mut().poll(&mut context).is_pending());
-        let id = latest_card(&server).await;
-        {
-            let mut scene = server.scene.lock().await;
-            let lease = scene.zone_registry.active_for_zone("notification-area")[0].lease_id;
-            let batch = MutationBatch {
-                batch_id: SceneId::new(),
-                agent_namespace: psk_agent(),
-                lease_id: lease,
-                timing_hints: None,
-                mutations: vec![
-                    SceneMutation::ClearZone {
-                        zone_name: "notification-area".into(),
-                        publish_token: ZonePublishToken { token: vec![] },
-                    },
-                    SceneMutation::SwitchActiveTab {
-                        tab_id: SceneId::new(),
-                    },
-                ],
-            };
-            assert!(!scene.apply_batch(&batch).applied);
-            assert!(
-                scene.take_notification_wait_notifiers().is_empty(),
-                "rejected batch emits no terminal readiness"
-            );
-        }
-        assert!(ask.as_mut().poll(&mut context).is_pending());
-        activate_card(&server, id, false).await;
-        let Poll::Ready(answer) = ask.as_mut().poll(&mut context) else {
-            panic!("original question survives rollback");
-        };
-        assert_eq!(answer["action"], "ship");
-    }
-
     // Internal scheduled identity survives real materialization before the wait.
     {
         let (server, clock) = self::server();
@@ -5480,7 +5438,6 @@ fn scene_refusal_hints_are_fixed_id_free_and_short() {
     let lease = "retry hud_publish";
     let held = "you hold nothing there; hud_publish first";
     let budget = "too much content; hud_clear older content, then retry";
-    let rejected = "zone refused this publish; call hud_surfaces";
     let key_reason = "notification key must be at most 256 UTF-8 bytes";
     let errors = [
         V::TabNotFound { id },
@@ -5526,7 +5483,6 @@ fn scene_refusal_hints_are_fixed_id_free_and_short() {
             id: ResourceId::of(b"x"),
         },
         V::ZoneNotFound { name: s("z") },
-        V::ZonePublishTokenInvalid { zone: s("z") },
         V::ZoneMediaTypeMismatch { zone: s("z") },
         V::ZoneMaxPublishersReached {
             zone: s("z"),
@@ -5541,13 +5497,11 @@ fn scene_refusal_hints_are_fixed_id_free_and_short() {
             tile_namespace: s("a"),
             agent_namespace: s("b"),
         },
-        V::CycleDetected { node_id: id },
         V::ZOrderConflict {
             tile_a: id,
             tile_b: id,
             z_order: 1,
         },
-        V::BatchSizeExceeded { max: 1, got: 2 },
         V::ZonePublishLeaseNotFound { namespace: s("a") },
         V::ZonePublishLeaseNotActive {
             namespace: s("a"),
@@ -5594,10 +5548,7 @@ fn scene_refusal_hints_are_fixed_id_free_and_short() {
             | V::ZonePublishLeaseOrphaned { .. } => Some(lease.to_owned()),
             V::TileNotFound { .. } | V::NamespaceMismatch { .. } => Some(held.to_owned()),
             V::ZonePublishSafeModeActive { .. } => Some(PAUSED_HINT.to_owned()),
-            V::BudgetExceeded { .. }
-            | V::NodeCountExceeded { .. }
-            | V::BatchSizeExceeded { .. } => Some(budget.to_owned()),
-            V::ZonePublishTokenInvalid { .. } => Some(rejected.to_owned()),
+            V::BudgetExceeded { .. } | V::NodeCountExceeded { .. } => Some(budget.to_owned()),
             V::InvalidField { field, reason }
                 if field == "key"
                     && [key_reason, "keyed clear requires a notification zone"]
@@ -5614,7 +5565,6 @@ fn scene_refusal_hints_are_fixed_id_free_and_short() {
             | V::DuplicateId { .. }
             | V::BoundsOutOfRange { .. }
             | V::ResourceNotFound { .. }
-            | V::CycleDetected { .. }
             | V::ZOrderConflict { .. } => Some(invalid.to_owned()),
         }
     };

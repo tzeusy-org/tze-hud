@@ -147,7 +147,7 @@ impl SceneGraph {
                 continue;
             }
             let life = self.holding_lifetime(
-                tile.expires_at,
+                None,
                 Some(tile.lease_id),
                 None,
                 if tile.present_at.is_some_and(|at| at > now) {

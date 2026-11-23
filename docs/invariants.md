@@ -111,8 +111,7 @@ input; it never adds a periodic poll to an idle runtime.
 A notification key names one exact-byte slot within a zone and authenticated
 publisher. Replacing it retains its position and zone enter progress while
 issuing fresh publication identity. Selective clear removes only matching active
-and delayed notifications, never sibling keys, foreign publishers or mixed-batch
-remainder. Neither operation retracts accepted input: the activation snapshots
+and delayed notifications while preserving sibling keys and foreign publications. Neither operation retracts accepted input: the activation snapshots
 its original optional key before removal, and its FIFO record and stable ACK id
 survive replacement, clear and expiry. A reused key is not a generation nonce;
 owner option D permits stale cancellation, never a stale answer. The broker
@@ -575,7 +574,7 @@ leases, including a request queued behind pause at the scene lock. A suspended
 MCP lease refuses Hold before mutation even if its early pause flag was false.
 An already completed gRPC sequence replays its cached result without retiming
 content; normal finite and indefinite Hold work again after resume.
-Terminal lease cleanup still removes its queued batches during pause, including
+Terminal lease cleanup still removes its queued publications during pause, including
 revocation at the maximum suspension bound; other owners' queued work survives.
 
 - `tze_hud_runtime` [`test_ttl_excluded_during_suspension`](../crates/tze_hud_runtime/src/shell/safe_mode.rs),
@@ -599,9 +598,11 @@ scene access and `CompositorDegradationPolicy` carries no suppression set.
 
 ## 7. Budgets are hard caps, not negotiations
 
-Per-agent and runtime-wide limits on tiles, texture bytes, update rate, and
-nodes per tile. An over-budget batch is rejected whole with a structured
-error; nothing escalates, throttles, or partially applies.
+Resource admission enforces per-agent and runtime-wide caps on texture bytes
+and upload occupancy. An upload that exceeds a cap returns a structured error
+and leaves the store unchanged. Internal tiles also have bounds on creation and
+node count. A zone or widget publication commits one validated update, so
+refusing it leaves the current content unchanged.
 
 - `tze_hud_runtime` [`mutation_budget_bridge::tests::registered_budget_rejects_mutation_above_tile_limit`](../crates/tze_hud_runtime/src/mutation_budget_bridge.rs),
   [`aggregate_limits_are_atomic_across_agents`](../crates/tze_hud_runtime/src/mutation_budget_bridge.rs)
@@ -661,7 +662,6 @@ Refusals name the field and limit to fix, and no hint carries an internal id.
 - Refusal hints: `tze_hud_mcp` [`portal_refusals_name_the_field_and_its_limit`](../crates/tze_hud_mcp/src/server/tests.rs),
   [`scene_refusal_hints_are_fixed_id_free_and_short`](../crates/tze_hud_mcp/src/server/tests.rs)
 
-- `tze_hud_scene` [`batch_size_exceeded`](../crates/tze_hud_scene/tests/batch_atomicity.rs)
 - `tze_hud_mcp` [`test_structured_error_has_hint_field`](../crates/tze_hud_mcp/src/server/tests.rs), [`error_codes_are_unique_and_documented`](../crates/tze_hud_mcp/src/error.rs),
   [`every_returned_code_is_in_the_closed_set`](../crates/tze_hud_mcp/src/server/tests.rs)
 - `tze_hud_resource` `store_behavior`: [`rejections_carry_stable_wire_code_and_actionable_detail`](../crates/tze_hud_resource/tests/store_behavior.rs),

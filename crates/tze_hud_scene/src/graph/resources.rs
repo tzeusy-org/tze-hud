@@ -7,8 +7,7 @@ impl SceneGraph {
     /// Register a resource as available for use in [`NodeData::StaticImage`] nodes.
     ///
     /// Must be called after a successful resource upload before any agent-submitted
-    /// [`crate::mutation::SceneMutation::AddNode`] or
-    /// [`crate::mutation::SceneMutation::SetTileRoot`] referencing the resource.
+    /// attaching a scene node that references the resource.
     /// Spec: Resource Upload Before Tile Creation.
     ///
     /// Calling this for an already-registered resource is a no-op: the existing

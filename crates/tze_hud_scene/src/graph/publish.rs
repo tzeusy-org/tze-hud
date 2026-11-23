@@ -1,17 +1,13 @@
 //! Typed zone and widget publication: what agents send.
 //!
-//! [`SceneGraph::publish`] commits one [`Publication`] directly, without the
-//! generic mutation batch. It keeps the checks the batch made for a publish:
-//! a named lease must exist and be active and its lease must still be within
-//! budget; the content checks are the zone and widget operations' own. A
-//! committed publication takes a sequence number and a present
-//! acknowledgement like an applied batch.
+//! [`SceneGraph::publish`] dispatches one [`Publication`] to the zone or widget
+//! operation. A specified lease must be active and within its resource
+//! budget. A successful commit gets a sequence number and a presentation ID.
 
 use std::collections::HashMap;
 
 use super::SceneGraph;
-use crate::mutation::MutationBatch;
-use crate::types::{SceneId, WidgetParameterValue, ZoneContent};
+use crate::types::{BudgetError, SceneId, WidgetParameterValue, ZoneContent};
 use crate::validation::ValidationError;
 
 /// A zone or widget publication.
@@ -83,23 +79,26 @@ impl Publisher {
 }
 
 impl SceneGraph {
-    /// Commit `publication` for `publisher`. On error the scene is unchanged.
+    /// Commit `publication` for `publisher` and return its present acknowledgement ID.
     pub fn publish(
         &mut self,
         publisher: &Publisher,
         publication: &Publication,
-    ) -> Result<(), ValidationError> {
-        self.publish_with_notification_id(publisher, publication, None)
+    ) -> Result<SceneId, ValidationError> {
+        let id = SceneId::new();
+        self.publish_with_id(id, publisher, publication, None)?;
+        Ok(id)
     }
 
-    pub(crate) fn publish_with_notification_id(
+    pub(crate) fn publish_with_id(
         &mut self,
+        id: SceneId,
         publisher: &Publisher,
         publication: &Publication,
         notification_id: Option<SceneId>,
     ) -> Result<(), ValidationError> {
         if let Some(lease_id) = publisher.lease_id {
-            self.check_publishing_lease(lease_id, &publisher.namespace)?;
+            self.check_publishing_lease(lease_id)?;
         }
         self.apply_publication(
             publication,
@@ -109,17 +108,13 @@ impl SceneGraph {
             notification_id,
         )?;
         self.next_sequence_number();
-        self.record_present_ack_batch(SceneId::new());
+        self.record_present_ack_batch(id);
         Ok(())
     }
 
     /// The lease a publication names must exist, be active and be within
     /// its budget.
-    fn check_publishing_lease(
-        &self,
-        lease_id: SceneId,
-        namespace: &str,
-    ) -> Result<(), ValidationError> {
+    fn check_publishing_lease(&self, lease_id: SceneId) -> Result<(), ValidationError> {
         let Some(lease) = self.leases.get(&lease_id) else {
             return Err(ValidationError::LeaseNotFound { id: lease_id });
         };
@@ -136,19 +131,31 @@ impl SceneGraph {
                 }
             });
         }
-        // A publication adds no tiles, nodes or textures; this only refuses a
-        // lease already over its budget.
-        let nothing = MutationBatch {
-            batch_id: SceneId::new(),
-            agent_namespace: namespace.to_string(),
-            mutations: Vec::new(),
-            timing_hints: None,
-            lease_id: Some(lease_id),
-        };
-        self.check_budget(&lease_id, &nothing)
-            .map_err(|budget| ValidationError::BudgetExceeded {
-                resource: format!("{budget}"),
-            })
+        // A publication adds no tiles or textures. Admission still refuses
+        // a lease whose resource usage already exceeds its budget.
+        let usage = self.lease_resource_usage(&lease_id);
+        let budget = &lease.resource_budget;
+        for (resource, current, limit) in [
+            ("tiles", u64::from(usage.tiles), u64::from(budget.max_tiles)),
+            (
+                "texture_bytes",
+                usage.texture_bytes,
+                budget.max_texture_bytes,
+            ),
+        ] {
+            if current > limit {
+                let error = BudgetError {
+                    resource: resource.into(),
+                    current,
+                    limit,
+                    requested: 0,
+                };
+                return Err(ValidationError::BudgetExceeded {
+                    resource: error.to_string(),
+                });
+            }
+        }
+        Ok(())
     }
 
     /// The zone or widget operation itself.
@@ -243,9 +250,9 @@ mod tests {
             ..Publisher::namespace("agent")
         };
         let sequence = scene.sequence_number;
-        scene.publish(&publisher, &subtitle("one")).unwrap();
+        let id = scene.publish(&publisher, &subtitle("one")).unwrap();
         assert_eq!(scene.sequence_number, sequence + 1);
-        assert_eq!(scene.drain_present_ack_batch_ids().len(), 1);
+        assert_eq!(scene.drain_present_ack_batch_ids(), vec![id]);
         assert_eq!(scene.zone_registry.active_for_zone("subtitle").len(), 1);
 
         scene.suspend_all_leases(scene.now_millis());

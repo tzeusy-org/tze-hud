@@ -355,7 +355,7 @@ fn present_or_schedule(
         return ok(seq);
     }
     match scene.publish(&publisher, &publication) {
-        Ok(()) => ok(seq),
+        Ok(_) => ok(seq),
         Err(e) => fail(seq, validation_error_code(&e), e.to_string()),
     }
 }

@@ -17,7 +17,6 @@
 //! - All four contention policies (LatestWins, Stack, MergeByKey, Replace)
 //! - All five v1 media types (StreamText, ShortTextWithIcon, KeyValuePairs, StaticImage, SolidColor)
 //! - Layer attachment routing: Background, Content (z >= ZONE_TILE_Z_MIN), Chrome
-//! - ZonePublishToken: validation rejects expired/invalid tokens
 //! - ZoneOccupancy: query API in v1 (no effective_geometry)
 //! - Per-publisher clear semantics
 //! - Expiry semantics (expires_at_wall_us)
@@ -560,7 +559,7 @@ fn static_image_content_publishes_successfully() {
     );
 }
 
-// ─── ZonePublishToken validation ──────────────────────────────────────────────
+// ─── Publication validation ──────────────────────────────────────────────────
 
 #[test]
 fn zone_not_found_rejected() {

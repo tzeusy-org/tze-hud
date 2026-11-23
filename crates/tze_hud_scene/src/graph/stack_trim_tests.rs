@@ -4,10 +4,9 @@
 
 use super::*;
 use crate::clock::TestClock;
-use crate::mutation::{MutationBatch, SceneMutation};
 use crate::types::{
     ContentionPolicy, GeometryPolicy, LayerAttachment, NotificationAction, NotificationPayload,
-    RenderingPolicy, ZoneContent, ZoneDefinition, ZoneMediaType, ZonePublishToken,
+    RenderingPolicy, ZoneContent, ZoneDefinition, ZoneMediaType,
 };
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -100,23 +99,21 @@ fn publish_keyed(
             .publish_to_zone(ZONE, content, agent, key, None, None)
             .unwrap(),
         Plane::Grpc => {
-            let batch = MutationBatch {
-                batch_id: SceneId::new(),
-                agent_namespace: agent.into(),
-                mutations: vec![SceneMutation::PublishToZone {
-                    zone_name: ZONE.into(),
-                    content,
-                    publish_token: ZonePublishToken { token: Vec::new() },
-                    merge_key: key,
-                    expires_at_wall_us: None,
-                    content_classification: None,
-                    breakpoints: Vec::new(),
-                    held: true,
-                }],
-                timing_hints: None,
+            let publisher = crate::Publisher {
+                namespace: agent.into(),
                 lease_id: None,
+                origin: None,
             };
-            assert!(scene.apply_batch(&batch).applied);
+            let publication = crate::Publication::Zone {
+                zone_name: ZONE.into(),
+                content,
+                merge_key: key,
+                expires_at_wall_us: None,
+                content_classification: None,
+                breakpoints: Vec::new(),
+                held: true,
+            };
+            scene.publish(&publisher, &publication).unwrap();
         }
     }
 }
@@ -489,28 +486,26 @@ fn questions_are_placed_once_when_presented() {
         ]
     );
     // S6: a delayed question samples when it comes due, not at the call.
-    let batch = MutationBatch {
-        batch_id: SceneId::new(),
-        agent_namespace: "a".into(),
-        mutations: vec![SceneMutation::PublishToZone {
-            zone_name: ZONE.into(),
-            content: question("later"),
-            publish_token: ZonePublishToken { token: Vec::new() },
-            merge_key: None,
-            expires_at_wall_us: None,
-            content_classification: None,
-            breakpoints: Vec::new(),
-            held: true,
-        }],
-        timing_hints: None,
+    let publisher = crate::Publisher {
+        namespace: "a".into(),
         lease_id: None,
+        origin: None,
     };
-    scene.schedule_batch(clock.now_us() + 5_000, batch);
-    scene.apply_due_batches();
+    let publication = crate::Publication::Zone {
+        zone_name: ZONE.into(),
+        content: question("later"),
+        merge_key: None,
+        expires_at_wall_us: None,
+        content_classification: None,
+        breakpoints: Vec::new(),
+        held: true,
+    };
+    scene.schedule_publication(clock.now_us() + 5_000, publisher, publication);
+    scene.apply_due_publications();
     assert_eq!(calls(), 2, "not due yet");
     clock.advance(5);
     queue("DISPLAY2");
-    scene.apply_due_batches();
+    scene.apply_due_publications();
     assert_eq!(calls(), 3);
     // S8: five cards over three displays; a sixth trims the oldest
     // non-question (the replaced card on DISPLAY2) once, as one stack.

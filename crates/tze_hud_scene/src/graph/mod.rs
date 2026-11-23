@@ -113,10 +113,10 @@ pub struct SceneGraph {
     /// re-prime the caches.
     #[serde(default)]
     pub geometry_epoch: u64,
-    /// Monotonically increasing sequence number assigned to each committed batch.
+    /// Monotonically increasing sequence number assigned to each committed publication.
     ///
     /// Incremented by `SceneGraph::next_sequence_number` on every successful
-    /// [`crate::mutation::MutationBatch`] commit.
+    /// [`SceneGraph::publish`] commit.
     pub sequence_number: u64,
     /// Publications held until their `present_at` time (see [`timed`]).
     #[serde(skip, default)]

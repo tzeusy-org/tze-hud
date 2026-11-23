@@ -2048,7 +2048,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                             let built_scene_version = scene.version;
                             let built_geometry_epoch = scene.geometry_epoch;
                             // ── Batch-correlated present ack drain ──
-                            // SceneGraph::apply_batch records internal batch ids.
+                            // SceneGraph::publish records internal publication IDs.
                             // Drain under the scene lock before GPU submission;
                             // a failed primary attempt can consume ids without a
                             // telemetry sample. Broadcast after local GPU work,
@@ -2135,7 +2135,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                                     present_wall_us,
                                     // 16-byte big-endian UUID, matching the
                                     // scene_id_to_bytes / bytes_to_scene_id wire
-                                    // contract used for MutationBatch.batch_id.
+                                    // contract for FramePresented.batch_ids.
                                     batch_ids: presented_batch_ids
                                         .iter()
                                         .map(|id| id.as_uuid().as_bytes().to_vec())

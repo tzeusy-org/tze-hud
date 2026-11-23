@@ -134,7 +134,6 @@ impl SceneGraph {
                 opacity: 1.0,
                 input_mode: InputMode::Capture,
                 present_at: None,
-                expires_at: None,
                 resource_budget: ResourceBudget::default(),
                 root_node: None,
                 visual_hint: crate::lease::TileVisualHint::None,

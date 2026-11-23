@@ -1,6 +1,6 @@
-//! Headless producer-half coverage for internal batch-to-GPU correlation.
+//! Headless producer-half coverage for publication-to-GPU correlation.
 //!
-//! Internal scene batches are paired with a local GPU completion timestamp and
+//! Publications are paired with a local GPU completion timestamp and
 //! emitted through an explicitly wired standalone FramePresented sender. The
 //! headless surface present is a no-op; this does not exercise a real gRPC
 //! listener, subscription permission gate or the windowed main-thread present.
@@ -15,8 +15,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tze_hud_protocol::proto::FramePresented;
 use tze_hud_runtime::HeadlessRuntime;
 use tze_hud_runtime::headless::HeadlessConfig;
-use tze_hud_scene::mutation::{MutationBatch, SceneMutation};
-use tze_hud_scene::types::Rect;
+use tze_hud_scene::{Publication, Publisher, SceneId, ZoneContent, ZoneRegistry};
 
 fn wall_us_now() -> u64 {
     SystemTime::now()
@@ -38,36 +37,31 @@ async fn make_runtime() -> HeadlessRuntime {
         .expect("runtime init")
 }
 
-/// Apply a tile-creating `MutationBatch` to the runtime scene and return the
-/// batch_id. Uses the runtime internal mutation admission seam under the
-/// scene lock (`scene.apply_batch`).
-async fn apply_create_tile_batch(runtime: &HeadlessRuntime) -> tze_hud_scene::SceneId {
-    let state = runtime.shared_state().lock().await;
-    let mut scene = state.scene.lock().await;
-    let tab = scene.create_tab("Main", 0).unwrap();
-    let lease = scene.grant_lease("test-agent", 60_000);
-    let batch = MutationBatch {
-        batch_id: tze_hud_scene::SceneId::new(),
-        agent_namespace: "test-agent".to_string(),
-        mutations: vec![SceneMutation::CreateTile {
-            tab_id: tab,
-            namespace: "test-agent".to_string(),
-            lease_id: lease,
-            bounds: Rect::new(10.0, 10.0, 200.0, 100.0),
-            z_order: 1,
-        }],
-        timing_hints: None,
-        lease_id: Some(lease),
-    };
-    let batch_id = batch.batch_id;
-    assert!(scene.apply_batch(&batch).applied, "batch must apply");
-    batch_id
+fn subtitle(content: impl Into<String>) -> Publication {
+    Publication::Zone {
+        zone_name: "subtitle".into(),
+        content: ZoneContent::StreamText(content.into()),
+        merge_key: None,
+        expires_at_wall_us: None,
+        content_classification: None,
+        breakpoints: Vec::new(),
+        held: false,
+    }
 }
 
-/// An applied batch is delivered on the frame-presented broadcast, correlated
+async fn publish_subtitle(runtime: &HeadlessRuntime) -> SceneId {
+    let state = runtime.shared_state().lock().await;
+    let mut scene = state.scene.lock().await;
+    scene.zone_registry = ZoneRegistry::with_defaults();
+    scene
+        .publish(&Publisher::namespace("test-agent"), &subtitle("one"))
+        .unwrap()
+}
+
+/// A committed publication is delivered on the frame-presented broadcast, correlated
 /// to the presented frame's wall-clock present time.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn applied_batch_delivered_as_frame_presented() {
+async fn committed_publication_delivered_as_frame_presented() {
     let mut runtime = make_runtime().await;
 
     // Wire a standalone broadcast sender (stands in for HudSessionImpl's) and
@@ -75,7 +69,7 @@ async fn applied_batch_delivered_as_frame_presented() {
     let (tx, mut rx) = tokio::sync::broadcast::channel::<FramePresented>(16);
     runtime.set_frame_presented_tx(tx);
 
-    let batch_id = apply_create_tile_batch(&runtime).await;
+    let batch_id = publish_subtitle(&runtime).await;
     let expected_bytes = batch_id.as_uuid().as_bytes().to_vec();
 
     // A present time sampled BEFORE the frame renders — the emitted
@@ -86,12 +80,12 @@ async fn applied_batch_delivered_as_frame_presented() {
 
     let event = rx
         .try_recv()
-        .expect("frame present ack must be delivered for the applied batch");
+        .expect("frame present ack must be delivered for the committed publication");
 
     assert_eq!(
         event.batch_ids,
         vec![expected_bytes],
-        "present ack carries the applied batch_id"
+        "present ack carries the committed publication_id"
     );
     assert_eq!(
         event.frame_number, telemetry.frame_number,
@@ -110,17 +104,17 @@ async fn applied_batch_delivered_as_frame_presented() {
     );
 }
 
-/// A frame with no applied batch since the last present emits no ack, and the
+/// A frame with no committed publication since the last present emits no ack, and the
 /// pending queue is one-shot (a second frame does not re-deliver).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn no_batch_no_ack_and_drain_is_one_shot() {
+async fn no_publication_no_ack_and_drain_is_one_shot() {
     let mut runtime = make_runtime().await;
     let (tx, mut rx) = tokio::sync::broadcast::channel::<FramePresented>(16);
     runtime.set_frame_presented_tx(tx);
 
-    apply_create_tile_batch(&runtime).await;
+    publish_subtitle(&runtime).await;
 
-    // First frame carries the batch → exactly one ack.
+    // First frame carries the publication → exactly one ack.
     runtime.render_frame().await;
     let first = rx.try_recv().expect("first frame delivers the ack");
     assert_eq!(first.batch_ids.len(), 1);
@@ -132,41 +126,30 @@ async fn no_batch_no_ack_and_drain_is_one_shot() {
             rx.try_recv(),
             Err(tokio::sync::broadcast::error::TryRecvError::Empty)
         ),
-        "a frame with no applied batch must not emit a present ack"
+        "a frame with no committed publication must not emit a present ack"
     );
 }
 
-/// Multiple batches applied before a single present are all correlated to that
+/// Multiple publications committed before a single present are all correlated to that
 /// frame, in application order.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn multiple_batches_share_one_presented_frame() {
+async fn multiple_publications_share_one_presented_frame() {
     let mut runtime = make_runtime().await;
     let (tx, mut rx) = tokio::sync::broadcast::channel::<FramePresented>(16);
     runtime.set_frame_presented_tx(tx);
 
-    // Set up scene once, then apply three separate batches before rendering.
+    // Set up scene once, then apply three separate publications before rendering.
     let mut expected = Vec::new();
     {
         let state = runtime.shared_state().lock().await;
         let mut scene = state.scene.lock().await;
-        let tab = scene.create_tab("Main", 0).unwrap();
-        let lease = scene.grant_lease("test-agent", 60_000);
-        for i in 0..3u32 {
-            let batch = MutationBatch {
-                batch_id: tze_hud_scene::SceneId::new(),
-                agent_namespace: "test-agent".to_string(),
-                mutations: vec![SceneMutation::CreateTile {
-                    tab_id: tab,
-                    namespace: "test-agent".to_string(),
-                    lease_id: lease,
-                    bounds: Rect::new(10.0 * (i + 1) as f32, 10.0, 80.0, 60.0),
-                    z_order: i + 1,
-                }],
-                timing_hints: None,
-                lease_id: Some(lease),
-            };
-            expected.push(batch.batch_id.as_uuid().as_bytes().to_vec());
-            assert!(scene.apply_batch(&batch).applied);
+        scene.zone_registry = ZoneRegistry::with_defaults();
+        let publisher = Publisher::namespace("test-agent");
+        for i in 0..3 {
+            let id = scene
+                .publish(&publisher, &subtitle(format!("update {i}")))
+                .unwrap();
+            expected.push(id.as_uuid().as_bytes().to_vec());
         }
     }
 

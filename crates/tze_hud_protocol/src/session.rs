@@ -54,7 +54,7 @@ pub struct SharedState {
     /// Whether the runtime is currently in safe mode.
     ///
     /// This is the **single source of truth** for the runtime-global safe-mode
-    /// flag.  When `true`, all active sessions reject MutationBatch with
+    /// flag.  When `true`, all active sessions reject Publish with
     /// SAFE_MODE_ACTIVE, and the winit event thread captures input locally.
     ///
     /// It is an `AtomicBool` so it can be read lock-free on the winit event

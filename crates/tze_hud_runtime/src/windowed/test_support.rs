@@ -619,7 +619,7 @@ mod tests {
         {
             let st = shared.lock().await;
             // Replace the empty default scene with our composer scene and seed
-            // the mirror, mimicking the post-apply_batch refresh.
+            // the mirror, mimicking the runtime scene refresh.
             *st.scene.lock().await = scene;
             st.refresh_active_tab_mirror(&*st.scene.lock().await);
         }

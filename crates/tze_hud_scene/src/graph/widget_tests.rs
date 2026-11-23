@@ -2034,67 +2034,6 @@ fn clear_publications_for_lease_removes_only_that_leases_widget_pubs() {
     }
 }
 
-/// WHEN ClearWidget is sent as a scene mutation batch
-/// THEN it removes the agent's publications via the standard pipeline.
-#[test]
-fn clear_widget_via_mutation_batch() {
-    use crate::mutation::{MutationBatch, SceneMutation};
-
-    let (mut scene, _tab) = scene_with_gauge(ContentionPolicy::Stack { max_depth: 4 });
-
-    // Publish as two agents
-    scene
-        .publish_to_widget(
-            "gauge",
-            std::collections::HashMap::from([(
-                "level".to_string(),
-                WidgetParameterValue::F32(0.5),
-            )]),
-            "agent.a",
-            None,
-            0,
-            None,
-        )
-        .unwrap();
-    scene
-        .publish_to_widget(
-            "gauge",
-            std::collections::HashMap::from([(
-                "level".to_string(),
-                WidgetParameterValue::F32(0.3),
-            )]),
-            "agent.b",
-            None,
-            0,
-            None,
-        )
-        .unwrap();
-    assert_eq!(scene.widget_registry.active_for_widget("gauge").len(), 2);
-
-    // Send ClearWidget from "agent.a"
-    let batch = MutationBatch {
-        batch_id: SceneId::new(),
-        agent_namespace: "agent.a".to_string(),
-        mutations: vec![SceneMutation::ClearWidget {
-            widget_name: "gauge".to_string(),
-            instance_id: None,
-        }],
-        timing_hints: None,
-        lease_id: None,
-    };
-    let result = scene.apply_batch(&batch);
-    assert!(result.applied, "ClearWidget batch should be accepted");
-
-    // Only "agent.b"'s publication should remain
-    let remaining = scene.widget_registry.active_for_widget("gauge");
-    assert_eq!(
-        remaining.len(),
-        1,
-        "agent.a's publication should be cleared"
-    );
-    assert_eq!(remaining[0].publisher_namespace, "agent.b");
-}
-
 /// The owner's auto-clear limit clears a publication that has no expiry of its
 /// own, applies to what is showing when it is set, and never extends an
 /// earlier agent expiry.

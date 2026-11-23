@@ -764,7 +764,6 @@ pub struct Tile {
     pub opacity: f32,
     pub input_mode: InputMode,
     pub present_at: Option<u64>,
-    pub expires_at: Option<u64>,
     pub resource_budget: ResourceBudget,
     pub root_node: Option<SceneId>,
     /// Visual overlay hint for the compositor.
@@ -1954,15 +1953,6 @@ pub struct ZoneDefinition {
     /// Defaults to [`LayerAttachment::Content`] if not specified.
     #[serde(default)]
     pub layer_attachment: LayerAttachment,
-}
-
-// ─── Zone publish token ──────────────────────────────────────────────────────
-
-/// Opaque capability token that authorizes publishing to a specific zone.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ZonePublishToken {
-    /// Opaque bytes issued at session auth.
-    pub token: Vec<u8>,
 }
 
 // ─── Zone content ────────────────────────────────────────────────────────────

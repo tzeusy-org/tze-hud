@@ -892,18 +892,8 @@ fn mutation_after_release_is_rejected() {
 /// within grace lets it mutate again, and grace expiry removes only its tile.
 #[test]
 fn orphaned_agent_is_frozen_while_other_agents_keep_working() {
-    use tze_hud_scene::mutation::{MutationBatch, SceneMutation};
     use tze_hud_scene::types::{Node, NodeData, Rgba, SolidColorNode};
 
-    fn batch(ns: &str, lease_id: SceneId, mutation: SceneMutation) -> MutationBatch {
-        MutationBatch {
-            batch_id: SceneId::new(),
-            agent_namespace: ns.to_string(),
-            mutations: vec![mutation],
-            timing_hints: None,
-            lease_id: Some(lease_id),
-        }
-    }
     fn root() -> Node {
         Node {
             layout: Default::default(),
@@ -921,13 +911,6 @@ fn orphaned_agent_is_frozen_while_other_agents_keep_working() {
             }),
         }
     }
-    let set_root = |tile_id| SceneMutation::SetTileRoot {
-        tile_id,
-        node: root(),
-        descendants: vec![],
-    };
-    let opacity = |tile_id, opacity| SceneMutation::UpdateTileOpacity { tile_id, opacity };
-
     let (mut scene, clock) = make_scene(0);
     let tab_id = setup_active_tab(&mut scene);
     let lease_a = grant_lease(&mut scene, "agent-a");
@@ -944,8 +927,9 @@ fn orphaned_agent_is_frozen_while_other_agents_keep_working() {
         )
         .unwrap();
     let b_bounds = scene.tiles[&tile_b].bounds;
-    let first = scene.apply_batch(&batch("agent-a", lease_a, set_root(tile_a)));
-    assert!(first.applied, "{:?}", first.rejection);
+    scene
+        .set_tile_root_checked(tile_a, root(), "agent-a")
+        .unwrap();
     let root_before = scene.tiles[&tile_a].root_node;
 
     clock.advance(5_000);
@@ -954,13 +938,12 @@ fn orphaned_agent_is_frozen_while_other_agents_keep_working() {
         .unwrap();
 
     // The orphaned agent can neither replace content nor change opacity.
-    for mutation in [set_root(tile_a), opacity(tile_a, 0.5)] {
-        let result = scene.apply_batch(&batch("agent-a", lease_a, mutation));
-        assert!(
-            !result.applied,
-            "mutation from an ORPHANED agent must be rejected"
-        );
-    }
+    assert!(
+        scene
+            .set_tile_root_checked(tile_a, root(), "agent-a")
+            .is_err()
+    );
+    assert!(scene.update_tile_opacity(tile_a, 0.5, "agent-a").is_err());
     assert_eq!(
         scene.tiles[&tile_a].root_node, root_before,
         "orphaned tile keeps its last committed content"
@@ -973,9 +956,7 @@ fn orphaned_agent_is_frozen_while_other_agents_keep_working() {
     // The other agent is unaffected: no badge, mutations accepted.
     assert_eq!(scene.tiles[&tile_b].visual_hint, TileVisualHint::None);
     assert!(
-        scene
-            .apply_batch(&batch("agent-b", lease_b, opacity(tile_b, 0.9)))
-            .applied,
+        scene.update_tile_opacity(tile_b, 0.9, "agent-b").is_ok(),
         "an active agent keeps working while another is orphaned"
     );
 
@@ -983,9 +964,7 @@ fn orphaned_agent_is_frozen_while_other_agents_keep_working() {
     clock.advance(10_000);
     scene.reconnect_lease(&lease_a, clock.now_millis()).unwrap();
     assert!(
-        scene
-            .apply_batch(&batch("agent-a", lease_a, opacity(tile_a, 0.5)))
-            .applied,
+        scene.update_tile_opacity(tile_a, 0.5, "agent-a").is_ok(),
         "mutations resume after reconnect within grace"
     );
 

@@ -108,9 +108,8 @@ pub struct ScrollOffsetUpdate {
 
 /// Batch of local state changes produced during Stage 2 Local Feedback.
 ///
-/// Forwarded to the compositor via a dedicated channel (separate from the
-/// MutationBatch channel). Applied in Stage 4 before render encoding without
-/// lease validation or budget checks.
+/// Forwarded to the compositor on the local-feedback channel and applied
+/// before render encoding.
 ///
 /// ## Latency invariant
 /// Must be produced within 1ms of the input event (combined Stage 1+2 budget).

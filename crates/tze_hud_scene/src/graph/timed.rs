@@ -13,7 +13,6 @@
 
 use super::SceneGraph;
 use super::publish::{Publication, Publisher};
-use crate::mutation::{MutationBatch, SceneMutation};
 use crate::types::SceneId;
 use crate::validation::ValidationError;
 
@@ -294,7 +293,8 @@ impl SceneGraph {
         let results = due
             .into_iter()
             .map(|s| {
-                let result = self.publish_with_notification_id(
+                let result = self.publish_with_id(
+                    s.id,
                     &s.publisher,
                     &s.publication,
                     s.notification_publication,
@@ -315,67 +315,13 @@ impl SceneGraph {
         results
     }
 
-    /// Stamp the batch's `expires_at` on the tiles it created or targeted.
-    /// Called after a batch commits.
-    pub(crate) fn stamp_batch_expiry(&mut self, batch: &MutationBatch, created_ids: &[SceneId]) {
-        let Some(expires_at) = batch
-            .timing_hints
-            .as_ref()
-            .and_then(|h| h.expires_at_wall_us)
-            .filter(|t| t.0 > 0)
-        else {
-            return;
-        };
-        let targeted = batch.mutations.iter().filter_map(target_tile_id);
-        for tile_id in created_ids.iter().copied().chain(targeted) {
-            if let Some(tile) = self.tiles.get_mut(&tile_id) {
-                tile.expires_at = Some(expires_at.0);
-            }
-        }
-    }
-
-    /// Remove tiles whose `expires_at` has passed. Returns the removed ids.
-    pub fn drain_expired_tiles(&mut self) -> Vec<SceneId> {
-        let now_us = self.clock.now_us();
-        let expired: Vec<SceneId> = self
-            .tiles
-            .values()
-            .filter(|t| t.expires_at.is_some_and(|at| at <= now_us))
-            .map(|t| t.id)
-            .collect();
-        for tile_id in &expired {
-            self.remove_tile_and_nodes(*tile_id);
-        }
-        if !expired.is_empty() {
-            self.version += 1;
-        }
-        expired
-    }
-
-    /// Earliest wall-clock deadline among scheduled publications and tile expiries.
+    /// Earliest wall-clock deadline among scheduled publications.
     pub fn next_timed_content_wall_us(&self) -> Option<u64> {
         let widgets_paused = self.widget_time_paused();
-        let scheduled = self
-            .scheduled_publications
+        self.scheduled_publications
             .iter()
             .filter(|scheduled| !scheduled.waits_for_widget_resume(widgets_paused))
             .map(|s| s.present_at_wall_us)
-            .min();
-        let tile_expiry = self.tiles.values().filter_map(|t| t.expires_at).min();
-        scheduled.into_iter().chain(tile_expiry).min()
-    }
-}
-
-/// The existing tile a mutation targets, if any (creation is handled via
-/// the batch's created ids; deletion needs no expiry).
-fn target_tile_id(mutation: &SceneMutation) -> Option<SceneId> {
-    match mutation {
-        SceneMutation::UpdateTileBounds { tile_id, .. }
-        | SceneMutation::UpdateTileOpacity { tile_id, .. }
-        | SceneMutation::UpdateTileInputMode { tile_id, .. }
-        | SceneMutation::SetTileRoot { tile_id, .. }
-        | SceneMutation::AddNode { tile_id, .. }
-        | SceneMutation::UpdateNodeContent { tile_id, .. } => Some(*tile_id),
-        _ => None,
+            .min()
     }
 }

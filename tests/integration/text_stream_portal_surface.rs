@@ -14,7 +14,6 @@ use tze_hud_scene::{
     MAX_MARKDOWN_BYTES, ZONE_TILE_Z_MIN,
     graph::{MAX_NODES_PER_TILE, SceneGraph},
     lease::LeaseState,
-    mutation::{MutationBatch, SceneMutation},
     types::{
         FontFamily, HitRegionNode, ImageFitMode, InputMode, Node, NodeData, Rect, SceneId,
         SolidColorNode, TextAlign, TextMarkdownNode, TextOverflow, TileScrollConfig,
@@ -86,16 +85,6 @@ impl PortalSurfaceState {
             }
             start += 1;
         }
-    }
-}
-
-fn make_batch(namespace: &str, lease_id: SceneId, mutations: Vec<SceneMutation>) -> MutationBatch {
-    MutationBatch {
-        batch_id: SceneId::new(),
-        agent_namespace: namespace.to_string(),
-        mutations,
-        timing_hints: None,
-        lease_id: Some(lease_id),
     }
 }
 
@@ -349,19 +338,15 @@ fn build_expanded_nodes(
     ]
 }
 
-fn root_batch_for_tile(tile_id: SceneId, root: Node, children: Vec<Node>) -> Vec<SceneMutation> {
-    let root_id = root.id;
-    let mut mutations = vec![SceneMutation::SetTileRoot {
-        tile_id,
-        node: root.clone(),
-        descendants: vec![],
-    }];
-    mutations.extend(children.into_iter().map(|node| SceneMutation::AddNode {
-        tile_id,
-        parent_id: Some(root_id),
-        node,
-    }));
-    mutations
+fn set_portal_root(
+    scene: &mut SceneGraph,
+    tile_id: SceneId,
+    mut root: Node,
+    children: Vec<Node>,
+    namespace: &str,
+) -> Result<(), tze_hud_scene::ValidationError> {
+    root.children = children.iter().map(|child| child.id).collect();
+    scene.set_tile_root_tree_checked(tile_id, root, children, namespace)
 }
 
 fn materialized_text_nodes(scene: &SceneGraph, tile_id: SceneId) -> Vec<String> {
@@ -496,19 +481,15 @@ fn user_scroll_offset_remains_authoritative_after_append_update() {
     let tab_id = scene.create_tab("Main", 0).expect("tab create");
     scene.active_tab = Some(tab_id);
     let lease_id = scene.grant_lease(namespace, 120_000);
-    let create = scene.apply_batch(&make_batch(
-        namespace,
-        lease_id,
-        vec![SceneMutation::CreateTile {
+    let tile_id = scene
+        .create_tile(
             tab_id,
-            namespace: namespace.to_string(),
+            namespace,
             lease_id,
-            bounds: portal_bounds(true),
-            z_order: PORTAL_Z_ORDER,
-        }],
-    ));
-    assert!(create.applied, "tile create must apply");
-    let tile_id = create.created_ids[0];
+            portal_bounds(true),
+            PORTAL_Z_ORDER,
+        )
+        .expect("create portal tile");
 
     scene
         .register_tile_scroll_config(
@@ -551,12 +532,8 @@ fn user_scroll_offset_remains_authoritative_after_append_update() {
             color_runs: Box::default(),
         }),
     };
-    let append = scene.apply_batch(&make_batch(
-        namespace,
-        lease_id,
-        root_batch_for_tile(tile_id, root, vec![transcript]),
-    ));
-    assert!(append.applied, "append update should apply");
+    let append = set_portal_root(&mut scene, tile_id, root, vec![transcript], namespace);
+    assert!(append.is_ok(), "append update should apply");
 
     let (sx, sy) = scene.tile_scroll_offset_local(tile_id);
     assert_eq!((sx, sy), (0.0, 100.0));
@@ -616,19 +593,15 @@ async fn collapsed_and_expanded_portal_surface_use_only_v1_node_types() {
     scene.register_resource(icon_id);
     let lease_id = scene.grant_lease(namespace, 120_000);
 
-    let create = scene.apply_batch(&make_batch(
-        namespace,
-        lease_id,
-        vec![SceneMutation::CreateTile {
+    let tile_id = scene
+        .create_tile(
             tab_id,
-            namespace: namespace.to_string(),
+            namespace,
             lease_id,
-            bounds: portal_bounds(false),
-            z_order: PORTAL_Z_ORDER,
-        }],
-    ));
-    assert!(create.applied, "collapsed portal tile must be creatable");
-    let tile_id = create.created_ids[0];
+            portal_bounds(false),
+            PORTAL_Z_ORDER,
+        )
+        .expect("create portal tile");
     const _PORTAL_BELOW_ZONE_BAND: () = assert!(
         PORTAL_Z_ORDER < ZONE_TILE_Z_MIN,
         "portal pilot tile must stay below runtime-managed zone band"
@@ -647,12 +620,14 @@ async fn collapsed_and_expanded_portal_surface_use_only_v1_node_types() {
     assert!(!collapsed.expanded, "collapsed state must be false");
     let mut collapsed_nodes = build_collapsed_nodes(&collapsed, icon_id);
     let collapsed_root = collapsed_nodes.remove(0);
-    let collapsed_batch = scene.apply_batch(&make_batch(
+    let collapsed_update = set_portal_root(
+        &mut scene,
+        tile_id,
+        collapsed_root,
+        collapsed_nodes,
         namespace,
-        lease_id,
-        root_batch_for_tile(tile_id, collapsed_root, collapsed_nodes),
-    ));
-    assert!(collapsed_batch.applied, "collapsed root batch must apply");
+    );
+    assert!(collapsed_update.is_ok(), "collapsed root update must apply");
 
     let collapsed_kinds = materialized_text_nodes(&scene, tile_id);
     assert!(
@@ -675,24 +650,20 @@ async fn collapsed_and_expanded_portal_surface_use_only_v1_node_types() {
     assert!(expanded.expanded, "expanded state must be true");
     let mut expanded_nodes = build_expanded_nodes(&expanded, icon_id);
     let expanded_root = expanded_nodes.remove(0);
-    let expanded_batch = scene.apply_batch(&make_batch(
+    scene
+        .update_tile_bounds(tile_id, portal_bounds(true), namespace)
+        .unwrap();
+    scene
+        .update_tile_input_mode(tile_id, InputMode::Capture, namespace)
+        .unwrap();
+    set_portal_root(
+        &mut scene,
+        tile_id,
+        expanded_root,
+        expanded_nodes,
         namespace,
-        lease_id,
-        vec![
-            SceneMutation::UpdateTileBounds {
-                tile_id,
-                bounds: portal_bounds(true),
-            },
-            SceneMutation::UpdateTileInputMode {
-                tile_id,
-                input_mode: InputMode::Capture,
-            },
-        ]
-        .into_iter()
-        .chain(root_batch_for_tile(tile_id, expanded_root, expanded_nodes))
-        .collect(),
-    ));
-    assert!(expanded_batch.applied, "expanded root batch must apply");
+    )
+    .unwrap();
 
     let tile = scene.tiles.get(&tile_id).expect("tile must still exist");
     assert_eq!(tile.bounds, portal_bounds(true));
@@ -741,19 +712,15 @@ fn expanded_transcript_materialization_is_bounded_to_viewport_and_budget() {
     let tab_id = scene.create_tab("Main", 0).expect("must create tab");
     scene.active_tab = Some(tab_id);
     let lease_id = scene.grant_lease("portal-agent", 120_000);
-    let create = scene.apply_batch(&make_batch(
-        "portal-agent",
-        lease_id,
-        vec![SceneMutation::CreateTile {
+    let tile_id = scene
+        .create_tile(
             tab_id,
-            namespace: "portal-agent".to_string(),
+            "portal-agent",
             lease_id,
-            bounds: portal_bounds(true),
-            z_order: PORTAL_Z_ORDER,
-        }],
-    ));
-    assert!(create.applied);
-    let tile_id = create.created_ids[0];
+            portal_bounds(true),
+            PORTAL_Z_ORDER,
+        )
+        .expect("create portal tile");
     scene
         .register_tile_scroll_config(
             tile_id,
@@ -797,13 +764,9 @@ fn expanded_transcript_materialization_is_bounded_to_viewport_and_budget() {
             color_runs: Box::default(),
         }),
     };
-    let apply = scene.apply_batch(&make_batch(
-        "portal-agent",
-        lease_id,
-        root_batch_for_tile(tile_id, root, vec![transcript]),
-    ));
+    let apply = set_portal_root(&mut scene, tile_id, root, vec![transcript], "portal-agent");
     assert!(
-        apply.applied,
+        apply.is_ok(),
         "bounded expanded transcript batch must apply"
     );
     let usage = scene.lease_resource_usage(&lease_id);
@@ -825,19 +788,15 @@ async fn portal_surface_state_remains_governed_by_orphan_rules() {
     scene.active_tab = Some(tab_id);
     scene.register_resource(icon_id);
     let lease_id = scene.grant_lease(namespace, 120_000);
-    let create = scene.apply_batch(&make_batch(
-        namespace,
-        lease_id,
-        vec![SceneMutation::CreateTile {
+    let tile_id = scene
+        .create_tile(
             tab_id,
-            namespace: namespace.to_string(),
+            namespace,
             lease_id,
-            bounds: portal_bounds(false),
-            z_order: PORTAL_Z_ORDER,
-        }],
-    ));
-    assert!(create.applied);
-    let tile_id = create.created_ids[0];
+            portal_bounds(false),
+            PORTAL_Z_ORDER,
+        )
+        .expect("create portal tile");
     let collapsed = PortalSurfaceState {
         portal_id: "portal://gov/1".to_string(),
         session_title: "Governed".to_string(),
@@ -850,15 +809,7 @@ async fn portal_surface_state_remains_governed_by_orphan_rules() {
     };
     let mut nodes = build_collapsed_nodes(&collapsed, icon_id);
     let root = nodes.remove(0);
-    assert!(
-        scene
-            .apply_batch(&make_batch(
-                namespace,
-                lease_id,
-                root_batch_for_tile(tile_id, root, nodes),
-            ))
-            .applied
-    );
+    set_portal_root(&mut scene, tile_id, root, nodes, namespace).unwrap();
 
     scene
         .disconnect_lease(&lease_id, 10_000)
@@ -869,16 +820,13 @@ async fn portal_surface_state_remains_governed_by_orphan_rules() {
         "portal lease must enter normal orphan path on disconnect"
     );
 
-    let rejected = scene.apply_batch(&make_batch(
+    let rejected = scene.update_tile_bounds(
+        tile_id,
+        Rect::new(48.0, 220.0, COLLAPSED_W, COLLAPSED_H),
         namespace,
-        lease_id,
-        vec![SceneMutation::UpdateTileBounds {
-            tile_id,
-            bounds: Rect::new(48.0, 220.0, COLLAPSED_W, COLLAPSED_H),
-        }],
-    ));
+    );
     assert!(
-        !rejected.applied,
+        rejected.is_err(),
         "portal tile must not bypass existing lease/orphan governance after disconnect"
     );
 }
@@ -941,19 +889,15 @@ fn portal_typing_indicator_updates_use_transient_in_place_path() {
     let icon_id = tze_hud_scene::ResourceId::from_bytes([0xCD; 32]);
     scene.register_resource(icon_id);
     let lease_id = scene.grant_lease(namespace, 120_000);
-    let create = scene.apply_batch(&make_batch(
-        namespace,
-        lease_id,
-        vec![SceneMutation::CreateTile {
+    let tile_id = scene
+        .create_tile(
             tab_id,
-            namespace: namespace.to_string(),
+            namespace,
             lease_id,
-            bounds: portal_bounds(false),
-            z_order: PORTAL_Z_ORDER,
-        }],
-    ));
-    assert!(create.applied);
-    let tile_id = create.created_ids[0];
+            portal_bounds(false),
+            PORTAL_Z_ORDER,
+        )
+        .expect("create portal tile");
 
     let state = PortalSurfaceState {
         portal_id: "portal://typing/1".to_string(),
@@ -967,12 +911,8 @@ fn portal_typing_indicator_updates_use_transient_in_place_path() {
     };
     let mut nodes = build_collapsed_nodes(&state, icon_id);
     let root = nodes.remove(0);
-    let apply = scene.apply_batch(&make_batch(
-        namespace,
-        lease_id,
-        root_batch_for_tile(tile_id, root, nodes),
-    ));
-    assert!(apply.applied);
+    let apply = set_portal_root(&mut scene, tile_id, root, nodes, namespace);
+    assert!(apply.is_ok());
     let activity_node_id = find_text_node_in_tile(&scene, tile_id, "typing...");
     let nodes_before = scene
         .lease_resource_usage(&lease_id)
@@ -984,23 +924,14 @@ fn portal_typing_indicator_updates_use_transient_in_place_path() {
     for content in ["typing...", "57 unread", "idle"] {
         let mut text = text_markdown_from_node(&scene, activity_node_id);
         text.content = content.to_string();
-        let update = scene.apply_batch(&make_batch(
-            namespace,
-            lease_id,
-            vec![SceneMutation::UpdateNodeContent {
+        scene
+            .update_node_content_checked(
                 tile_id,
-                node_id: activity_node_id,
-                data: NodeData::TextMarkdown(text),
-            }],
-        ));
-        assert!(
-            update.applied,
-            "activity update must succeed as transient in-place content refresh"
-        );
-        assert!(
-            update.created_ids.is_empty(),
-            "typing/activity refresh must not allocate new scene nodes"
-        );
+                activity_node_id,
+                NodeData::TextMarkdown(text),
+                namespace,
+            )
+            .expect("refresh activity in place");
     }
 
     let nodes_after = scene
@@ -1041,19 +972,15 @@ fn portal_scroll_updates_local_first_via_input_processor() {
     let tab_id = scene.create_tab("Main", 0).expect("tab create");
     scene.active_tab = Some(tab_id);
     let lease_id = scene.grant_lease(namespace, 120_000);
-    let create = scene.apply_batch(&make_batch(
-        namespace,
-        lease_id,
-        vec![SceneMutation::CreateTile {
+    let tile_id = scene
+        .create_tile(
             tab_id,
-            namespace: namespace.to_string(),
+            namespace,
             lease_id,
-            bounds: portal_bounds(true),
-            z_order: PORTAL_Z_ORDER,
-        }],
-    ));
-    assert!(create.applied);
-    let tile_id = create.created_ids[0];
+            portal_bounds(true),
+            PORTAL_Z_ORDER,
+        )
+        .expect("create portal tile");
     let tile_bounds = portal_bounds(true);
 
     // Register a scroll config so the tile is scrollable.
@@ -1177,19 +1104,15 @@ fn portal_scroll_offset_clamped_to_content_boundary() {
     let tab_id = scene.create_tab("Main", 0).expect("tab create");
     scene.active_tab = Some(tab_id);
     let lease_id = scene.grant_lease(namespace, 120_000);
-    let create = scene.apply_batch(&make_batch(
-        namespace,
-        lease_id,
-        vec![SceneMutation::CreateTile {
+    let tile_id = scene
+        .create_tile(
             tab_id,
-            namespace: namespace.to_string(),
+            namespace,
             lease_id,
-            bounds: portal_bounds(true),
-            z_order: PORTAL_Z_ORDER,
-        }],
-    ));
-    assert!(create.applied);
-    let tile_id = create.created_ids[0];
+            portal_bounds(true),
+            PORTAL_Z_ORDER,
+        )
+        .expect("create portal tile");
     let tile_bounds = portal_bounds(true);
 
     let content_height = 300.0_f32;
@@ -1248,19 +1171,15 @@ fn portal_adapter_append_preserves_user_scroll_position() {
     let tab_id = scene.create_tab("Main", 0).expect("tab create");
     scene.active_tab = Some(tab_id);
     let lease_id = scene.grant_lease(namespace, 120_000);
-    let create = scene.apply_batch(&make_batch(
-        namespace,
-        lease_id,
-        vec![SceneMutation::CreateTile {
+    let tile_id = scene
+        .create_tile(
             tab_id,
-            namespace: namespace.to_string(),
+            namespace,
             lease_id,
-            bounds: portal_bounds(true),
-            z_order: PORTAL_Z_ORDER,
-        }],
-    ));
-    assert!(create.applied);
-    let tile_id = create.created_ids[0];
+            portal_bounds(true),
+            PORTAL_Z_ORDER,
+        )
+        .expect("create portal tile");
 
     scene
         .register_tile_scroll_config(
@@ -1307,14 +1226,10 @@ fn portal_adapter_append_preserves_user_scroll_position() {
             color_runs: Box::default(),
         }),
     };
-    let append = scene.apply_batch(&make_batch(
-        namespace,
-        lease_id,
-        root_batch_for_tile(tile_id, root, vec![transcript]),
-    ));
-    assert!(append.applied, "adapter append must apply");
+    let append = set_portal_root(&mut scene, tile_id, root, vec![transcript], namespace);
+    assert!(append.is_ok(), "adapter append must apply");
 
-    // Scroll offset must be unchanged — the MutationBatch path does NOT
+    // Scroll offset must be unchanged — a content update does not
     // reset local-first scroll state.
     let (sx, sy) = scene.tile_scroll_offset_local(tile_id);
     assert!(
@@ -1404,19 +1319,15 @@ fn click_to_focus_grants_focus_to_composer_hit_region() {
     let lease_id = scene.grant_lease(namespace, 120_000);
 
     // Create the expanded portal tile in Capture mode (required for keyboard focus).
-    let create = scene.apply_batch(&make_batch(
-        namespace,
-        lease_id,
-        vec![SceneMutation::CreateTile {
+    let tile_id = scene
+        .create_tile(
             tab_id,
-            namespace: namespace.to_string(),
+            namespace,
             lease_id,
-            bounds: portal_bounds(true),
-            z_order: PORTAL_Z_ORDER,
-        }],
-    ));
-    assert!(create.applied);
-    let tile_id = create.created_ids[0];
+            portal_bounds(true),
+            PORTAL_Z_ORDER,
+        )
+        .expect("create portal tile");
 
     // Explicitly set input_mode to Capture so the tile accepts focus.
     scene.tiles.get_mut(&tile_id).unwrap().input_mode = InputMode::Capture;
@@ -1501,19 +1412,15 @@ fn keyboard_processor_delivers_to_focused_composer_and_buffer_mutates() {
     let tab_id = scene.create_tab("Main", 0).expect("tab create");
     scene.active_tab = Some(tab_id);
     let lease_id = scene.grant_lease(namespace, 120_000);
-    let create = scene.apply_batch(&make_batch(
-        namespace,
-        lease_id,
-        vec![SceneMutation::CreateTile {
+    let tile_id = scene
+        .create_tile(
             tab_id,
-            namespace: namespace.to_string(),
+            namespace,
             lease_id,
-            bounds: portal_bounds(true),
-            z_order: PORTAL_Z_ORDER,
-        }],
-    ));
-    assert!(create.applied);
-    let tile_id = create.created_ids[0];
+            portal_bounds(true),
+            PORTAL_Z_ORDER,
+        )
+        .expect("create portal tile");
     scene.tiles.get_mut(&tile_id).unwrap().input_mode = InputMode::Capture;
 
     let composer_node_id = tze_hud_scene::SceneId::new();

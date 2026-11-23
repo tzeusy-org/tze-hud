@@ -11,9 +11,6 @@ impl SceneGraph {
     /// Default 30,000 ms (30 seconds).
     pub const DEFAULT_GRACE_PERIOD_MS: u64 = crate::lease::ORPHAN_GRACE_PERIOD_MS;
 
-    /// Budget soft-limit threshold (80% of hard limit).
-    pub const BUDGET_SOFT_LIMIT_PCT: f64 = 0.80;
-
     /// Maximum leases across all agents in the entire runtime.
     pub const MAX_RUNTIME_LEASES: usize = 64;
 

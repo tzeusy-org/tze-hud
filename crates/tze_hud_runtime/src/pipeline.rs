@@ -519,7 +519,6 @@ pub(crate) fn sweep_timed_scene_state(
             );
         }
     }
-    scene.drain_expired_tiles();
     scene.drain_expired_zone_publications();
     scene.drain_expired_widget_publications();
     scene.expire_leases()
