@@ -313,6 +313,7 @@ class Run:
     helper_pids: list[int] = field(default_factory=list)  # owned non-HUD apps (scenario 10's Notepad)
     timeline: list[dict] = field(default_factory=list)
     publications: set[tuple[str, str | None]] = field(default_factory=set)
+    grpc_port: int = field(default=0, init=False)
 
     @property
     def pid(self) -> int | None:
@@ -320,7 +321,7 @@ class Run:
 
     # Lifecycle ───────────────────────────────────────────────────────────
 
-    def start(self) -> None:
+    def start(self, *, resident_raster: bool = False) -> None:
         if self.injector == "sendinput":
             if os.environ.get("GITHUB_ACTIONS") != "true":
                 raise Refused("tier W drives the real desktop; it runs only on a CI VM (GITHUB_ACTIONS=true)")
@@ -343,8 +344,18 @@ class Run:
             env.pop(key, None)
         env["TZE_HUD_LOG"] = "info"
         env["TZE_HUD_LOG_JSON"] = "1"
-        self.port = free_port()
+        if resident_raster:
+            # Only the raster witness needs both listeners. Keep the first
+            # reservation until the second is chosen so they cannot coincide.
+            with socket.socket() as reservation:
+                reservation.bind(("127.0.0.1", 0))
+                self.grpc_port = reservation.getsockname()[1]
+                self.port = free_port()
+        else:
+            self.grpc_port = 0
+            self.port = free_port()
         config = seed_config(CONFIG, self.psk)
+        self.config_dir = config.parent
         if self.go_to_probe:
             seeded = config.read_text(encoding="utf-8")
             config.write_text(seeded.replace("[runtime]\n",
@@ -354,7 +365,6 @@ class Run:
         digest = hashlib.sha256(self.foreign_psk.encode()).hexdigest()
         with open(config.parent / "agents.toml", "a", encoding="utf-8") as agents:
             agents.write(f'\n[agents.{FOREIGN_AGENT}]\npsk_sha256 = "{digest}"\nallow = ["*"]\n')
-        self.config_dir = config.parent
         self.config = config
         self.log = self.out / "hud.log"
         dimensions = (["--width", str(SCREEN[0]), "--height", str(SCREEN[1])]
@@ -362,7 +372,7 @@ class Run:
         with open(self.log, "wb") as log:
             self.hud = subprocess.Popen(
                 [str(self.exe), "--config", str(config), "--window-mode", self.window_mode,
-                 *dimensions, "--grpc-port", "0", "--mcp-port", str(self.port)],
+                 *dimensions, "--grpc-port", str(self.grpc_port), "--mcp-port", str(self.port)],
                 # Run from the scratch HOME for hygiene: nothing the HUD writes lands in the repo.
                 env=env, cwd=self.home, stdout=log, stderr=subprocess.STDOUT,
             )
@@ -370,6 +380,12 @@ class Run:
         self.smoke = Smoke(f"http://127.0.0.1:{self.port}/mcp", self.psk)
         self.foreign = Smoke(f"http://127.0.0.1:{self.port}/mcp", self.foreign_psk)
         wait_for_mcp(self.smoke, self.hud, 60)
+        if resident_raster:
+            # Capture uses the compositor's own frame and never injects input.
+            if (self.hud.poll() is not None or self.status().get("pid") != self.pid
+                    or (self.injector == "xtest" and (not self.xvfb or self.xvfb.poll() is not None))):
+                raise Refused("raster witness did not reach its owned HUD and display")
+            return
         self.inj = XTest(self.display, self.guard) if self.injector == "xtest" else WIN.SendInput(self.guard)
         if self.injector == "sendinput":
             self._check_identity_mapping()

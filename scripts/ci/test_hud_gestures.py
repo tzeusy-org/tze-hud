@@ -50,6 +50,42 @@ OWNED = dict(started_display=":91", target_display=":91", owned_pid=4242, status
 
 
 class GuardTests(unittest.TestCase):
+    def test_only_the_resident_witness_enables_grpc_and_it_requires_the_owned_pid(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            for witness, reported_pid in ((False, 4242), (True, 4242), (True, 999)):
+                with self.subTest(witness=witness, reported_pid=reported_pid):
+                    run = g.Run(exe=Path("tze_hud"), out=workspace)
+                    home = workspace / f"home-{witness}-{reported_pid}"
+                    home.mkdir()
+                    xvfb = mock.Mock(**{"poll.return_value": None})
+                    hud = mock.Mock(pid=4242, **{"poll.return_value": None})
+                    config = workspace / "tze_hud.toml"
+                    with mock.patch.object(g.tempfile, "mkdtemp", return_value=str(home)), \
+                            mock.patch.object(g, "start_xvfb", return_value=(xvfb, ":91")), \
+                            mock.patch.object(g, "seed_config", return_value=config), \
+                            mock.patch.object(g.subprocess, "Popen", return_value=hud) as spawn, \
+                            mock.patch.object(g, "wait_for_mcp"), \
+                            mock.patch.object(g, "XTest") as injector, \
+                            mock.patch.object(g.Run, "guard"), \
+                            mock.patch.object(g.Run, "status", return_value={"pid": reported_pid}):
+                        if reported_pid != hud.pid:
+                            with self.assertRaises(g.Refused):
+                                run.start(resident_raster=witness)
+                        else:
+                            run.start(resident_raster=witness)
+                        command = spawn.call_args.args[0]
+                        grpc_port = int(command[command.index("--grpc-port") + 1])
+                        mcp_port = int(command[command.index("--mcp-port") + 1])
+                        self.assertGreater(mcp_port, 0)
+                        if witness:
+                            self.assertGreater(grpc_port, 0)
+                            self.assertNotEqual(mcp_port, grpc_port)
+                            injector.assert_not_called()
+                        else:
+                            self.assertEqual(grpc_port, 0)
+                            injector.assert_called_once()
+
     def test_owned_display_pid_and_loopback_pass(self) -> None:
         g.check_owned(**OWNED)
 
