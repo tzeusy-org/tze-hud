@@ -978,8 +978,10 @@ mod tests {
         let mut fs = bundled_font_system();
         let wakes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let counter = Arc::clone(&wakes);
+        let (wake_done_tx, wake_done_rx) = std::sync::mpsc::channel();
         fallback.set_wake(RenderWakeNotifier::new(move || {
             counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let _ = wake_done_tx.send(());
         }));
 
         // S3: text the bundled faces cover asks for nothing.
@@ -998,6 +1000,10 @@ mod tests {
         assert!(shaped(&mut fs, text).iter().any(|(_, g)| *g == 0));
 
         assert!(wait_and_install(&mut fallback, &mut fs));
+        // The worker sends the faces before it calls the wake notifier.
+        wake_done_rx
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("fallback load must wake the renderer");
         assert_eq!(wakes.load(std::sync::atomic::Ordering::SeqCst), 1);
         // S1: after the install, no shaped glyph is.notdef.
         let after = shaped(&mut fs, text);
