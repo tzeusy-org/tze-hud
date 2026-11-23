@@ -8,7 +8,7 @@
     "vocab_fingerprint": "sha256:446a9538cb6c348e3516120d7c08b09f57c36495e2acfffe59a5bf8b0cfb1a2d",
     "counting_policy": "each canonical JSON-RPC body independently; UTF-8 bytes; encode_with_special_tokens; operation and flow totals are integer sums; model_visible counts tool name + arguments + result text only"
   },
-  "fixture_fingerprint": "blake3:e83837711fea394768941bcb45c8bc3b8168b582fd0f7e18c517531f56b970a6",
+  "fixture_fingerprint": "blake3:045082f23a9c919d35b8ef205814d447204a840ac308f46b04c5926e68a8aeac",
   "flows": {
     "discover": {
       "flow_version": 4,
@@ -294,7 +294,7 @@
     },
     "tools_list": {
       "flow_version": 4,
-      "flow_fingerprint": "blake3:5bcb0a58a6fb4c053ea7567254ad74d8627a1fdc44de5a2cdef027f04b5905bf",
+      "flow_fingerprint": "blake3:5889589d7005855889e3d9939e1a2a76b9e54a5259cd15cf672a9c27818e8d7d",
       "operations": {
         "tools/list": {
           "request": {
@@ -302,26 +302,26 @@
             "tokens": 21
           },
           "response": {
-            "bytes": 2773,
-            "tokens": 643
+            "bytes": 2793,
+            "tokens": 651
           },
           "total": {
-            "bytes": 2831,
-            "tokens": 664
+            "bytes": 2851,
+            "tokens": 672
           },
           "model_visible": {
-            "bytes": 2729,
-            "tokens": 627
+            "bytes": 2749,
+            "tokens": 635
           }
         }
       },
       "total": {
-        "bytes": 2831,
-        "tokens": 664
+        "bytes": 2851,
+        "tokens": 672
       },
       "model_visible": {
-        "bytes": 2729,
-        "tokens": 627
+        "bytes": 2749,
+        "tokens": 635
       }
     },
     "widget_publish": {
@@ -428,14 +428,14 @@
     }
   },
   "approval": {
-    "status": "owner_approved",
-    "decision_reference": "hud-ohgc9.6 AC6: the owner explicitly accepted tools/list 2,711->2,729 model-visible bytes / 622->627 tokens (wire 2,813->2,831 / 659->664) for PR1676 on 2026-11-21",
-    "basis": "Source-bound calibration on 66dadc83 plus this change: only tools_list changes (+18 bytes, +5 tokens). Every other flow keeps byte-identical fingerprints and metrics. Ceilings, tokenizer, flow version 4 and accounting unchanged. Two byte-identical current-source measurements. No Windows acceptance is inferred."
+    "status": "pending_owner_review",
+    "decision_reference": "hud-ljhku.8 R8.5 approves the progress and copy schema changes. The measured tools/list byte delta awaits owner review on the implementation PR.",
+    "basis": "Two byte-identical measurements at 73fe42f4 record tools/list 2,729 to 2,749 model-visible bytes / 627 to 635 tokens (wire 2,831 to 2,851 bytes / 664 to 672 tokens). All other flow fingerprints and metrics and the action-limit error are identical. Ceilings, tokenizer, flow version 4 and accounting are unchanged."
   },
   "previous_approval": {
     "status": "owner_approved",
-    "decision_reference": "hud-ohgc9.14 AC5: the owner explicitly accepted the tools_list baseline (wait_ms maximum 30000->55000; 2,711 model-visible bytes / 622 tokens and 2,813 wire bytes / 659 tokens unchanged, new flow fingerprint) for PR1673 on 2026-11-21. The prior approval (hud-ohgc9.9) is kept under previous_approval.",
-    "basis": "Source-bound calibration on 6db3a318 plus this change: the two tools/list `maximum` values for wait_ms change 30000->55000, so tools_list keeps 2,711 model-visible bytes / 622 tokens (2,813 wire bytes / 659 tokens) with a new flow fingerprint. Every other flow keeps byte-identical fingerprints and metrics: discover126, zone39, widget22, error45, complete choice114, choice wait77 (still sends wait_ms 30000), choice labels65, portal137. Ceilings, tokenizer, flow version4 and accounting unchanged. Two byte-identical current-source measurements. No Windows acceptance is inferred."
+    "decision_reference": "hud-ohgc9.6 AC6: the owner explicitly accepted tools/list 2,711->2,729 model-visible bytes / 622->627 tokens (wire 2,813->2,831 / 659->664) for PR1676 on 2026-11-21",
+    "basis": "Source-bound calibration on 66dadc83 plus this change: only tools_list changes (+18 bytes, +5 tokens). Every other flow keeps byte-identical fingerprints and metrics. Ceilings, tokenizer, flow version 4 and accounting unchanged. Two byte-identical current-source measurements. No Windows acceptance is inferred."
   },
   "production_discovery": {
     "source": "c3355f6144805c219f240ab4272a33da1e33364e",

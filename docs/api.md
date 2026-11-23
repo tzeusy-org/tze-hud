@@ -1917,7 +1917,7 @@ distinguishes arguments from responses and partial configuration examples.
 
 | Measure | Before T5 (wire) | Wire | Model-visible | Budget (model-visible) |
 |---|---|---|---|---|
-| `tools/list` | 4,418 | 664 | 627 | ≤ 900 |
+| `tools/list` | 4,418 | 672 | 635 | ≤ 900 |
 | Discover (default scene) | ~430 (`list_zones`) | 194 | 126 | ≤ 150 |
 | Zone publish | ~197 | 90 | 39 | ≤ 80 |
 | Four-option notification ask + returned answer + ACK | — | 273 | 114 | ≤ 120 |
@@ -1930,9 +1930,10 @@ distinguishes arguments from responses and partial configuration examples.
 
 All rows use canonical flow version 4 and `tiktoken-rs` 0.12.0
 (`o200k_base`); the canonical gate requires two byte-identical final-source
-measurements. A change to any flow's bytes or ceiling is an owner decision,
-recorded on the PR that makes it; the current bytes and ceilings were last
-accepted with PR1676 (`tools/list`, 2026-11-21).
+measurements. The implementation PR records owner decisions on changes to
+flow bytes or ceilings. The progress and copy schema adds 20 `tools/list`
+bytes and 8 tokens to the PR1676 baseline (2,729 to 2,749 model-visible bytes
+and 2,831 to 2,851 wire bytes). Those measured bytes await owner review.
 
 - `notification_choice` publishes Ship/Hold/Skip/Open, activates Skip through
   `SceneGraph::activate_notification` (the shared pointer/keyboard producer),
