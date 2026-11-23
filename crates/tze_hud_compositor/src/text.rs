@@ -3542,361 +3542,184 @@ fn linear_to_srgb_u8(linear: f32) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ops::Range;
+    use tze_hud_scene::types::{Rect, RenderingPolicy, Rgba, TextMarkdownNode};
 
-    // ── portal_part_clip_rect ──────────────────────────────────
-    // Pure CPU geometry: the per-part clip envelope for multi-node portals.
-
-    /// With no declared part, the clip is exactly the content∩tile intersection
-    /// and matches the pre-promotion single-node behavior (content clamped to
-    /// the tile box).
-    #[test]
-    fn portal_part_clip_rect_no_part_clamps_to_tile() {
-        // Content overflows the tile on the right and bottom.
-        let clip =
-            portal_part_clip_rect((10.0, 10.0, 400.0, 400.0), (0.0, 0.0, 100.0, 100.0), None);
-        // Right/bottom are clamped to the tile edge (x=100, y=100).
-        assert_eq!(clip, (10.0, 10.0, 90.0, 90.0));
-    }
-
-    /// A declared part region narrows the clip below the tile box — an overlong
-    /// transcript node is contained to its part band and cannot paint over the
-    /// composer strip beneath it.
-    #[test]
-    fn portal_part_clip_rect_part_contains_content() {
-        // Transcript node laid out over the whole tile, but its part band is the
-        // top 60px only.
-        let clip = portal_part_clip_rect(
-            (0.0, 0.0, 100.0, 100.0),      // content spans the tile
-            (0.0, 0.0, 100.0, 100.0),      // tile
-            Some((0.0, 0.0, 100.0, 60.0)), // transcript band (absolute)
-        );
-        assert_eq!(clip, (0.0, 0.0, 100.0, 60.0));
-    }
-
-    /// The part envelope never *widens* the clip past the tile: a part region
-    /// larger than the tile is still bounded by the tile box.
-    #[test]
-    fn portal_part_clip_rect_part_cannot_exceed_tile() {
-        let clip = portal_part_clip_rect(
-            (0.0, 0.0, 100.0, 100.0),
-            (0.0, 0.0, 80.0, 80.0),
-            Some((0.0, 0.0, 200.0, 200.0)),
-        );
-        assert_eq!(clip, (0.0, 0.0, 80.0, 80.0));
-    }
-
-    /// A disjoint part (content laid out outside its declared region) collapses
-    /// to the 1.0-floored degenerate rect rather than a zero/negative extent.
-    #[test]
-    fn portal_part_clip_rect_disjoint_floors_to_unit() {
-        let clip = portal_part_clip_rect(
-            (0.0, 0.0, 40.0, 40.0),
-            (0.0, 0.0, 100.0, 100.0),
-            Some((60.0, 60.0, 40.0, 40.0)), // no overlap with content
-        );
-        // Width/height floored at 1.0 (never zero/negative).
-        assert!(clip.2 >= 1.0 && clip.3 >= 1.0, "got {clip:?}");
-    }
-
-    /// The part envelope is a clip only; it is applied in absolute space after
-    /// the tile origin offset, so a part band on a translated tile clips at the
-    /// translated location.
-    #[test]
-    fn portal_part_clip_rect_absolute_part_offset() {
-        // Tile at (200,100); transcript band is the tile's top 50px → absolute
-        // (200,100,300,50).
-        let clip = portal_part_clip_rect(
-            (200.0, 100.0, 300.0, 400.0), // content
-            (200.0, 100.0, 300.0, 400.0), // tile
-            Some((200.0, 100.0, 300.0, 50.0)),
-        );
-        assert_eq!(clip, (200.0, 100.0, 300.0, 50.0));
-    }
-
-    /// repro (pure CPU): a single unbroken token far wider than the box
-    /// must fall back to glyph-level (break-anywhere) wrapping so every visual line
-    /// fits inside `wrap_width` and no content is left on one over-long line whose
-    /// tail the box scissor would clip.
-    ///
-    /// This exercises the shared [`composer_wrap_line_widths`] helper, which uses
-    /// [`WRAPPED_TEXT_WRAP`] — the exact policy the composer draft, the viewer-echo
-    /// history line count, and the render paint path all use. Before the fix
-    /// (`Wrap::Word`) the 200-char run shaped to ONE line wider than the box: this
-    /// asserts `> 1` line, so it fails on the old policy and passes on the new one.
-    #[test]
-    fn overlong_unbroken_token_wraps_at_glyph_level_within_box() {
-        let mut fs = crate::fonts::bundled_font_system();
-        let font_size_px = 16.0;
-        let lhm = 1.4;
-        let wrap_width = 80.0;
-
-        // A 200-char run with NO spaces — one unbreakable "word" (the owner's
-        // `asdasd…` case). Word-only wrap cannot break it; glyph fallback must.
-        let token = "a".repeat(200);
-        let widths = composer_wrap_line_widths(&mut fs, &token, wrap_width, font_size_px, lhm);
-
-        assert!(
-            widths.len() > 1,
-            "an over-long unbroken token must wrap to multiple lines \
-             (break-anywhere fallback); got {} line(s) — the tail would be clipped",
-            widths.len()
-        );
-        // Every wrapped line must fit inside the box (small epsilon for the final
-        // glyph advance / AA). A line wider than the box is exactly the clipped-tail
-        // defect this fix removes.
-        for (i, w) in widths.iter().enumerate() {
-            assert!(
-                *w <= wrap_width + 1.0,
-                "wrapped line {i} width {w} exceeds wrap_width {wrap_width}; \
-                 its tail would be clipped by the box scissor"
-            );
+    fn item(text: &str, width: f32, height: f32) -> TextItem {
+        TextItem {
+            text: Arc::from(text),
+            pixel_x: 10.0,
+            pixel_y: 20.0,
+            bounds_width: width,
+            bounds_height: height,
+            clip_pixel_x: 10.0,
+            clip_pixel_y: 20.0,
+            clip_bounds_width: width,
+            clip_bounds_height: height,
+            font_size_px: 16.0,
+            line_height_multiplier: 1.4,
+            font_family: FontFamily::SystemSansSerif,
+            font_weight: 400,
+            color: [255; 4],
+            alignment: TextAlign::Start,
+            overflow: TextOverflow::Ellipsis,
+            outline_color: None,
+            outline_width: None,
+            opacity: 1.0,
+            color_runs: Box::new([]),
+            styled_runs: Box::new([]),
+            viewport: TruncationViewport::HeadAnchored,
         }
     }
 
-    /// A token that already fits stays on a single line — the break-anywhere
-    /// policy is a strict superset of word wrap and must not gratuitously split
-    /// content that fits.
-    #[test]
-    fn short_token_stays_single_line() {
-        let mut fs = crate::fonts::bundled_font_system();
-        let widths = composer_wrap_line_widths(&mut fs, "hi", 400.0, 16.0, 1.4);
-        assert_eq!(widths.len(), 1, "a short token must not wrap");
+    fn styled(bytes: Range<usize>) -> StyledRunItem {
+        StyledRunItem {
+            start_byte: bytes.start,
+            end_byte: bytes.end,
+            weight: Some(700),
+            italic: true,
+            monospace: false,
+            color: None,
+            background_color: Some([30, 30, 30, 255]),
+            size_scale: Some(1.2),
+            fill_line_width: false,
+        }
     }
 
-    /// Normal spaced text still wraps at word boundaries under the break-anywhere
-    /// policy (regression guard: WordOrGlyph must not change ordinary word wrap).
-    #[test]
-    fn spaced_text_still_word_wraps() {
-        let mut fs = crate::fonts::bundled_font_system();
-        let text = "word ".repeat(40); // ~200 chars, many spaces
-        let widths = composer_wrap_line_widths(&mut fs, &text, 80.0, 16.0, 1.4);
-        assert!(
-            widths.len() > 1,
-            "spaced text must still wrap to multiple lines"
+    fn color(bytes: Range<usize>) -> ColorRunItem {
+        ColorRunItem {
+            start_byte: bytes.start,
+            end_byte: bytes.end,
+            color: [10, 20, 30, 255],
+        }
+    }
+
+    fn prime<'a>(
+        cache: &'a mut TruncationCache,
+        item: &TextItem,
+        fonts: &mut FontSystem,
+    ) -> &'a TruncationResult {
+        let key = effective_truncation_key(item).unwrap();
+        let (_, monospace) = styled_runs_effective_measurement(&item.styled_runs, item.font_weight);
+        let family = if monospace {
+            FontFamily::SystemMonospace
+        } else {
+            item.font_family
+        };
+        cache.prime(
+            key,
+            &item.text,
+            item.bounds_width,
+            item.bounds_height,
+            item.font_size_px,
+            family,
+            key.font_weight,
+            item.viewport,
+            item.line_height_multiplier,
+            fonts,
+        )
+    }
+
+    fn shape(item: &TextItem, text: &str, fonts: &mut FontSystem) -> Buffer {
+        let mut buffer = Buffer::new(
+            fonts,
+            Metrics::new(
+                item.font_size_px,
+                item.font_size_px * item.line_height_multiplier,
+            ),
         );
-        for (i, w) in widths.iter().enumerate() {
-            assert!(
-                *w <= 80.0 + 1.0,
-                "word-wrapped line {i} width {w} exceeds box width 80.0"
-            );
+        buffer.set_size(fonts, Some(item.bounds_width), None);
+        buffer.set_wrap(fonts, Wrap::Word);
+        buffer.set_text(
+            fonts,
+            text,
+            Attrs::new()
+                .family(Family::SansSerif)
+                .weight(Weight(item.font_weight)),
+            Shaping::Advanced,
+        );
+        buffer.shape_until_scroll(fonts, false);
+        buffer
+    }
+
+    #[test]
+    fn portal_part_clip_rect_intersects_content_tile_and_absolute_part() {
+        for (content, tile, part, expected) in [
+            (
+                (10.0, 10.0, 400.0, 400.0),
+                (0.0, 0.0, 100.0, 100.0),
+                None,
+                (10.0, 10.0, 90.0, 90.0),
+            ),
+            (
+                (0.0, 0.0, 100.0, 100.0),
+                (0.0, 0.0, 80.0, 80.0),
+                Some((0.0, 0.0, 200.0, 200.0)),
+                (0.0, 0.0, 80.0, 80.0),
+            ),
+            (
+                (0.0, 0.0, 100.0, 100.0),
+                (0.0, 0.0, 100.0, 100.0),
+                Some((0.0, 0.0, 100.0, 60.0)),
+                (0.0, 0.0, 100.0, 60.0),
+            ),
+            (
+                (200.0, 100.0, 300.0, 400.0),
+                (200.0, 100.0, 300.0, 400.0),
+                Some((200.0, 100.0, 300.0, 50.0)),
+                (200.0, 100.0, 300.0, 50.0),
+            ),
+            (
+                (0.0, 0.0, 40.0, 40.0),
+                (0.0, 0.0, 100.0, 100.0),
+                Some((60.0, 60.0, 40.0, 40.0)),
+                (60.0, 60.0, 1.0, 1.0),
+            ),
+        ] {
+            assert_eq!(portal_part_clip_rect(content, tile, part), expected);
         }
     }
 
     #[test]
-    fn strip_markdown_removes_heading_markers() {
-        let md = "# Hello\n## World\nPlain text";
-        let stripped = strip_markdown_v1(md);
-        assert_eq!(stripped, "Hello\nWorld\nPlain text");
+    fn composer_wraps_words_and_overwide_tokens_inside_the_box() {
+        let mut fonts = crate::fonts::bundled_font_system();
+        for (text, single_line) in [
+            ("hi".to_owned(), true),
+            ("word ".repeat(40), false),
+            ("a".repeat(200), false),
+        ] {
+            let widths = composer_wrap_line_widths(&mut fonts, &text, 80.0, 16.0, 1.4);
+            assert!(!widths.is_empty());
+            assert_eq!(widths.len() == 1, single_line);
+            assert!(widths.iter().all(|&width| width <= 81.0), "{widths:?}");
+        }
     }
 
     #[test]
-    fn strip_markdown_removes_emphasis() {
-        let md = "Hello *world*";
-        let stripped = strip_markdown_v1(md);
-        assert_eq!(stripped, "Hello world");
+    fn legacy_markdown_and_linear_color_conversions() {
+        for (markdown, plain) in [
+            ("# Hello\n## World\nPlain text", "Hello\nWorld\nPlain text"),
+            ("Hello *world*", "Hello world"),
+            ("", ""),
+        ] {
+            assert_eq!(strip_markdown_v1(markdown), plain);
+        }
+        for (linear, srgb) in [(0.0, 0), (0.5, 188), (1.0, 255)] {
+            assert_eq!(linear_to_srgb_u8(linear), srgb);
+        }
+        assert_eq!(rgba_to_srgb_u8(Rgba::BLACK), [0, 0, 0, 255]);
+        assert_eq!(rgba_to_srgb_u8(Rgba::WHITE), [255; 4]);
+        assert_eq!(
+            apply_opacity_to_color([200, 100, 50, 200], 0.5),
+            [200, 100, 50, 100]
+        );
     }
 
     #[test]
-    fn strip_markdown_empty_input() {
-        assert_eq!(strip_markdown_v1(""), "");
-    }
-
-    #[test]
-    fn linear_to_srgb_u8_black() {
-        assert_eq!(linear_to_srgb_u8(0.0), 0);
-    }
-
-    #[test]
-    fn linear_to_srgb_u8_white() {
-        assert_eq!(linear_to_srgb_u8(1.0), 255);
-    }
-
-    #[test]
-    fn linear_to_srgb_u8_midpoint() {
-        // Linear 0.5 → sRGB ~0.735 → ~187 u8
-        let v = linear_to_srgb_u8(0.5);
-        assert!(v > 180 && v < 200, "midpoint sRGB: {v}");
-    }
-
-    #[test]
-    fn text_item_from_text_markdown_node_insets_margin() {
-        use tze_hud_scene::types::{Rect, Rgba, TextMarkdownNode};
-        let node = TextMarkdownNode {
+    fn text_item_insets_markdown_without_collapsing_small_labels() {
+        let mut node = TextMarkdownNode {
             content: "# Hello\n*world*".to_owned(),
             bounds: Rect::new(10.0, 20.0, 200.0, 80.0),
-            font_size_px: 16.0,
-            font_family: FontFamily::SystemSansSerif,
-            color: Rgba::new(1.0, 1.0, 1.0, 1.0),
-            background: None,
-            alignment: TextAlign::Start,
-            overflow: TextOverflow::Clip,
-            color_runs: Box::default(),
-        };
-        let item = TextItem::from_text_markdown_node(&node, 50.0, 50.0);
-        // tile_x=50, tile_y=50, node.bounds.x=10, node.bounds.y=20, margin=6
-        assert_eq!(item.pixel_x, 66.0);
-        assert_eq!(item.pixel_y, 76.0);
-        assert_eq!(&*item.text, "Hello\nworld");
-        // New fields default correctly.
-        assert!(item.outline_color.is_none());
-        assert!(item.outline_width.is_none());
-        assert_eq!(item.opacity, 1.0);
-    }
-
-    #[test]
-    fn text_item_from_small_text_markdown_node_does_not_collapse_height() {
-        use tze_hud_scene::types::{Rect, Rgba, TextMarkdownNode};
-        let node = TextMarkdownNode {
-            content: "RESIDENT AGENT".to_owned(),
-            bounds: Rect::new(96.0, 18.0, 152.0, 12.0),
-            font_size_px: 11.0,
-            font_family: FontFamily::SystemSansSerif,
-            color: Rgba::new(1.0, 1.0, 1.0, 1.0),
-            background: None,
-            alignment: TextAlign::Start,
-            overflow: TextOverflow::Clip,
-            color_runs: Box::default(),
-        };
-        let item = TextItem::from_text_markdown_node(&node, 0.0, 0.0);
-        assert!(
-            item.bounds_height >= 11.0,
-            "small presence-card labels must retain height close to their font size for live glyph rendering; got {}",
-            item.bounds_height
-        );
-        assert!(
-            item.pixel_y < 22.0,
-            "small presence-card labels should not be pushed too far down by inset margin; got {}",
-            item.pixel_y
-        );
-    }
-
-    // ── from_zone_policy: RenderingPolicy → TextItem field mapping ───────────
-
-    #[test]
-    fn from_zone_policy_maps_policy_fields() {
-        use tze_hud_scene::types::{RenderingPolicy, Rgba};
-        type Check = fn(&TextItem);
-        // (case, policy, opacity, check) — `zone` is placed at (100, 200).
-        let cases: Vec<(&str, RenderingPolicy, f32, Check)> = vec![
-            (
-                "font size and color",
-                RenderingPolicy {
-                    font_size_px: Some(24.0),
-                    text_color: Some(Rgba::new(1.0, 0.0, 0.0, 1.0)),
-                    ..Default::default()
-                },
-                1.0,
-                |i| {
-                    assert_eq!(i.font_size_px, 24.0);
-                    assert_eq!((i.color[0], i.color[1]), (255, 0));
-                },
-            ),
-            (
-                "outline propagated",
-                RenderingPolicy {
-                    outline_color: Some(Rgba::BLACK),
-                    outline_width: Some(2.0),
-                    ..Default::default()
-                },
-                1.0,
-                |i| {
-                    assert!(i.outline_color.is_some());
-                    assert_eq!(i.outline_width, Some(2.0));
-                },
-            ),
-            (
-                "zero outline width suppresses outline",
-                RenderingPolicy {
-                    outline_color: Some(Rgba::BLACK),
-                    outline_width: Some(0.0),
-                    ..Default::default()
-                },
-                1.0,
-                |i| {
-                    assert!(i.outline_color.is_none());
-                    assert!(i.outline_width.is_none());
-                },
-            ),
-            (
-                "opacity halves alpha",
-                RenderingPolicy {
-                    text_color: Some(Rgba::WHITE),
-                    ..Default::default()
-                },
-                0.5,
-                |i| assert!((i.color[3] as i32 - 127).abs() <= 2, "alpha {}", i.color[3]),
-            ),
-            (
-                "default margin is 8px",
-                RenderingPolicy::default(),
-                1.0,
-                |i| assert_eq!((i.pixel_x, i.pixel_y), (108.0, 208.0)),
-            ),
-            (
-                "margin_px fallback",
-                RenderingPolicy {
-                    margin_px: Some(20.0),
-                    ..Default::default()
-                },
-                1.0,
-                |i| assert_eq!((i.pixel_x, i.pixel_y), (120.0, 220.0)),
-            ),
-            (
-                "bold weight propagated",
-                RenderingPolicy {
-                    font_weight: Some(700),
-                    ..Default::default()
-                },
-                1.0,
-                |i| assert_eq!(i.font_weight, 700),
-            ),
-            (
-                "weight defaults to regular",
-                RenderingPolicy::default(),
-                1.0,
-                |i| assert_eq!(i.font_weight, 400),
-            ),
-            (
-                "overflow defaults to clip",
-                RenderingPolicy::default(),
-                1.0,
-                |i| assert_eq!(i.overflow, TextOverflow::Clip),
-            ),
-            (
-                "overflow ellipsis propagated",
-                RenderingPolicy {
-                    overflow: Some(TextOverflow::Ellipsis),
-                    ..Default::default()
-                },
-                1.0,
-                |i| assert_eq!(i.overflow, TextOverflow::Ellipsis),
-            ),
-            (
-                "overflow clip explicit",
-                RenderingPolicy {
-                    overflow: Some(TextOverflow::Clip),
-                    ..Default::default()
-                },
-                1.0,
-                |i| assert_eq!(i.overflow, TextOverflow::Clip),
-            ),
-        ];
-        for (name, policy, opacity, check) in cases {
-            let item = TextItem::from_zone_policy(
-                "text", 100.0, 200.0, 400.0, 100.0, &policy, opacity, 1.0,
-            );
-            // Wrap so a failing row names itself.
-            let r = std::panic::catch_unwind(|| check(&item));
-            assert!(r.is_ok(), "from_zone_policy case failed: {name}");
-        }
-    }
-
-    #[test]
-    fn from_text_markdown_node_font_weight_defaults_to_regular() {
-        use tze_hud_scene::types::{Rect, Rgba, TextMarkdownNode};
-        let node = TextMarkdownNode {
-            content: "Plain text".to_owned(),
-            bounds: Rect::new(0.0, 0.0, 200.0, 60.0),
             font_size_px: 16.0,
             font_family: FontFamily::SystemSansSerif,
             color: Rgba::WHITE,
@@ -3905,2782 +3728,506 @@ mod tests {
             overflow: TextOverflow::Clip,
             color_runs: Box::default(),
         };
-        let item = TextItem::from_text_markdown_node(&node, 0.0, 0.0);
-        assert_eq!(item.font_weight, 400);
+        let normal = TextItem::from_text_markdown_node(&node, 50.0, 50.0);
+        assert_eq!((normal.pixel_x, normal.pixel_y), (66.0, 76.0));
+        assert_eq!(&*normal.text, "Hello\nworld");
+        assert_eq!((normal.outline_color, normal.outline_width), (None, None));
+        assert_eq!((normal.font_weight, normal.opacity), (400, 1.0));
+
+        node.bounds = Rect::new(96.0, 18.0, 152.0, 12.0);
+        node.font_size_px = 11.0;
+        let compact = TextItem::from_text_markdown_node(&node, 0.0, 0.0);
+        assert!(compact.bounds_height >= 11.0 && compact.pixel_y < 22.0);
     }
 
     #[test]
-    fn rgba_to_srgb_u8_black_and_white() {
-        use tze_hud_scene::types::Rgba;
-        assert_eq!(rgba_to_srgb_u8(Rgba::BLACK), [0, 0, 0, 255]);
-        assert_eq!(rgba_to_srgb_u8(Rgba::WHITE), [255, 255, 255, 255]);
-    }
+    fn from_zone_policy_maps_policy_fields() {
+        let build = |policy: &RenderingPolicy, opacity| {
+            TextItem::from_zone_policy("text", 100.0, 200.0, 400.0, 100.0, policy, opacity, 1.0)
+        };
+        let defaults = build(&RenderingPolicy::default(), 1.0);
+        assert_eq!((defaults.pixel_x, defaults.pixel_y), (108.0, 208.0));
+        assert_eq!(defaults.font_weight, 400);
+        assert_eq!(defaults.overflow, TextOverflow::Clip);
 
-    #[test]
-    fn apply_opacity_to_color_halves_alpha() {
+        let mut policy = RenderingPolicy {
+            font_size_px: Some(24.0),
+            font_weight: Some(700),
+            text_color: Some(Rgba::new(1.0, 0.0, 0.0, 1.0)),
+            outline_color: Some(Rgba::BLACK),
+            outline_width: Some(2.0),
+            margin_px: Some(20.0),
+            overflow: Some(TextOverflow::Ellipsis),
+            ..Default::default()
+        };
+        let custom = build(&policy, 0.5);
+        assert_eq!((custom.pixel_x, custom.pixel_y), (120.0, 220.0));
+        assert_eq!((custom.font_size_px, custom.font_weight), (24.0, 700));
+        assert_eq!(custom.color, [255, 0, 0, 127]);
         assert_eq!(
-            apply_opacity_to_color([200u8, 100, 50, 200], 0.5),
-            [200, 100, 50, 100],
-            "RGB unchanged, alpha halved"
+            (custom.outline_color, custom.outline_width),
+            (Some([0, 0, 0, 127]), Some(2.0))
         );
+        assert_eq!(custom.overflow, TextOverflow::Ellipsis);
+
+        policy.outline_width = Some(0.0);
+        policy.overflow = Some(TextOverflow::Clip);
+        let disabled = build(&policy, 1.0);
+        assert_eq!(
+            (disabled.outline_color, disabled.outline_width),
+            (None, None)
+        );
+        assert_eq!(disabled.overflow, TextOverflow::Clip);
     }
 
-    // ── color_run_spans: run list → styled spans ─────────────────────────────
-
-    /// Each row: text, runs `(start, end, rgb)` in input order, and the expected
-    /// `(slice, Some(rgb) | None-for-base-attrs)` spans. Later runs win overlaps
-    /// regardless of start order; `\n` is never a split point.
     #[test]
     fn color_run_spans_cases() {
-        const RED: [u8; 4] = [255, 0, 0, 255];
-        const GREEN: [u8; 4] = [0, 255, 0, 255];
-        const BLUE: [u8; 4] = [0, 0, 255, 255];
-        const ORANGE: [u8; 4] = [255, 128, 0, 255];
-        type Rgb = Option<(u8, u8, u8)>;
-        const R: Rgb = Some((255, 0, 0));
-        const G: Rgb = Some((0, 255, 0));
-        const B: Rgb = Some((0, 0, 255));
-        const O: Rgb = Some((255, 128, 0));
+        let red = [255, 0, 0, 255];
+        let green = [0, 255, 0, 255];
+        let blue = [0, 0, 255, 255];
+        let amber = [255, 128, 0, 160];
+        let (r, g, b, a) = (Some(red), Some(green), Some(blue), Some(amber));
+        type Run = (usize, usize, [u8; 4]);
+        type Painted<'a> = (&'a str, Option<[u8; 4]>);
 
-        type Case = (
-            &'static str,
-            &'static str,
-            Vec<(usize, usize, [u8; 4])>,
-            Vec<(&'static str, Rgb)>,
-        );
-        let cases: Vec<Case> = vec![
+        // Input order settles overlaps, including runs whose start is earlier.
+        // Missing or empty runs use base attributes. Newlines are normal bytes.
+        let cases: &[(&str, &[Run], &[Painted<'_>])] = &[
             (
-                "single full run",
-                "hello",
-                vec![(0, 5, RED)],
-                vec![("hello", R)],
-            ),
-            (
-                "two runs with gap",
                 "hello world",
-                vec![(0, 5, RED), (6, 11, BLUE)],
-                vec![("hello", R), (" ", None), ("world", B)],
+                &[(0, 5, red), (6, 11, blue)],
+                &[("hello", r), (" ", None), ("world", b)],
             ),
             (
-                "trailing unstyled",
                 "hello world",
-                vec![(0, 5, RED)],
-                vec![("hello", R), (" world", None)],
+                &[(0, 5, red)],
+                &[("hello", r), (" world", None)],
             ),
+            ("no color", &[], &[("no color", None)]),
+            ("text", &[(2, 2, red)], &[("text", None)]),
+            ("éworld", &[(0, 2, red)], &[("é", r), ("world", None)]),
             (
-                "empty runs fall back",
-                "no color",
-                vec![],
-                vec![("no color", None)],
-            ),
-            (
-                "end clamped to text",
-                "hi",
-                vec![(0, 999, GREEN)],
-                vec![("hi", G)],
-            ),
-            (
-                "zero-length run skipped",
-                "text",
-                vec![(2, 2, RED)],
-                vec![("text", None)],
-            ),
-            (
-                "multibyte boundary",
-                "éworld",
-                vec![(0, 2, RED)],
-                vec![("é", R), ("world", None)],
-            ),
-            (
-                "overlap: later wins",
                 "0123456789abcde",
-                vec![(0, 10, RED), (5, 15, BLUE)],
-                vec![("01234", R), ("56789abcde", B)],
+                &[(0, 8, red), (4, 12, green), (10, 15, blue)],
+                &[("0123", r), ("456789", g), ("abcde", b)],
             ),
             (
-                "three runs: middle overlapped by later",
-                "0123456789abcde",
-                vec![(0, 8, RED), (4, 12, GREEN), (10, 15, BLUE)],
-                vec![("0123", R), ("456789", G), ("abcde", B)],
-            ),
-            (
-                "unsorted input equals sorted",
-                "hello world",
-                vec![(6, 11, BLUE), (0, 5, RED)],
-                vec![("hello", R), (" ", None), ("world", B)],
-            ),
-            (
-                "adjacent runs stay separate",
                 "abcdef",
-                vec![(0, 3, RED), (3, 6, BLUE)],
-                vec![("abc", R), ("def", B)],
+                &[(0, 3, red), (3, 6, blue)],
+                &[("abc", r), ("def", b)],
             ),
             (
-                "nested inner wins, outer resumes",
                 "0123456789ab",
-                vec![(0, 12, RED), (4, 8, BLUE)],
-                vec![("0123", R), ("4567", B), ("89ab", R)],
+                &[(0, 12, red), (4, 8, blue)],
+                &[("0123", r), ("4567", b), ("89ab", r)],
             ),
             (
-                "higher index wins though it starts earlier",
                 "0123456789abcde",
-                vec![(5, 15, BLUE), (0, 10, RED)],
-                vec![("0123456789", R), ("abcde", B)],
+                &[(5, 15, blue), (0, 10, red)],
+                &[("0123456789", r), ("abcde", b)],
             ),
             (
-                "degenerate dropped, oob clamped, same-color merged",
                 "hello",
-                vec![(2, 2, RED), (3, 100, RED), (0, 3, RED)],
-                vec![("hello", R)],
+                &[(2, 2, red), (3, 100, red), (0, 3, red)],
+                &[("hello", r)],
             ),
             (
-                "run crosses newlines as one span",
                 "line 1\nline 2\nline 3",
-                vec![(3, 16, ORANGE)],
-                vec![("lin", None), ("e 1\nline 2\nli", O), ("ne 3", None)],
+                &[(3, 16, amber)],
+                &[("lin", None), ("e 1\nline 2\nli", a), ("ne 3", None)],
             ),
             (
-                "per-line runs: newline gaps unstyled",
                 "red line\nblue line\ngreen line",
-                vec![(0, 8, RED), (9, 18, BLUE), (19, 29, GREEN)],
-                vec![
-                    ("red line", R),
+                &[(0, 8, red), (9, 18, blue), (19, 29, green)],
+                &[
+                    ("red line", r),
                     ("\n", None),
-                    ("blue line", B),
+                    ("blue line", b),
                     ("\n", None),
-                    ("green line", G),
+                    ("green line", g),
                 ],
             ),
         ];
 
-        for (name, text, runs, expected) in cases {
-            let runs: Vec<ColorRunItem> = runs
-                .into_iter()
-                .map(|(start_byte, end_byte, color)| ColorRunItem {
+        for (text, runs, expected) in cases {
+            let runs: Vec<_> = runs
+                .iter()
+                .map(|&(start_byte, end_byte, color)| ColorRunItem {
                     start_byte,
                     end_byte,
                     color,
                 })
                 .collect();
             let spans = color_run_spans(text, &runs, Attrs::new());
-            let got: Vec<(&str, Rgb)> = spans
+            let painted: Vec<_> = spans
                 .iter()
-                .map(|(s, a)| (*s, a.color_opt.map(|c| (c.r(), c.g(), c.b()))))
+                .map(|(text, attrs)| (*text, attrs.color_opt.map(|c| [c.r(), c.g(), c.b(), c.a()])))
                 .collect();
-            assert_eq!(got, expected, "case: {name}");
+            assert_eq!(painted, *expected, "{text:?}: {runs:?}");
         }
     }
 
-    // ── TruncationCache tests ────────────────────────────────────
-    //
-    // These tests verify the stable-shape-caching contract: `truncate_for_ellipsis`
-    // is called exactly once per content/geometry change and zero times on
-    // subsequent frames with the same scene.
-
-    /// Cache hit for the same (content, geometry) pair is guaranteed after prime().
-    ///
-    /// This is the key invariant: zero truncation work per frame on unchanged
-    /// content, as with unchanged Markdown cache keys.
     #[test]
-    fn truncation_cache_hit_after_prime() {
-        let mut fs = crate::fonts::bundled_font_system();
+    fn truncation_cache_tracks_intermediate_geometries_and_evicts_stale_content() {
+        let mut fonts = crate::fonts::bundled_font_system();
         let mut cache = TruncationCache::new();
-
-        let content =
-            "This is a long sentence that will definitely need truncation at narrow widths.";
-        let bounds_w = 80.0_f32;
-        let bounds_h = 50.0_f32;
-        let font_size = 16.0_f32;
-        let family = FontFamily::SystemSansSerif;
-        let weight = 400u16;
-
-        let key = TruncationKey::new(
-            content,
-            bounds_w,
-            bounds_h,
-            font_size,
-            family,
-            weight,
-            TruncationViewport::HeadAnchored,
-        );
-
-        // Prime: first call computes truncation.
-        let first = cache
-            .prime(
-                key,
-                content,
-                bounds_w,
-                bounds_h,
-                font_size,
-                family,
-                weight,
-                TruncationViewport::HeadAnchored,
-                1.4,
-                &mut fs,
-            )
-            .clone();
-
-        // Second call with identical key: must hit the cache (no re-shaping).
-        let second = cache
-            .prime(
-                key,
-                content,
-                bounds_w,
-                bounds_h,
-                font_size,
-                family,
-                weight,
-                TruncationViewport::HeadAnchored,
-                1.4,
-                &mut fs,
-            )
-            .clone();
-
-        assert_eq!(
-            first, second,
-            "cached truncation result must be identical to the computed result"
-        );
-        assert_eq!(
-            cache.len(),
-            1,
-            "only one cache entry for the same (content, geometry) pair"
-        );
-    }
-
-    /// Different geometry produces a separate cache entry.
-    #[test]
-    fn truncation_cache_different_geometry_different_entry() {
-        let mut fs = crate::fonts::bundled_font_system();
-        let mut cache = TruncationCache::new();
-
-        let content = "Hello world this is a somewhat long string";
-        let family = FontFamily::SystemSansSerif;
-        let weight = 400u16;
-        let font_size = 16.0_f32;
-
-        let key_narrow = TruncationKey::new(
-            content,
-            60.0,
-            50.0,
-            font_size,
-            family,
-            weight,
-            TruncationViewport::HeadAnchored,
-        );
-        let key_wide = TruncationKey::new(
-            content,
-            300.0,
-            50.0,
-            font_size,
-            family,
-            weight,
-            TruncationViewport::HeadAnchored,
-        );
-
-        cache.prime(
-            key_narrow,
-            content,
-            60.0,
-            50.0,
-            font_size,
-            family,
-            weight,
-            TruncationViewport::HeadAnchored,
-            1.4,
-            &mut fs,
-        );
-        cache.prime(
-            key_wide,
-            content,
-            300.0,
-            50.0,
-            font_size,
-            family,
-            weight,
-            TruncationViewport::HeadAnchored,
-            1.4,
-            &mut fs,
-        );
-
-        assert_eq!(
-            cache.len(),
-            2,
-            "two distinct geometries → two cache entries"
-        );
-
-        // The wide result should not be truncated; the narrow one should be.
-        let narrow_result = cache
-            .get_by_key(&key_narrow)
-            .expect("narrow must be cached");
-        let wide_result = cache.get_by_key(&key_wide).expect("wide must be cached");
-        assert_eq!(
-            wide_result.text, content,
-            "text that fits the wide box passes through unchanged"
-        );
-        assert!(
-            wide_result.text.len() >= narrow_result.text.len(),
-            "wider bounds must produce an equal-or-longer result"
-        );
-    }
-
-    /// get_by_key returns None for a key that has not been primed.
-    #[test]
-    fn truncation_cache_miss_before_prime() {
-        let cache = TruncationCache::new();
-        let key = TruncationKey::new(
-            "text",
-            100.0,
-            50.0,
-            16.0,
-            FontFamily::SystemSansSerif,
-            400,
-            TruncationViewport::HeadAnchored,
-        );
-        assert!(
-            cache.get_by_key(&key).is_none(),
-            "cache must be empty before prime"
-        );
-    }
-
-    /// a cadence-deferred render-path miss for new geometry must be
-    /// served by `get_stale_by_content` (the previous geometry's valid
-    /// truncation) — NEVER by an inline shape on the frame loop.
-    ///
-    /// This mirrors what `prepare_text_items` now does on a cache miss: it
-    /// resolves `get_by_key(...).or_else(get_stale_by_content(content_hash))`
-    /// and never calls `prime` (the inline shaper) on the render path.  We
-    /// assert the stale path returns a previously-primed result while the cache
-    /// length is unchanged — proving no shaping occurred for the new geometry.
-    #[test]
-    fn truncation_stale_by_content_serves_deferred_geometry_miss() {
-        let mut fs = crate::fonts::bundled_font_system();
-        let mut cache = TruncationCache::new();
-
-        let content = "A streaming transcript line long enough to require ellipsis truncation";
-        let family = FontFamily::SystemSansSerif;
-        let weight = 400u16;
-        let font_size = 14.0_f32;
-
-        // Commit-time prime at geometry G0 (width 120).
-        let key_g0 = TruncationKey::new(
-            content,
-            120.0,
-            30.0,
-            font_size,
-            family,
-            weight,
-            TruncationViewport::HeadAnchored,
-        );
-        let g0_result = cache
-            .prime(
-                key_g0,
-                content,
-                120.0,
-                30.0,
-                font_size,
-                family,
-                weight,
-                TruncationViewport::HeadAnchored,
-                1.4,
-                &mut fs,
-            )
-            .clone();
-        assert_eq!(cache.len(), 1);
-
-        // A resize drag bumps geometry to G1 (width 90), but the adaptive
-        // cadence gate DEFERS the off-path re-prime, so G1's key was never
-        // primed.  The render path sees an exact-key miss.
-        let key_g1 = TruncationKey::new(
-            content,
-            90.0,
-            30.0,
-            font_size,
-            family,
-            weight,
-            TruncationViewport::HeadAnchored,
-        );
-        assert!(
-            cache.get_by_key(&key_g1).is_none(),
-            "deferred frame: exact-geometry key must be a miss"
-        );
-
-        // Render-path resolution (no inline shaping): fall back to the nearest
-        // stale truncation for the SAME content.
-        let resolved = cache
-            .get_by_key(&key_g1)
-            .or_else(|| cache.get_stale_by_content(&key_g1.content_hash()))
-            .cloned();
-        assert_eq!(
-            resolved.as_ref(),
-            Some(&g0_result),
-            "deferred miss must reuse the previous geometry's valid truncation"
-        );
-
-        // Critical: the cache MUST NOT have grown — no entry was shaped/inserted
-        // for G1 on the render path.  The deferred off-path prime fills it later.
-        assert_eq!(
-            cache.len(),
-            1,
-            "render-path stale fallback must not shape or insert a new entry"
-        );
-    }
-
-    /// the stale-by-content index tracks the *most recent* primed
-    /// geometry, so the freshest available truncation is reused on a later miss.
-    #[test]
-    fn truncation_stale_by_content_tracks_latest_primed_geometry() {
-        let mut fs = crate::fonts::bundled_font_system();
-        let mut cache = TruncationCache::new();
-
-        let content = "Another long transcript line that overflows narrow tiles and truncates";
-        let family = FontFamily::SystemSansSerif;
-        let weight = 400u16;
-        let font_size = 14.0_f32;
-
-        let prime_at = |cache: &mut TruncationCache, fs: &mut FontSystem, w: f32| {
-            let key = TruncationKey::new(
-                content,
-                w,
-                30.0,
-                font_size,
-                family,
-                weight,
-                TruncationViewport::HeadAnchored,
-            );
-            cache
-                .prime(
-                    key,
-                    content,
-                    w,
-                    30.0,
-                    font_size,
-                    family,
-                    weight,
-                    TruncationViewport::HeadAnchored,
-                    1.4,
-                    fs,
-                )
-                .clone()
-        };
-
-        prime_at(&mut cache, &mut fs, 200.0);
-        let latest = prime_at(&mut cache, &mut fs, 80.0);
-
-        // A miss at an un-primed geometry must reuse the LATEST primed result.
-        let hash = TruncationKey::new(
-            content,
-            55.0,
-            30.0,
-            font_size,
-            family,
-            weight,
-            TruncationViewport::HeadAnchored,
-        )
-        .content_hash();
-        assert_eq!(
-            cache.get_stale_by_content(&hash),
-            Some(&latest),
-            "stale fallback must serve the most-recently-primed geometry"
-        );
-    }
-
-    /// cold start (content never primed at any geometry) returns
-    /// `None` — the render path then renders untruncated-clipped text, still
-    /// shaping nothing on the truncation path.
-    #[test]
-    fn truncation_stale_by_content_cold_start_is_none() {
-        let cache = TruncationCache::new();
-        let hash = *blake3::hash(b"never primed").as_bytes();
-        assert!(
-            cache.get_stale_by_content(&hash).is_none(),
-            "cold start: no stale entry exists for unprimed content"
-        );
-    }
-
-    /// `evict_except` must keep `by_content` consistent — a content
-    /// hash whose only entries were evicted must no longer resolve via the
-    /// stale fallback (no dangling key pointing at an evicted entry).
-    #[test]
-    fn truncation_stale_index_pruned_on_evict() {
-        let mut fs = crate::fonts::bundled_font_system();
-        let mut cache = TruncationCache::new();
-
-        let family = FontFamily::SystemSansSerif;
-        let weight = 400u16;
-        let font_size = 14.0_f32;
-
-        let content_keep = "Keep me visible in the scene";
-        let content_gone = "This content left the scene entirely";
-
-        let key_keep = TruncationKey::new(
-            content_keep,
-            120.0,
-            30.0,
-            font_size,
-            family,
-            weight,
-            TruncationViewport::HeadAnchored,
-        );
-        let key_gone = TruncationKey::new(
-            content_gone,
-            120.0,
-            30.0,
-            font_size,
-            family,
-            weight,
-            TruncationViewport::HeadAnchored,
-        );
-
-        cache.prime(
-            key_keep,
-            content_keep,
-            120.0,
-            30.0,
-            font_size,
-            family,
-            weight,
-            TruncationViewport::HeadAnchored,
-            1.4,
-            &mut fs,
-        );
-        cache.prime(
-            key_gone,
-            content_gone,
-            120.0,
-            30.0,
-            font_size,
-            family,
-            weight,
-            TruncationViewport::HeadAnchored,
-            1.4,
-            &mut fs,
-        );
-
-        // Evict everything except the surviving content.
-        cache.evict_except(&[key_keep]);
-
+        let content = "The most recent transcript entry has a useful tail to preserve.";
+        let large = item(content, 400.0, 110.0);
+        let large_key = effective_truncation_key(&large).unwrap();
+        assert!(cache.get_by_key(&large_key).is_none());
         assert!(
             cache
-                .get_stale_by_content(&key_keep.content_hash())
-                .is_some(),
-            "surviving content must still resolve via stale fallback"
-        );
-        assert!(
-            cache
-                .get_stale_by_content(&key_gone.content_hash())
-                .is_none(),
-            "evicted content must not resolve via a dangling stale index entry"
-        );
-    }
-
-    /// Zero-truncation-work invariant: after priming, a second `prime` call
-    /// must not call `truncate_for_ellipsis` again (proven via cache.len()
-    /// staying at 1, not 2, after the second call with the same key).
-    ///
-    /// This is the per-frame zero-cost assertion: once primed, the frame path
-    /// pays only O(1) for a lookup, not O(n) for shaping.
-    #[test]
-    fn truncation_cache_zero_work_on_unchanged_scene() {
-        let mut fs = crate::fonts::bundled_font_system();
-        let mut cache = TruncationCache::new();
-
-        let content = "Transcript line that is long enough to require ellipsis truncation here";
-        let bounds_w = 120.0_f32;
-        let bounds_h = 30.0_f32;
-        let font_size = 14.0_f32;
-        let family = FontFamily::SystemSansSerif;
-        let weight = 400u16;
-
-        let key = TruncationKey::new(
-            content,
-            bounds_w,
-            bounds_h,
-            font_size,
-            family,
-            weight,
-            TruncationViewport::HeadAnchored,
+                .get_stale_by_content(&large_key.content_hash)
+                .is_none()
         );
 
-        // Frame 1: cold start — cache miss, computes and stores result.
-        let frame1_result = cache
-            .prime(
-                key,
-                content,
-                bounds_w,
-                bounds_h,
-                font_size,
-                family,
-                weight,
-                TruncationViewport::HeadAnchored,
-                1.4,
-                &mut fs,
-            )
-            .clone();
-
-        // Frame 2+: unchanged scene — cache hit, zero shaping work.
-        // We call prime() 9 more times to simulate 9 subsequent frames.
-        for _ in 0..9 {
-            let frame_n_result = cache
-                .prime(
-                    key,
-                    content,
-                    bounds_w,
-                    bounds_h,
-                    font_size,
-                    family,
-                    weight,
-                    TruncationViewport::HeadAnchored,
-                    1.4,
-                    &mut fs,
-                )
-                .clone();
-            assert_eq!(
-                frame1_result, frame_n_result,
-                "repeated prime() with unchanged scene must return the cached result"
-            );
-        }
-
-        // The cache still holds exactly one entry — no spurious re-insertions.
-        assert_eq!(
-            cache.len(),
-            1,
-            "cache must hold exactly one entry for one (content, geometry) pair"
-        );
-    }
-
-    /// evict_except removes entries not in the live set.
-    #[test]
-    fn truncation_cache_evict_removes_stale_entries() {
-        let mut fs = crate::fonts::bundled_font_system();
-        let mut cache = TruncationCache::new();
-
-        let family = FontFamily::SystemSansSerif;
-        let weight = 400u16;
-        let font_size = 14.0_f32;
-
-        let content_a = "Keep this line";
-        let content_b = "Evict this line";
-
-        let key_a = TruncationKey::new(
-            content_a,
-            120.0,
-            30.0,
-            font_size,
-            family,
-            weight,
-            TruncationViewport::HeadAnchored,
-        );
-        let key_b = TruncationKey::new(
-            content_b,
-            120.0,
-            30.0,
-            font_size,
-            family,
-            weight,
-            TruncationViewport::HeadAnchored,
-        );
-
-        cache.prime(
-            key_a,
-            content_a,
-            120.0,
-            30.0,
-            font_size,
-            family,
-            weight,
-            TruncationViewport::HeadAnchored,
-            1.4,
-            &mut fs,
-        );
-        cache.prime(
-            key_b,
-            content_b,
-            120.0,
-            30.0,
-            font_size,
-            family,
-            weight,
-            TruncationViewport::HeadAnchored,
-            1.4,
-            &mut fs,
-        );
-        assert_eq!(cache.len(), 2);
-
-        cache.evict_except(&[key_a]);
-
-        assert_eq!(cache.len(), 1, "evict_except must remove the stale entry");
-        assert!(
-            cache.get_by_key(&key_a).is_some(),
-            "kept entry must remain after eviction"
-        );
-        assert!(
-            cache.get_by_key(&key_b).is_none(),
-            "evicted entry must be gone"
-        );
-    }
-
-    /// clear() empties the cache entirely.
-    #[test]
-    fn truncation_cache_clear_empties_all_entries() {
-        let mut fs = crate::fonts::bundled_font_system();
-        let mut cache = TruncationCache::new();
-
-        let family = FontFamily::SystemSansSerif;
-        let weight = 400u16;
-        let font_size = 14.0_f32;
-
-        for i in 0..3 {
-            let content = format!("Content line {i}");
-            let key = TruncationKey::new(
-                &content,
-                120.0,
-                30.0,
-                font_size,
-                family,
-                weight,
-                TruncationViewport::HeadAnchored,
-            );
-            cache.prime(
-                key,
-                &content,
-                120.0,
-                30.0,
-                font_size,
-                family,
-                weight,
-                TruncationViewport::HeadAnchored,
-                1.4,
-                &mut fs,
-            );
-        }
-        assert_eq!(cache.len(), 3);
-
-        cache.clear();
-        assert_eq!(cache.len(), 0, "clear() must empty the cache");
-        assert!(
-            cache.is_empty(),
-            "is_empty() must return true after clear()"
-        );
-    }
-
-    // ── Mid-drag re-truncation tests ─────────────────
-    //
-    // These tests verify that when a portal tile's bounds change during a resize
-    // drag, the TruncationCache correctly re-resolves at each new intermediate
-    // geometry. The key invariant: "pane re-layout under the
-    // overflow contract at every intermediate geometry."
-    //
-    // Because TruncationCache is keyed on bounds (bounds_width_bits /
-    // bounds_height_bits are part of TruncationKey), a bounds change produces a
-    // cache miss.  These tests confirm that:
-    //   a) priming at a new (narrower) geometry produces truncation at that
-    //      geometry, not at the old geometry.
-    //   b) an intermediate geometry is independently primed and its result
-    //      differs from the initial geometry.
-    //   c) the cache holds separate entries for each distinct geometry.
-
-    /// Priming at a narrower intermediate geometry produces a separate cache
-    /// entry with truncation that fits within the new (narrower) bounds.
-    ///
-    /// This is the core invariant: at each intermediate geometry during
-    /// a resize, the overflow contract is re-applied to the new bounds.
-    #[test]
-    fn intermediate_resize_geometry_re_resolves_truncation() {
-        let mut fs = crate::fonts::bundled_font_system();
-        let mut cache = TruncationCache::new();
-
-        // Long content that will overflow a narrow box but fits a wide one.
-        let content = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"; // 39 'A's
-        let family = FontFamily::SystemSansSerif;
-        let weight = 400u16;
-        let font_size = 16.0_f32;
-        let height = 100.0_f32;
-
-        // ── Step 1: prime at initial (wide) geometry ──────────────────────────
-        let wide_w = 600.0_f32;
-        let key_wide = TruncationKey::new(
-            content,
-            wide_w,
-            height,
-            font_size,
-            family,
-            weight,
-            TruncationViewport::HeadAnchored,
-        );
-        let result_wide = cache
-            .prime(
-                key_wide,
-                content,
-                wide_w,
-                height,
-                font_size,
-                family,
-                weight,
-                TruncationViewport::HeadAnchored,
-                1.4,
-                &mut fs,
-            )
-            .clone();
-
-        // Wide box: long content likely fits without truncation.
-        // (We don't assert on was_truncated for the wide case as it depends on
-        // font metrics — just record the result for comparison.)
-
-        // ── Step 2: prime at an intermediate (narrow) geometry ───────────────
-        // This simulates a resize drag that has moved the pane to a narrower width.
-        let narrow_w = 60.0_f32; // narrow enough to force truncation
-        let key_narrow = TruncationKey::new(
-            content,
-            narrow_w,
-            height,
-            font_size,
-            family,
-            weight,
-            TruncationViewport::HeadAnchored,
-        );
-        let result_narrow = cache
-            .prime(
-                key_narrow,
-                content,
-                narrow_w,
-                height,
-                font_size,
-                family,
-                weight,
-                TruncationViewport::HeadAnchored,
-                1.4,
-                &mut fs,
-            )
-            .clone();
-
-        // The narrow-geometry result must be independently cached (separate key).
-        assert_eq!(
-            cache.len(),
-            2,
-            "wide and narrow geometries must produce separate cache entries \
-             (one for each distinct bounds_width); got {} entries",
-            cache.len(),
-        );
-
-        // The narrow result must be truncated (39 'A's will not fit in 60px).
-        assert!(
-            result_narrow.was_truncated,
-            "content must be truncated at the intermediate narrow geometry ({narrow_w}px); \
-             got: {:?}",
-            result_narrow.text,
-        );
-        assert!(
-            result_narrow.text.ends_with(crate::overflow::ELLIPSIS),
-            "truncated result at intermediate geometry must end with '…'; got: {:?}",
-            result_narrow.text,
-        );
-
-        // The narrow result must be strictly shorter than the wide result
-        // (or at least differ — the wide result may or may not truncate
-        // depending on font metrics, but the narrow one always will).
-        if !result_wide.was_truncated {
-            assert_ne!(
-                result_wide.text, result_narrow.text,
-                "wide (untruncated) and narrow (truncated) results must differ \
-                 — the narrow intermediate geometry must trigger independent re-resolution"
-            );
-        }
-    }
-
-    /// A sequence of three intermediate geometries each produces an independently
-    /// cached result.  The cache holds one entry per distinct bounds, and each
-    /// entry reflects the correct truncation for its bounds.
-    ///
-    /// This validates that the re-truncation is not just at drag-end (the widest
-    /// or narrowest bound) but at *every* distinct intermediate geometry the
-    /// cache is primed for.
-    #[test]
-    fn sequence_of_intermediate_geometries_all_independently_cached() {
-        let mut fs = crate::fonts::bundled_font_system();
-        let mut cache = TruncationCache::new();
-
-        // Content long enough to overflow at mid and narrow widths.
-        let content = "WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW"; // 43 'W's
-        let family = FontFamily::SystemSansSerif;
-        let weight = 400u16;
-        let font_size = 16.0_f32;
-        let height = 100.0_f32;
-
-        let widths: [f32; 3] = [500.0, 200.0, 60.0];
-
-        // Prime at each intermediate geometry in order (simulating a resize drag
-        // from wide to mid to narrow).
+        let whole = prime(&mut cache, &large, &mut fonts).clone();
+        assert_eq!(whole.text, content);
+        assert!(!whole.was_truncated);
         let mut results = Vec::new();
-        for &w in &widths {
-            let key = TruncationKey::new(
-                content,
-                w,
-                height,
-                font_size,
-                family,
-                weight,
-                TruncationViewport::HeadAnchored,
+        for (width, height) in [(85.0, 40.0), (110.0, 40.0), (110.0, 63.0), (140.0, 85.0)] {
+            let resized = item(content, width, height);
+            let key = effective_truncation_key(&resized).unwrap();
+            assert!(
+                cache.get_by_key(&key).is_none(),
+                "duplicate key at {width}×{height}"
             );
-            let result = cache
-                .prime(
-                    key,
-                    content,
-                    w,
-                    height,
-                    font_size,
-                    family,
-                    weight,
-                    TruncationViewport::HeadAnchored,
-                    1.4,
-                    &mut fs,
+            assert_eq!(
+                cache.get_stale_by_content(&key.content_hash),
+                Some(results.last().map_or(&whole, |(_, result)| result)),
+            );
+            let result = prime(&mut cache, &resized, &mut fonts).clone();
+            assert!(result.was_truncated && result.text.ends_with(overflow::ELLIPSIS));
+            assert_eq!(cache.get_by_key(&key), Some(&result));
+            // Reuse the cached result for unchanged content, as with unchanged Markdown cache keys.
+            for _ in 0..3 {
+                assert_eq!(prime(&mut cache, &resized, &mut fonts), &result);
+            }
+            results.push((key, result));
+        }
+        assert_eq!(cache.len(), results.len() + 1);
+        assert_ne!(results[0].1, results[2].1);
+        for (key, result) in &results {
+            assert_eq!(cache.get_by_key(key), Some(result));
+        }
+
+        let other = item("This content left the scene entirely", 400.0, 110.0);
+        let other_key = effective_truncation_key(&other).unwrap();
+        let other_result = prime(&mut cache, &other, &mut fonts).clone();
+        assert_eq!(
+            cache.get_stale_by_content(&other_key.content_hash),
+            Some(&other_result)
+        );
+
+        let (latest_key, latest) = results.last().unwrap();
+        cache.evict_except(&[*latest_key]);
+        assert_eq!(cache.len(), 1);
+        assert!(cache.get_by_key(&large_key).is_none());
+        assert!(cache.get_by_key(&other_key).is_none());
+        assert!(
+            cache
+                .get_stale_by_content(&other_key.content_hash)
+                .is_none()
+        );
+        assert!(!cache.by_content.contains_key(&other_key.content_hash));
+        assert_eq!(
+            cache.get_stale_by_content(&large_key.content_hash),
+            Some(latest)
+        );
+        cache.evict_except(&[]);
+        assert!(
+            cache
+                .get_stale_by_content(&large_key.content_hash)
+                .is_none()
+        );
+        assert!(cache.is_empty());
+        assert_eq!(prime(&mut cache, &large, &mut fonts), &whole);
+        cache.clear();
+        assert!(cache.get_by_key(&large_key).is_none());
+        assert!(
+            cache
+                .get_stale_by_content(&large_key.content_hash)
+                .is_none()
+        );
+        assert!(cache.is_empty());
+    }
+
+    #[test]
+    fn configured_truncation_bound_uses_the_visible_input_window() {
+        let mut fonts = crate::fonts::bundled_font_system();
+        let text = (0..40)
+            .map(|row| {
+                format!("Transcript line {row}: the quick brown fox jumps over the lazy dog.")
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        for viewport in [
+            TruncationViewport::HeadAnchored,
+            TruncationViewport::TailAnchored,
+        ] {
+            let mut full = item(&text, 600.0, 80.0);
+            full.viewport = viewport;
+            let mut cache = TruncationCache::new();
+            let default = cache.max_truncation_input_bytes();
+            assert_eq!(default, overflow::DEFAULT_MAX_TRUNCATION_INPUT_BYTES);
+            assert!((1024..default).contains(&text.len()));
+            let window = |bound| {
+                overflow::viewport_adjacent_input(
+                    &text,
+                    full.bounds_height,
+                    full.font_size_px * full.line_height_multiplier,
+                    viewport,
+                    bound,
+                    overflow::TRUNCATION_OVERSCAN_LINES,
                 )
-                .clone();
-            results.push((w, result));
-        }
-
-        // Each geometry must have produced a separate cache entry.
-        assert_eq!(
-            cache.len(),
-            3,
-            "three distinct intermediate geometries must produce three cache entries; \
-             got {} entries",
-            cache.len(),
-        );
-
-        // The narrowest geometry must be truncated.
-        let (narrow_w, ref narrow_result) = results[2];
-        assert!(
-            narrow_result.was_truncated,
-            "content must be truncated at narrowest intermediate geometry ({narrow_w}px)"
-        );
-        assert!(
-            narrow_result.text.ends_with(crate::overflow::ELLIPSIS),
-            "narrowest intermediate result must end with '…'; got: {:?}",
-            narrow_result.text,
-        );
-
-        // The narrow result must be shorter than the widest result (which may
-        // not be truncated).  At minimum the texts must differ.
-        let (wide_w, ref wide_result) = results[0];
-        if !wide_result.was_truncated {
-            assert_ne!(
-                wide_result.text, narrow_result.text,
-                "intermediate geometry at {wide_w}px and {narrow_w}px must produce \
-                 different truncation results (widths differ significantly)"
+            };
+            assert_eq!(window(default), text);
+            assert!(window(1024).len() < text.len());
+            let direct = TextItem {
+                text: Arc::from(window(1024)),
+                ..full.clone()
+            };
+            cache.set_max_truncation_input_bytes(1024);
+            assert_eq!(cache.max_truncation_input_bytes(), 1024);
+            let bounded = prime(&mut cache, &full, &mut fonts).clone();
+            let mut unbounded = TruncationCache::new();
+            unbounded.set_max_truncation_input_bytes(usize::MAX);
+            assert_eq!(
+                bounded.text,
+                prime(&mut unbounded, &direct, &mut fonts).text
             );
         }
     }
 
-    /// Verify that TruncationKey encodes bounds in the key: the same content
-    /// at two different widths produces two different keys (so the cache miss
-    /// mechanism that drives intermediate-geometry re-resolution is sound).
-    ///
-    /// This is the structural guarantee underlying the entire re-truncation
-    /// design: the TruncationCache already invalidates naturally on bounds change
-    /// because bounds are part of the key.
     #[test]
-    fn truncation_key_encodes_bounds_width_distinctly() {
-        let content = "any content string";
-        let key_a = TruncationKey::new(
-            content,
-            100.0,
-            50.0,
-            16.0,
-            FontFamily::SystemSansSerif,
-            400,
-            TruncationViewport::HeadAnchored,
-        );
-        let key_b = TruncationKey::new(
-            content,
-            200.0,
-            50.0,
-            16.0,
-            FontFamily::SystemSansSerif,
-            400,
-            TruncationViewport::HeadAnchored,
-        );
-        assert_ne!(
-            key_a, key_b,
-            "TruncationKey must differ when bounds_width differs \
-             (required for mid-drag cache-invalidation correctness)"
-        );
-    }
-
-    /// Verify that TruncationKey encodes bounds height in the key.
-    #[test]
-    fn truncation_key_encodes_bounds_height_distinctly() {
-        let content = "any content string";
-        let key_a = TruncationKey::new(
-            content,
-            200.0,
-            50.0,
-            16.0,
-            FontFamily::SystemSansSerif,
-            400,
-            TruncationViewport::HeadAnchored,
-        );
-        let key_b = TruncationKey::new(
-            content,
-            200.0,
-            80.0,
-            16.0,
-            FontFamily::SystemSansSerif,
-            400,
-            TruncationViewport::HeadAnchored,
-        );
-        assert_ne!(
-            key_a, key_b,
-            "TruncationKey must differ when bounds_height differs \
-             (required for mid-drag cache-invalidation correctness)"
-        );
-    }
-
-    // ──: styled/color run reslice tests ─────────────────────────────
-
-    /// reslice_styled_runs: runs entirely before content_end_byte are preserved.
-    #[test]
-    fn reslice_styled_runs_runs_within_range_preserved() {
-        let runs = vec![
-            StyledRunItem {
-                start_byte: 0,
-                end_byte: 4,
-                weight: Some(700),
-                italic: false,
-                monospace: false,
-                color: None,
-                background_color: None,
-                size_scale: None,
-                fill_line_width: false,
-            },
-            StyledRunItem {
-                start_byte: 5,
-                end_byte: 10,
-                weight: None,
-                italic: true,
-                monospace: false,
-                color: None,
-                background_color: None,
-                size_scale: None,
-                fill_line_width: false,
-            },
-        ];
-        // content_end = 10: both runs fit entirely
-        let result = reslice_styled_runs(&runs, 10);
-        assert_eq!(result.len(), 2, "both runs within range must be preserved");
-        assert_eq!(result[0].start_byte, 0);
-        assert_eq!(result[0].end_byte, 4);
-        assert_eq!(result[1].start_byte, 5);
-        assert_eq!(result[1].end_byte, 10);
-    }
-
-    /// reslice_styled_runs: runs starting at or beyond content_end_byte are dropped.
-    #[test]
-    fn reslice_styled_runs_beyond_truncation_dropped() {
-        let runs = vec![
-            StyledRunItem {
-                start_byte: 0,
-                end_byte: 3,
-                weight: Some(700),
-                italic: false,
-                monospace: false,
-                color: None,
-                background_color: None,
-                size_scale: None,
-                fill_line_width: false,
-            },
-            StyledRunItem {
-                start_byte: 5,
-                end_byte: 10,
-                weight: None,
-                italic: false,
-                monospace: false,
-                color: None,
-                background_color: None,
-                size_scale: None,
-                fill_line_width: false,
-            },
-        ];
-        // content_end = 4: second run (5..10) is entirely beyond truncation point
-        let result = reslice_styled_runs(&runs, 4);
-        assert_eq!(result.len(), 1, "run beyond content_end must be dropped");
-        assert_eq!(result[0].start_byte, 0);
-        assert_eq!(result[0].end_byte, 3);
-    }
-
-    /// reslice_styled_runs: runs partially overlapping content_end_byte are clamped.
-    #[test]
-    fn reslice_styled_runs_partial_overlap_clamped() {
-        let runs = vec![StyledRunItem {
-            start_byte: 3,
-            end_byte: 12,
-            weight: Some(700),
-            italic: false,
-            monospace: false,
-            color: None,
-            background_color: None,
-            size_scale: None,
-            fill_line_width: false,
-        }];
-        // content_end = 8: run 3..12 overlaps; should become 3..8
-        let result = reslice_styled_runs(&runs, 8);
+    fn clipping_reslices_styled_and_colored_runs_at_visible_byte_boundaries() {
+        let mut head = item("first then more", 80.0, 40.0);
+        head.styled_runs = [styled(0..2), styled(3..9), styled(9..14)].into();
+        let visible = reslice_styled_runs_for_item(&head, "first…");
+        assert_eq!(visible.len(), 2);
+        assert_eq!((visible[0].start_byte, visible[0].end_byte), (0, 2));
+        assert_eq!((visible[1].start_byte, visible[1].end_byte), (3, 5));
+        assert_eq!(visible[1].weight, head.styled_runs[1].weight);
         assert_eq!(
-            result.len(),
-            1,
-            "partially overlapping run should be clamped"
-        );
-        assert_eq!(result[0].start_byte, 3);
-        assert_eq!(
-            result[0].end_byte, 8,
-            "end_byte must be clamped to content_end"
-        );
-        assert_eq!(result[0].weight, Some(700), "weight must be preserved");
-    }
-
-    /// reslice_color_runs: runs entirely before content_end_byte are preserved.
-    #[test]
-    fn reslice_color_runs_within_range_preserved() {
-        let runs = vec![
-            ColorRunItem {
-                start_byte: 0,
-                end_byte: 4,
-                color: [255, 0, 0, 255],
-            },
-            ColorRunItem {
-                start_byte: 5,
-                end_byte: 9,
-                color: [0, 0, 255, 255],
-            },
-        ];
-        let result = reslice_color_runs(&runs, 10);
-        assert_eq!(result.len(), 2);
-        assert_eq!(result[0].end_byte, 4);
-        assert_eq!(result[1].end_byte, 9);
-    }
-
-    /// reslice_color_runs: runs beyond content_end_byte are dropped.
-    #[test]
-    fn reslice_color_runs_beyond_truncation_dropped() {
-        let runs = vec![
-            ColorRunItem {
-                start_byte: 0,
-                end_byte: 3,
-                color: [255, 0, 0, 255],
-            },
-            ColorRunItem {
-                start_byte: 6,
-                end_byte: 12,
-                color: [0, 255, 0, 255],
-            },
-        ];
-        let result = reslice_color_runs(&runs, 5);
-        assert_eq!(
-            result.len(),
-            1,
-            "second run entirely beyond content_end must be dropped"
-        );
-        assert_eq!(result[0].color, [255, 0, 0, 255]);
-    }
-
-    /// reslice_color_runs: partial overlap is clamped to content_end.
-    #[test]
-    fn reslice_color_runs_partial_overlap_clamped() {
-        let runs = vec![ColorRunItem {
-            start_byte: 2,
-            end_byte: 10,
-            color: [0, 128, 255, 255],
-        }];
-        let result = reslice_color_runs(&runs, 6);
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].start_byte, 2);
-        assert_eq!(result[0].end_byte, 6, "end clamped to content_end");
-        assert_eq!(result[0].color, [0, 128, 255, 255], "color preserved");
-    }
-
-    // ──: styled_runs_effective_measurement tests ───────────────────
-
-    /// Base case: no styled runs → returns base_weight and no monospace.
-    #[test]
-    fn styled_runs_effective_measurement_no_runs() {
-        let (weight, mono) = styled_runs_effective_measurement(&[], 400);
-        assert_eq!(weight, 400, "no runs: effective weight = base_weight");
-        assert!(!mono, "no runs: no monospace");
-    }
-
-    /// Bold run raises effective weight.
-    #[test]
-    fn styled_runs_effective_measurement_bold_run_raises_weight() {
-        let runs = vec![StyledRunItem {
-            start_byte: 0,
-            end_byte: 5,
-            weight: Some(700),
-            italic: false,
-            monospace: false,
-            color: None,
-            background_color: None,
-            size_scale: None,
-            fill_line_width: false,
-        }];
-        let (weight, mono) = styled_runs_effective_measurement(&runs, 400);
-        assert_eq!(weight, 700, "bold run must raise effective weight to 700");
-        assert!(!mono);
-    }
-
-    /// Monospace run sets use_monospace flag.
-    #[test]
-    fn styled_runs_effective_measurement_monospace_run_sets_flag() {
-        let runs = vec![StyledRunItem {
-            start_byte: 0,
-            end_byte: 5,
-            weight: None,
-            italic: false,
-            monospace: true,
-            color: None,
-            background_color: None,
-            size_scale: None,
-            fill_line_width: false,
-        }];
-        let (weight, mono) = styled_runs_effective_measurement(&runs, 400);
-        assert_eq!(
-            weight, 400,
-            "monospace run without weight: base_weight unchanged"
-        );
-        assert!(mono, "monospace run must set use_monospace");
-    }
-
-    /// Multiple runs: maximum weight is returned.
-    #[test]
-    fn styled_runs_effective_measurement_max_weight_returned() {
-        let runs = vec![
-            StyledRunItem {
-                start_byte: 0,
-                end_byte: 3,
-                weight: Some(600),
-                italic: false,
-                monospace: false,
-                color: None,
-                background_color: None,
-                size_scale: None,
-                fill_line_width: false,
-            },
-            StyledRunItem {
-                start_byte: 4,
-                end_byte: 8,
-                weight: Some(800),
-                italic: false,
-                monospace: false,
-                color: None,
-                background_color: None,
-                size_scale: None,
-                fill_line_width: false,
-            },
-            StyledRunItem {
-                start_byte: 9,
-                end_byte: 12,
-                weight: Some(500),
-                italic: false,
-                monospace: false,
-                color: None,
-                background_color: None,
-                size_scale: None,
-                fill_line_width: false,
-            },
-        ];
-        let (weight, mono) = styled_runs_effective_measurement(&runs, 400);
-        assert_eq!(weight, 800, "maximum weight across runs must be returned");
-        assert!(!mono);
-    }
-
-    // ──: tail-anchored styled-run reslice tests ────────────────────
-    //
-    // `truncate_tail_anchored` emits LEADING-ellipsis output ("…\n{tail}"),
-    // so styled_run byte offsets (relative to original text) must be shifted
-    // into the "…\n{tail}" coordinate space.  These tests verify the new
-    // `reslice_styled_runs_tail_anchored` and `reslice_color_runs_tail_anchored`
-    // helpers, and also confirm that the spans they produce slice the correct
-    // substrings from the leading-ellipsis effective text.
-
-    /// Basic shift: a bold run on the visible tail is remapped to effective_text coords.
-    ///
-    /// Original text:  "line1\nline2\nline3"  (bytes 0..17)
-    /// Truncated (tail-anchored): "…\nline2\nline3"
-    ///   - "…" = 3 bytes, "\n" = 1 byte → leading_bytes = 4
-    ///   - tail_origin = 17 - 12 = 5  ("line1\n" is the dropped prefix, 6 bytes)
-    ///
-    /// Wait — let's compute carefully:
-    ///   "line1\nline2\nline3"
-    ///    0123456789012345678
-    ///    "line2\nline3" starts at byte 6 (len 12)
-    ///    tail_origin = 18 - 12 = 6
-    ///
-    /// A bold run at [6..10] ("line") in original text should shift to
-    ///   new_start = 6 - 6 + 4 = 4
-    ///   new_end   = 10 - 6 + 4 = 8
-    /// In effective_text "…\nline2\nline3":
-    ///   bytes 0..3 = "…", byte 3 = "\n", bytes 4..10 = "line2\n", bytes 10..15 = "line3"
-    ///   → [4..8] = "line" ✓ (correct glyphs styled)
-    #[test]
-    fn reslice_styled_runs_tail_anchored_basic_shift() {
-        let original = "line1\nline2\nline3";
-        // "line2\nline3" = 12 bytes; starts at byte 6 in original
-        let truncated = "…\nline2\nline3";
-        // ELLIPSIS = "…" = 3 bytes, + "\n" = 4 bytes leading_bytes
-        // tail_origin = 17 - 12 = 5? No: original.len() = 17 actually.
-        // "line1\nline2\nline3": l-i-n-e-1 = 5, \n = 1, l-i-n-e-2 = 5, \n = 1, l-i-n-e-3 = 5 → 17 bytes
-        // "line2\nline3": l-i-n-e-2 = 5, \n = 1, l-i-n-e-3 = 5 → 11 bytes
-        // tail_origin = 17 - 11 = 6 ✓ ("line1\n" = 6 bytes)
-        // leading_bytes = 3 + 1 = 4
-        // bold run [6..11] ("line2") in original → [6-6+4.. 11-6+4] = [4..9]
-        // In "…\nline2\nline3": bytes [4..9] = "line2" ✓
-        let runs = vec![StyledRunItem {
-            start_byte: 6,
-            end_byte: 11,
-            weight: Some(700),
-            italic: false,
-            monospace: false,
-            color: None,
-            background_color: None,
-            size_scale: None,
-            fill_line_width: false,
-        }];
-        let result = reslice_styled_runs_tail_anchored(original, truncated, &runs);
-        assert_eq!(
-            result.len(),
-            1,
-            "bold run on visible tail must survive reslice"
-        );
-        assert_eq!(
-            result[0].start_byte, 4,
-            "start must be shifted to leading-ellipsis coords"
-        );
-        assert_eq!(
-            result[0].end_byte, 9,
-            "end must be shifted to leading-ellipsis coords"
-        );
-        assert_eq!(result[0].weight, Some(700), "weight preserved");
-        // Verify the span slices the correct substring.
-        assert_eq!(
-            &truncated[result[0].start_byte..result[0].end_byte],
-            "line2",
-            "resliced run must address 'line2' in the effective text"
-        );
-    }
-
-    /// Single-line `max_lines == 1` output: the
-    /// tail-anchored result is `"…{newest line}"` with NO newline.  The reslice
-    /// must use a `leading_bytes` of `ELLIPSIS.len()` (3), not `ELLIPSIS.len()+1`
-    /// (4), or it would slice off the first content byte and mis-shift offsets.
-    #[test]
-    fn reslice_styled_runs_tail_anchored_single_line_inline_ellipsis() {
-        let original = "old line one\nold line two\nNewest";
-        // max_lines==1 leading-ellipsis output: "…Newest" (no newline).
-        let truncated = "…Newest";
-        // leading_bytes must resolve to 3 (just "…"), tail_content = "Newest".
-        // tail_origin = original.len() - 6.  A bold run over "Newest" in the
-        // original must remap to address "Newest" in "…Newest".
-        let newest_start = original.len() - "Newest".len();
-        let runs = vec![StyledRunItem {
-            start_byte: newest_start,
-            end_byte: original.len(),
-            weight: Some(700),
-            italic: false,
-            monospace: false,
-            color: None,
-            background_color: None,
-            size_scale: None,
-            fill_line_width: false,
-        }];
-        let result = reslice_styled_runs_tail_anchored(original, truncated, &runs);
-        assert_eq!(
-            result.len(),
-            1,
-            "bold run on the single visible newest line must survive reslice"
-        );
-        // "…" = 3 bytes; "Newest" occupies bytes [3..9] in "…Newest".
-        assert_eq!(
-            result[0].start_byte, 3,
-            "start must shift past the inline '…'"
-        );
-        assert_eq!(result[0].end_byte, truncated.len());
-        assert_eq!(
-            &truncated[result[0].start_byte..result[0].end_byte],
-            "Newest",
-            "resliced run must address 'Newest' in the single-line effective text"
-        );
-    }
-
-    /// Run entirely before the visible tail is dropped.
-    #[test]
-    fn reslice_styled_runs_tail_anchored_run_before_tail_dropped() {
-        let original = "line1\nline2\nline3";
-        let truncated = "…\nline2\nline3";
-        // Run [0..5] = "line1" is in the dropped prefix → should be dropped.
-        let runs = vec![StyledRunItem {
-            start_byte: 0,
-            end_byte: 5,
-            weight: Some(700),
-            italic: false,
-            monospace: false,
-            color: None,
-            background_color: None,
-            size_scale: None,
-            fill_line_width: false,
-        }];
-        let result = reslice_styled_runs_tail_anchored(original, truncated, &runs);
-        assert!(
-            result.is_empty(),
-            "run entirely before tail must be dropped; got: {result:?}"
-        );
-    }
-
-    /// Run partially overlapping the tail start is clamped to the tail start.
-    #[test]
-    fn reslice_styled_runs_tail_anchored_partial_overlap_clamped() {
-        let original = "line1\nline2\nline3";
-        let truncated = "…\nline2\nline3";
-        // tail_origin = 6; run [3..9] straddles the tail boundary.
-        // Clamped start = 6; end = 9.
-        // new_start = 6 - 6 + 4 = 4; new_end = 9 - 6 + 4 = 7.
-        // truncated[4..7] = "lin" (start of "line2")
-        let runs = vec![StyledRunItem {
-            start_byte: 3,
-            end_byte: 9,
-            weight: Some(700),
-            italic: false,
-            monospace: false,
-            color: None,
-            background_color: None,
-            size_scale: None,
-            fill_line_width: false,
-        }];
-        let result = reslice_styled_runs_tail_anchored(original, truncated, &runs);
-        assert_eq!(
-            result.len(),
-            1,
-            "partially overlapping run must survive as clamped"
-        );
-        assert_eq!(
-            result[0].start_byte, 4,
-            "clamped start must be at tail start in effective coords"
-        );
-        assert_eq!(result[0].end_byte, 7);
-        assert_eq!(
-            &truncated[result[0].start_byte..result[0].end_byte],
-            "lin",
-            "sliced text must be the overlap region in effective text"
-        );
-    }
-
-    /// Multiple runs: only runs on the visible tail survive; their offsets are
-    /// correct addresses into the leading-ellipsis effective text.
-    ///
-    /// This pins clipping for leading-ellipsis output: before the fix,
-    /// `content_end` would equal `truncated.len()` (strip_suffix failing on
-    /// leading-ellipsis output), no clipping would occur, and the original
-    /// offsets (0..5 and 6..11) would be applied verbatim to "…\nline2\nline3".
-    /// Byte 0..5 of that string is "…\nli" (not "line1") — wrong glyphs styled.
-    #[test]
-    fn reslice_styled_runs_tail_anchored_multiple_runs_regression() {
-        let original = "line1\nline2\nline3";
-        // tail_origin = 6; leading_bytes = 4
-        let truncated = "…\nline2\nline3";
-
-        let runs = vec![
-            // Run on dropped prefix ("line1") → should be dropped
-            StyledRunItem {
-                start_byte: 0,
-                end_byte: 5,
-                weight: Some(700),
-                italic: false,
-                monospace: false,
-                color: None,
-                background_color: None,
-                size_scale: None,
-                fill_line_width: false,
-            },
-            // Run on visible tail ("line2") → should map to [4..9] in effective_text
-            StyledRunItem {
-                start_byte: 6,
-                end_byte: 11,
-                weight: Some(400),
-                italic: true,
-                monospace: false,
-                color: Some([255, 0, 0, 255]),
-                background_color: None,
-                size_scale: None,
-                fill_line_width: false,
-            },
-        ];
-
-        let result = reslice_styled_runs_tail_anchored(original, truncated, &runs);
-        assert_eq!(
-            result.len(),
-            1,
-            "only the run on the visible tail survives; got {result:?}"
-        );
-        assert_eq!(
-            result[0].start_byte, 4,
-            "run on 'line2' must start at byte 4 (after '…\\n') in effective text"
-        );
-        assert_eq!(
-            result[0].end_byte, 9,
-            "run on 'line2' must end at byte 9 in effective text"
-        );
-        assert_eq!(
-            &truncated[result[0].start_byte..result[0].end_byte],
-            "line2",
-            "shifted run must address 'line2' in '…\\nline2\\nline3'"
+            visible[1].background_color,
+            head.styled_runs[1].background_color
         );
 
-        // Demonstrate the pre-fix bug: if offsets were NOT shifted, byte
-        // range [6..11] in truncated "…\nline2\nline3" addresses "\nline" — wrong.
-        // After the fix the range [4..9] correctly addresses "line2".
-        assert_ne!(
-            &truncated[6..11],
-            "line2",
-            "unshifted offset 6..11 must NOT address 'line2' in effective text \
-             (confirms the pre-fix mis-styling)"
-        );
-    }
-
-    /// `reslice_color_runs_tail_anchored`: basic color run on visible tail.
-    #[test]
-    fn reslice_color_runs_tail_anchored_basic_shift() {
-        let original = "line1\nline2\nline3";
-        let truncated = "…\nline2\nline3";
-        // Run [6..11] = "line2" in original → [4..9] in effective_text.
-        let runs = vec![ColorRunItem {
-            start_byte: 6,
-            end_byte: 11,
-            color: [0, 128, 255, 255],
-        }];
-        let result = reslice_color_runs_tail_anchored(original, truncated, &runs);
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].start_byte, 4);
-        assert_eq!(result[0].end_byte, 9);
-        assert_eq!(result[0].color, [0, 128, 255, 255], "color preserved");
-        assert_eq!(
-            &truncated[result[0].start_byte..result[0].end_byte],
-            "line2",
-            "color run must address 'line2' in effective text"
-        );
-    }
-
-    /// `reslice_color_runs_tail_anchored`: run before tail is dropped.
-    #[test]
-    fn reslice_color_runs_tail_anchored_run_before_tail_dropped() {
-        let original = "line1\nline2\nline3";
-        let truncated = "…\nline2\nline3";
-        let runs = vec![ColorRunItem {
-            start_byte: 0,
-            end_byte: 5,
-            color: [255, 0, 0, 255],
-        }];
-        let result = reslice_color_runs_tail_anchored(original, truncated, &runs);
-        assert!(
-            result.is_empty(),
-            "color run before tail must be dropped; got {result:?}"
-        );
-    }
-
-    /// `reslice_styled_runs_tail_anchored` falls back (empty) when first
-    /// visible line was further horizontally truncated (no suffix match).
-    #[test]
-    fn reslice_styled_runs_tail_anchored_first_line_truncated_fallback() {
-        let original = "line1\nthis_is_a_very_long_line_2\nline3";
-        // First visible line was horizontally truncated: "this_is_a_very…"
-        // So truncated_str does NOT end with original text's suffix.
-        let truncated = "…\nthis_is_a_very…\nline3";
-        let runs = vec![StyledRunItem {
-            start_byte: 6,
-            end_byte: 15,
-            weight: Some(700),
-            italic: false,
-            monospace: false,
-            color: None,
-            background_color: None,
-            size_scale: None,
-            fill_line_width: false,
-        }];
-        // original.ends_with("this_is_a_very…\nline3") is false, so empty is returned.
-        let result = reslice_styled_runs_tail_anchored(original, truncated, &runs);
-        assert!(
-            result.is_empty(),
-            "when first line is horizontally truncated, must return empty (unstyled fallback); \
-             got {result:?}"
-        );
-    }
-
-    // ──: no-truncation short-circuit tests ──────────────────────────
-    //
-    // Regression: when the cache returns Some(truncated_str) but truncated_str
-    // equals the original text (it fit without truncation), the code must NOT
-    // enter the tail-anchored or head-anchored reslice branches — even when the
-    // original text starts with ELLIPSIS.  Before this fix, a text starting
-    // with "…" in TailAnchored mode would incorrectly trigger the leading-ellipsis
-    // shift, painting styled/color runs on wrong glyph positions.
-
-    /// styled_runs: no-truncation short-circuit preserves runs unchanged even
-    /// when the original text starts with ELLIPSIS (the pre-fix false trigger).
-    #[test]
-    fn styled_runs_no_truncation_preserves_runs_when_text_starts_with_ellipsis() {
-        // Original text that happens to start with the ellipsis character.
-        let text: Arc<str> = Arc::from("…already_short");
-        // truncated_str identical to original — text fit, no truncation occurred.
-        let truncated_str: Arc<str> = Arc::clone(&text);
-
-        let runs = vec![
-            StyledRunItem {
-                start_byte: 0,
-                end_byte: 3, // 3-byte UTF-8 ellipsis
-                weight: Some(700),
-                italic: false,
-                monospace: false,
-                color: None,
-                background_color: None,
-                size_scale: None,
-                fill_line_width: false,
-            },
-            StyledRunItem {
-                start_byte: 3,
-                end_byte: 14,
-                weight: None,
-                italic: true,
-                monospace: false,
-                color: None,
-                background_color: None,
-                size_scale: None,
-                fill_line_width: false,
-            },
-        ];
-
-        // Simulate the reslice decision that prepare_text_items now makes.
-        // The short-circuit must fire: no offset shift must occur.
-        // Note: in production code `truncated_str` is `&str`; here we hold
-        // `Arc<str>` and deref to compare the str values directly.
-        let resliced: Vec<StyledRunItem> = if *truncated_str == *text {
-            runs.to_vec()
-        } else if truncated_str.starts_with(crate::overflow::ELLIPSIS) {
-            reslice_styled_runs_tail_anchored(&text, &truncated_str, &runs)
-        } else {
-            let content_end = truncated_str
-                .strip_suffix(crate::overflow::ELLIPSIS)
-                .map(|s| s.len())
-                .unwrap_or(truncated_str.len());
-            reslice_styled_runs(&runs, content_end)
-        };
-
-        assert_eq!(
-            resliced.len(),
-            2,
-            "all runs must be preserved by the no-truncation short-circuit; got {resliced:?}"
-        );
-        assert_eq!(
-            resliced[0].start_byte, 0,
-            "first run start must be unshifted"
-        );
-        assert_eq!(resliced[0].end_byte, 3, "first run end must be unshifted");
-        assert_eq!(
-            resliced[1].start_byte, 3,
-            "second run start must be unshifted"
-        );
-        assert_eq!(resliced[1].end_byte, 14, "second run end must be unshifted");
-    }
-
-    /// color_runs: no-truncation short-circuit preserves runs unchanged even
-    /// when the original text starts with ELLIPSIS.
-    #[test]
-    fn color_runs_no_truncation_preserves_runs_when_text_starts_with_ellipsis() {
-        let text: Arc<str> = Arc::from("…short");
-        let truncated_str: Arc<str> = Arc::clone(&text);
-
-        let runs = vec![ColorRunItem {
-            start_byte: 0,
-            end_byte: 3, // 3-byte ellipsis
-            color: [255, 0, 0, 255],
-        }];
-
-        // Simulate the color-runs reslice decision.
-        // Note: in production code `truncated_str` is `&str`; here we hold
-        // `Arc<str>` and deref to compare the str values directly.
-        let resliced: Vec<ColorRunItem> = if *truncated_str == *text {
-            runs.to_vec()
-        } else if truncated_str.starts_with(crate::overflow::ELLIPSIS) {
-            reslice_color_runs_tail_anchored(&text, &truncated_str, &runs)
-        } else {
-            let content_end = truncated_str
-                .strip_suffix(crate::overflow::ELLIPSIS)
-                .map(|s| s.len())
-                .unwrap_or(truncated_str.len());
-            reslice_color_runs(&runs, content_end)
-        };
-
-        assert_eq!(
-            resliced.len(),
-            1,
-            "color run must be preserved by no-truncation short-circuit; got {resliced:?}"
-        );
-        assert_eq!(resliced[0].start_byte, 0, "run start must be unshifted");
-        assert_eq!(resliced[0].end_byte, 3, "run end must be unshifted");
-    }
-
-    // ──: #708 end-to-end regression tests ──────────────────────────
-    //
-    // These tests exercise the ACTUAL call-site functions extracted from the
-    // pipeline that #708 fixed:
-    //
-    //   (a) reslice_styled_runs_for_item — the reslice-decision core of the
-    //       prepare_text_items styled-run path (lines 591–614 before extraction).
-    //       Tests call this function with a TextItem that carries a bold run
-    //       whose end_byte spans into the "…" glyph, and assert that the
-    //       returned runs do NOT include the ellipsis bytes.
-    //
-    //   (b) effective_truncation_key — the key-building core shared by
-    //       prime_truncation_cache and prepare_text_items.  Tests call this
-    //       function with a TextItem containing bold styled_runs and assert
-    //       the key encodes the effective weight (700) rather than the base
-    //       weight (400), then verify TruncationCache::prime produces a
-    //       strictly shorter truncated prefix at weight 700 vs 400.
-    //
-    // HOW THESE FAIL WHEN THE FIX IS REVERTED
-    //
-    //   (a) If `reslice_styled_runs` is removed from
-    //       `reslice_styled_runs_for_item`, the function returns the original
-    //       (un-clamped) runs.  The test asserts the returned run's end_byte
-    //       equals `content_end` (≠ the original end_byte that spans into "…"),
-    //       so the `assert_eq!` fails.
-    //
-    //   (b) If `styled_runs_effective_measurement` is removed from
-    //       `effective_truncation_key` and replaced with `item.font_weight`,
-    //       the key will encode weight 400 even for a bold-run item.  The test
-    //       asserts the key returned by `effective_truncation_key` matches a
-    //       key built explicitly with weight 700 (via `assert_eq!`), so it fails.
-    //       The truncated-prefix length comparison also degenerates (both prefixes
-    //       equal, both would overflow visually when rendered at weight 700).
-
-    /// #708 fix (a) regression — styled-run PRESERVATION through truncation.
-    ///
-    /// Calls `reslice_styled_runs_for_item` (the call-site function extracted
-    /// from `prepare_text_items`'s reslice branch) with a `TextItem` whose
-    /// bold `styled_runs` span the "…" glyph bytes in the truncated string.
-    ///
-    /// **Would-fail-pre-fix**: if `reslice_styled_runs` is removed from
-    /// `reslice_styled_runs_for_item`, the returned run's `end_byte` will be
-    /// the original value (which includes the "…" bytes) instead of
-    /// `content_end` (the byte before "…").  The `assert_eq!(run.end_byte, …)`
-    /// on the returned run will fail.
-    ///
-    /// Additionally the test verifies that the spans built from the resliced
-    /// runs do NOT include "…" in any bold span — the correctness property
-    /// that the fix was designed to restore.
-    #[test]
-    fn regression_708a_reslice_for_item_clamps_run_away_from_ellipsis() {
-        // Layout:
-        //   truncated_str: "Hello…"
-        //   H  e  l  l  o  …(3 bytes)
-        //   0  1  2  3  4  5 6 7  ← byte offsets
-        //   content_end = 5  (byte just before "…")
-        //   ellipsis    = bytes 5..8
-        //   total len   = 8
-        //
-        // The TextItem carries a bold run 0..8 (original text was longer than
-        // "Hello…"; the run covers all of it).  Before the fix, the run would
-        // be passed un-clamped to styled_run_spans → the "…" glyph ended up
-        // in a bold span.  With the fix (reslice_styled_runs_for_item) the run
-        // is clamped to end_byte=5 so only "Hello" is bold.
-        let ellipsis = crate::overflow::ELLIPSIS; // "…" — 3 UTF-8 bytes
-        let prefix = "Hello";
-        let truncated_str = format!("{prefix}{ellipsis}");
-        let content_end = prefix.len(); // 5
-
-        // Simulate a TextItem whose original text was longer (e.g. "Hello World")
-        // and whose bold run spans 0..11 in original-text space.
-        // After truncation the truncated_str is "Hello…" (8 bytes), so the run's
-        // un-clamped end_byte (11) is > truncated_str.len() (8); yet
-        // styled_run_spans clamps to text.len() (8), which still covers "…".
-        // We model this with end_byte = truncated_str.len() (8) — the pathological
-        // case where un-clamped == truncated-string length — to match the exact
-        // pre-fix bug scenario.
-        let item = TextItem {
-            text: Arc::from("Hello World"), // original (longer) text
-            pixel_x: 0.0,
-            pixel_y: 0.0,
-            bounds_width: 60.0,
-            bounds_height: 40.0,
-            clip_pixel_x: 0.0,
-            clip_pixel_y: 0.0,
-            clip_bounds_width: 60.0,
-            clip_bounds_height: 40.0,
-            font_size_px: 16.0,
-            font_family: FontFamily::SystemSansSerif,
-            font_weight: 400,
-            color: [255, 255, 255, 255],
-            alignment: TextAlign::Start,
-            overflow: TextOverflow::Ellipsis,
-            outline_color: None,
-            outline_width: None,
-            opacity: 1.0,
-            color_runs: Box::new([]),
-            styled_runs: Box::new([StyledRunItem {
-                start_byte: 0,
-                end_byte: truncated_str.len(), // 8 — includes "…" bytes
-                weight: Some(700),
-                italic: false,
-                monospace: false,
-                color: None,
-                background_color: None,
-                size_scale: None,
-                fill_line_width: false,
-            }]),
-            viewport: TruncationViewport::HeadAnchored,
-            line_height_multiplier: 1.4,
-        };
-
-        // ── Call through the EXTRACTED CALL-SITE FUNCTION ─────────────────────
-        // reslice_styled_runs_for_item is the exact logic that prepare_text_items
-        // now delegates to.  If the fix (reslice_styled_runs branch) is reverted,
-        // the function returns the original un-clamped run.
-        let resliced = reslice_styled_runs_for_item(&item, &truncated_str);
-
-        // The resliced run must exist (bold content survived truncation).
-        assert_eq!(
-            resliced.len(),
-            1,
-            "#708 fix-a regression: one bold run must survive into the prefix; \
-             got: {resliced:?}"
-        );
-        // The run must be clamped to content_end (byte 5, the "H…o" prefix,
-        // NOT the "…" bytes).  If reslice is reverted, end_byte = 8 ≠ 5.
-        assert_eq!(
-            resliced[0].end_byte, content_end,
-            "#708 fix-a regression: bold run must be clamped to content_end={content_end} \
-             (byte before '…'); got end_byte={} — reslice_styled_runs is not being applied",
-            resliced[0].end_byte,
-        );
-        assert_eq!(
-            resliced[0].weight,
-            Some(700),
-            "#708 fix-a regression: bold weight must be preserved through reslice"
-        );
-
-        // ── Verify the styling-preservation invariant ─────────────────────────
-        // Build spans from the resliced run and assert "…" is NOT in any bold span.
-        let base_attrs = Attrs::new().family(Family::SansSerif).weight(Weight(400));
+        let mut bold = item("Hello world", 80.0, 40.0);
+        bold.styled_runs = [styled(0..8)].into();
+        let clipped = "Hello…";
+        let visible = reslice_styled_runs_for_item(&bold, clipped);
         let spans = styled_run_spans(
-            &truncated_str,
-            &resliced,
-            base_attrs,
-            FontFamily::SystemSansSerif,
-            16.0,
-            1.4,
+            clipped,
+            &visible,
+            Attrs::new().family(Family::SansSerif).weight(Weight(400)),
+            bold.font_family,
+            bold.font_size_px,
+            bold.line_height_multiplier,
         );
-        let ellipsis_in_bold = spans
+        let weights: Vec<_> = spans
             .iter()
-            .any(|(s, attrs)| attrs.weight == Weight(700) && s.contains(ellipsis));
-        assert!(
-            !ellipsis_in_bold,
-            "#708 fix-a regression: '…' must not appear in any bold span; \
-             got spans: {:?}",
-            spans.iter().map(|(s, _)| *s).collect::<Vec<_>>()
-        );
-
-        // Bold text must cover exactly the prefix "Hello".
-        let bold_text: String = spans
-            .iter()
-            .filter(|(_, attrs)| attrs.weight == Weight(700))
-            .map(|(s, _)| *s)
+            .map(|(text, attrs)| (*text, attrs.weight))
             .collect();
+        assert_eq!(weights, [("Hello", Weight(700)), ("…", Weight(400))]);
+
+        let color_runs = [color(0..2), color(3..9), color(9..14)];
+        let colors = reslice_color_runs(&color_runs, 5);
+        assert_eq!(colors.len(), 2);
+        assert_eq!((colors[0].start_byte, colors[0].end_byte), (0, 2));
         assert_eq!(
-            bold_text, prefix,
-            "#708 fix-a regression: bold span must cover exactly '{prefix}', not '…'"
-        );
-    }
-
-    /// #708 fix (b) regression — styled MEASUREMENT correctness via
-    /// `effective_truncation_key`.
-    ///
-    /// Calls `effective_truncation_key` (the call-site function shared by
-    /// `prime_truncation_cache` and `prepare_text_items`) with a `TextItem`
-    /// carrying a full-text bold `styled_run`, then asserts the returned key
-    /// encodes the effective weight 700 (not the base weight 400) and that
-    /// `TruncationCache::prime` at weight 700 produces a strictly shorter
-    /// truncated prefix than at weight 400.
-    ///
-    /// **Would-fail-pre-fix**: if `styled_runs_effective_measurement` is removed
-    /// from `effective_truncation_key` and replaced with `item.font_weight`, the
-    /// key will encode weight 400 for the bold item.  The `assert_eq!` comparing
-    /// the returned key with a key explicitly built at weight 700 will fail,
-    /// catching the regression directly at the call site.
-    #[test]
-    fn regression_708b_effective_key_uses_bold_weight_and_truncates_more() {
-        let mut fs = crate::fonts::bundled_font_system();
-
-        // Content long enough to overflow at both weight 400 and 700 in a
-        // narrow box, with the cut-point differing between the two weights.
-        let content = "WWW bold WWW bold WWW bold WWW bold";
-        let narrow_w = 120.0_f32;
-        let height = 40.0_f32;
-        let font_size = 16.0_f32;
-        let base_weight: u16 = 400;
-        let eff_weight: u16 = 700;
-
-        // TextItem with a bold styled_run covering all content.
-        let item_bold = TextItem {
-            text: Arc::from(content),
-            pixel_x: 0.0,
-            pixel_y: 0.0,
-            bounds_width: narrow_w,
-            bounds_height: height,
-            clip_pixel_x: 0.0,
-            clip_pixel_y: 0.0,
-            clip_bounds_width: narrow_w,
-            clip_bounds_height: height,
-            font_size_px: font_size,
-            font_family: FontFamily::SystemSansSerif,
-            font_weight: base_weight, // BASE weight — the item-level setting
-            color: [255, 255, 255, 255],
-            alignment: TextAlign::Start,
-            overflow: TextOverflow::Ellipsis,
-            outline_color: None,
-            outline_width: None,
-            opacity: 1.0,
-            color_runs: Box::new([]),
-            // The styled_run makes the effective weight 700 — this is what the
-            // fix must pick up.
-            styled_runs: Box::new([StyledRunItem {
-                start_byte: 0,
-                end_byte: content.len(),
-                weight: Some(eff_weight),
-                italic: false,
-                monospace: false,
-                color: None,
-                background_color: None,
-                size_scale: None,
-                fill_line_width: false,
-            }]),
-            viewport: TruncationViewport::HeadAnchored,
-            line_height_multiplier: 1.4,
-        };
-
-        // ── Call through the EXTRACTED CALL-SITE FUNCTION ─────────────────────
-        // effective_truncation_key is the key-building core that prime_truncation_cache
-        // and prepare_text_items now delegate to.  If the fix is reverted,
-        // the key will encode base_weight (400) instead of eff_weight (700).
-        let key_from_item = effective_truncation_key(&item_bold)
-            .expect("#708 fix-b: Ellipsis item must produce a key");
-
-        // Build the expected key explicitly at eff_weight=700.  If
-        // effective_truncation_key uses base_weight instead, key_from_item will
-        // encode 400 here → assert_eq! fails, catching the regression.
-        let expected_bold_key = TruncationKey::new(
-            content,
-            narrow_w,
-            height,
-            font_size,
-            FontFamily::SystemSansSerif,
-            eff_weight, // 700 — what effective_truncation_key must produce
-            TruncationViewport::HeadAnchored,
-        );
-        assert_eq!(
-            key_from_item, expected_bold_key,
-            "#708 fix-b regression: effective_truncation_key must encode the \
-             effective bold weight ({eff_weight}) for a TextItem with bold styled_runs; \
-             if this fails, styled_runs_effective_measurement is not being called"
+            (colors[1].start_byte, colors[1].end_byte, colors[1].color),
+            (3, 5, color_runs[1].color)
         );
 
-        // The key must DIFFER from a base-weight-400 key (sanity check that
-        // the two weights produce distinct cache slots).
-        let base_key = TruncationKey::new(
-            content,
-            narrow_w,
-            height,
-            font_size,
-            FontFamily::SystemSansSerif,
-            base_weight, // 400
-            TruncationViewport::HeadAnchored,
-        );
-        assert_ne!(
-            key_from_item, base_key,
-            "#708 fix-b regression: bold-item key must differ from base-weight key"
-        );
-
-        // ── Verify truncation-length correctness ──────────────────────────────
-        // Prime the cache at base weight (400) and at the effective bold weight (700).
-        // Bold glyphs are wider → fewer characters fit → the prefix is shorter.
-        let mut cache_base = TruncationCache::new();
-        let result_base = cache_base
-            .prime(
-                base_key,
-                content,
-                narrow_w,
-                height,
-                font_size,
-                FontFamily::SystemSansSerif,
-                base_weight,
-                TruncationViewport::HeadAnchored,
-                1.4,
-                &mut fs,
-            )
-            .clone();
-
-        let mut cache_bold = TruncationCache::new();
-        let result_bold = cache_bold
-            .prime(
-                expected_bold_key,
-                content,
-                narrow_w,
-                height,
-                font_size,
-                FontFamily::SystemSansSerif,
-                eff_weight,
-                TruncationViewport::HeadAnchored,
-                1.4,
-                &mut fs,
-            )
-            .clone();
-
-        assert!(
-            result_base.was_truncated,
-            "#708 fix-b regression: base-weight result must be truncated"
-        );
-        assert!(
-            result_bold.was_truncated,
-            "#708 fix-b regression: bold-weight result must be truncated"
-        );
-
-        // Bold must produce a prefix that is no longer than the base prefix.
-        // Pre-fix failure: both results would be identical (base weight used for
-        // both), so the bold text would overflow visually when rendered at 700.
-        let prefix_base = result_base
-            .text
-            .strip_suffix(crate::overflow::ELLIPSIS)
-            .unwrap_or(&result_base.text)
-            .len();
-        let prefix_bold = result_bold
-            .text
-            .strip_suffix(crate::overflow::ELLIPSIS)
-            .unwrap_or(&result_bold.text)
-            .len();
-        assert!(
-            prefix_bold <= prefix_base,
-            "#708 fix-b regression: bold-weight truncation must produce a prefix \
-             no longer than base-weight (bold glyphs are wider → earlier cut point); \
-             got base {prefix_base}B, bold {prefix_bold}B; \
-             base: {:?}, bold: {:?}",
-            result_base.text,
-            result_bold.text,
-        );
-
-        // Repeated priming at the exact effective attributes must preserve the
-        // bold result and its single cache slot. A base-weight result remains
-        // separate even when both live in the same cache.
-        let repeated_bold = cache_bold
-            .prime(
-                expected_bold_key,
-                content,
-                narrow_w,
-                height,
-                font_size,
-                FontFamily::SystemSansSerif,
-                eff_weight,
-                TruncationViewport::HeadAnchored,
-                1.4,
-                &mut fs,
-            )
-            .clone();
-        assert_eq!(repeated_bold, result_bold);
-        assert_eq!(cache_bold.entries.len(), 1);
-        let separate_base = cache_bold
-            .prime(
-                base_key,
-                content,
-                narrow_w,
-                height,
-                font_size,
-                FontFamily::SystemSansSerif,
-                base_weight,
-                TruncationViewport::HeadAnchored,
-                1.4,
-                &mut fs,
-            )
-            .clone();
-        assert_eq!(separate_base, result_base);
-        assert_eq!(cache_bold.entries.len(), 2);
-        assert_eq!(
-            cache_bold.entries.get(&expected_bold_key),
-            Some(&result_bold)
-        );
-
-        // The cached strings must actually fit when shaped at their respective
-        // effective weights, independently of the key and prefix-length checks.
-        for (result, weight) in [(&result_base, base_weight), (&result_bold, eff_weight)] {
-            let mut buffer = Buffer::new(&mut fs, Metrics::new(font_size, font_size * 1.4));
-            buffer.set_size(&mut fs, Some(narrow_w), None);
-            buffer.set_wrap(&mut fs, Wrap::Word);
-            buffer.set_text(
-                &mut fs,
-                &result.text,
-                Attrs::new()
-                    .family(Family::SansSerif)
-                    .weight(Weight(weight)),
-                Shaping::Advanced,
-            );
-            buffer.shape_until_scroll(&mut fs, false);
-            let runs: Vec<_> = buffer.layout_runs().collect();
-            assert!(!runs.is_empty());
-            assert!(runs.len() <= 1, "the 40px box contains one whole line");
-            assert!(runs.iter().all(|run| run.line_w <= narrow_w));
+        let mut tail = item("one\nélan\nlast", 80.0, 40.0);
+        tail.viewport = TruncationViewport::TailAnchored;
+        tail.styled_runs = [styled(0..3), styled(1..9), styled(10..14)].into();
+        let color_runs = [color(0..3), color(1..9), color(10..14)];
+        for (text, spans) in [
+            ("…\nélan\nlast", &[(4, 9, "élan"), (10, 14, "last")][..]),
+            ("…last", &[(3, 7, "last")][..]),
+            ("…\nél…\nlast", &[][..]),
+        ] {
+            let styles = effective_styled_runs_for_item(&tail, Some(text));
+            let colors = reslice_color_runs_tail_anchored(&tail.text, text, &color_runs);
+            assert_eq!(styles.len(), spans.len(), "{text}");
+            assert_eq!(colors.len(), spans.len(), "{text}");
+            for ((style, color), &(start, end, word)) in styles.iter().zip(&colors).zip(spans) {
+                assert_eq!((style.start_byte, style.end_byte), (start, end));
+                assert_eq!((color.start_byte, color.end_byte), (start, end));
+                assert_eq!(&text[start..end], word);
+                assert_eq!(style.size_scale, Some(1.2));
+                assert!(style.italic);
+            }
         }
 
-        // The cache consumer must keep contextual Unicode output and
-        // weight-separated cache slots under the union candidate search.
+        tail.text = Arc::from("…already_short");
+        tail.styled_runs = [styled(0..3), styled(3..14)].into();
+        let unchanged = effective_styled_runs_for_item(&tail, Some(&tail.text));
+        assert_eq!(unchanged.len(), 2);
+        assert_eq!((unchanged[0].start_byte, unchanged[0].end_byte), (0, 3));
+        assert_eq!((unchanged[1].start_byte, unchanged[1].end_byte), (3, 14));
+    }
+
+    #[test]
+    fn truncation_measures_effective_weight_and_monospace_and_keeps_their_keys_separate() {
+        let mut fonts = crate::fonts::bundled_font_system();
+        let mut cache = TruncationCache::new();
         for text in [
+            "WWW bold WWW bold WWW bold WWW bold",
             "WWW ffi e\u{301} 👨‍👩‍👧‍👦 WWW tail",
             "العربية الطويلة WWW العربية ffi",
             "heading\nWWW ffi e\u{301} 👨‍👩‍👧‍👦\nlast row",
         ] {
-            for weight in [base_weight, eff_weight] {
-                let key = TruncationKey::new(
-                    text,
-                    narrow_w,
-                    height,
-                    font_size,
-                    FontFamily::SystemSansSerif,
-                    weight,
-                    TruncationViewport::HeadAnchored,
-                );
-                let first = cache_bold
-                    .prime(
-                        key,
-                        text,
-                        narrow_w,
-                        height,
-                        font_size,
-                        FontFamily::SystemSansSerif,
-                        weight,
-                        TruncationViewport::HeadAnchored,
-                        1.4,
-                        &mut fs,
-                    )
-                    .clone();
-                // Shape the actual cached output independently at its exact
-                // effective weight; a matching cache entry alone is insufficient.
-                let mut output_reference =
-                    Buffer::new(&mut fs, Metrics::new(font_size, font_size * 1.4));
-                output_reference.set_size(&mut fs, Some(narrow_w), None);
-                output_reference.set_wrap(&mut fs, Wrap::Word);
-                output_reference.set_text(
-                    &mut fs,
-                    &first.text,
-                    Attrs::new()
-                        .family(Family::SansSerif)
-                        .weight(Weight(weight)),
-                    Shaping::Advanced,
-                );
-                output_reference.shape_until_scroll(&mut fs, false);
-                let output_runs: Vec<_> = output_reference.layout_runs().collect();
-                assert!(!output_runs.is_empty());
-                assert!(output_runs.len() <= 1);
-                assert!(output_runs.iter().all(|run| run.line_w <= narrow_w));
-                let entries = cache_bold.entries.len();
-                let repeated = cache_bold
-                    .prime(
-                        key,
-                        text,
-                        narrow_w,
-                        height,
-                        font_size,
-                        FontFamily::SystemSansSerif,
-                        weight,
-                        TruncationViewport::HeadAnchored,
-                        1.4,
-                        &mut fs,
-                    )
-                    .clone();
-                assert_eq!(repeated, first);
-                assert_eq!(cache_bold.entries.len(), entries);
-                assert_eq!(cache_bold.entries.get(&key), Some(&first));
+            let mut measured = item(text, 120.0, 40.0);
+            let regular_key = effective_truncation_key(&measured).unwrap();
+            let regular = prime(&mut cache, &measured, &mut fonts).clone();
+            measured.styled_runs = [
+                StyledRunItem {
+                    weight: Some(600),
+                    ..styled(0..text.len())
+                },
+                styled(0..text.len()),
+                StyledRunItem {
+                    weight: Some(500),
+                    ..styled(0..text.len())
+                },
+            ]
+            .into();
+            let bold_key = effective_truncation_key(&measured).unwrap();
+            assert_ne!(regular_key, bold_key);
+            assert_eq!(bold_key.font_weight, 700);
+            let bold = prime(&mut cache, &measured, &mut fonts).clone();
+            assert_eq!(cache.get_by_key(&regular_key), Some(&regular));
+            assert_eq!(cache.get_by_key(&bold_key), Some(&bold));
+            let entries = cache.len();
+            assert_eq!(prime(&mut cache, &measured, &mut fonts), &bold);
+            assert_eq!(cache.len(), entries);
+            if text.starts_with("WWW bold") {
+                assert!(regular.was_truncated && bold.was_truncated);
+                assert!(bold.text.len() <= regular.text.len());
             }
+            for (weight, result) in [(400, regular), (700, bold)] {
+                measured.font_weight = weight;
+                let reference = shape(&measured, &result.text, &mut fonts);
+                let runs: Vec<_> = reference.layout_runs().collect();
+                assert_eq!(runs.len(), 1, "{text:?} at weight {weight}");
+                assert!(runs[0].line_w <= measured.bounds_width);
+            }
+            measured.font_weight = 400;
+            measured.styled_runs[0].monospace = true;
+            let mono_key = effective_truncation_key(&measured).unwrap();
+            assert_eq!(
+                mono_key,
+                TruncationKey::new(
+                    text,
+                    120.0,
+                    40.0,
+                    16.0,
+                    FontFamily::SystemMonospace,
+                    700,
+                    TruncationViewport::HeadAnchored,
+                )
+            );
+            assert_ne!(mono_key, bold_key);
+            measured.overflow = TextOverflow::Clip;
+            assert_eq!(effective_truncation_key(&measured), None);
         }
 
-        // Source-independent full backend layout is the oracle for these
-        // fitting consumer inputs, rather than another truncation helper.
-        // Fixed weight/configuration per call must not leak previous attributes.
+        let monospace = StyledRunItem {
+            weight: None,
+            monospace: true,
+            ..styled(0..4)
+        };
+        assert_eq!(
+            styled_runs_effective_measurement(&[monospace], 400),
+            (400, true)
+        );
+
         for text in [
             "",
             "العربية ffi",
+            "e\u{301} 👨‍👩‍👧‍👦",
             "LTR e\u{301} 👨‍👩‍👧‍👦",
             "one\ttwo",
             "first\r\nsecond\nthird",
         ] {
-            for weight in [eff_weight, base_weight, eff_weight] {
-                let attrs = Attrs::new()
-                    .family(Family::SansSerif)
-                    .weight(Weight(weight));
-                let mut reference = Buffer::new(&mut fs, Metrics::new(font_size, font_size * 1.4));
-                reference.set_size(&mut fs, Some(400.0), None);
-                reference.set_wrap(&mut fs, Wrap::Word);
-                reference.set_text(&mut fs, text, attrs, Shaping::Advanced);
-                reference.shape_until_scroll(&mut fs, false);
-                let expected_runs: Vec<_> = reference.layout_runs().collect();
-                assert!(expected_runs.len() <= 4);
-                assert!(expected_runs.iter().all(|run| run.line_w <= 400.0));
-                for run in &expected_runs {
-                    let min_start = run.glyphs.iter().map(|g| g.start).min().unwrap_or(0);
+            let mut fitted = item(text, 400.0, 100.0);
+            for weight in [700, 400, 700] {
+                fitted.font_weight = weight;
+                let reference = shape(&fitted, text, &mut fonts);
+                assert!(reference.layout_runs().count() <= 4);
+                for run in reference.layout_runs() {
                     assert!(
-                        reference.lines[run.line_i]
-                            .text()
-                            .is_char_boundary(min_start)
+                        run.line_w <= fitted.bounds_width,
+                        "{text:?} at weight {weight}"
                     );
+                    let start = run
+                        .glyphs
+                        .iter()
+                        .map(|glyph| glyph.start)
+                        .min()
+                        .unwrap_or(0);
+                    assert!(reference.lines[run.line_i].text().is_char_boundary(start));
                 }
-                let key = TruncationKey::new(
-                    text,
-                    400.0,
-                    100.0,
-                    font_size,
-                    FontFamily::SystemSansSerif,
-                    weight,
-                    TruncationViewport::HeadAnchored,
-                );
-                let actual = cache_bold
-                    .prime(
-                        key,
-                        text,
-                        400.0,
-                        100.0,
-                        font_size,
-                        FontFamily::SystemSansSerif,
-                        weight,
-                        TruncationViewport::HeadAnchored,
-                        1.4,
-                        &mut fs,
-                    )
-                    .clone();
-                assert_eq!(actual.text, text);
-                assert!(!actual.was_truncated);
-                let entries = cache_bold.entries.len();
-                let repeated = cache_bold
-                    .prime(
-                        key,
-                        text,
-                        400.0,
-                        100.0,
-                        font_size,
-                        FontFamily::SystemSansSerif,
-                        weight,
-                        TruncationViewport::HeadAnchored,
-                        1.4,
-                        &mut fs,
-                    )
-                    .clone();
-                assert_eq!(repeated, actual);
-                assert_eq!(cache_bold.entries.len(), entries);
-                assert_eq!(cache_bold.entries.get(&key), Some(&actual));
+
+                let key = effective_truncation_key(&fitted).unwrap();
+                let result = prime(&mut cache, &fitted, &mut fonts).clone();
+                assert_eq!(result.text, text, "{text:?} at weight {weight}");
+                assert!(!result.was_truncated);
+                let entries = cache.len();
+                assert_eq!(prime(&mut cache, &fitted, &mut fonts), &result);
+                assert_eq!(cache.len(), entries);
+                assert_eq!(cache.get_by_key(&key), Some(&result));
             }
         }
     }
 
-    /// Phase 2: `compute_inline_backdrop_quads` returns a quad for a
-    /// `StyledRunItem` with `background_color` set, using actual glyph layout data.
-    ///
-    /// Constructs a `Buffer` for the text "hello code world" where the word "code"
-    /// (bytes 6..10) has a `background_color` styled run set to the code-background
-    /// design token sentinel value `[30, 30, 30, 255]`.  After shaping, the function
-    /// must return exactly one quad that:
-    ///   - carries the correct color `[30, 30, 30, 255]`
-    ///   - has `x >= item.pixel_x` (glyph starts at or after the item origin)
-    ///   - has positive width and height (layout run produced real glyph metrics)
-    ///
-    /// **Would-fail pre-fix**: before this commit, `prepare_text_items` returned
-    /// `Result<(), String>` and no quads were ever computed.
     #[test]
-    fn compute_inline_backdrop_quads_returns_quad_for_background_color_run() {
-        // Attrs, Buffer, Family, Metrics, Shaping, Wrap are imported via `use super::*`
-        // (they come from the top-level `use glyphon::{...}` in text.rs).
-
-        let mut fs = crate::fonts::bundled_font_system();
-
-        // The plain text item (markdown already stripped).
-        // "hello " = 6 bytes, "code" = 4 bytes (bytes 6..10), " world" = 6 bytes.
-        let text: Arc<str> = Arc::from("hello code world");
-        let code_start: usize = 6; // byte offset of 'c' in "code"
-        let code_end: usize = 10; // byte offset just past 'e' in "code"
-        let bg_color: [u8; 4] = [30, 30, 30, 255];
-
-        let font_size = 16.0_f32;
-        let line_height = font_size * 1.4;
-        let pixel_x = 10.0_f32;
-        let pixel_y = 20.0_f32;
-        let width = 400.0_f32;
-        let height = 60.0_f32;
-
-        // Build and shape the buffer — mirrors what prepare_text_items does.
-        // Must use Shaping::Advanced so glyph.start/end are byte offsets (not
-        // char indices), matching what compute_inline_backdrop_quads expects.
-        let mut buf = Buffer::new(&mut fs, Metrics::new(font_size, line_height));
-        buf.set_size(&mut fs, Some(width), Some(height));
-        buf.set_wrap(&mut fs, Wrap::Word);
-        buf.set_text(
-            &mut fs,
-            &text,
-            Attrs::new().family(Family::SansSerif),
-            Shaping::Advanced,
-        );
-        buf.shape_until_scroll(&mut fs, false);
-
-        // Build the TextItem with a backdrop-colored styled run over "code".
-        let item = TextItem {
-            text: Arc::clone(&text),
-            pixel_x,
-            pixel_y,
-            bounds_width: width,
-            bounds_height: height,
-            clip_pixel_x: pixel_x,
-            clip_pixel_y: pixel_y,
-            clip_bounds_width: width,
-            clip_bounds_height: height,
-            font_size_px: font_size,
-            line_height_multiplier: 1.4,
-            font_family: FontFamily::SystemSansSerif,
-            font_weight: 400,
-            color: [255, 255, 255, 255],
-            alignment: TextAlign::Start,
-            overflow: TextOverflow::Clip,
-            outline_color: None,
-            outline_width: None,
-            opacity: 1.0,
-            color_runs: Box::new([]),
-            styled_runs: Box::new([StyledRunItem {
-                start_byte: code_start,
-                end_byte: code_end,
-                weight: None,
-                italic: false,
-                monospace: true,
-                color: None,
-                background_color: Some(bg_color),
-                size_scale: None,
-                fill_line_width: false,
-            }]),
-            viewport: TruncationViewport::HeadAnchored,
+    fn glyph_layout_drives_inline_backdrops_and_multiline_selection() {
+        let mut fonts = crate::fonts::bundled_font_system();
+        let quads = |item: &TextItem, fonts: &mut FontSystem| {
+            let buffer = shape(item, &item.text, fonts);
+            compute_inline_backdrop_quads(
+                std::slice::from_ref(item),
+                &[buffer],
+                &[item.styled_runs.to_vec()],
+            )
         };
 
-        // Sanity: the buffer must produce layout runs with glyphs before we test
-        // the backdrop computation.
-        assert!(
-            buf.layout_runs().count() > 0,
-            "buffer produced no layout runs — shape_until_scroll may not have worked; \
-             lines={}",
-            buf.lines.len()
-        );
-        assert!(
-            buf.layout_runs().map(|r| r.glyphs.len()).sum::<usize>() > 0,
-            "layout runs exist but contain no glyphs"
-        );
+        let mut code = item("hello code world", 400.0, 60.0);
+        let background = [30, 30, 30, 255];
+        code.styled_runs = [styled(6..10)].into();
+        let code_quads = quads(&code, &mut fonts);
+        assert_eq!(code_quads.len(), 1);
+        let quad = &code_quads[0];
+        assert_eq!(quad.color, background);
+        assert!(quad.x > code.pixel_x && quad.y >= code.pixel_y && quad.w > 0.0 && quad.h > 0.0);
+        code.styled_runs[0].fill_line_width = true;
+        let single_line_selection = quads(&code, &mut fonts);
+        assert_eq!(single_line_selection.len(), 1);
+        let filled = &single_line_selection[0];
+        assert_eq!((filled.x, filled.w), (quad.x, quad.w));
 
-        // Pass effective_styled_runs as the new third argument.  This test uses
-        // a non-truncated item so the effective runs are identical to item.styled_runs.
-        let eff_runs: Vec<Vec<StyledRunItem>> = vec![item.styled_runs.to_vec()];
-        let quads = compute_inline_backdrop_quads(&[item], &[buf], &eff_runs);
-
-        // At least one quad must be returned for the "code" span.
-        assert!(
-            !quads.is_empty(),
-            "expected at least one backdrop quad for the 'code' styled run, got none; \
-             sr_start={code_start}, sr_end={code_end}"
-        );
-
-        // All quads must carry the design-token color.
-        for (i, q) in quads.iter().enumerate() {
-            assert_eq!(
-                q.color, bg_color,
-                "quad[{i}] has wrong color {:?}, expected {:?}",
-                q.color, bg_color
-            );
+        for (text, width, bytes) in [("aaaa bbbb cccc", 45.0, 1..13), ("aa\nbb\ncc", 300.0, 1..7)] {
+            let mut selection = item(text, width, 200.0);
+            selection.styled_runs = [styled(bytes)].into();
+            let unfilled = quads(&selection, &mut fonts);
+            selection.styled_runs[0].fill_line_width = true;
+            let filled = quads(&selection, &mut fonts);
+            assert_eq!(unfilled.len(), 3, "{text:?}");
+            assert_eq!(filled.len(), 3, "{text:?}");
+            let right = selection.pixel_x + width;
+            let (first, middle, last) = (&filled[0], &filled[1], &filled[2]);
+            assert!(first.y < middle.y && middle.y < last.y);
+            assert!((first.x - unfilled[0].x).abs() < 0.01);
+            assert!((first.x + first.w - right).abs() < 0.01);
+            assert!((middle.x - selection.pixel_x).abs() < 0.01);
+            assert!((middle.w - width).abs() < 0.01);
+            assert!(middle.w > unfilled[1].w);
+            assert!((last.x - selection.pixel_x).abs() < 0.01);
+            assert!((last.x + last.w - unfilled[2].x - unfilled[2].w).abs() < 0.01);
         }
-
-        // Quad geometry must be physically plausible.
-        let first = &quads[0];
-        assert!(
-            first.x >= pixel_x,
-            "quad x ({}) must be >= item pixel_x ({pixel_x}); \
-             the 'code' span starts after 'hello ' so it can't be at the item origin",
-            first.x
-        );
-        assert!(first.w > 0.0, "quad width ({}) must be positive", first.w);
-        assert!(first.h > 0.0, "quad height ({}) must be positive", first.h);
-        assert!(
-            first.y >= pixel_y,
-            "quad y ({}) must be >= item pixel_y ({pixel_y})",
-            first.y
-        );
-    }
-
-    // ─── Multi-line composer selection highlight ─────────────────
-
-    /// Pure three-part-shape math: a single-line selection is untouched; the
-    /// first line extends to the right edge; the last line to the left edge; a
-    /// fully-interior line spans the full box width.
-    #[test]
-    fn extend_selection_quad_to_box_three_part_shape() {
-        let q = |x: f32, w: f32| InlineBackdropQuad {
-            x,
-            y: 0.0,
-            w,
-            h: 10.0,
-            color: [0, 0, 0, 255],
-        };
-        let (c0, c1) = (10.0_f32, 200.0_f32);
-
-        // Single line (no continuation) → unchanged.
-        let s = extend_selection_quad_to_box(q(50.0, 30.0), c0, c1, false, false);
-        assert_eq!((s.x, s.w), (50.0, 30.0));
-
-        // First line (continues onto the next) → extend RIGHT to the box edge.
-        let f = extend_selection_quad_to_box(q(50.0, 30.0), c0, c1, false, true);
-        assert_eq!(f.x, 50.0, "first-line left edge unchanged");
-        assert!(
-            (f.x + f.w - c1).abs() < 0.01,
-            "first-line extends to box right"
-        );
-
-        // Last line (continues from the previous) → extend LEFT to the box edge.
-        let l = extend_selection_quad_to_box(q(50.0, 30.0), c0, c1, true, false);
-        assert!((l.x - c0).abs() < 0.01, "last-line extends to box left");
-        assert!(
-            (l.x + l.w - 80.0).abs() < 0.01,
-            "last-line right edge preserved"
-        );
-
-        // Interior line (continues both ways) → full box width.
-        let m = extend_selection_quad_to_box(q(50.0, 30.0), c0, c1, true, true);
-        assert!(
-            (m.x - c0).abs() < 0.01 && (m.x + m.w - c1).abs() < 0.01,
-            "interior full width"
-        );
-    }
-
-    /// A `fill_line_width` selection spanning 3 wrapped visual lines produces the
-    /// standard shape: partial first line (to the right edge), a FULL-WIDTH
-    /// interior line, and a partial last line (from the left edge). Shaped with a
-    /// CPU `FontSystem` (no GPU).
-    #[test]
-    fn multiline_selection_fills_interior_line_width() {
-        let mut fs = crate::fonts::bundled_font_system();
-        // Narrow width forces one 4-char word per visual line: "aaaa"/"bbbb"/"cccc".
-        let text: Arc<str> = Arc::from("aaaa bbbb cccc");
-        let font_size = 16.0_f32;
-        let line_height = font_size * 1.4;
-        let (pixel_x, pixel_y, width, height) = (10.0_f32, 20.0_f32, 45.0_f32, 200.0_f32);
-        let sel_bg: [u8; 4] = [58, 123, 213, 115];
-
-        let mut buf = Buffer::new(&mut fs, Metrics::new(font_size, line_height));
-        buf.set_size(&mut fs, Some(width), Some(height));
-        buf.set_wrap(&mut fs, Wrap::Word);
-        buf.set_text(
-            &mut fs,
-            &text,
-            Attrs::new().family(Family::SansSerif),
-            Shaping::Advanced,
-        );
-        buf.shape_until_scroll(&mut fs, false);
-        assert!(
-            buf.layout_runs().count() >= 3,
-            "text must wrap to >= 3 visual rows"
-        );
-
-        // Selection from mid-first-word (byte 1) to mid-last-word (byte 13) spans all rows.
-        let make_item = |fill: bool| TextItem {
-            text: Arc::clone(&text),
-            pixel_x,
-            pixel_y,
-            bounds_width: width,
-            bounds_height: height,
-            clip_pixel_x: pixel_x,
-            clip_pixel_y: pixel_y,
-            clip_bounds_width: width,
-            clip_bounds_height: height,
-            font_size_px: font_size,
-            line_height_multiplier: 1.4,
-            font_family: FontFamily::SystemSansSerif,
-            font_weight: 400,
-            color: [255, 255, 255, 255],
-            alignment: TextAlign::Start,
-            overflow: TextOverflow::Clip,
-            outline_color: None,
-            outline_width: None,
-            opacity: 1.0,
-            color_runs: Box::new([]),
-            styled_runs: Box::new([StyledRunItem {
-                start_byte: 1,
-                end_byte: 13,
-                weight: None,
-                italic: false,
-                monospace: false,
-                color: None,
-                background_color: Some(sel_bg),
-                size_scale: None,
-                fill_line_width: fill,
-            }]),
-            viewport: TruncationViewport::HeadAnchored,
-        };
-
-        // Re-shape a second buffer for the control item (buffers are consumed by value).
-        let mut buf2 = Buffer::new(&mut fs, Metrics::new(font_size, line_height));
-        buf2.set_size(&mut fs, Some(width), Some(height));
-        buf2.set_wrap(&mut fs, Wrap::Word);
-        buf2.set_text(
-            &mut fs,
-            &text,
-            Attrs::new().family(Family::SansSerif),
-            Shaping::Advanced,
-        );
-        buf2.shape_until_scroll(&mut fs, false);
-
-        let item = make_item(true);
-        let eff = vec![item.styled_runs.to_vec()];
-        let quads = compute_inline_backdrop_quads(&[item], &[buf], &eff);
-        assert!(
-            quads.len() >= 3,
-            "one selection quad per wrapped line, got {}",
-            quads.len()
-        );
-
-        let box_left = pixel_x;
-        let box_right = pixel_x + width;
-        // Quads are emitted in visual-line order.
-        let (first, interior, last) = (&quads[0], &quads[1], &quads[2]);
-        // First line: extends to the box right edge (partial left).
-        assert!(
-            (first.x + first.w - box_right).abs() < 1.0 && first.x > box_left + 1.0,
-            "first line: partial-left, extends to box right (x={}, right={})",
-            first.x,
-            first.x + first.w
-        );
-        // Interior line: full box width.
-        assert!(
-            (interior.x - box_left).abs() < 1.0
-                && (interior.x + interior.w - box_right).abs() < 1.0,
-            "interior line must span the full box width (x={}, right={})",
-            interior.x,
-            interior.x + interior.w
-        );
-        // Last line: starts at the box left edge (partial right).
-        assert!(
-            (last.x - box_left).abs() < 1.0 && last.x + last.w < box_right - 1.0,
-            "last line: extends to box left, partial-right (x={}, right={})",
-            last.x,
-            last.x + last.w
-        );
-
-        // CONTROL: without fill_line_width, interior quads are tight to glyphs
-        // (NOT full width) — proving the flag drives the shape.
-        let control = make_item(false);
-        let eff2 = vec![control.styled_runs.to_vec()];
-        let control_quads = compute_inline_backdrop_quads(&[control], &[buf2], &eff2);
-        assert!(control_quads.len() >= 3);
-        let ci = &control_quads[1];
-        assert!(
-            (ci.x + ci.w - box_right).abs() > 1.0 || (ci.x - box_left).abs() > 1.0,
-            "without fill_line_width the interior quad must NOT span the full box width"
-        );
-    }
-
-    /// A selection that spans a HARD newline (Ctrl+Enter draft) also produces the
-    /// full-width-interior shape — the byte-offset accounting across BufferLines
-    /// (`line_byte_offsets`) keeps the per-line quads correct.
-    #[test]
-    fn multiline_selection_across_hard_newline_fills_interior() {
-        let mut fs = crate::fonts::bundled_font_system();
-        // Three hard lines; a wide box so nothing SOFT-wraps — the line breaks are
-        // the '\n's at bytes 2 and 5.
-        let text: Arc<str> = Arc::from("aa\nbb\ncc");
-        let font_size = 16.0_f32;
-        let line_height = font_size * 1.4;
-        let (pixel_x, pixel_y, width, height) = (10.0_f32, 20.0_f32, 300.0_f32, 200.0_f32);
-        let sel_bg: [u8; 4] = [58, 123, 213, 115];
-
-        let mut buf = Buffer::new(&mut fs, Metrics::new(font_size, line_height));
-        buf.set_size(&mut fs, Some(width), Some(height));
-        buf.set_wrap(&mut fs, Wrap::Word);
-        buf.set_text(
-            &mut fs,
-            &text,
-            Attrs::new().family(Family::SansSerif),
-            Shaping::Advanced,
-        );
-        buf.shape_until_scroll(&mut fs, false);
-
-        // Select from byte 1 (mid "aa") to byte 7 (mid "cc") — spans both newlines.
-        let item = TextItem {
-            text: Arc::clone(&text),
-            pixel_x,
-            pixel_y,
-            bounds_width: width,
-            bounds_height: height,
-            clip_pixel_x: pixel_x,
-            clip_pixel_y: pixel_y,
-            clip_bounds_width: width,
-            clip_bounds_height: height,
-            font_size_px: font_size,
-            line_height_multiplier: 1.4,
-            font_family: FontFamily::SystemSansSerif,
-            font_weight: 400,
-            color: [255, 255, 255, 255],
-            alignment: TextAlign::Start,
-            overflow: TextOverflow::Clip,
-            outline_color: None,
-            outline_width: None,
-            opacity: 1.0,
-            color_runs: Box::new([]),
-            styled_runs: Box::new([StyledRunItem {
-                start_byte: 1,
-                end_byte: 7,
-                weight: None,
-                italic: false,
-                monospace: false,
-                color: None,
-                background_color: Some(sel_bg),
-                size_scale: None,
-                fill_line_width: true,
-            }]),
-            viewport: TruncationViewport::HeadAnchored,
-        };
-        let eff = vec![item.styled_runs.to_vec()];
-        let quads = compute_inline_backdrop_quads(&[item], &[buf], &eff);
-        assert_eq!(quads.len(), 3, "one quad per hard line");
-        let box_right = pixel_x + width;
-        // The interior line ("bb") is fully selected → full box width.
-        assert!(
-            (quads[1].x - pixel_x).abs() < 1.0 && (quads[1].x + quads[1].w - box_right).abs() < 1.0,
-            "interior hard line spans full box width"
-        );
-        // Quads stack top-to-bottom (distinct y per line).
-        assert!(
-            quads[0].y < quads[1].y && quads[1].y < quads[2].y,
-            "quads stack per line"
-        );
-    }
-
-    // ── max_truncation_input_bytes wiring ─────────────────────────
-
-    /// The setter updates the cache's bound; a fresh cache starts at the
-    /// compositor default (4096).
-    #[test]
-    fn set_max_truncation_input_bytes_reaches_cache() {
-        let mut cache = TruncationCache::new();
-        assert_eq!(
-            cache.max_truncation_input_bytes(),
-            overflow::DEFAULT_MAX_TRUNCATION_INPUT_BYTES,
-            "fresh cache must use the compositor default bound"
-        );
-        cache.set_max_truncation_input_bytes(1024);
-        assert_eq!(
-            cache.max_truncation_input_bytes(),
-            1024,
-            "configured bound must reach the cache"
-        );
-    }
-
-    /// A configured non-default bound changes which input the truncation cache
-    /// shapes: at the default (4096) a sub-4096 transcript is shaped whole, but
-    /// at a smaller configured bound (1024) the viewport-adjacent-window
-    /// fallback restricts the shaped input — and the cache shapes exactly that
-    /// window.
-    #[test]
-    fn configured_bound_changes_truncation_fallback_input() {
-        // A multi-line transcript whose total size sits strictly between the
-        // small configured bound (1024) and the default bound (4096), so the
-        // fallback engages only at the configured bound.
-        let line = "The quick brown fox jumps over the lazy dog and keeps on running.";
-        let content = vec![line; 40].join("\n");
-        assert!(
-            content.len() > 1024 && content.len() < 4096,
-            "fixture must straddle the two bounds; got {} bytes",
-            content.len()
-        );
-
-        let bounds_w = 600.0_f32;
-        let bounds_h = 80.0_f32; // only a few visible lines
-        let font_size = 16.0_f32;
-        let family = FontFamily::SystemSansSerif;
-        let weight = 400u16;
-        let lhm = 1.4_f32;
-        let line_height = font_size * lhm;
-        let vp = TruncationViewport::HeadAnchored;
-
-        // Default bound: input is under 4096 → NOT windowed (whole input shaped).
-        let full_window = overflow::viewport_adjacent_input(
-            &content,
-            bounds_h,
-            line_height,
-            vp,
-            overflow::DEFAULT_MAX_TRUNCATION_INPUT_BYTES,
-            overflow::TRUNCATION_OVERSCAN_LINES,
-        );
-        assert_eq!(
-            full_window,
-            content.as_str(),
-            "default bound must not window a sub-4096 transcript"
-        );
-
-        // Configured bound: input exceeds 1024 → windowed to a shorter slice.
-        let small_window = overflow::viewport_adjacent_input(
-            &content,
-            bounds_h,
-            line_height,
-            vp,
-            1024,
-            overflow::TRUNCATION_OVERSCAN_LINES,
-        );
-        assert!(
-            small_window.len() < content.len(),
-            "configured bound must restrict the shaped input (fallback engaged)"
-        );
-
-        // The cache at the configured bound must shape exactly that window:
-        // priming the FULL content at bound 1024 yields the same truncation
-        // result as priming the windowed slice directly at an unbounded cache.
-        let mut fs = crate::fonts::bundled_font_system();
-
-        let key_full =
-            TruncationKey::new(&content, bounds_w, bounds_h, font_size, family, weight, vp);
-        let mut configured = TruncationCache::new();
-        configured.set_max_truncation_input_bytes(1024);
-        let via_bound = configured
-            .prime(
-                key_full, &content, bounds_w, bounds_h, font_size, family, weight, vp, lhm, &mut fs,
-            )
-            .clone();
-
-        let key_window = TruncationKey::new(
-            small_window,
-            bounds_w,
-            bounds_h,
-            font_size,
-            family,
-            weight,
-            vp,
-        );
-        let mut unbounded = TruncationCache::new();
-        unbounded.set_max_truncation_input_bytes(usize::MAX);
-        let via_direct = unbounded
-            .prime(
-                key_window,
-                small_window,
-                bounds_w,
-                bounds_h,
-                font_size,
-                family,
-                weight,
-                vp,
-                lhm,
-                &mut fs,
-            )
-            .clone();
-
-        assert_eq!(
-            via_bound.text, via_direct.text,
-            "at the configured bound the cache must shape the viewport-adjacent window, \
-             not the full committed transcript"
-        );
     }
 }
