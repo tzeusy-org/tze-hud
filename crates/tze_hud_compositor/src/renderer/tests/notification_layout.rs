@@ -74,6 +74,7 @@ async fn test_notification_stack_adds_dismiss_label_and_reserves_text_width() {
         .publish_to_zone(
             "notification-area",
             ZoneContent::Notification(NotificationPayload {
+                progress: None,
                 text: "Dismissible notification".to_owned(),
                 icon: String::new(),
                 urgency: 1,
@@ -242,6 +243,7 @@ async fn test_dismiss_button_respects_typography_tokens() {
             .publish_to_zone(
                 "notification-area",
                 ZoneContent::Notification(NotificationPayload {
+                    progress: None,
                     text: text.to_owned(),
                     icon: String::new(),
                     urgency: 1,
@@ -323,6 +325,7 @@ async fn test_notification_text_inset_from_backdrop_edges() {
         .publish_to_zone(
             "notification-area",
             ZoneContent::Notification(NotificationPayload {
+                progress: None,
                 text: "Test notification".to_owned(),
                 icon: String::new(),
                 urgency: 1,
@@ -420,6 +423,7 @@ async fn test_two_line_notification_empty_title_produces_one_text_item() {
         .publish_to_zone(
             "notification-area",
             ZoneContent::Notification(NotificationPayload {
+                progress: None,
                 text: "Body only notification".to_owned(),
                 icon: String::new(),
                 urgency: 0,
@@ -491,6 +495,7 @@ async fn test_two_line_notification_title_produces_two_text_items() {
         .publish_to_zone(
             "notification-area",
             ZoneContent::Notification(NotificationPayload {
+                progress: None,
                 title: "System Alert".to_owned(),
                 text: "Disk space low on /dev/sda1".to_owned(),
                 icon: String::new(),
@@ -632,6 +637,7 @@ async fn test_two_line_notification_title_produces_two_text_items() {
                             actions: labels[..count]
                                 .iter()
                                 .map(|label| NotificationAction {
+                                    copy: None,
                                     label: (*label).into(),
                                     callback_id: Some((*label).into()),
                                     url: None,
@@ -896,6 +902,7 @@ async fn test_two_line_notifications_stack_correctly() {
         .publish_to_zone(
             "notification-area",
             ZoneContent::Notification(NotificationPayload {
+                progress: None,
                 title: "First Alert".to_owned(),
                 text: "First body text".to_owned(),
                 icon: String::new(),
@@ -913,6 +920,7 @@ async fn test_two_line_notifications_stack_correctly() {
         .publish_to_zone(
             "notification-area",
             ZoneContent::Notification(NotificationPayload {
+                progress: None,
                 title: "Second Alert".to_owned(),
                 text: "Second body text".to_owned(),
                 icon: String::new(),
@@ -969,6 +977,7 @@ async fn test_two_line_notifications_stack_correctly() {
         ]
         .into_iter()
         .map(|label| NotificationAction {
+            copy: None,
             label: label.into(),
             callback_id: Some(label.into()),
             url: None,
@@ -1215,6 +1224,7 @@ async fn test_prune_faded_publications_removes_completed_fades() {
         .publish_to_zone(
             "notification-area",
             ZoneContent::Notification(NotificationPayload {
+                progress: None,
                 text: "First".to_owned(),
                 icon: String::new(),
                 urgency: 0,
@@ -1232,6 +1242,7 @@ async fn test_prune_faded_publications_removes_completed_fades() {
         .publish_to_zone(
             "notification-area",
             ZoneContent::Notification(NotificationPayload {
+                progress: None,
                 text: "Second".to_owned(),
                 icon: String::new(),
                 urgency: 1,
@@ -1400,6 +1411,7 @@ async fn test_stack_reflow_after_publication_pruned() {
             .publish_to_zone(
                 "notification-area",
                 ZoneContent::Notification(NotificationPayload {
+                    progress: None,
                     text: text.to_owned(),
                     icon: String::new(),
                     urgency: 1,
@@ -1494,6 +1506,7 @@ async fn test_stack_reflow_after_publication_pruned() {
     ]
     .into_iter()
     .map(|label| NotificationAction {
+        copy: None,
         label: label.into(),
         callback_id: Some(label.into()),
         url: None,
@@ -1564,6 +1577,7 @@ async fn test_stack_reflow_after_publication_pruned() {
                     actions: ["Ship", "Hold", "Skip", "Open"]
                         .into_iter()
                         .map(|label| NotificationAction {
+                            copy: None,
                             label: if long {
                                 label.repeat(100)
                             } else {
@@ -1770,6 +1784,7 @@ fn test_update_publication_animations_seeds_fresh_state() {
         .publish_to_zone(
             "notification-area",
             ZoneContent::Notification(NotificationPayload {
+                progress: None,
                 text: "Hello".to_owned(),
                 icon: String::new(),
                 urgency: 1,
@@ -1815,6 +1830,7 @@ fn test_update_publication_animations_seeds_fresh_state() {
         zone_name: "notification-area".to_string(),
         publisher_namespace: "agent-b".to_string(),
         content: ZoneContent::Notification(NotificationPayload {
+            progress: None,
             text: "No TTL".to_owned(),
             icon: String::new(),
             urgency: 0,
@@ -1882,6 +1898,7 @@ async fn test_session_caption_takes_one_secondary_line_above_the_title() {
     });
     let card = |title: &str| {
         ZoneContent::Notification(NotificationPayload {
+            progress: None,
             title: title.to_owned(),
             text: "Body".to_owned(),
             icon: String::new(),
@@ -1982,6 +1999,7 @@ async fn go_to_uses_existing_caption_geometry_and_draws_local_cues() {
         .publish_to_zone(
             "notification-area",
             ZoneContent::Notification(NotificationPayload {
+                progress: None,
                 title: "Question".into(),
                 text: "Body".into(),
                 icon: String::new(),
@@ -2138,6 +2156,7 @@ async fn test_long_session_caption_ellipsizes_and_moves_the_card_by_one_line() {
             .publish_to_zone(
                 "notification-area",
                 ZoneContent::Notification(NotificationPayload {
+                    progress: None,
                     title: "Title".to_owned(),
                     text: "Body".to_owned(),
                     icon: String::new(),

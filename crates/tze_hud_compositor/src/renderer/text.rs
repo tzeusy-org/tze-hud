@@ -262,9 +262,8 @@ impl super::Compositor {
         items
     }
 
-    /// Prime only stack notification title/body bands, using the exact same
-    /// collector as drawing. Action/dismiss labels keep their existing Clip
-    /// policy, and non-notification zones retain their current priming path.
+    /// Prime the ellipsized notification bands and labels using the same
+    /// collector as drawing.
     pub(super) fn collect_notification_ellipsis_items(
         &self,
         scene: &SceneGraph,
@@ -613,8 +612,8 @@ impl super::Compositor {
                                     });
                                     let label_y = b.y + action_layout.label_y;
                                     let label_h = action_layout.label_height.max(1.0);
-                                    // A pressed url action's feedback replaces its
-                                    // label in the same bounds; failure is the error color.
+                                    // Local link and copy feedback replaces the
+                                    // label without moving the button.
                                     let feedback = match &scene.overlay.link_feedback {
                                         Some((
                                             tze_hud_scene::LinkFeedbackTarget::CardAction {
@@ -629,11 +628,17 @@ impl super::Compositor {
                                         }
                                         _ => None,
                                     };
-                                    let error_color = feedback
-                                        .filter(|s| *s == tze_hud_scene::LinkFeedbackState::Failed)
-                                        .and_then(|_| self.token_map.get("color.error"))
-                                        .and_then(|hex| super::token_colors::parse_hex_color(hex))
-                                        .map(tone_color);
+                                    let copy_feedback =
+                                        scene.overlay.notification_copy_feedback.filter(|result| {
+                                            action.copy.is_some()
+                                                && result.publication_id == record.publication_id
+                                                && result.index == index
+                                        });
+                                    let failed = feedback
+                                        == Some(tze_hud_scene::LinkFeedbackState::Failed)
+                                        || copy_feedback.is_some_and(|result| !result.succeeded);
+                                    let error_color =
+                                        failed.then(|| tone_color(style.destructive_outline()));
                                     let label = |text: Arc<str>, x: f32, width: f32, align| {
                                         let mut item = Self::make_zone_text_item(
                                             text,
@@ -667,9 +672,11 @@ impl super::Compositor {
                                         ));
                                     }
                                     let mut text = label(
-                                        Arc::from(match feedback {
-                                            Some(state) => state.label(),
-                                            None => action.label.as_str(),
+                                        Arc::from(match (feedback, copy_feedback) {
+                                            (_, Some(result)) if result.succeeded => "Copied",
+                                            (_, Some(_)) => "Copy failed",
+                                            (Some(state), None) => state.label(),
+                                            (None, None) => action.label.as_str(),
                                         }),
                                         b.x + action_layout.padding + hint_width,
                                         action_layout.label_width(&b, index),

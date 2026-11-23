@@ -1486,6 +1486,13 @@ impl SceneGraph {
             ZoneInteractionKind::Action { index } => {
                 let action = payload.actions.get(*index)?;
                 action.validate().ok()?;
+                if let Some(text) = &action.copy {
+                    return Some(super::NotificationActivation::Copy {
+                        text: text.clone(),
+                        publication_id: key,
+                        index: *index,
+                    });
+                }
                 if action.url.is_some() {
                     let url = action.encoded_url().ok()?;
                     let mono = self.now_monotonic_us();

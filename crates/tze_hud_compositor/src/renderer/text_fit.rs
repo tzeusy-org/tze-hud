@@ -400,6 +400,7 @@ mod tests {
                 .iter()
                 .enumerate()
                 .map(|(i, label)| NotificationAction {
+                    copy: None,
                     label: (*label).into(),
                     callback_id: Some(format!("a{i}")),
                     url: None,
@@ -553,12 +554,14 @@ mod tests {
             text: "Deploy?".into(),
             actions: vec![
                 NotificationAction {
+                    copy: None,
                     label: first.into(),
                     callback_id: Some("go".into()),
                     url: None,
                     role: None,
                 },
                 NotificationAction {
+                    copy: None,
                     label: second.into(),
                     callback_id: None,
                     url: Some("https://example.com/".into()),

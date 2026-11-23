@@ -22,11 +22,12 @@ message Rgba {
 // ─── Zone Types ───────────────────────────────────────────────────────────────
 
 // A single action button on a notification slot.
-// Exactly one non-empty callback_id or url target.
+// One callback, HTTPS URL, or local copy target. All unset means a label-only callback.
 message NotificationActionProto {
   string label       = 1;  // Human-readable button label (≤32 chars recommended)
   string callback_id = 2;  // Publisher callback, absent for links
   string url = 3;          // HTTPS URL, absent for callbacks
+  optional string copy = 4;  // 1–2048 UTF-8 bytes, copied locally
 }
 
 message NotificationPayload {
@@ -35,6 +36,7 @@ message NotificationPayload {
   uint32 urgency = 3;   // 0=low, 1=normal, 2=urgent, 3=critical
   string title   = 4;   // Optional: bold title for two-line layout; empty = single-line
   repeated NotificationActionProto actions = 5;  // Optional action buttons (≤4 rendered)
+  optional float progress = 6;  // Determinate fraction in 0..=1
 }
 
 message StatusBarPayload {

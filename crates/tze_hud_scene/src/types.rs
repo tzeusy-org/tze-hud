@@ -1966,7 +1966,7 @@ pub enum ActionRole {
     Destructive,
 }
 
-/// One notification button: a publisher callback or an owner-opened HTTPS link.
+/// One notification button with a callback, HTTPS link, or local copy target.
 /// The runtime resolves its target by live publication and zero-based index.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NotificationAction {
@@ -1976,23 +1976,96 @@ pub struct NotificationAction {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub copy: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub role: Option<ActionRole>,
 }
 
-pub const ACTION_TARGET_HINT: &str = "action needs callback_id or url, not both";
+pub const ACTION_TARGET_HINT: &str = "action needs one of callback_id, url or copy";
 pub const ACTION_URL_HINT: &str = "action url must be https";
+pub const ACTION_COPY_HINT: &str = "action copy must contain 1 to 2048 UTF-8 bytes";
 pub const ACTION_ROLE_HINT: &str = "action role needs a callback action";
+pub const NOTIFICATION_PROGRESS_HINT: &str = "notification.progress must be a number in 0..1";
 
 impl NotificationAction {
+    pub fn target_count(&self) -> usize {
+        usize::from(self.callback_id.is_some())
+            + usize::from(self.url.is_some())
+            + usize::from(self.copy.is_some())
+    }
+
+    fn defaulted_callback_id(&self) -> Option<&str> {
+        (self.target_count() == 0).then_some(&self.label)
+    }
+
+    /// Resolve label-only targets before either transport admits a card.
+    pub fn resolve_label_callbacks(actions: &mut [Self]) -> Result<(), String> {
+        validate_notification_action_count(actions.len())?;
+        for (index, action) in actions.iter().enumerate() {
+            if let Some(label) = action.defaulted_callback_id() {
+                match label {
+                    "" => return Err(ACTION_TARGET_HINT.into()),
+                    "dismiss" => {
+                        return Err(format!(
+                            "notification.actions[{index}] label dismiss needs a callback_id"
+                        ));
+                    }
+                    _ => {}
+                }
+            }
+        }
+        for (index, action) in actions.iter().enumerate() {
+            let defaulted = action.defaulted_callback_id();
+            let callback = action.callback_id.as_deref().or(defaulted);
+            for (earlier_index, earlier) in actions[..index].iter().enumerate() {
+                let earlier_defaulted = earlier.defaulted_callback_id();
+                let earlier_callback = earlier.callback_id.as_deref().or(earlier_defaulted);
+                if (defaulted.is_some() || earlier_defaulted.is_some())
+                    && callback == earlier_callback
+                {
+                    let (repeat, first) = if defaulted.is_some() {
+                        (index, earlier_index)
+                    } else {
+                        (earlier_index, index)
+                    };
+                    return Err(format!(
+                        "notification.actions[{repeat}] label repeats actions[{first}]; add a callback_id"
+                    ));
+                }
+            }
+        }
+        for action in actions {
+            if let Some(label) = action.defaulted_callback_id() {
+                action.callback_id = Some(label.to_owned());
+            }
+        }
+        Ok(())
+    }
+
     /// Preserve transport presence for exclusivity; only the parser's serialized
     /// URL may leave the scene for a local browser handoff.
     pub fn validate(&self) -> Result<(), String> {
-        match (&self.callback_id, &self.url) {
-            (Some(callback), None) if !callback.is_empty() => Ok(()),
-            (None, Some(_)) if self.role.is_some() => Err(ACTION_ROLE_HINT.into()),
-            (None, Some(_)) => self.encoded_url().map(|_| ()),
-            _ => Err(ACTION_TARGET_HINT.into()),
+        if self.target_count() != 1 {
+            return Err(ACTION_TARGET_HINT.into());
         }
+        if let Some(callback) = &self.callback_id {
+            return if callback.is_empty() {
+                Err(ACTION_TARGET_HINT.into())
+            } else {
+                Ok(())
+            };
+        }
+        if self.role.is_some() {
+            return Err(ACTION_ROLE_HINT.into());
+        }
+        if let Some(copy) = &self.copy {
+            return if (1..=2048).contains(&copy.len()) {
+                Ok(())
+            } else {
+                Err(ACTION_COPY_HINT.into())
+            };
+        }
+        self.encoded_url().map(|_| ())
     }
 
     /// Taken only by a completed hold.
@@ -2018,7 +2091,7 @@ impl NotificationAction {
 ///   - Line 2: `text`, in the matching body role.
 ///
 ///   The slot height is expanded to fit both lines.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
 pub struct NotificationPayload {
     /// Body text.  For single-line notifications this is the only displayed
     /// text.  For two-line notifications this is the second (body) line.
@@ -2039,6 +2112,9 @@ pub struct NotificationPayload {
     /// When empty or absent: single-line rendering using `text` only.
     #[serde(default)]
     pub title: String,
+    /// Determinate progress in 0..=1. Omission leaves the card's layout unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub progress: Option<f32>,
     /// Optional action buttons shown at the bottom of the notification slot.
     ///
     /// Both publish planes accept at most `MAX_NOTIFICATION_ACTIONS` actions;
@@ -2069,11 +2145,13 @@ impl NotificationPayload {
         if self.is_blank() {
             return Err(BLANK_NOTIFICATION_HINT.to_string());
         }
-        if self.actions.len() > MAX_NOTIFICATION_ACTIONS {
-            return Err(format!(
-                "notification allows at most {MAX_NOTIFICATION_ACTIONS} actions"
-            ));
+        if self
+            .progress
+            .is_some_and(|value| !(0.0..=1.0).contains(&value))
+        {
+            return Err(NOTIFICATION_PROGRESS_HINT.into());
         }
+        validate_notification_action_count(self.actions.len())?;
         for action in &self.actions {
             action.validate()?;
         }
@@ -2086,6 +2164,15 @@ pub const BLANK_NOTIFICATION_HINT: &str = "notification needs a title or body";
 
 /// Maximum number of action buttons accepted and rendered per notification slot.
 pub const MAX_NOTIFICATION_ACTIONS: usize = 4;
+
+fn validate_notification_action_count(count: usize) -> Result<(), String> {
+    if count > MAX_NOTIFICATION_ACTIONS {
+        return Err(format!(
+            "notification allows at most {MAX_NOTIFICATION_ACTIONS} actions"
+        ));
+    }
+    Ok(())
+}
 
 // ─── Zone hit regions ────────────────────────────────────────────────────────
 

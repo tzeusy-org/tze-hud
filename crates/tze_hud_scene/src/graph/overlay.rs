@@ -34,6 +34,13 @@ pub enum NotificationControl {
     GoTo,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NotificationCopyFeedback {
+    pub publication_id: SceneId,
+    pub index: usize,
+    pub succeeded: bool,
+}
+
 /// Window availability is computed once per presented publication. Mutable
 /// attempt feedback is local and expires on a runtime deadline.
 #[derive(Clone, Debug, Default)]
@@ -122,6 +129,9 @@ pub struct RuntimeOverlayState {
     /// sets and clears it, the compositor draws it.
     #[serde(skip, default)]
     pub link_feedback: Option<(crate::LinkFeedbackTarget, crate::LinkFeedbackState)>,
+    /// A local copy result. Clipboard text never enters this display state.
+    #[serde(skip, default)]
+    pub notification_copy_feedback: Option<NotificationCopyFeedback>,
     /// Chooses the display of each newly presented question card; `None`
     /// keeps every card on the notification display.
     #[serde(skip, default)]

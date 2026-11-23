@@ -25,6 +25,12 @@ pub enum NotificationActivation {
         publication_id: SceneId,
         index: usize,
     },
+    /// Copy this action's text on the owner host without consuming the card.
+    Copy {
+        text: String,
+        publication_id: SceneId,
+        index: usize,
+    },
 }
 
 /// Returns a `SystemClock` wrapped in `Arc<dyn Clock>`.

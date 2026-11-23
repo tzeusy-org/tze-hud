@@ -357,6 +357,7 @@ async fn build_windowed_frame_decoupled_from_surface_then_presents() {
         .publish_to_zone(
             "notification-area",
             ZoneContent::Notification(NotificationPayload {
+                progress: None,
                 text: "Backdrop for build/present split test".to_owned(),
                 icon: String::new(),
                 urgency: 1,
@@ -817,6 +818,7 @@ async fn zone_assigned_to_secondary_display_renders_there() {
                 .publish_to_zone(
                     "notif",
                     ZoneContent::Notification(NotificationPayload {
+                        progress: None,
                         text: "Hello".to_string(),
                         icon: String::new(),
                         urgency: 1,
@@ -923,6 +925,7 @@ async fn placed_questions_draw_in_a_stack_on_their_display() {
     scene.overlay.question_placer = Some(placer.clone());
     let card = |text: &str, question: bool| {
         ZoneContent::Notification(NotificationPayload {
+            progress: None,
             text: text.to_string(),
             icon: String::new(),
             urgency: 1,
@@ -930,6 +933,7 @@ async fn placed_questions_draw_in_a_stack_on_their_display() {
             title: String::new(),
             actions: question
                 .then(|| tze_hud_scene::types::NotificationAction {
+                    copy: None,
                     label: "Yes".into(),
                     callback_id: Some("yes".into()),
                     url: None,

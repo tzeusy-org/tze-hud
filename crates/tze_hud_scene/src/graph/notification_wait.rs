@@ -13,7 +13,7 @@ use std::sync::{
 };
 
 /// An unexpired, unanswered card with a valid callback action. Counted once
-/// per card; URL-only cards are not questions. `choices` holds answered cards.
+/// per card. Link and copy actions do not contribute. `choices` holds answered cards.
 pub(crate) fn is_unanswered_question(
     record: &ZonePublishRecord,
     choices: &HashMap<SceneId, String>,

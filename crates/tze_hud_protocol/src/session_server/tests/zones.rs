@@ -1,6 +1,103 @@
 use super::*;
 
 #[tokio::test]
+async fn notification_progress_and_copy_admission() {
+    use crate::proto::{NotificationActionProto, NotificationPayload, ZoneContent, zone_content};
+    let (mut client, server, state) =
+        setup_test_with_state_and_render_wake(Default::default()).await;
+    let scene = state.lock().await.scene.clone();
+    scene.lock().await.zone_registry = tze_hud_scene::types::ZoneRegistry::with_defaults();
+    let (tx, _, mut stream) = handshake(&mut client, "card-publisher", "test-key").await;
+    let progress_hint = "notification.progress must be a number in 0..1";
+    let copy_hint = "action copy must contain 1 to 2048 UTF-8 bytes";
+    let target_hint = "action needs one of callback_id, url or copy";
+    let cases = [
+        (Some(-0.01), None, "", "", Some(progress_hint)),
+        (Some(1.01), None, "", "", Some(progress_hint)),
+        (Some(f32::NAN), None, "", "", Some(progress_hint)),
+        (Some(f32::INFINITY), None, "", "", Some(progress_hint)),
+        (None, Some(String::new()), "", "", Some(copy_hint)),
+        (None, Some("é".repeat(1025)), "", "", Some(copy_hint)),
+        (None, Some("job".into()), "go", "", Some(target_hint)),
+        (
+            None,
+            Some("job".into()),
+            "",
+            "https://example.com/",
+            Some(target_hint),
+        ),
+        (Some(0.0), Some("é".repeat(1024)), "", "", None),
+        (Some(1.0), Some("job".into()), "", "", None),
+    ];
+    let mut sequence = 2;
+    for delay in [0, 1_000_000] {
+        for (progress, copy, callback_id, url, hint) in &cases {
+            let before = {
+                let scene = scene.lock().await;
+                (scene.version, scene.scheduled_publications.len())
+            };
+            let result = request(
+                &tx,
+                &mut stream,
+                sequence,
+                ClientPayload::Publish(Publish {
+                    surface: "zone:notification-area".into(),
+                    key: "progress".into(),
+                    content: Some(ZoneContent {
+                        payload: Some(zone_content::Payload::Notification(NotificationPayload {
+                            text: "Deploy".into(),
+                            progress: *progress,
+                            actions: vec![NotificationActionProto {
+                                label: "Action".into(),
+                                copy: copy.clone(),
+                                callback_id: (*callback_id).into(),
+                                url: (*url).into(),
+                            }],
+                            ..Default::default()
+                        })),
+                    }),
+                    present_at_us: if delay == 0 { 0 } else { now_wall_us() + delay },
+                    ..Default::default()
+                }),
+            )
+            .await;
+            let scene = scene.lock().await;
+            if let Some(hint) = hint {
+                assert_eq!(
+                    (result.ok, result.code.as_str()),
+                    (false, "INVALID_ARGUMENT")
+                );
+                assert_eq!(
+                    result.hint,
+                    super::verbs::fail(sequence, "INVALID_ARGUMENT", *hint).hint
+                );
+                assert_eq!((scene.version, scene.scheduled_publications.len()), before);
+            } else {
+                assert!(result.ok, "{result:?}");
+                let content = if delay == 0 {
+                    &scene.zone_registry.active_for_zone("notification-area")[0].content
+                } else {
+                    let tze_hud_scene::Publication::Zone { content, .. } =
+                        &scene.scheduled_publications.last().unwrap().publication
+                    else {
+                        panic!("expected a scheduled zone publication");
+                    };
+                    content
+                };
+                let tze_hud_scene::ZoneContent::Notification(card) = content else {
+                    panic!("expected a notification");
+                };
+                assert_eq!(card.progress, *progress);
+                assert_eq!(card.actions[0].copy, *copy);
+                assert_eq!(card.actions[0].callback_id, None);
+            }
+            sequence += 1;
+        }
+    }
+    drop(server);
+}
+
+#[tokio::test]
 async fn test_zone_publish_result() {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tze_hud_scene::types::MAX_NOTIFICATION_ACTIONS;
@@ -121,7 +218,7 @@ async fn test_zone_publish_result() {
         )
     };
     let mut seq = 4;
-    // Plain proto3 defaults carry neither target, so they must reject.
+    // Both unset legacy target strings allow a label-only callback.
     for delay in [0, 1_000_000] {
         let sequence = seq;
         seq += 1;
@@ -148,17 +245,27 @@ async fn test_zone_publish_result() {
             }),
         )
         .await;
-        assert!(!result.ok, "empty target must reject: {result:?}");
-        assert_eq!(result.code, "INVALID_ARGUMENT");
-        assert_eq!(
-            result.hint,
-            super::verbs::fail(
-                sequence,
-                "INVALID_ARGUMENT",
-                "action needs callback_id or url, not both"
-            )
-            .hint
-        );
+        assert!(result.ok, "label-only callback: {result:?}");
+        let scene = scene.lock().await;
+        let content = if delay == 0 {
+            &scene
+                .zone_registry
+                .active_for_zone("notification-area")
+                .last()
+                .unwrap()
+                .content
+        } else {
+            let tze_hud_scene::Publication::Zone { content, .. } =
+                &scene.scheduled_publications.last().unwrap().publication
+            else {
+                panic!("expected a scheduled zone publication");
+            };
+            content
+        };
+        let tze_hud_scene::ZoneContent::Notification(payload) = content else {
+            panic!("expected a notification");
+        };
+        assert_eq!(payload.actions[0].callback_id.as_deref(), Some("Open"));
     }
     for delay_us in [0, 1_000_000] {
         let publish = |count| {
@@ -170,6 +277,7 @@ async fn test_zone_publish_result() {
                             text: "Choose".into(),
                             actions: (0..count)
                                 .map(|i| crate::proto::NotificationActionProto {
+                                    copy: None,
                                     label: format!("Option {i}"),
                                     callback_id: if i % 2 == 0 {
                                         format!("answer-{i}")
@@ -260,12 +368,12 @@ async fn test_zone_publish_result() {
         (
             "go".into(),
             "https://example.com/".into(),
-            Some("action needs callback_id or url, not both"),
+            Some("action needs one of callback_id, url or copy"),
         ),
         (
             "".into(),
             "".into(),
-            Some("action needs callback_id or url, not both"),
+            Some("action needs one of callback_id, url or copy"),
         ),
         ("legacy".into(), "".into(), None),
         ("".into(), boundary.clone(), None),
@@ -300,12 +408,14 @@ async fn test_zone_publish_result() {
                                 text: "Targets".into(),
                                 actions: vec![
                                     crate::proto::NotificationActionProto {
+                                        copy: None,
                                         label: "Legacy".into(),
                                         callback_id: "legacy".into(),
                                         url: String::new(),
                                     },
                                     // Blank labels on gRPC retain their existing semantics.
                                     crate::proto::NotificationActionProto {
+                                        copy: None,
                                         label: String::new(),
                                         callback_id: callback_id.clone(),
                                         url: url.clone(),

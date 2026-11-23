@@ -165,6 +165,8 @@ impl WindowedRuntimeState {
             press_guard: Default::default(),
             notification_link_opener: Default::default(),
             link_feedback: None,
+            notification_clipboard: Default::default(),
+            copy_feedback: None,
             window_go_to: Default::default(),
             context_menu_press: None,
             context_menu_open: false,
@@ -3465,6 +3467,7 @@ mod tests {
                             tze_hud_scene::NotificationPayload {
                                 text: "Blocked browser".into(),
                                 actions: vec![tze_hud_scene::NotificationAction {
+                                    copy: None,
                                     label: "Open".into(),
                                     callback_id: None,
                                     url: Some("https://example.com/frame".into()),
@@ -3838,6 +3841,7 @@ mod tests {
                 ephemeral: false,
             });
             let action = |id: &str, label: &str| NotificationAction {
+                copy: None,
                 label: label.to_string(),
                 callback_id: Some(id.to_string()),
                 url: None,
@@ -3847,6 +3851,7 @@ mod tests {
                 .publish_to_zone(
                     "notification-area",
                     ZoneContent::Notification(NotificationPayload {
+                        progress: None,
                         text: "Click Approve".to_string(),
                         icon: String::new(),
                         urgency: 2,
@@ -5101,6 +5106,7 @@ mod tests {
             };
             for (i, url) in urls.iter().enumerate() {
                 payload.actions[i] = NotificationAction {
+                    copy: None,
                     label: format!("Link {i}"),
                     callback_id: None,
                     url: Some((*url).into()),
@@ -5135,6 +5141,99 @@ mod tests {
             native.complete(receipt);
         }
         harness.drain();
+    }
+
+    #[test]
+    fn card_copy_pointer_and_answer_digit_write_locally_and_keep_the_card() {
+        const TEXT: &str = "cargo test -p example\njob-42";
+        for (digit, succeeded) in [(false, true), (true, true), (true, false)] {
+            let mut harness = approve_reject_notification_harness();
+            let id = {
+                let mut scene = harness.scene();
+                let card = &mut scene
+                    .zone_registry
+                    .active_publishes
+                    .get_mut("notification-area")
+                    .unwrap()[0];
+                let tze_hud_scene::ZoneContent::Notification(payload) = &mut card.content else {
+                    panic!("expected a notification");
+                };
+                payload.actions[1] = tze_hud_scene::NotificationAction {
+                    label: "Copy cmd".into(),
+                    copy: Some(TEXT.into()),
+                    ..Default::default()
+                };
+                let id = card.publication_id;
+                scene.version += 1;
+                id
+            };
+            assert!(harness.tick());
+            let (tx, rx) = std::sync::mpsc::channel();
+            harness.app.state.notification_clipboard.write = Arc::new(move |text| {
+                tx.send(text.to_owned()).unwrap();
+                if succeeded {
+                    Ok(())
+                } else {
+                    Err("fixture clipboard busy".into())
+                }
+            });
+
+            if digit {
+                harness
+                    .app
+                    .state
+                    .answer_keyboard
+                    .requested
+                    .store(true, std::sync::atomic::Ordering::Release);
+                harness.drain();
+                assert!(harness.app.state.answer_keyboard.focus.is_some());
+                harness.enqueue(key_down("Digit2", "2", 1_000));
+                harness.enqueue(key_up("Digit2", "2", 1_100));
+                harness.drain();
+                assert!(harness.app.state.answer_keyboard.focus.is_none());
+            } else {
+                let bounds = harness
+                    .scene()
+                    .overlay
+                    .zone_hit_regions
+                    .iter()
+                    .find(|r| {
+                        r.publication_id == id
+                            && r.kind
+                                == (tze_hud_scene::types::ZoneInteractionKind::Action { index: 1 })
+                    })
+                    .unwrap()
+                    .bounds;
+                click_at(
+                    &mut harness,
+                    (
+                        bounds.x + bounds.width * 0.5,
+                        bounds.y + bounds.height * 0.5,
+                    ),
+                );
+            }
+
+            assert_eq!(rx.try_recv().unwrap(), TEXT);
+            assert!(rx.try_recv().is_err());
+            harness.app.settle_copy_feedback(std::time::Instant::now());
+            {
+                let scene = harness.scene();
+                assert_eq!(
+                    scene.zone_registry.active_for_zone("notification-area")[0].publication_id,
+                    id
+                );
+                let result = scene.overlay.notification_copy_feedback.unwrap();
+                assert_eq!(
+                    (result.publication_id, result.index, result.succeeded),
+                    (id, 1, succeeded)
+                );
+            }
+            assert!(take_action_ids(&harness).is_empty());
+            let until = harness.app.state.copy_feedback.unwrap().until;
+            assert!(harness.app.settle_copy_feedback(until));
+            assert!(harness.scene().overlay.notification_copy_feedback.is_none());
+            assert!(harness.app.state.copy_feedback.is_none());
+        }
     }
 
     fn publish_go_to_card(
@@ -6058,12 +6157,14 @@ mod tests {
                     unreachable!()
                 };
                 payload.actions[0] = NotificationAction {
+                    copy: None,
                     label: "Docs".into(),
                     callback_id: None,
                     url: Some(urls[0].into()),
                     role: None,
                 };
                 payload.actions[1] = NotificationAction {
+                    copy: None,
                     label: "More".into(),
                     callback_id: None,
                     url: Some(urls[1].into()),
@@ -7027,12 +7128,14 @@ mod tests {
                 .publish_to_zone(
                     "notification-area",
                     ZoneContent::Notification(NotificationPayload {
+                        progress: None,
                         text: "Ship v2?".to_string(),
                         icon: String::new(),
                         urgency: 1,
                         ttl_ms: None,
                         title: "Deploy".to_string(),
                         actions: vec![NotificationAction {
+                            copy: None,
                             label: "Ship".to_string(),
                             callback_id: Some("ship".to_string()),
                             url: None,
@@ -7092,6 +7195,7 @@ mod tests {
                 .publish_to_zone(
                     "notification-area",
                     ZoneContent::Notification(NotificationPayload {
+                        progress: None,
                         text: "Dismiss this notification".into(),
                         icon: String::new(),
                         urgency: 1,
@@ -7109,12 +7213,14 @@ mod tests {
                 .publish_to_zone(
                     "notification-area",
                     ZoneContent::Notification(NotificationPayload {
+                        progress: None,
                         text: "Keep this notification".into(),
                         icon: String::new(),
                         urgency: 1,
                         ttl_ms: None,
                         title: "Control".into(),
                         actions: vec![NotificationAction {
+                            copy: None,
                             label: "Keep".into(),
                             callback_id: Some("keep".into()),
                             url: None,

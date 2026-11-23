@@ -276,6 +276,7 @@ fn countdown_notification_scene_on(mut scene: SceneGraph) -> SceneGraph {
         .publish_to_zone(
             "notification-area",
             ZoneContent::Notification(NotificationPayload {
+                progress: None,
                 text: "hello".to_owned(),
                 icon: String::new(),
                 urgency: 1,
@@ -352,6 +353,7 @@ async fn idle_with_notification_renders_only_at_fade() {
         payload.actions = ["A", "B", "C", "D"]
             .into_iter()
             .map(|label| NotificationAction {
+                copy: None,
                 label: label.into(),
                 callback_id: Some(label.into()),
                 url: None,
@@ -440,6 +442,7 @@ async fn idle_with_notification_renders_only_at_fade() {
         payload.actions = ["A", "B", "C", "D"]
             .into_iter()
             .map(|label| NotificationAction {
+                copy: None,
                 label: label.into(),
                 callback_id: Some(label.into()),
                 url: None,
@@ -1185,6 +1188,7 @@ async fn idle_destructive_card_renders_only_during_hold_or_drain() {
         .content
     {
         payload.actions = vec![NotificationAction {
+            copy: None,
             label: "Delete".into(),
             callback_id: Some("delete".into()),
             url: None,

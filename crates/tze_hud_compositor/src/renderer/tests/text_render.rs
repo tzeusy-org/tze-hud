@@ -332,6 +332,7 @@ async fn test_zone_notification_renders_visible_text() {
         .publish_to_zone(
             "notification",
             ZoneContent::Notification(NotificationPayload {
+                progress: None,
                 text: "Alert: system ready".to_owned(),
                 icon: String::new(),
                 urgency: 1,

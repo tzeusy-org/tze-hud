@@ -44,12 +44,14 @@ fn two_displays() -> (HeadlessEventLoopHarness, SceneId, SceneId) {
             .publish_to_zone(
                 ZONE,
                 ZoneContent::Notification(NotificationPayload {
+                    progress: None,
                     text: "Deploy?".into(),
                     icon: String::new(),
                     urgency: 1,
                     ttl_ms: None,
                     title: String::new(),
                     actions: vec![NotificationAction {
+                        copy: None,
                         label: "Yes".into(),
                         callback_id: Some("yes".into()),
                         url: None,

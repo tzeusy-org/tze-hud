@@ -223,6 +223,7 @@ pub(crate) async fn publish_notification_to_zone_via_grpc(
         proto::ZoneContent {
             payload: Some(proto::zone_content::Payload::Notification(
                 proto::NotificationPayload {
+                    progress: None,
                     text: text.to_string(),
                     icon: String::new(),
                     urgency,

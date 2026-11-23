@@ -472,6 +472,26 @@ impl super::Compositor {
                         let ZoneContent::Notification(payload) = &record.content else {
                             continue;
                         };
+                        if let Some(bar) =
+                            style.progress_bar(slot, payload, record.caption.as_deref())
+                        {
+                            for (bounds, mut color) in bar {
+                                if bounds.width <= 0.0 {
+                                    continue;
+                                }
+                                color.a *= opacity;
+                                out.push(RoundedRectDrawCmd {
+                                    x: bounds.x,
+                                    y: bounds.y,
+                                    width: bounds.width,
+                                    height: bounds.height,
+                                    radius: (bounds.height * 0.5).min(bounds.width * 0.5),
+                                    color: self.gpu_color(color),
+                                    border: None,
+                                    clip: None,
+                                });
+                            }
+                        }
                         let chrome_state = |id: String| {
                             scene
                                 .overlay

@@ -282,6 +282,9 @@ pub(super) struct NotificationStyle {
     /// role on a banner.
     pub(super) lone: TextRole,
     captioned: bool,
+    progress_height: f32,
+    progress_gap: f32,
+    progress_track: Rgba,
     /// The dismiss button: a square as tall as the title line.
     pub(super) dismiss_size: f32,
     pub(super) dismiss_gap: f32,
@@ -416,6 +419,9 @@ impl NotificationStyle {
             },
             lone: if roles.lone_title { title } else { body },
             captioned: roles.captioned,
+            progress_height: dp(tokens, "progress.track.height"),
+            progress_gap: dp(tokens, "space.xs"),
+            progress_track: color(tokens, "color.outline.variant"),
             title,
             body,
             action_height: dp(tokens, "space.xxl"),
@@ -467,6 +473,39 @@ impl NotificationStyle {
     /// competes with the title; nothing for an unlabeled publication.
     pub(super) fn caption_height(&self, caption: Option<&str>) -> f32 {
         self.caption(caption).map_or(0.0, |_| self.body.line_height)
+    }
+
+    pub(super) fn progress_reserve(&self, payload: &NotificationPayload) -> f32 {
+        if payload.progress.is_some() && self.progress_height > 0.0 {
+            self.progress_gap + self.progress_height
+        } else {
+            0.0
+        }
+    }
+
+    /// Track and fill for the progress strip between the text and actions.
+    pub(super) fn progress_bar(
+        &self,
+        card: Rect,
+        payload: &NotificationPayload,
+        caption: Option<&str>,
+    ) -> Option<[(Rect, Rgba); 2]> {
+        let fraction = payload.progress?;
+        let width = card.width - 2.0 * self.padding_h;
+        let y = self.caption_height(caption) + self.text_block_height(!payload.title.is_empty())
+            - self.padding_v
+            + self.progress_gap;
+        if width <= 0.0 || self.progress_height <= 0.0 || y + self.progress_height > card.height {
+            return None;
+        }
+        let track = Rect::new(
+            card.x + self.padding_h,
+            card.y + y,
+            width,
+            self.progress_height,
+        );
+        let fill = Rect::new(track.x, track.y, width * fraction, track.height);
+        Some([(track, self.progress_track), (fill, self.primary)])
     }
 
     /// The caption this style draws: a card's, never a banner's.

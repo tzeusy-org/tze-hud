@@ -748,6 +748,7 @@ mod tests {
                             NotificationPayload {
                                 text: "Choose".into(),
                                 actions: vec![NotificationActionProto {
+                                    copy: None,
                                     label: "Yes".into(),
                                     callback_id: "yes".into(),
                                     url: String::new(),

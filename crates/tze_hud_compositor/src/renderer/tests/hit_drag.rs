@@ -43,6 +43,7 @@ async fn zone_hit_single_notification_produces_dismiss_region() {
         .publish_to_zone(
             "notif",
             ZoneContent::Notification(NotificationPayload {
+                progress: None,
                 text: "Hello".to_string(),
                 icon: String::new(),
                 urgency: 1,
@@ -115,6 +116,7 @@ async fn zone_hit_dismiss_region_at_top_right_of_slot() {
         .publish_to_zone(
             "notif",
             ZoneContent::Notification(NotificationPayload {
+                progress: None,
                 text: "Test".to_string(),
                 icon: String::new(),
                 urgency: 1,
@@ -196,6 +198,7 @@ async fn zone_hit_notification_with_two_actions_produces_three_regions() {
         .publish_to_zone(
             "notif",
             ZoneContent::Notification(NotificationPayload {
+                progress: None,
                 text: "Confirm?".to_string(),
                 icon: String::new(),
                 urgency: 1,
@@ -204,12 +207,14 @@ async fn zone_hit_notification_with_two_actions_produces_three_regions() {
                 title: String::new(),
                 actions: vec![
                     NotificationAction {
+                        copy: None,
                         label: "Yes".to_string(),
                         callback_id: Some("yes".to_string()),
                         url: None,
                         role: None,
                     },
                     NotificationAction {
+                        copy: None,
                         label: "No".to_string(),
                         callback_id: Some("no".to_string()),
                         url: None,
@@ -285,6 +290,7 @@ async fn zone_hit_tab_order_is_sequential() {
         .publish_to_zone(
             "notif",
             ZoneContent::Notification(NotificationPayload {
+                progress: None,
                 text: "Tab order test".to_string(),
                 icon: String::new(),
                 urgency: 1,
@@ -293,12 +299,14 @@ async fn zone_hit_tab_order_is_sequential() {
                 title: String::new(),
                 actions: vec![
                     NotificationAction {
+                        copy: None,
                         label: "A".to_string(),
                         callback_id: Some("a".to_string()),
                         url: None,
                         role: None,
                     },
                     NotificationAction {
+                        copy: None,
                         label: "B".to_string(),
                         callback_id: Some("b".to_string()),
                         url: None,
@@ -363,6 +371,7 @@ async fn zone_hit_populate_clears_on_repeated_calls() {
         .publish_to_zone(
             "notif",
             ZoneContent::Notification(NotificationPayload {
+                progress: None,
                 text: "Once".to_string(),
                 icon: String::new(),
                 urgency: 1,
@@ -713,6 +722,7 @@ async fn drag_handle_regions_cover_visible_tile_and_zone_but_not_widget() {
             ZoneContent::Notification(NotificationPayload {
                 text: "content".into(),
                 actions: vec![tze_hud_scene::NotificationAction {
+                    copy: None,
                     label: "Open".into(),
                     callback_id: Some("open".into()),
                     url: None,
@@ -1186,6 +1196,7 @@ async fn drag_visual_feedback_applied_during_active_drag() {
                 .publish_to_zone(
                     "notif",
                     ZoneContent::Notification(NotificationPayload {
+                        progress: None,
                         text: "Body".into(),
                         title: if count == 1 {
                             String::new()
@@ -1197,6 +1208,7 @@ async fn drag_visual_feedback_applied_during_active_drag() {
                         ttl_ms: None,
                         actions: (0..if count == 3 { 4 } else { 0 })
                             .map(|n| NotificationAction {
+                                copy: None,
                                 label: format!("Action {n}"),
                                 callback_id: (n != 0).then(|| format!("action-{n}")),
                                 url: (n == 0).then(|| "https://example.com/scale".into()),
@@ -1540,6 +1552,7 @@ fn zone_hit_regions_and_slot_pitch_scale_with_px_scale() {
             ephemeral: false,
         });
         let action = |label: &str| NotificationAction {
+            copy: None,
             label: label.to_string(),
             callback_id: Some(label.to_lowercase()),
             url: None,
@@ -1553,6 +1566,7 @@ fn zone_hit_regions_and_slot_pitch_scale_with_px_scale() {
                 .publish_to_zone(
                     "notif",
                     ZoneContent::Notification(NotificationPayload {
+                        progress: None,
                         text: text.to_string(),
                         icon: String::new(),
                         urgency: 1,

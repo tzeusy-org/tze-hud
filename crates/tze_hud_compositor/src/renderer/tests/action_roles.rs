@@ -9,6 +9,7 @@ const ZONE: &str = "notification-area";
 
 fn action(label: &str, destructive: bool) -> NotificationAction {
     NotificationAction {
+        copy: None,
         label: label.into(),
         callback_id: Some(label.into()),
         url: None,

@@ -62,6 +62,7 @@ fn setup_single_notification_scene() -> (SceneGraph, u64, &'static str) {
         .publish_to_zone(
             "notif",
             ZoneContent::Notification(NotificationPayload {
+                progress: None,
                 text: "Test notification".to_string(),
                 icon: String::new(),
                 urgency: 1,
@@ -232,6 +233,7 @@ fn dismiss_notification_leaves_other_publications_untouched() {
         .publish_to_zone(
             "notif",
             ZoneContent::Notification(NotificationPayload {
+                progress: None,
                 text: "First".to_string(),
                 icon: String::new(),
                 urgency: 1,
@@ -250,6 +252,7 @@ fn dismiss_notification_leaves_other_publications_untouched() {
         .publish_to_zone(
             "notif",
             ZoneContent::Notification(NotificationPayload {
+                progress: None,
                 text: "Second".to_string(),
                 icon: String::new(),
                 urgency: 2,
@@ -449,6 +452,7 @@ fn zone_hit_region_fields_round_trip() {
 #[test]
 fn notification_action_fields_accessible() {
     let action = NotificationAction {
+        copy: None,
         label: "Confirm".to_string(),
         callback_id: Some("confirm-action".to_string()),
         url: None,
@@ -463,6 +467,7 @@ fn notification_action_fields_accessible() {
 #[test]
 fn notification_payload_with_actions_serializes() {
     let payload = NotificationPayload {
+        progress: None,
         text: "Do you confirm?".to_string(),
         icon: String::new(),
         urgency: 1,
@@ -470,12 +475,14 @@ fn notification_payload_with_actions_serializes() {
         title: String::new(),
         actions: vec![
             NotificationAction {
+                copy: None,
                 label: "Yes".to_string(),
                 callback_id: Some("yes".to_string()),
                 url: None,
                 role: None,
             },
             NotificationAction {
+                copy: None,
                 label: "No".to_string(),
                 callback_id: Some("no".to_string()),
                 url: None,

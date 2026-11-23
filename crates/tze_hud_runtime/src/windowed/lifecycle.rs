@@ -2429,6 +2429,11 @@ impl WinitApp {
     ) {
         match outcome {
             tze_hud_scene::graph::NotificationActivation::Callback(wake) => wake.notify(),
+            tze_hud_scene::graph::NotificationActivation::Copy {
+                text,
+                publication_id,
+                index,
+            } => self.copy_notification_text(publication_id, index, &text),
             tze_hud_scene::graph::NotificationActivation::OpenUrl {
                 url,
                 publication_id,

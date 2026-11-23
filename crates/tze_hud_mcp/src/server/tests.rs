@@ -422,7 +422,7 @@ async fn bad_arguments_are_invalid_argument_tool_errors() {
         )
         .await;
         assert_eq!(err["code"], "INVALID_ARGUMENT");
-        assert_eq!(err["hint"], "action needs callback_id or url, not both");
+        assert_eq!(err["hint"], "action needs one of callback_id, url or copy");
     }
 
     // The same cardinality rule applies before immediate admission and scheduling.
@@ -544,7 +544,7 @@ async fn bad_arguments_are_invalid_argument_tool_errors() {
             observed.fetch_add(1, Ordering::Relaxed);
         }),
     );
-    let target_hint = "action needs callback_id or url, not both";
+    let target_hint = "action needs one of callback_id, url or copy";
     let url_hint = "action url must be https";
     let prefix = "https://example.com/";
     let boundary = format!("{prefix}{}", "a".repeat(2048 - prefix.len()));
@@ -2790,6 +2790,7 @@ async fn action_role_is_destructive_on_callback_actions_only() {
         unreachable!()
     };
     let action = |label: &str, callback: &str, role| NotificationAction {
+        copy: None,
         label: label.into(),
         callback_id: Some(callback.into()),
         url: None,
@@ -4336,6 +4337,85 @@ async fn status_bar_keys_merge_and_update() {
         .find(|r| r.merge_key.as_deref() == Some("weather"))
         .unwrap();
     assert!(matches!(&weather.content, ZoneContent::StatusBar(p) if p.entries["weather"] == "75F"));
+}
+
+#[tokio::test]
+async fn notification_progress_and_copy_admission() {
+    let (server, _) = server();
+    let invalid_progress = "notification.progress must be a number in 0..1";
+    let invalid_copy = "action copy must contain 1 to 2048 UTF-8 bytes";
+    let exclusivity = "action needs one of callback_id, url or copy";
+    for delay in [0, 1000] {
+        let args = |content| {
+            json!({
+                "surface": "zone:notification-area", "delay_ms": delay, "content": content,
+            })
+        };
+        for (fields, hint) in [
+            (json!({"progress": null}), invalid_progress),
+            (json!({"progress": "0.4"}), invalid_progress),
+            (json!({"progress": -0.01}), invalid_progress),
+            (json!({"progress": 1.00000001}), invalid_progress),
+            (
+                json!({"actions": [{"label":"Copy", "copy":""}]}),
+                invalid_copy,
+            ),
+            (
+                json!({"actions": [{"label":"Copy", "copy":"é".repeat(1025)}]}),
+                invalid_copy,
+            ),
+            (
+                json!({"actions": [{"label":"Copy", "copy":"job", "callback_id":""}]}),
+                exclusivity,
+            ),
+            (
+                json!({"actions": [{"label":"Copy", "copy":"job", "url":""}]}),
+                exclusivity,
+            ),
+        ] {
+            let mut content = fields;
+            content["body"] = json!("Deploy");
+            let err = call_err(&server, "hud_publish", args(content)).await;
+            assert_eq!(err["code"], "INVALID_ARGUMENT");
+            assert_eq!(err["hint"], hint);
+            let scene = server.scene.lock().await;
+            assert!(
+                scene
+                    .zone_registry
+                    .active_for_zone("notification-area")
+                    .is_empty()
+            );
+            assert!(scene.scheduled_publications.is_empty());
+        }
+    }
+
+    let publish = |key, progress| {
+        json!({
+            "surface": "zone:notification-area", "key": key,
+            "content": {
+                "body": "Deploy", "progress": progress,
+                "actions": [{"label":"Copy", "copy":"é".repeat(1024)}, {"label":"Stop"}],
+            },
+        })
+    };
+    call(&server, "hud_publish", publish("deployment", 0.0)).await;
+    call(&server, "hud_publish", publish("other", 1.0)).await;
+    call(&server, "hud_publish", publish("deployment", 0.7)).await;
+    let scene = server.scene.lock().await;
+    let cards = scene.zone_registry.active_for_zone("notification-area");
+    assert_eq!(cards.len(), 2);
+    assert_eq!(cards[0].merge_key.as_deref(), Some("deployment"));
+    assert_eq!(cards[1].merge_key.as_deref(), Some("other"));
+    let ZoneContent::Notification(payload) = &cards[0].content else {
+        panic!("expected the updated notification");
+    };
+    assert_eq!(payload.progress, Some(0.7));
+    assert_eq!(
+        payload.actions[0].copy.as_deref(),
+        Some("é".repeat(1024).as_str())
+    );
+    assert_eq!(payload.actions[0].callback_id, None);
+    assert_eq!(payload.actions[1].callback_id.as_deref(), Some("Stop"));
 }
 
 // ── Safe mode ────────────────────────────────────────────────────────────────

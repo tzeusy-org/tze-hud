@@ -323,6 +323,8 @@ pub(super) fn make_windowed_keyboard_test_app(
         press_guard: Default::default(),
         notification_link_opener: Default::default(),
         link_feedback: None,
+        notification_clipboard: Default::default(),
+        copy_feedback: None,
         window_go_to: Default::default(),
         context_menu_press: None,
         context_menu_open: false,
@@ -980,6 +982,7 @@ mod tests {
             .publish_to_zone(
                 "alert-banner",
                 ZoneContent::Notification(NotificationPayload {
+                    progress: None,
                     text: "hello".to_string(),
                     icon: String::new(),
                     urgency: 0,
@@ -1105,6 +1108,7 @@ mod tests {
             .publish_to_zone(
                 "alert-banner",
                 ZoneContent::Notification(NotificationPayload {
+                    progress: None,
                     text: "hello".to_string(),
                     icon: String::new(),
                     urgency: 0,

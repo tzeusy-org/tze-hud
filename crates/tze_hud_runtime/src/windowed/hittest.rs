@@ -859,12 +859,14 @@ mod tests {
             .publish_to_zone(
                 "notifications",
                 ZoneContent::Notification(NotificationPayload {
+                    progress: None,
                     text: "Move the stack".into(),
                     title: "Placement".into(),
                     icon: String::new(),
                     urgency: 1,
                     ttl_ms: None,
                     actions: vec![NotificationAction {
+                        copy: None,
                         label: "Open".into(),
                         callback_id: Some("open".into()),
                         url: None,
@@ -1306,12 +1308,14 @@ mod tests {
                         .publish_to_zone(
                             "notifications",
                             ZoneContent::Notification(NotificationPayload {
+                                progress: None,
                                 text: "Move the stack".into(),
                                 title: "Placement".into(),
                                 icon: String::new(),
                                 urgency: 1,
                                 ttl_ms: None,
                                 actions: vec![NotificationAction {
+                                    copy: None,
                                     label: "Open".into(),
                                     callback_id: Some("open".into()),
                                     url: None,

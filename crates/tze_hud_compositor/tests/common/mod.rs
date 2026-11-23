@@ -112,6 +112,7 @@ pub(crate) fn publish_notification(
         .publish_to_zone(
             zone,
             ZoneContent::Notification(NotificationPayload {
+                progress: None,
                 text: format!("urgency {urgency}"),
                 icon,
                 urgency,

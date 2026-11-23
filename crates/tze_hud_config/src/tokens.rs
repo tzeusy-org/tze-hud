@@ -852,6 +852,11 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         default_value: "1200",
     },
     CanonicalToken {
+        key: "notification.copy.feedback.ms",
+        description: "How long a notification button shows its copy result (ms)",
+        default_value: "1200",
+    },
+    CanonicalToken {
         key: NOTIFICATION_ACTION_HOLD_MS_KEY,
         description: "How long a destructive notification action must be held (ms, 0-3000; 0 = no hold)",
         default_value: "600",

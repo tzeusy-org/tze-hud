@@ -2402,8 +2402,8 @@ impl Compositor {
             scene.display_area.height,
         );
 
-        // Notification title/body bands share draw geometry and the existing
-        // bounded ellipsis machinery; Clip action labels are not primed.
+        // Notification bands and action labels share draw geometry and the
+        // bounded ellipsis machinery.
         zone_ellipsis_items.extend(self.collect_notification_ellipsis_items(
             scene,
             scene.display_area.width,
