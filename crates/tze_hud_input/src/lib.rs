@@ -365,11 +365,6 @@ impl InputProcessor {
             .map(|k| k.0)
     }
 
-    /// Whether `tile`'s OUTPUT follows its tail.
-    pub fn output_at_tail(&self, tile: SceneId) -> bool {
-        self.scroll_state.follow_tail_anchor(tile) == crate::scroll::FollowTailAnchor::AtTail
-    }
-
     /// While an OUTPUT selection exists the view stops following the tail
     /// (new output counts as unread); returns whether it was following.
     pub fn hold_output_for_selection(&mut self, tile: SceneId, scene: &mut SceneGraph) -> bool {

@@ -265,8 +265,6 @@ pub struct HeadlessEventLoopHarness {
     last_turn_submitted: bool,
     offscreen_work: (u64, u64),
     offscreen_tokens_seen: u64,
-    next_frame_wall_us: Option<u64>,
-    next_animation_at: Option<std::time::Instant>,
     mcp_addr: Option<SocketAddr>,
     grpc_addr: Option<SocketAddr>,
     clipboard: Arc<std::sync::Mutex<Vec<String>>>,
@@ -553,8 +551,6 @@ impl HeadlessEventLoopHarness {
             last_turn_submitted: false,
             offscreen_work: (0, 0),
             offscreen_tokens_seen: 0,
-            next_frame_wall_us: None,
-            next_animation_at: None,
             mcp_addr: Some(mcp_addr),
             grpc_addr: Some(grpc_addr),
             clipboard,
@@ -904,18 +900,6 @@ impl HeadlessEventLoopHarness {
             .load(std::sync::atomic::Ordering::Acquire)
     }
 
-    /// Number of tiles showing the disconnection badge (their agent's session
-    /// dropped and the lease is in its grace period).
-    pub fn badged_tile_count(&self) -> usize {
-        self.scene()
-            .tiles
-            .values()
-            .filter(|tile| {
-                tile.visual_hint == tze_hud_scene::lease::TileVisualHint::DisconnectionBadge
-            })
-            .count()
-    }
-
     /// Whether the server's send buffer to `agent`'s session is full: the agent
     /// has stopped reading, so the next reply it is owed would block.
     pub async fn session_backed_up(&self, agent: &str) -> bool {
@@ -941,21 +925,6 @@ impl HeadlessEventLoopHarness {
     pub fn tile_bounds(&self) -> Vec<tze_hud_scene::Rect> {
         let scene = self.scene();
         scene.tiles.values().map(|tile| tile.bounds).collect()
-    }
-
-    /// The text every tile on screen shows.
-    pub fn tile_texts(&self) -> Vec<String> {
-        let scene = self.scene();
-        scene
-            .tiles
-            .values()
-            .filter_map(|tile| tile.root_node)
-            .filter_map(|id| scene.nodes.get(&id))
-            .filter_map(|node| match &node.data {
-                NodeData::TextMarkdown(text) => Some(text.content.clone()),
-                _ => None,
-            })
-            .collect()
     }
 
     /// Attach a real offscreen compositor using the canonical headless factory.
@@ -1001,11 +970,6 @@ impl HeadlessEventLoopHarness {
     /// None identifies a renderer-unavailable turn, not an idle success.
     pub fn last_frame_submitted(&self) -> Option<bool> {
         self.offscreen.as_ref().map(|_| self.last_turn_submitted)
-    }
-
-    /// Content/lease/widget and animation deadlines from the production turn.
-    pub fn frame_deadlines(&self) -> (Option<u64>, Option<std::time::Instant>) {
-        (self.next_frame_wall_us, self.next_animation_at)
     }
 
     /// Run the real main-thread settle followed by the production frame turn.
@@ -1089,8 +1053,6 @@ impl HeadlessEventLoopHarness {
             },
         );
         self.last_turn_submitted = turn.submitted;
-        self.next_frame_wall_us = turn.next_wall_us;
-        self.next_animation_at = turn.next_animation_at;
         if turn.work.is_none() {
             // GPU-free callers need approximate notification geometry, but do
             // not claim render/snapshot/presentation evidence.
@@ -1375,8 +1337,6 @@ impl HeadlessEventLoopHarness {
             last_turn_submitted: false,
             offscreen_work: (0, 0),
             offscreen_tokens_seen: 0,
-            next_frame_wall_us: None,
-            next_animation_at: None,
             mcp_addr: None,
             grpc_addr: None,
             clipboard: Arc::default(),

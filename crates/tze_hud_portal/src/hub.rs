@@ -911,18 +911,6 @@ impl PortalHub {
         }
     }
 
-    /// Degrade all live portals when their shared upstream goes away.
-    /// Returns only changed identities; holds cannot keep a disconnected stream live.
-    pub fn degrade_all(&mut self, now_us: u64) -> Vec<PortalKey> {
-        let mut changed = Vec::new();
-        for (key, portal) in &mut self.portals {
-            if portal.degrade(now_us) {
-                changed.push(key.clone());
-            }
-        }
-        changed
-    }
-
     /// The runtime took the portal away (viewer dismiss, lost surface).
     pub fn reclaim(&mut self, key: &PortalKey) {
         if let Some(portal) = self.portals.get_mut(key) {
