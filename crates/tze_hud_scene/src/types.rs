@@ -1351,7 +1351,7 @@ impl Lease {
     ///
     /// Accounts for suspension: time spent in Suspended state does not count
     /// toward TTL consumption.
-    pub fn is_expired(&self, now_ms: u64) -> bool {
+    pub(crate) fn is_expired(&self, now_ms: u64) -> bool {
         match self.state {
             // Terminal states are already past expiry semantics.
             LeaseState::Denied
@@ -1486,12 +1486,12 @@ impl Lease {
     }
 
     /// Whether mutations are allowed. Only Active state permits mutations.
-    pub fn is_mutations_allowed(&self) -> bool {
+    pub(crate) fn is_mutations_allowed(&self) -> bool {
         self.state == LeaseState::Active
     }
 
     /// Check if the grace period has expired for an orphaned lease.
-    pub fn check_grace_expired(&self, now_ms: u64) -> bool {
+    pub(crate) fn check_grace_expired(&self, now_ms: u64) -> bool {
         match (self.state, self.disconnected_at_ms) {
             (LeaseState::Orphaned, Some(disc_at)) => now_ms >= disc_at + self.grace_period_ms,
             _ => false,
@@ -1499,7 +1499,7 @@ impl Lease {
     }
 
     /// Check if a suspended lease has exceeded the maximum suspension time.
-    pub fn check_suspension_expired(&self, now_ms: u64, max_suspend_ms: u64) -> bool {
+    pub(crate) fn check_suspension_expired(&self, now_ms: u64, max_suspend_ms: u64) -> bool {
         match (self.state, self.suspended_at_ms) {
             (LeaseState::Suspended, Some(susp_at)) => now_ms >= susp_at + max_suspend_ms,
             _ => false,

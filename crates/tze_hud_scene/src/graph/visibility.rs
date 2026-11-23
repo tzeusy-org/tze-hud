@@ -65,7 +65,7 @@ impl SceneGraph {
     /// Whether `tile` belongs to a session portal: some tile of its lease
     /// carries a portal surface or a local scroll config. Costs one lookup per
     /// marked (portal) tile, not per scene tile.
-    pub fn tile_is_portal(&self, tile: &Tile) -> bool {
+    fn tile_is_portal(&self, tile: &Tile) -> bool {
         self.overlay
             .tile_scroll_configs
             .keys()

@@ -26,7 +26,7 @@ impl RenderWakeNotifier {
         }
     }
 
-    pub fn is_wired(&self) -> bool {
+    fn is_wired(&self) -> bool {
         self.callback.is_some()
     }
 }
