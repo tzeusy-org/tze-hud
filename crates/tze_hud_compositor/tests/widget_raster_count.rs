@@ -424,100 +424,122 @@ async fn widget_param_update_rasterizes_only_that_instance() {
     #[cfg(feature = "dev-mode")]
     assert_widget_work(&mut gpu.compositor, 0, 0);
 
-    // The shipped gauge's arc, severity and edge pixels are covered by
-    // gauge_binding_rendering. Here keep the distinct progress-bar frame.
-    let mut scene = SceneGraph::new(512.0, 256.0);
-    let name = register_bundle(
-        &mut gpu.compositor,
-        &mut scene,
-        bundle!("progress-bar", ["track.svg", "fill.svg"]),
-    );
-    let tab = scene.create_tab("Progress", 0).unwrap();
-    let definition = scene.widget_registry.definitions[&name].clone();
-    let mut paint = |scene: &mut SceneGraph, params: &[(&'static str, Value)]| {
-        publish_params(scene, &name, "model", 0, params.iter().cloned());
-        gpu.render_pixels(scene)
-    };
-    let at = |pixels: &[u8], roi| widget_region(pixels, 512, (0, 0), roi);
-    let readout = (270, 10, 35, 16);
-    let track = token_rgb("color.outline.variant");
-    let mut severity_frames = HashMap::new();
-    for owner in [false, true] {
-        let (initial, fill) = if owner {
-            (
-                serde_json::json!({ "fill_color": [12, 210, 123, 255] }),
-                [12, 210, 123],
-            )
-        } else {
-            (serde_json::json!({}), token_rgb("color.primary"))
-        };
-        let mut scene = scene.clone();
-        let mut instance = configured_instance(&definition, tab, &name, initial);
-        instance.geometry_override = Some(relative(0.0, 0.0, 320.0 / 512.0, 50.0 / 256.0));
-        scene.widget_registry.register_instance(instance);
+    assert_shipped_severity_pixels(&mut gpu);
+}
 
-        // Sample the empty, half and full interior. The custom fill uses the
-        // same boundaries, so a mid-fill check there suffices for the role.
-        let stages = [(0.0, 15), (0.5, 160), (1.0, 305)];
-        let mut last_readout = Vec::new();
-        for &(progress, fill_to) in if owner { &stages[1..2] } else { &stages[..] } {
-            let pixels = paint(
-                &mut scene,
-                &[("progress", Value::F32(progress)), ("label", string(""))],
-            );
-            for x in [18, 155, 165, 301] {
-                let expected = if x < fill_to { fill } else { track };
-                assert_color(
-                    pixel_at(&pixels, 512, x, 37),
-                    expected,
-                    2,
-                    format_args!("progress={progress}, x={x}"),
-                );
-            }
-            let text = at(&pixels, readout);
-            assert!(
-                text.iter()
-                    .any(|p| p[..3].iter().all(|&channel| channel > 128))
-            );
-            assert_ne!(text, last_readout, "readout updates when progress changes");
-            last_readout = text;
-            if progress == 0.5 && owner {
-                let long = paint(&mut scene, &[("label", string("W".repeat(32)))]);
-                for (roi, stable) in [
-                    (readout, true),
-                    ((320, 0, 192, 50), true),
-                    ((15, 10, 220, 16), false),
-                ] {
-                    assert_eq!(
-                        at(&long, roi) == at(&pixels, roi),
-                        stable,
-                        "long label at {roi:?}"
+fn assert_shipped_severity_pixels(gpu: &mut Gpu) {
+    for (bundle, level, width, height, sample) in [
+        (
+            bundle!("gauge", ["background.svg", "fill.svg"]),
+            "level",
+            128.0,
+            132.0,
+            (98, 56),
+        ),
+        (
+            bundle!("progress-bar", ["track.svg", "fill.svg"]),
+            "progress",
+            320.0,
+            50.0,
+            (100, 37),
+        ),
+    ] {
+        let mut scene = SceneGraph::new(512.0, 256.0);
+        let name = register_bundle(&mut gpu.compositor, &mut scene, bundle);
+        let tab = scene.create_tab("Severity", 0).unwrap();
+        let definition = scene.widget_registry.definitions[&name].clone();
+        let mut paint = |scene: &mut SceneGraph, params: &[(&'static str, Value)]| {
+            publish_params(scene, &name, "model", 0, params.iter().cloned());
+            gpu.render_pixels(scene)
+        };
+        let mut default_severity_frames = HashMap::new();
+        for owner in [false, true] {
+            let (initial, fill) = if owner {
+                (
+                    serde_json::json!({ "fill_color": [12, 210, 123, 255] }),
+                    [12, 210, 123],
+                )
+            } else {
+                (serde_json::json!({}), token_rgb("color.primary"))
+            };
+            let mut scene = scene.clone();
+            let mut instance = configured_instance(&definition, tab, &name, initial);
+            instance.geometry_override = Some(relative(0.0, 0.0, width / 512.0, height / 256.0));
+            scene.widget_registry.register_instance(instance);
+            if level == "progress" {
+                let at = |pixels: &[u8], roi| widget_region(pixels, 512, (0, 0), roi);
+                let track = token_rgb("color.outline.variant");
+                let mut last_readout = Vec::new();
+                for (progress, fill_to) in [(0.0, 15), (0.5, 160), (1.0, 305)] {
+                    let pixels = paint(
+                        &mut scene,
+                        &[(level, Value::F32(progress)), ("label", string(""))],
                     );
+                    for x in [18, 155, 165, 301] {
+                        let expected = if x < fill_to { fill } else { track };
+                        assert_color(
+                            pixel_at(&pixels, 512, x, 37),
+                            expected,
+                            2,
+                            format_args!("progress={progress}, x={x}"),
+                        );
+                    }
+                    let text = at(&pixels, (270, 10, 35, 16));
+                    assert!(
+                        text.iter()
+                            .any(|p| p[..3].iter().all(|&channel| channel > 128))
+                    );
+                    assert_ne!(text, last_readout, "readout updates when progress changes");
+                    last_readout = text;
+                    let long = paint(&mut scene, &[("label", string("W".repeat(32)))]);
+                    for (roi, stable) in [
+                        ((270, 10, 50, 16), true),  // Includes the percentage and right inset.
+                        ((320, 0, 192, 50), true),  // Outside the progress card.
+                        ((15, 10, 220, 16), false), // Visible label text.
+                    ] {
+                        assert_eq!(
+                            at(&long, roi) == at(&pixels, roi),
+                            stable,
+                            "long label at {roi:?}, progress={progress}, owner={owner}"
+                        );
+                    }
                 }
             }
-        }
-        for (severity, expected) in [
-            ("warning", token_rgb("color.caution")),
-            ("error", token_rgb("color.error")),
-            ("info", fill),
-        ] {
-            let pixels = paint(
-                &mut scene,
-                &[
-                    ("progress", Value::F32(0.75)),
-                    ("severity", enumeration(severity)),
-                    ("label", string("")),
-                ],
-            );
-            assert_color(pixel_at(&pixels, 512, 100, 37), expected, 2, severity);
-            if severity != "info" {
-                let baseline = severity_frames
-                    .entry(severity)
-                    .or_insert_with(|| pixels.clone());
-                assert!(
-                    pixels == *baseline,
-                    "owner info fill changed {severity} pixels"
+            let mut info_frame = None;
+            for (severity, expected) in [
+                ("info", fill),
+                ("warning", token_rgb("color.caution")),
+                ("error", token_rgb("color.error")),
+                ("info", fill),
+            ] {
+                let pixels = paint(
+                    &mut scene,
+                    &[
+                        (level, Value::F32(0.75)),
+                        ("severity", enumeration(severity)),
+                        ("label", string("")),
+                    ],
                 );
+                assert_color(
+                    pixel_at(&pixels, 512, sample.0, sample.1),
+                    expected,
+                    2,
+                    format_args!("owner={owner} severity={severity}"),
+                );
+                if severity == "info" {
+                    if let Some(first) = &info_frame {
+                        assert!(pixels == *first, "{name}: info frame must return unchanged");
+                    } else {
+                        info_frame = Some(pixels);
+                    }
+                } else if owner {
+                    assert!(
+                        pixels == default_severity_frames[severity],
+                        "{name}/{severity}: owner info fill changed non-info pixels, including rounded edges"
+                    );
+                } else {
+                    default_severity_frames.insert(severity, pixels);
+                }
             }
         }
     }
@@ -756,13 +778,18 @@ async fn countdown_kpi_and_stepper_render_their_shipped_contracts() {
             ("state", enumeration("blocked")),
         ],
     );
-    for (step, active) in [(None, 1), (Some(7.0), 4)] {
-        if let Some(step) = step {
-            publish(&mut scene, "stepper", &[("step", Value::F32(step))]);
-            gpu.draw(&mut scene);
-            clock.advance(201);
-        }
+    let blocked = gpu.render_pixels(&mut scene);
+    for (step, active) in [(2.0, 1), (7.0, 4)] {
+        publish(&mut scene, "stepper", &[("step", Value::F32(step))]);
+        gpu.draw(&mut scene);
+        clock.advance(201);
         let pixels = gpu.render_pixels(&mut scene);
+        if active == 1 {
+            assert!(
+                pixels == blocked,
+                "republishing the same whole step changes no pixel"
+            );
+        }
         for dot in 0..5 {
             dot_color(
                 &pixels,
@@ -839,9 +866,21 @@ async fn countdown_kpi_and_stepper_render_their_shipped_contracts() {
     };
     assert_eq!(rendered_text(&gpu.compositor), string("5 min"));
     let initial_rasters = raster_count(&gpu.compositor, "countdown");
+    assert!(!gpu.compositor.has_inflight_animation(&scene));
+    clock.advance(59_999);
+    assert!(!gpu.compositor.widget_deadline_needs_render(&scene));
+    assert!(gpu.draw(&mut scene).widget_rasterized.is_empty());
+    assert_eq!(raster_count(&gpu.compositor, "countdown"), initial_rasters);
+    clock.advance(1);
+    assert!(gpu.compositor.widget_deadline_needs_render(&scene));
+    assert_eq!(gpu.draw(&mut scene).widget_rasterized, ["countdown"]);
+    assert_eq!(rendered_text(&gpu.compositor), string("4 min"));
+    assert_eq!(
+        raster_count(&gpu.compositor, "countdown"),
+        initial_rasters + 1
+    );
 
-    // The windowed idle-gate harness covers ordinary cadence and safe mode.
-    // Here test owner hiding and zero geometry.
+    // The windowed idle-gate harness separately covers pause and resume.
     scene.set_owner_hidden(SurfaceClasses {
         widgets: true,
         ..SurfaceClasses::NONE
@@ -850,19 +889,22 @@ async fn countdown_kpi_and_stepper_render_their_shipped_contracts() {
     assert_eq!(gpu.compositor.next_widget_deadline_wall_us(&scene), None);
     assert!(!gpu.compositor.widget_deadline_needs_render(&scene));
     assert!(gpu.draw(&mut scene).widget_rasterized.is_empty());
-    assert_eq!(raster_count(&gpu.compositor, "countdown"), initial_rasters);
-
-    scene.set_owner_hidden(SurfaceClasses::NONE);
-    assert!(gpu.compositor.widget_deadline_needs_render(&scene));
-    assert_eq!(gpu.draw(&mut scene).widget_rasterized, ["countdown"]);
-    assert_eq!(rendered_text(&gpu.compositor), string("4 min"));
     assert_eq!(
         raster_count(&gpu.compositor, "countdown"),
         initial_rasters + 1
     );
+
+    scene.set_owner_hidden(SurfaceClasses::NONE);
+    assert!(gpu.compositor.widget_deadline_needs_render(&scene));
+    assert_eq!(gpu.draw(&mut scene).widget_rasterized, ["countdown"]);
+    assert_eq!(rendered_text(&gpu.compositor), string("3 min"));
+    assert_eq!(
+        raster_count(&gpu.compositor, "countdown"),
+        initial_rasters + 2
+    );
     assert!(!gpu.compositor.has_inflight_animation(&scene));
 
-    clock.advance(240_000);
+    clock.advance(180_000);
     let zero = gpu.render_pixels(&mut scene);
     assert_eq!(rendered_text(&gpu.compositor), string("0:00"));
     assert_eq!(gpu.compositor.next_widget_deadline_wall_us(&scene), None);

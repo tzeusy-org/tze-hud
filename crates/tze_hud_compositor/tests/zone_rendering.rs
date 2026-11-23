@@ -134,7 +134,8 @@ async fn notification_and_alert_pixels_follow_their_content_and_roles() {
         ),
         (2, None, (222, 17), NOTIF_URGENT, TOL, "caution"),
         (3, None, (222, 17), NOTIF_CRITICAL, TOL, "critical"),
-        (1, None, (224, 26), NOTIF_LOW, TOL, "no icon"),
+        (0, None, (224, 26), NOTIF_LOW, TOL, "empty icon"),
+        (1, None, (222, 17), NOTIF_LOW, TOL, "normal urgency"),
         (
             0,
             Some(unregistered),
@@ -145,10 +146,13 @@ async fn notification_and_alert_pixels_follow_their_content_and_roles() {
         ),
     ] {
         let mut scene = notification_scene();
-        let icon = icon.map_or_else(String::new, |id| id.to_hex());
-        publish_notification(&mut scene, "notification-area", urgency, icon, "a");
-        gpu.render(&mut scene)
-            .expect(x, y, expected, tolerance, what);
+        let icon_hex = icon.map_or_else(String::new, |id| id.to_hex());
+        publish_notification(&mut scene, "notification-area", urgency, icon_hex, "a");
+        let frame = gpu.render(&mut scene);
+        frame.expect(x, y, expected, tolerance, what);
+        if urgency == 0 && icon.is_none() {
+            frame.expect(222, 17, NOTIF_LOW, TOL, "low urgency");
+        }
     }
 
     gpu.compositor
@@ -220,55 +224,65 @@ fn alert_scene(gpu: &mut Gpu, theme: &str) -> SceneGraph {
 
 // Severity controls the stack, with modern inset cards and Classic strips.
 fn assert_alert_pixels(gpu: &mut Gpu) {
-    for (theme, [low, critical]) in ALERT_THEMES.iter().zip([[1, 3], [0, 3], [1, 5]]) {
+    for theme in &ALERT_THEMES {
+        let expect_tone = |frame: &Frame, slot: usize, tone: usize, proof: &str| {
+            let y = theme.centers_y[slot];
+            let expected = theme.tones[tone];
+            frame.expect(128, y, expected, 8, proof);
+            frame.expect(
+                4,
+                y,
+                if theme.inset { CLEAR } else { expected },
+                8,
+                &format!("{proof}: outer margin"),
+            );
+        };
+        for (urgency, tone) in [(0, 0), (1, 0), (2, 1), (3, 2), (5, 2)] {
+            let mut scene = alert_scene(gpu, theme.name);
+            publish_notification(&mut scene, "alert-banner", urgency, String::new(), "a");
+            let frame = gpu.render(&mut scene);
+            expect_tone(
+                &frame,
+                0,
+                tone,
+                &format!("{} urgency {urgency}", theme.name),
+            );
+        }
         let mut scene = alert_scene(gpu, theme.name);
-        for (urgency, agent) in [(low, "info"), (2, "warning"), (critical, "critical")] {
+        for (urgency, agent) in [(1, "info"), (2, "warning"), (3, "critical")] {
             publish_notification(&mut scene, "alert-banner", urgency, String::new(), agent);
         }
         let frame = gpu.render(&mut scene);
         for (slot, tone) in [2, 1, 0].into_iter().enumerate() {
-            let label = format!("{} slot {slot}", theme.name);
-            frame.expect(128, theme.centers_y[slot], theme.tones[tone], 8, &label);
-            frame.expect(
-                4,
-                theme.centers_y[slot],
-                if theme.inset {
-                    CLEAR
-                } else {
-                    theme.tones[tone]
-                },
-                8,
-                &format!("{label}: outer margin"),
-            );
+            expect_tone(&frame, slot, tone, &format!("{} slot {slot}", theme.name));
         }
         if theme.inset {
             frame.expect(128, 8, CLEAR, 2, "top margin stays clear");
             frame.expect(128, 72, CLEAR, 2, "inter-card gap stays clear");
         }
+        // Stream text uses the explicit policy backdrop in every theme.
+        let mut scene = alert_scene(gpu, theme.name);
+        let policy = &mut scene
+            .zone_registry
+            .zones
+            .get_mut("alert-banner")
+            .unwrap()
+            .rendering_policy;
+        policy.backdrop = Some(Rgba::new(0.1, 0.1, 0.16, 0.9));
+        policy.backdrop_opacity = Some(0.9);
+        publish(
+            &mut scene,
+            "alert-banner",
+            ZoneContent::StreamText("alert".into()),
+        );
+        gpu.render(&mut scene).expect(
+            128,
+            theme.centers_y[0],
+            [87, 87, 109, 255],
+            8,
+            &format!("{} stream text policy backdrop", theme.name),
+        );
     }
-    // Stream text uses the zone backdrop instead of a notification role.
-    let theme = &ALERT_THEMES[0];
-    let mut scene = alert_scene(gpu, theme.name);
-    let policy = &mut scene
-        .zone_registry
-        .zones
-        .get_mut("alert-banner")
-        .unwrap()
-        .rendering_policy;
-    policy.backdrop = Some(Rgba::new(0.1, 0.1, 0.16, 0.9));
-    policy.backdrop_opacity = Some(0.9);
-    publish(
-        &mut scene,
-        "alert-banner",
-        ZoneContent::StreamText("alert".into()),
-    );
-    gpu.render(&mut scene).expect(
-        128,
-        theme.centers_y[0],
-        [87, 87, 109, 255],
-        8,
-        "stream text keeps its policy backdrop",
-    );
 }
 
 // ─── Subtitle ────────────────────────────────────────────────────────────────
@@ -481,6 +495,11 @@ fn assert_ambient_image_pixels(gpu: &mut Gpu) {
         publish(scene, "ambient-background", ZoneContent::StaticImage(id))
     };
 
+    ambient(&mut scene, register_image(gpu, 8, 8, &red.repeat(8 * 8)));
+    let square = gpu.render(&mut scene);
+    for (x, y) in extent.clone() {
+        square.expect(x, y, red, 20, "square image fills the display");
+    }
     let opaque = blue.repeat(16 * 8);
     // A single non-square texture pins the full extent and UV orientation.
     let directional: Vec<u8> = (0..8)

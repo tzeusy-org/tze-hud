@@ -605,16 +605,32 @@ fn widget_occupancy_latest_wins_uses_most_recent() {
     scene
         .publish_to_widget(
             "gauge",
-            std::collections::HashMap::from([(
-                "level".to_string(),
-                WidgetParameterValue::F32(0.2),
-            )]),
+            std::collections::HashMap::from([
+                ("level".to_string(), WidgetParameterValue::F32(0.2)),
+                (
+                    "label".to_string(),
+                    WidgetParameterValue::String("CPU".into()),
+                ),
+            ]),
             "agent.a",
             None,
             0,
             None,
         )
         .unwrap();
+    let label = |scene: &SceneGraph| {
+        scene
+            .widget_registry
+            .get_occupancy("gauge", tab_id)
+            .unwrap()
+            .effective_params
+            .get("label")
+            .cloned()
+    };
+    assert_eq!(
+        label(&scene),
+        Some(WidgetParameterValue::String("CPU".into()))
+    );
     scene
         .publish_to_widget(
             "gauge",
@@ -641,6 +657,11 @@ fn widget_occupancy_latest_wins_uses_most_recent() {
     assert!(
         matches!(level, Some(WidgetParameterValue::F32(v)) if (*v - 0.9).abs() < 1e-6),
         "LatestWins: most recent level (0.9) should win, got: {level:?}"
+    );
+    assert_eq!(
+        label(&scene),
+        Some(WidgetParameterValue::String(String::new())),
+        "LatestWins uses the schema default for a label omitted by the newest publisher"
     );
 }
 
