@@ -128,8 +128,8 @@ with the same cancellation and idle semantics as a `hud_input` wait.
   An invalid value returns `INVALID_ARGUMENT` with
   `notification.progress must be a number in 0..1` on either plane.
   Each action can specify a callback, an HTTPS URL or local clipboard text.
-  An action with no target defaults to a callback whose id and answer are
-  its label, byte for byte. MCP requires a non-empty label. A supplied MCP
+  On MCP, an action with no target defaults to a callback whose id and answer
+  are its label, byte for byte. MCP requires a non-empty label. A supplied MCP
   callback id must be non-empty. Supplying multiple targets rejects with
   `INVALID_ARGUMENT` and hint `action needs one of callback_id, url or copy`.
   In MCP, an explicitly empty target string still counts as present.
@@ -151,14 +151,17 @@ with the same cancellation and idle semantics as a `hud_input` wait.
   It is never taken automatically. A card whose actions are all destructive
   has no primary. gRPC actions carry no role.
   An empty MCP URL gets `action url must be https`. On gRPC, plain-string
-  `callback_id` and `url` defaults count as absent. The label-only form needs a
-  non-empty label. The gRPC `progress` and `copy` fields preserve presence.
+  `callback_id` and `url` defaults count as absent. The gRPC `progress` and
+  `copy` fields preserve presence. gRPC requires exactly one target and uses
+  the same target hint when all three are absent.
   URLs must parse as HTTPS with a non-empty host and
   contain at most 2048 supplied UTF-8 bytes; every URL failure uses
   `action url must be https`. No network probe is performed. Both planes
   validate the whole payload before immediate admission or deferred scheduling.
   Clipboard text must contain 1 through 2048 UTF-8 bytes. An empty or
   oversized value returns `action copy must contain 1 to 2048 UTF-8 bytes`.
+  A NUL character returns `action copy cannot contain NUL` because Windows
+  clipboard text ends at the first NUL.
   Pressing a copy action writes the text locally and shows `Copied` or
   `Copy failed` in the button for about 1.2 seconds. The card stays with its
   current expiry and no item reaches `hud_input`. The answer chord's digit

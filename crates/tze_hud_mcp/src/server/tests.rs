@@ -4344,6 +4344,7 @@ async fn notification_progress_and_copy_admission() {
     let (server, _) = server();
     let invalid_progress = "notification.progress must be a number in 0..1";
     let invalid_copy = "action copy must contain 1 to 2048 UTF-8 bytes";
+    let nul_hint = "action copy cannot contain NUL";
     let exclusivity = "action needs one of callback_id, url or copy";
     for delay in [0, 1000] {
         let args = |content| {
@@ -4363,6 +4364,14 @@ async fn notification_progress_and_copy_admission() {
             (
                 json!({"actions": [{"label":"Copy", "copy":"é".repeat(1025)}]}),
                 invalid_copy,
+            ),
+            (
+                json!({"actions": [{"label":"Copy", "copy":"\0job"}]}),
+                nul_hint,
+            ),
+            (
+                json!({"actions": [{"label":"Copy", "copy":"job\0suffix"}]}),
+                nul_hint,
             ),
             (
                 json!({"actions": [{"label":"Copy", "copy":"job", "callback_id":""}]}),
@@ -4389,25 +4398,42 @@ async fn notification_progress_and_copy_admission() {
         }
     }
 
-    let publish = |key, progress| {
+    let publish = |key, progress, copy: &str| {
         json!({
             "surface": "zone:notification-area", "key": key,
             "content": {
                 "body": "Deploy", "progress": progress,
-                "actions": [{"label":"Copy", "copy":"é".repeat(1024)}, {"label":"Stop"}],
+                "actions": [{"label":"Stop", "copy":copy}, {"label":"Stop"}],
             },
         })
     };
-    call(&server, "hud_publish", publish("deployment", 0.0)).await;
-    call(&server, "hud_publish", publish("other", 1.0)).await;
+    let max_copy = "é".repeat(1024);
+    const MULTILINE_COPY: &str = "cargo test -p example\n会社 — café";
+    call(
+        &server,
+        "hud_publish",
+        publish("deployment", 0.0, &max_copy),
+    )
+    .await;
+    call(&server, "hud_publish", publish("other", 1.0, &max_copy)).await;
     let original_ids = {
         let scene = server.scene.lock().await;
         let cards = scene.zone_registry.active_for_zone("notification-area");
         assert_eq!(cards.len(), 2);
         [cards[0].publication_id, cards[1].publication_id]
     };
-    call(&server, "hud_publish", publish("deployment", 0.4)).await;
-    call(&server, "hud_publish", publish("deployment", 0.7)).await;
+    call(
+        &server,
+        "hud_publish",
+        publish("deployment", 0.4, MULTILINE_COPY),
+    )
+    .await;
+    call(
+        &server,
+        "hud_publish",
+        publish("deployment", 0.7, MULTILINE_COPY),
+    )
+    .await;
     let scene = server.scene.lock().await;
     let cards = scene.zone_registry.active_for_zone("notification-area");
     assert_eq!(cards.len(), 2);
@@ -4419,10 +4445,7 @@ async fn notification_progress_and_copy_admission() {
         panic!("expected the updated notification");
     };
     assert_eq!(payload.progress, Some(0.7));
-    assert_eq!(
-        payload.actions[0].copy.as_deref(),
-        Some("é".repeat(1024).as_str())
-    );
+    assert_eq!(payload.actions[0].copy.as_deref(), Some(MULTILINE_COPY));
     assert_eq!(payload.actions[0].callback_id, None);
     assert_eq!(payload.actions[1].callback_id.as_deref(), Some("Stop"));
 }

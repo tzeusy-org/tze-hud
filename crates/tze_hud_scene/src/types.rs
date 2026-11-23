@@ -1998,7 +1998,7 @@ impl NotificationAction {
         (self.target_count() == 0).then_some(&self.label)
     }
 
-    /// Resolve label-only targets before either transport admits a card.
+    /// Resolve label-only callbacks for MCP. gRPC requires a supplied target.
     pub fn resolve_label_callbacks(actions: &mut [Self]) -> Result<(), String> {
         validate_notification_action_count(actions.len())?;
         for (index, action) in actions.iter().enumerate() {
@@ -2059,11 +2059,13 @@ impl NotificationAction {
             return Err(ACTION_ROLE_HINT.into());
         }
         if let Some(copy) = &self.copy {
-            return if (1..=2048).contains(&copy.len()) {
-                Ok(())
-            } else {
-                Err(ACTION_COPY_HINT.into())
-            };
+            if !(1..=2048).contains(&copy.len()) {
+                return Err(ACTION_COPY_HINT.into());
+            }
+            if copy.contains('\0') {
+                return Err("action copy cannot contain NUL".into());
+            }
+            return Ok(());
         }
         self.encoded_url().map(|_| ())
     }

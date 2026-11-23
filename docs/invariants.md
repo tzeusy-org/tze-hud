@@ -135,14 +135,16 @@ guarded card under the pointer arms a wake
 [`press_guard_is_not_zeroed_by_os_motion`](../crates/tze_hud_config/src/tokens.rs)).
 
 A notification action has one resolved callback, HTTPS URL or local copy
-target. Both planes validate it before mutation or scheduling. A targetless
-action with a non-empty label is a callback named by that label. Admission
-rejects a defaulted callback id that repeats another callback id or is
-`dismiss`. MCP counts explicit empty strings as present. gRPC treats its
-plain empty callback and URL strings as absent. Multiple targets use hint
+target. Both planes validate it before mutation or scheduling. On MCP a
+targetless action with a non-empty label is a callback named by that label.
+Admission rejects a defaulted callback id that repeats another callback id
+or is `dismiss`. MCP counts explicit empty strings as present. gRPC treats its
+plain empty callback and URL strings as absent and requires a target.
+Multiple targets on either plane or a missing target on gRPC use
 `action needs one of callback_id, url or copy`. URLs require a parsed HTTPS
 host and at most 2048 supplied UTF-8 bytes. Copy text requires 1 through
-2048 UTF-8 bytes. All action kinds share the four-action admission cap.
+2048 UTF-8 bytes without NUL. All action kinds share the four-action
+admission cap.
 
 Optional notification progress is finite and within 0 through 1 on both
 planes. A same-key update retains its visual slot and enter timeline.

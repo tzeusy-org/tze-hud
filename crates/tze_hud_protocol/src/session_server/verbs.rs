@@ -281,17 +281,15 @@ fn publish_zone(
     zone: &str,
     publish: &Publish,
 ) -> RequestResult {
-    let Some(mut content) = publish
+    let Some(content) = publish
         .content
         .as_ref()
         .and_then(crate::convert::proto_zone_content_to_scene)
     else {
         return fail(seq, "INVALID_ARGUMENT", "zone publish needs content");
     };
-    if let tze_hud_scene::types::ZoneContent::Notification(n) = &mut content
-        && let Err(hint) =
-            tze_hud_scene::types::NotificationAction::resolve_label_callbacks(&mut n.actions)
-                .and_then(|()| n.validate())
+    if let tze_hud_scene::types::ZoneContent::Notification(n) = &content
+        && let Err(hint) = n.validate()
     {
         return fail(seq, "INVALID_ARGUMENT", hint);
     }

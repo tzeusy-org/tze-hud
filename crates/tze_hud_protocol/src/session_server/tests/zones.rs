@@ -10,6 +10,7 @@ async fn notification_progress_and_copy_admission() {
     let (tx, _, mut stream) = handshake(&mut client, "card-publisher", "test-key").await;
     let progress_hint = "notification.progress must be a number in 0..1";
     let copy_hint = "action copy must contain 1 to 2048 UTF-8 bytes";
+    let nul_hint = "action copy cannot contain NUL";
     let target_hint = "action needs one of callback_id, url or copy";
     let cases = [
         (Some(-0.01), None, "", "", Some(progress_hint)),
@@ -18,6 +19,8 @@ async fn notification_progress_and_copy_admission() {
         (Some(f32::INFINITY), None, "", "", Some(progress_hint)),
         (None, Some(String::new()), "", "", Some(copy_hint)),
         (None, Some("é".repeat(1025)), "", "", Some(copy_hint)),
+        (None, Some("\0job".into()), "", "", Some(nul_hint)),
+        (None, Some("job\0suffix".into()), "", "", Some(nul_hint)),
         (None, Some("job".into()), "go", "", Some(target_hint)),
         (
             None,
@@ -27,7 +30,13 @@ async fn notification_progress_and_copy_admission() {
             Some(target_hint),
         ),
         (Some(0.0), Some("é".repeat(1024)), "", "", None),
-        (Some(1.0), Some("job".into()), "", "", None),
+        (
+            Some(1.0),
+            Some("cargo test -p example\n会社 — café".into()),
+            "",
+            "",
+            None,
+        ),
     ];
     let mut sequence = 2;
     for delay in [0, 1_000_000] {
@@ -218,10 +227,11 @@ async fn test_zone_publish_result() {
         )
     };
     let mut seq = 4;
-    // Both unset legacy target strings allow a label-only callback.
+    // Both unset legacy target strings plus absent copy leave no gRPC target.
     for delay in [0, 1_000_000] {
         let sequence = seq;
         seq += 1;
+        let before = snapshot(&*scene.lock().await);
         let result = request(
             &tx,
             &mut stream,
@@ -245,27 +255,18 @@ async fn test_zone_publish_result() {
             }),
         )
         .await;
-        assert!(result.ok, "label-only callback: {result:?}");
-        let scene = scene.lock().await;
-        let content = if delay == 0 {
-            &scene
-                .zone_registry
-                .active_for_zone("notification-area")
-                .last()
-                .unwrap()
-                .content
-        } else {
-            let tze_hud_scene::Publication::Zone { content, .. } =
-                &scene.scheduled_publications.last().unwrap().publication
-            else {
-                panic!("expected a scheduled zone publication");
-            };
-            content
-        };
-        let tze_hud_scene::ZoneContent::Notification(payload) = content else {
-            panic!("expected a notification");
-        };
-        assert_eq!(payload.actions[0].callback_id.as_deref(), Some("Open"));
+        assert!(!result.ok, "empty target must reject: {result:?}");
+        assert_eq!(result.code, "INVALID_ARGUMENT");
+        assert_eq!(
+            result.hint,
+            super::verbs::fail(
+                sequence,
+                "INVALID_ARGUMENT",
+                "action needs one of callback_id, url or copy"
+            )
+            .hint
+        );
+        assert_eq!(snapshot(&*scene.lock().await), before);
     }
     for delay_us in [0, 1_000_000] {
         let publish = |count| {
