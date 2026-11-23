@@ -1371,115 +1371,68 @@ mod tests {
         Attrs::new()
     }
 
-    // ── Task 3.4: max_whole_lines invariants ──────────────────────────────────
-
     #[test]
-    fn max_whole_lines_cases() {
-        // (case, height, line_height, expected)
-        let cases = [
-            ("exact fit", 60.0, 20.0, 3),
-            ("partial line excluded", 65.0, 20.0, 3),
-            ("zero height", 0.0, 20.0, 0),
-            ("zero line height", 100.0, 0.0, 0),
-            ("smaller than one line still shows one", 10.0, 20.0, 1),
-        ];
-        for (name, h, lh, expected) in cases {
-            assert_eq!(max_whole_lines(h, lh), expected, "case: {name}");
+    fn whole_line_limits_and_invalid_geometry() {
+        for (height, line, count) in [
+            (60.0, 20.0, 3),
+            (65.0, 20.0, 3),
+            (0.0, 20.0, 0),
+            (100.0, 0.0, 0),
+            (10.0, 20.0, 1),
+        ] {
+            assert_eq!(
+                max_whole_lines(height, line),
+                count,
+                "{height}px / {line}px"
+            );
         }
-    }
 
-    // ── Task 3.4: ellipsis content correctness ────────────────────────────────
-
-    /// When a line fits, truncate_for_ellipsis returns the original text unchanged.
-    #[test]
-    fn short_text_fits_unchanged() {
         let mut fs = make_font_system();
-        let text = "Hi";
-        let result = truncate_for_ellipsis(
-            text,
-            base_attrs(),
-            1000.0, // very wide
-            100.0,
-            16.0,
-            22.4,
-            &mut fs,
-        );
-        assert_eq!(
-            result.text, text,
-            "short text that fits must not be truncated"
-        );
-        assert!(
-            !result.was_truncated,
-            "was_truncated must be false when text fits"
-        );
-    }
+        let transcript_line_height = 14.0 * 1.4;
+        for anchor in [
+            TruncationViewport::HeadAnchored,
+            TruncationViewport::TailAnchored,
+        ] {
+            let truncate = match anchor {
+                TruncationViewport::HeadAnchored => truncate_for_ellipsis,
+                TruncationViewport::TailAnchored => truncate_tail_anchored,
+            };
+            for (text, width, height, font, line) in [
+                ("Hi", 1000.0, 100.0, 16.0, 22.4),
+                ("", 200.0, 100.0, 16.0, 22.4),
+                (
+                    "Short text\nTwo lines",
+                    400.0,
+                    transcript_line_height * 5.0,
+                    14.0,
+                    transcript_line_height,
+                ),
+            ] {
+                let result = truncate(text, base_attrs(), width, height, font, line, &mut fs);
+                assert_eq!(result.text, text, "{anchor:?}: fitting input");
+                assert!(!result.was_truncated, "{anchor:?}: fitting input {text:?}");
+            }
 
-    /// Empty text returns empty result with no truncation.
-    #[test]
-    fn empty_text_no_truncation() {
-        let mut fs = make_font_system();
-        let result = truncate_for_ellipsis("", base_attrs(), 200.0, 100.0, 16.0, 22.4, &mut fs);
-        assert_eq!(result.text, "", "empty text must remain empty");
-        assert!(!result.was_truncated);
-    }
-
-    /// Degenerate geometry (zero width) produces empty result.
-    #[test]
-    fn zero_width_produces_empty() {
-        let mut fs = make_font_system();
-        let result = truncate_for_ellipsis("hello", base_attrs(), 0.0, 100.0, 16.0, 22.4, &mut fs);
-        assert_eq!(result.text, "", "zero-width bounds must produce empty text");
-        assert!(
-            result.was_truncated,
-            "was_truncated must be true for non-empty input"
-        );
-    }
-
-    /// NaN and infinite geometry inputs are guarded: no panic, empty result with
-    /// was_truncated=true for non-empty input.
-    ///
-    /// Mirrors the is_finite() guard added to `truncate_tail_anchored` in
-    /// PR #678/#684.  NaN bypasses `<= 0.0` comparisons and flows into
-    /// floor()/usize casts, panicking in debug mode.
-    #[test]
-    fn non_finite_geometry_produces_empty_no_panic() {
-        let inputs: &[(&str, f32, f32, f32, f32)] = &[
-            // (label omitted — indexed below)
-            ("hello", f32::NAN, 100.0, 16.0, 22.4),
-            ("hello", 200.0, f32::NAN, 16.0, 22.4),
-            ("hello", 200.0, 100.0, f32::NAN, 22.4),
-            ("hello", 200.0, 100.0, 16.0, f32::NAN),
-            ("hello", f32::INFINITY, 100.0, 16.0, 22.4),
-            ("hello", 200.0, f32::INFINITY, 16.0, 22.4),
-            ("hello", 200.0, 100.0, f32::INFINITY, 22.4),
-            ("hello", 200.0, 100.0, 16.0, f32::INFINITY),
-            ("hello", f32::NEG_INFINITY, 100.0, 16.0, 22.4),
-            ("hello", 200.0, f32::NEG_INFINITY, 16.0, 22.4),
-            // Empty text must still return empty with was_truncated=false.
-            ("", f32::NAN, 100.0, 16.0, 22.4),
-        ];
-        for (i, &(text, bw, bh, fs_px, lh)) in inputs.iter().enumerate() {
-            let mut font_system = make_font_system();
-            let result =
-                truncate_for_ellipsis(text, base_attrs(), bw, bh, fs_px, lh, &mut font_system);
-            assert_eq!(
-                result.text, "",
-                "input #{i}: non-finite geometry must produce empty text; \
-                 bounds_width={bw} bounds_height={bh} font_size={fs_px} line_height={lh}"
-            );
-            let expected_truncated = !text.is_empty();
-            assert_eq!(
-                result.was_truncated,
-                expected_truncated,
-                "input #{i}: was_truncated must be {} for {:?} input; \
-                 bounds_width={bw} bounds_height={bh} font_size={fs_px} line_height={lh}",
-                expected_truncated,
-                if text.is_empty() {
-                    "empty"
-                } else {
-                    "non-empty"
-                },
-            );
+            for invalid in [0.0, -1.0, f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+                for (width, height, font, line) in [
+                    (invalid, 100.0, 16.0, 22.4),
+                    (200.0, invalid, 16.0, 22.4),
+                    (200.0, 100.0, invalid, 22.4),
+                    (200.0, 100.0, 16.0, invalid),
+                ] {
+                    for text in ["hello", ""] {
+                        let result =
+                            truncate(text, base_attrs(), width, height, font, line, &mut fs);
+                        let geometry = (width, height, font, line);
+                        assert!(result.text.is_empty(), "{anchor:?} {geometry:?}");
+                        assert_eq!(
+                            result.was_truncated,
+                            !text.is_empty(),
+                            "{anchor:?} {geometry:?} {text:?}"
+                        );
+                    }
+                }
+            }
         }
     }
 
@@ -2895,47 +2848,6 @@ mod tests {
         );
     }
 
-    /// When content fits entirely (fewer runs than max_lines), both anchoring
-    /// modes produce identical results — the original text unchanged.
-    #[test]
-    fn tail_anchored_short_text_fits_unchanged() {
-        let mut fs = make_font_system();
-        let font_size = 14.0_f32;
-        let line_h = font_size * 1.4;
-        let text = "Short text\nTwo lines";
-        let bounds_w = 400.0_f32;
-        // Height for 5 lines — more than enough.
-        let bounds_h = line_h * 5.0;
-
-        let head_result = truncate_for_ellipsis(
-            text,
-            base_attrs(),
-            bounds_w,
-            bounds_h,
-            font_size,
-            line_h,
-            &mut fs,
-        );
-        let tail_result = truncate_tail_anchored(
-            text,
-            base_attrs(),
-            bounds_w,
-            bounds_h,
-            font_size,
-            line_h,
-            &mut fs,
-        );
-
-        assert_eq!(
-            head_result.text, tail_result.text,
-            "when content fits, head- and tail-anchored must produce the same result"
-        );
-        assert!(
-            !tail_result.was_truncated,
-            "tail-anchored must not set was_truncated when content fits"
-        );
-    }
-
     /// Appending more content to an already-overflowing transcript must not
     /// disturb the visible window when the caller is head-anchored (scrolled
     /// back).  This is the structural mirror of the scroll-layer task 3.3 test
@@ -2983,18 +2895,6 @@ mod tests {
             "head-anchored append stability: visible content must be identical \
              whether or not new lines have been appended beyond the viewport"
         );
-    }
-
-    /// Tail-anchored degenerate inputs: empty text stays empty (untruncated);
-    /// zero-width bounds yield empty text flagged as truncated.
-    #[test]
-    fn tail_anchored_degenerate_inputs_produce_empty() {
-        let mut fs = make_font_system();
-        for (text, width, truncated) in [("", 200.0, false), ("hello", 0.0, true)] {
-            let r = truncate_tail_anchored(text, base_attrs(), width, 100.0, 16.0, 22.4, &mut fs);
-            assert_eq!(r.text, "", "text={text:?} width={width}");
-            assert_eq!(r.was_truncated, truncated, "text={text:?} width={width}");
-        }
     }
 
     // ── Task 3.2: property-based tests for truncate_tail_anchored ──
@@ -3283,378 +3183,149 @@ mod tests {
         }
     }
 
-    // ──: multi-line horizontal overflow check ───────────────────────
-
-    /// A long unbreakable token on the FIRST line (not the last) must be
-    /// truncated even when all lines fit vertically.
-    ///
-    /// Before the fix, only the last run's width was checked; a wide token on
-    /// any non-final line was silently hard-clipped by TextBounds.
-    ///
-    /// We build a two-line text where line 1 has a long unbreakable token that
-    /// overflows bounds_width, and line 2 fits.  After truncation the result
-    /// must end with ELLIPSIS (indicating horizontal truncation was applied).
     #[test]
-    fn non_final_line_horizontal_overflow_triggers_truncation() {
+    fn first_or_middle_horizontal_overflow_truncates_before_later_lines() {
         let mut fs = make_font_system();
-        let font_size = 16.0_f32;
-        let line_h = font_size * 1.4;
-        let bounds_w = 80.0_f32;
-        // Height fits 3 lines comfortably — no vertical truncation.
-        let bounds_h = line_h * 3.0 + 1.0;
-
-        // Line 1: long unbreakable token that must overflow at bounds_w=80px
-        let long_token = "WWWWWWWWWWWWWWWWWWWW"; // 20 'W's, should overflow 80px at 16px
-        // Verify the precondition: long_token must overflow bounds_w.
-        let token_w = measure_single_line(
-            long_token,
-            base_attrs(),
-            bounds_w * 4.0,
-            font_size,
-            line_h,
-            &mut fs,
-        );
+        let font = 16.0;
+        let line = font * 1.4;
+        let width = 80.0;
+        let wide = "W".repeat(20);
+        let token_width =
+            measure_single_line(&wide, base_attrs(), width * 4.0, font, line, &mut fs);
         assert!(
-            token_w > bounds_w,
-            "precondition failed: \"{long_token}\" ({token_w:.1}px) must overflow \
-             bounds_w={bounds_w}px at font_size={font_size}px so the \
-             non-final-line overflow regression is exercised; check that \
-             glyphon metrics are available in this environment"
+            token_width > width,
+            "wide token measures {token_width}px in a {width}px box"
         );
 
-        // Line 2: short text that fits.
-        let text = format!("{long_token}\nshort");
-
-        let result = truncate_for_ellipsis(
-            &text,
-            base_attrs(),
-            bounds_w,
-            bounds_h,
-            font_size,
-            line_h,
-            &mut fs,
-        );
-
-        assert!(
-            result.was_truncated,
-            "text with an overflowing first line must be truncated; \
-             token_w={token_w:.1}px bounds_w={bounds_w}px; result: {:?}",
-            result.text
-        );
-        assert!(
-            result.text.ends_with(ELLIPSIS),
-            "truncated result must end with '…'; got: {:?}",
-            result.text
-        );
-    }
-
-    /// Same test for tail-anchored truncation: non-final line overflow is caught.
-    #[test]
-    fn tail_anchored_non_final_line_horizontal_overflow_triggers_truncation() {
-        let mut fs = make_font_system();
-        let font_size = 16.0_f32;
-        let line_h = font_size * 1.4;
-        let bounds_w = 80.0_f32;
-        let bounds_h = line_h * 3.0 + 1.0;
-
-        let long_token = "WWWWWWWWWWWWWWWWWWWW";
-        let token_w = measure_single_line(
-            long_token,
-            base_attrs(),
-            bounds_w * 4.0,
-            font_size,
-            line_h,
-            &mut fs,
-        );
-        assert!(
-            token_w > bounds_w,
-            "precondition failed: \"{long_token}\" ({token_w:.1}px) must overflow \
-             bounds_w={bounds_w}px at font_size={font_size}px so the \
-             tail-anchored non-final-line overflow regression is exercised; \
-             check that glyphon metrics are available in this environment"
-        );
-
-        let text = format!("{long_token}\nshort");
-
-        let result = truncate_tail_anchored(
-            &text,
-            base_attrs(),
-            bounds_w,
-            bounds_h,
-            font_size,
-            line_h,
-            &mut fs,
-        );
-
-        assert!(
-            result.was_truncated,
-            "tail-anchored: text with an overflowing first line must be truncated; \
-             token_w={token_w:.1}px bounds_w={bounds_w}px; result: {:?}",
-            result.text
-        );
-        assert!(
-            result.text.ends_with(ELLIPSIS),
-            "tail-anchored: truncated result must end with '…'; got: {:?}",
-            result.text
-        );
-    }
-
-    /// Multi-line text where ONLY the middle line overflows: truncation applies at
-    /// the first overflowing line, not the last.
-    #[test]
-    fn middle_line_overflow_truncated_at_correct_position() {
-        let mut fs = make_font_system();
-        let font_size = 16.0_f32;
-        let line_h = font_size * 1.4;
-        let bounds_w = 80.0_f32;
-        // Height fits 4 lines comfortably — no vertical truncation.
-        let bounds_h = line_h * 4.0 + 1.0;
-
-        let long_token = "WWWWWWWWWWWWWWWWWWWW";
-        let token_w = measure_single_line(
-            long_token,
-            base_attrs(),
-            bounds_w * 4.0,
-            font_size,
-            line_h,
-            &mut fs,
-        );
-        assert!(
-            token_w > bounds_w,
-            "precondition failed: \"{long_token}\" ({token_w:.1}px) must overflow \
-             bounds_w={bounds_w}px at font_size={font_size}px so the \
-             middle-line overflow regression is exercised; check that \
-             glyphon metrics are available in this environment"
-        );
-
-        // Line 1 and Line 3 are short; Line 2 is the long overflowing token.
-        let text = format!("short\n{long_token}\nalso short");
-
-        let result = truncate_for_ellipsis(
-            &text,
-            base_attrs(),
-            bounds_w,
-            bounds_h,
-            font_size,
-            line_h,
-            &mut fs,
-        );
-
-        assert!(
-            result.was_truncated,
-            "text with an overflowing middle line must be truncated; \
-             token_w={token_w:.1}px bounds_w={bounds_w}px; result: {:?}",
-            result.text
-        );
-        assert!(
-            result.text.ends_with(ELLIPSIS),
-            "truncated result must end with '…'; got: {:?}",
-            result.text
-        );
-        // The first line must appear in the result (it was before the overflow).
-        assert!(
-            result.text.starts_with("short"),
-            "first short line must be preserved before the truncation point; \
-             got: {:?}",
-            result.text
-        );
-    }
-
-    // ── Viewport-adjacent-window truncation fallback ───────
-
-    /// Build a multi-line transcript of `n_lines` lines, each tagged with its
-    /// index so windowing mistakes (dropping the wrong lines) are observable.
-    fn transcript(n_lines: usize) -> String {
-        let mut s = String::new();
-        for i in 0..n_lines {
-            // ~40 bytes/line of distinct prose so the whole transcript is many KiB.
-            s.push_str(&format!("line {i:04}: the quick brown fox jumps over\n"));
-        }
-        // Drop the trailing newline so the last line has no empty line after it.
-        if s.ends_with('\n') {
-            s.pop();
-        }
-        s
-    }
-
-    /// Below the byte bound, the fallback is a no-op: the full input is returned
-    /// unchanged so truncation measures the full committed input.
-    #[test]
-    fn fallback_noop_below_bound() {
-        let text = transcript(5); // well under 4 KiB
-        assert!(text.len() <= DEFAULT_MAX_TRUNCATION_INPUT_BYTES);
-        let line_h = 14.0 * 1.4;
-        let bounds_h = line_h * 5.0;
-        for vp in [
+        for anchor in [
             TruncationViewport::HeadAnchored,
             TruncationViewport::TailAnchored,
         ] {
-            let window = viewport_adjacent_input(
-                &text,
-                bounds_h,
-                line_h,
-                vp,
-                DEFAULT_MAX_TRUNCATION_INPUT_BYTES,
-                TRUNCATION_OVERSCAN_LINES,
-            );
-            assert_eq!(window, text, "small input must not be windowed ({vp:?})");
+            let truncate = match anchor {
+                TruncationViewport::HeadAnchored => truncate_for_ellipsis,
+                TruncationViewport::TailAnchored => truncate_tail_anchored,
+            };
+            for (prefix, later, rows) in [("", "short", 3.0), ("short\n", "also short", 4.0)] {
+                // All source lines fit vertically. Only the unbreakable token overflows.
+                let text = format!("{prefix}{wide}\n{later}");
+                let result = truncate(
+                    &text,
+                    base_attrs(),
+                    width,
+                    line * rows + 1.0,
+                    font,
+                    line,
+                    &mut fs,
+                );
+                assert!(result.was_truncated, "{anchor:?}: {text:?}");
+                assert!(
+                    result.text.starts_with(prefix),
+                    "{anchor:?}: {:?}",
+                    result.text
+                );
+                assert!(
+                    result.text.ends_with(ELLIPSIS),
+                    "{anchor:?}: {:?}",
+                    result.text
+                );
+                assert!(
+                    !result.text.contains(later),
+                    "{anchor:?}: {:?}",
+                    result.text
+                );
+            }
         }
     }
 
-    /// A single giant line (no '\n') cannot be windowed on a whole-line boundary,
-    /// so the fallback returns it unchanged even above the byte bound.
-    #[test]
-    fn fallback_single_giant_line_unwindowed() {
-        let text = "x".repeat(DEFAULT_MAX_TRUNCATION_INPUT_BYTES * 2);
-        let line_h = 14.0 * 1.4;
-        let window = viewport_adjacent_input(
-            &text,
-            line_h * 5.0,
-            line_h,
-            TruncationViewport::HeadAnchored,
-            DEFAULT_MAX_TRUNCATION_INPUT_BYTES,
-            TRUNCATION_OVERSCAN_LINES,
-        );
-        assert_eq!(window.len(), text.len(), "single line cannot be windowed");
+    /// Index each source line so selecting the wrong edge is visible in the result.
+    fn transcript(lines: usize) -> String {
+        (0..lines)
+            .map(|i| format!("line {i:04}: the quick brown fox jumps over"))
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 
-    /// Above the bound, the window is bounded by viewport geometry (max_lines +
-    /// overscan source lines), not by the full transcript size.
     #[test]
-    fn fallback_window_is_bounded_by_viewport() {
-        let text = transcript(2000); // tens of KiB
-        assert!(text.len() > DEFAULT_MAX_TRUNCATION_INPUT_BYTES);
-        let line_h = 14.0 * 1.4;
-        let max_lines = 5usize;
-        let bounds_h = line_h * max_lines as f32;
+    fn fallback_windows_are_bounded_and_preserve_visible_output() {
+        let mut fs = make_font_system();
+        let font = 14.0;
+        let line = font * 1.4;
+        let width = 400.0;
+        let short = transcript(5);
+        let giant = "x".repeat(DEFAULT_MAX_TRUNCATION_INPUT_BYTES * 2);
+        let long = transcript(2000);
+        let replay = transcript(256);
+        assert!(short.len() <= DEFAULT_MAX_TRUNCATION_INPUT_BYTES);
+        assert!(long.len() > DEFAULT_MAX_TRUNCATION_INPUT_BYTES);
+        assert!(replay.len() > DEFAULT_MAX_TRUNCATION_INPUT_BYTES);
 
-        let head = viewport_adjacent_input(
-            &text,
-            bounds_h,
-            line_h,
+        for anchor in [
             TruncationViewport::HeadAnchored,
-            DEFAULT_MAX_TRUNCATION_INPUT_BYTES,
-            TRUNCATION_OVERSCAN_LINES,
-        );
-        let tail = viewport_adjacent_input(
-            &text,
-            bounds_h,
-            line_h,
             TruncationViewport::TailAnchored,
-            DEFAULT_MAX_TRUNCATION_INPUT_BYTES,
-            TRUNCATION_OVERSCAN_LINES,
-        );
-
-        // Window holds exactly max_lines + overscan whole lines.
-        let expect_lines = max_lines + TRUNCATION_OVERSCAN_LINES;
-        assert_eq!(head.lines().count(), expect_lines, "head window line count");
-        assert_eq!(tail.lines().count(), expect_lines, "tail window line count");
-        // Head keeps the FIRST lines; tail keeps the LAST lines.
-        assert!(
-            head.starts_with("line 0000:"),
-            "head keeps first lines: {head:?}"
-        );
-        assert!(
-            tail.trim_end()
-                .ends_with("line 1999: the quick brown fox jumps over"),
-            "tail keeps last lines: {:?}",
-            tail.lines().last()
-        );
-        // Window is far smaller than the full transcript.
-        assert!(head.len() < text.len() / 10, "head window must be bounded");
-        assert!(tail.len() < text.len() / 10, "tail window must be bounded");
-    }
-
-    /// **Acceptance #2**: for the lines within the viewport-adjacent window, the
-    /// truncation result (visible window + ellipsis) is **byte-identical** to the
-    /// full-input result, for both anchor modes. This empirically verifies the
-    /// per-source-line shaping-independence property the fallback relies on.
-    #[test]
-    fn fallback_visible_window_is_byte_identical_to_full_input() {
-        let text = transcript(256);
-        assert!(text.len() > DEFAULT_MAX_TRUNCATION_INPUT_BYTES);
-        let font_size = 14.0_f32;
-        let line_h = font_size * 1.4;
-        let bounds_w = 400.0_f32;
-
-        // Exercise several viewport heights, including the degenerate single line.
-        for max_lines in [1usize, 3, 5, 9] {
-            let bounds_h = line_h * max_lines as f32;
-            let mut fs = make_font_system();
-
-            // HeadAnchored.
-            let full_head = truncate_for_ellipsis(
-                &text,
-                base_attrs(),
-                bounds_w,
-                bounds_h,
-                font_size,
-                line_h,
-                &mut fs,
-            );
-            let win_head_input = viewport_adjacent_input(
-                &text,
-                bounds_h,
-                line_h,
-                TruncationViewport::HeadAnchored,
-                DEFAULT_MAX_TRUNCATION_INPUT_BYTES,
-                TRUNCATION_OVERSCAN_LINES,
-            );
-            assert!(
-                win_head_input.len() < text.len(),
-                "max_lines={max_lines}: head fallback must engage"
-            );
-            let win_head = truncate_for_ellipsis(
-                win_head_input,
-                base_attrs(),
-                bounds_w,
-                bounds_h,
-                font_size,
-                line_h,
-                &mut fs,
+        ] {
+            let window = |text, height| {
+                viewport_adjacent_input(
+                    text,
+                    height,
+                    line,
+                    anchor,
+                    DEFAULT_MAX_TRUNCATION_INPUT_BYTES,
+                    TRUNCATION_OVERSCAN_LINES,
+                )
+            };
+            let height = line * 5.0;
+            assert_eq!(
+                window(short.as_str(), height),
+                short,
+                "{anchor:?}: below byte bound"
             );
             assert_eq!(
-                win_head.text, full_head.text,
-                "max_lines={max_lines}: head-anchored windowed result must be byte-identical"
+                window(giant.as_str(), height),
+                giant,
+                "{anchor:?}: no whole-line split"
             );
-            assert_eq!(win_head.was_truncated, full_head.was_truncated);
 
-            // TailAnchored.
-            let full_tail = truncate_tail_anchored(
-                &text,
-                base_attrs(),
-                bounds_w,
-                bounds_h,
-                font_size,
-                line_h,
-                &mut fs,
-            );
-            let win_tail_input = viewport_adjacent_input(
-                &text,
-                bounds_h,
-                line_h,
-                TruncationViewport::TailAnchored,
-                DEFAULT_MAX_TRUNCATION_INPUT_BYTES,
-                TRUNCATION_OVERSCAN_LINES,
+            let bounded = window(long.as_str(), height);
+            assert_eq!(
+                bounded.lines().count(),
+                5 + TRUNCATION_OVERSCAN_LINES,
+                "{anchor:?}"
             );
             assert!(
-                win_tail_input.len() < text.len(),
-                "max_lines={max_lines}: tail fallback must engage"
+                bounded.len() < long.len() / 10,
+                "{anchor:?}: bounded transcript"
             );
-            let win_tail = truncate_tail_anchored(
-                win_tail_input,
-                base_attrs(),
-                bounds_w,
-                bounds_h,
-                font_size,
-                line_h,
-                &mut fs,
-            );
-            assert_eq!(
-                win_tail.text, full_tail.text,
-                "max_lines={max_lines}: tail-anchored windowed result must be byte-identical"
-            );
-            assert_eq!(win_tail.was_truncated, full_tail.was_truncated);
+            let truncate = match anchor {
+                TruncationViewport::HeadAnchored => {
+                    assert!(bounded.starts_with("line 0000:"), "{bounded:?}");
+                    truncate_for_ellipsis
+                }
+                TruncationViewport::TailAnchored => {
+                    assert!(
+                        bounded.ends_with("line 1999: the quick brown fox jumps over"),
+                        "{bounded:?}"
+                    );
+                    truncate_tail_anchored
+                }
+            };
+            for rows in [1, 3, 5, 9] {
+                let height = line * rows as f32;
+                let adjacent = window(replay.as_str(), height);
+                assert!(
+                    adjacent.len() < replay.len(),
+                    "{anchor:?}, {rows} rows: fallback must engage"
+                );
+                let full = truncate(&replay, base_attrs(), width, height, font, line, &mut fs);
+                let windowed = truncate(adjacent, base_attrs(), width, height, font, line, &mut fs);
+                assert!(
+                    full.was_truncated,
+                    "{anchor:?}, {rows} rows: replay must clip"
+                );
+                assert_eq!(
+                    windowed, full,
+                    "{anchor:?}, {rows} rows: text and truncation flag"
+                );
+            }
         }
     }
 
@@ -3712,16 +3383,13 @@ mod tests {
             assert!(cut.was_truncated, "{text}");
             let n = cut.drawn_chars(text);
             assert!(n < text.chars().count(), "{text}");
-            assert_eq!(
-                cut.text,
-                format!("{}{ELLIPSIS}", char_prefix(text, n).trim_end())
-            );
-            let again = char_prefix(text, n);
-            let whole =
-                truncate_for_ellipsis(again, base_attrs(), width, height, 16.0, 22.0, &mut fs);
+            let prefix = char_prefix(text, n);
+            assert_eq!(cut.text, format!("{}{ELLIPSIS}", prefix.trim_end()));
+            let replay =
+                truncate_for_ellipsis(prefix, base_attrs(), width, height, 16.0, 22.0, &mut fs);
             assert!(
-                !whole.was_truncated,
-                "{text}: first {n} chars {again:?} cut again"
+                !replay.was_truncated,
+                "{text}: first {n} chars {prefix:?} cut again"
             );
         }
         let fits = truncate_for_ellipsis("Hi", base_attrs(), 200.0, 20.0, 16.0, 22.0, &mut fs);
