@@ -236,6 +236,7 @@ pub use visibility::SurfaceClasses;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PendingActionKind {
     Callback(String),
+    Reply { callback_id: String, text: String },
     Dismiss,
     Displaced,
 }

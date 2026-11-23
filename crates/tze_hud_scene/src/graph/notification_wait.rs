@@ -12,7 +12,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
-/// An unexpired, unanswered card with a valid callback action. Counted once
+/// An unexpired, unanswered card with a valid callback or reply. Counted once
 /// per card. Link and copy actions do not contribute. `choices` holds answered cards.
 pub(crate) fn is_unanswered_question(
     record: &ZonePublishRecord,
@@ -25,7 +25,7 @@ pub(crate) fn is_unanswered_question(
         && !choices.contains_key(&record.publication_id)
         && matches!(&record.content, ZoneContent::Notification(payload)
             if payload.actions.iter().any(|action|
-                action.callback_id.is_some() && action.validate().is_ok()))
+                (action.callback_id.is_some() || action.reply.is_some()) && action.validate().is_ok()))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -149,6 +149,7 @@ fn close_and_link_presses_are_dropped_too() {
         let card = with_actions(content(&harness), |actions| {
             actions[1] = NotificationAction {
                 copy: None,
+                reply: None,
                 label: "Docs".into(),
                 callback_id: None,
                 url: Some("https://example.com/docs".into()),

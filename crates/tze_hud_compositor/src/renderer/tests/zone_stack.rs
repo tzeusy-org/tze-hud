@@ -341,6 +341,7 @@ async fn test_stack_slot_clips_at_zone_boundary() {
     };
     let callback = NotificationAction {
         copy: None,
+        reply: None,
         label: "Answer".into(),
         callback_id: Some("answer".into()),
         url: None,
@@ -403,6 +404,7 @@ async fn test_stack_slot_clips_at_zone_boundary() {
     };
     payload.actions = vec![NotificationAction {
         copy: None,
+        reply: None,
         label: "Open".into(),
         callback_id: None,
         url: Some("https://example.com/".into()),

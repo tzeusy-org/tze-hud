@@ -354,6 +354,7 @@ async fn idle_with_notification_renders_only_at_fade() {
             .into_iter()
             .map(|label| NotificationAction {
                 copy: None,
+                reply: None,
                 label: label.into(),
                 callback_id: Some(label.into()),
                 url: None,
@@ -443,6 +444,7 @@ async fn idle_with_notification_renders_only_at_fade() {
             .into_iter()
             .map(|label| NotificationAction {
                 copy: None,
+                reply: None,
                 label: label.into(),
                 callback_id: Some(label.into()),
                 url: None,
@@ -1189,6 +1191,7 @@ async fn idle_destructive_card_renders_only_during_hold_or_drain() {
     {
         payload.actions = vec![NotificationAction {
             copy: None,
+            reply: None,
             label: "Delete".into(),
             callback_id: Some("delete".into()),
             url: None,

@@ -55,6 +55,7 @@ fn two_displays() -> (HeadlessEventLoopHarness, SceneId, SceneId) {
                     title: String::new(),
                     actions: vec![NotificationAction {
                         copy: None,
+                        reply: None,
                         label: "Yes".into(),
                         callback_id: Some("yes".into()),
                         url: None,

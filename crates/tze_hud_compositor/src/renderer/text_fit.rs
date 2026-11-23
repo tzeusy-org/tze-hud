@@ -419,6 +419,7 @@ mod tests {
                 .enumerate()
                 .map(|(i, label)| NotificationAction {
                     copy: None,
+                    reply: None,
                     label: (*label).into(),
                     callback_id: Some(format!("a{i}")),
                     url: None,
@@ -573,6 +574,7 @@ mod tests {
             actions: vec![
                 NotificationAction {
                     copy: None,
+                    reply: None,
                     label: first.into(),
                     callback_id: Some("go".into()),
                     url: None,
@@ -580,6 +582,7 @@ mod tests {
                 },
                 NotificationAction {
                     copy: None,
+                    reply: None,
                     label: second.into(),
                     callback_id: None,
                     url: Some("https://example.com/".into()),

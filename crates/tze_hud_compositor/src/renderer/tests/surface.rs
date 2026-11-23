@@ -937,6 +937,7 @@ async fn placed_questions_draw_in_a_stack_on_their_display() {
             actions: question
                 .then(|| tze_hud_scene::types::NotificationAction {
                     copy: None,
+                    reply: None,
                     label: "Yes".into(),
                     callback_id: Some("yes".into()),
                     url: None,

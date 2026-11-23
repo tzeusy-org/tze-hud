@@ -422,7 +422,10 @@ async fn bad_arguments_are_invalid_argument_tool_errors() {
         )
         .await;
         assert_eq!(err["code"], "INVALID_ARGUMENT");
-        assert_eq!(err["hint"], "action needs one of callback_id, url or copy");
+        assert_eq!(
+            err["hint"],
+            "action needs one of callback_id, url, copy or reply"
+        );
     }
 
     // The same cardinality rule applies before immediate admission and scheduling.
@@ -544,7 +547,7 @@ async fn bad_arguments_are_invalid_argument_tool_errors() {
             observed.fetch_add(1, Ordering::Relaxed);
         }),
     );
-    let target_hint = "action needs one of callback_id, url or copy";
+    let target_hint = "action needs one of callback_id, url, copy or reply";
     let url_hint = "action url must be https";
     let prefix = "https://example.com/";
     let boundary = format!("{prefix}{}", "a".repeat(2048 - prefix.len()));
@@ -2456,30 +2459,9 @@ async fn activate_card(server: &McpServer, id: SceneId, dismiss: bool) {
 
 /// Press action `index` of card `id` (`None` presses the ×).
 async fn activate(server: &McpServer, id: SceneId, index: Option<usize>) {
-    use tze_hud_scene::types::{Rect, ZoneHitRegion, ZoneInteractionKind};
     let (activation, wakes) = {
         let mut scene = server.scene.lock().await;
-        let record = scene
-            .zone_registry
-            .active_for_zone("notification-area")
-            .iter()
-            .find(|record| record.publication_id == id)
-            .unwrap()
-            .clone();
-        let region = ZoneHitRegion {
-            publication_id: id,
-            zone_name: record.zone_name,
-            published_at_wall_us: record.published_at_wall_us,
-            publisher_namespace: record.publisher_namespace,
-            bounds: Rect::new(0.0, 0.0, 100.0, 30.0),
-            kind: match index {
-                None => ZoneInteractionKind::Dismiss,
-                Some(index) => ZoneInteractionKind::Action { index },
-            },
-            interaction_id: format!("test:{id}:{index:?}"),
-            tab_order: 0,
-        };
-        scene.overlay.zone_hit_regions.push(region.clone());
+        let region = render_card_control(&mut scene, id, index);
         let activation = scene
             .activate_notification(&region, 0)
             .expect("accepted local control");
@@ -2492,6 +2474,35 @@ async fn activate(server: &McpServer, id: SceneId, index: Option<usize>) {
         tze_hud_scene::graph::NotificationActivation::Callback(wake) => wake.notify(),
         _ => panic!("callback fixture"),
     }
+}
+
+fn render_card_control(
+    scene: &mut SceneGraph,
+    id: SceneId,
+    index: Option<usize>,
+) -> tze_hud_scene::types::ZoneHitRegion {
+    use tze_hud_scene::types::{Rect, ZoneHitRegion, ZoneInteractionKind};
+    let record = scene
+        .zone_registry
+        .active_for_zone("notification-area")
+        .iter()
+        .find(|record| record.publication_id == id)
+        .unwrap();
+    let region = ZoneHitRegion {
+        publication_id: id,
+        zone_name: record.zone_name.clone(),
+        published_at_wall_us: record.published_at_wall_us,
+        publisher_namespace: record.publisher_namespace.clone(),
+        bounds: Rect::new(0.0, 0.0, 100.0, 30.0),
+        kind: match index {
+            None => ZoneInteractionKind::Dismiss,
+            Some(index) => ZoneInteractionKind::Action { index },
+        },
+        interaction_id: format!("test:{id}:{index:?}"),
+        tab_order: 0,
+    };
+    scene.overlay.zone_hit_regions.push(region.clone());
+    region
 }
 
 /// A label-only action is a callback named by its label: an armed wait
@@ -2791,6 +2802,7 @@ async fn action_role_is_destructive_on_callback_actions_only() {
     };
     let action = |label: &str, callback: &str, role| NotificationAction {
         copy: None,
+        reply: None,
         label: label.into(),
         callback_id: Some(callback.into()),
         url: None,
@@ -4345,7 +4357,7 @@ async fn notification_progress_and_copy_admission() {
     let invalid_progress = "notification.progress must be a number in 0..1";
     let invalid_copy = "action copy must contain 1 to 2048 UTF-8 bytes";
     let nul_hint = "action copy cannot contain NUL";
-    let exclusivity = "action needs one of callback_id, url or copy";
+    let exclusivity = "action needs one of callback_id, url, copy or reply";
     for delay in [0, 1000] {
         let args = |content| {
             json!({
@@ -4380,6 +4392,27 @@ async fn notification_progress_and_copy_admission() {
             (
                 json!({"actions": [{"label":"Copy", "copy":"job", "url":""}]}),
                 exclusivity,
+            ),
+            (
+                json!({"actions":[{"label":"Other…","reply":"other","callback_id":"go"}]}),
+                exclusivity,
+            ),
+            (
+                json!({"actions":[{"label":"Other…","reply":"first"},
+                    {"label":"Other…","reply":"second"}]}),
+                "notification allows at most one reply action",
+            ),
+            (
+                json!({"actions":[{"label":"Other…","reply":""}]}),
+                "action reply needs a non-empty callback ID",
+            ),
+            (
+                json!({"actions":[{"label":"Other…","reply":42}]}),
+                "notification.actions[0].reply must be a string",
+            ),
+            (
+                json!({"actions":[{"label":"Other…","reply":"other","role":"destructive"}]}),
+                "notification.actions[0].role needs a callback action",
             ),
         ] {
             let mut content = fields;

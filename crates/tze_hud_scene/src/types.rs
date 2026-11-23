@@ -1872,7 +1872,7 @@ pub enum ActionRole {
     Destructive,
 }
 
-/// One notification button with a callback, HTTPS link, or local copy target.
+/// One notification button targeting a callback, HTTPS link, local copy, or typed reply.
 /// The runtime resolves its target by live publication and zero-based index.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NotificationAction {
@@ -1883,11 +1883,17 @@ pub struct NotificationAction {
     pub url: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub copy: Option<String>,
+    /// Opens a local one-line field. The value is the publisher callback ID.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reply: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub role: Option<ActionRole>,
 }
 
-pub const ACTION_TARGET_HINT: &str = "action needs one of callback_id, url or copy";
+pub const ACTION_TARGET_HINT: &str = "action needs one of callback_id, url, copy or reply";
+pub const NOTIFICATION_REPLY_MAX_BYTES: usize = 280;
+const ACTION_REPLY_HINT: &str = "action reply needs a non-empty callback ID";
+const MULTIPLE_REPLIES_HINT: &str = "notification allows at most one reply action";
 pub const ACTION_URL_HINT: &str = "action url must be https";
 pub const ACTION_COPY_HINT: &str = "action copy must contain 1 to 2048 UTF-8 bytes";
 pub const ACTION_ROLE_HINT: &str = "action role needs a callback action";
@@ -1898,6 +1904,7 @@ impl NotificationAction {
         usize::from(self.callback_id.is_some())
             + usize::from(self.url.is_some())
             + usize::from(self.copy.is_some())
+            + usize::from(self.reply.is_some())
     }
 
     fn defaulted_callback_id(&self) -> Option<&str> {
@@ -1972,6 +1979,16 @@ impl NotificationAction {
                 return Err("action copy cannot contain NUL".into());
             }
             return Ok(());
+        }
+        if let Some(reply) = &self.reply {
+            if self.label.trim().is_empty() {
+                return Err("reply action needs a label".into());
+            }
+            return if reply.is_empty() {
+                Err(ACTION_REPLY_HINT.into())
+            } else {
+                Ok(())
+            };
         }
         self.encoded_url().map(|_| ())
     }
@@ -2060,8 +2077,15 @@ impl NotificationPayload {
             return Err(NOTIFICATION_PROGRESS_HINT.into());
         }
         validate_notification_action_count(self.actions.len())?;
+        let mut has_reply = false;
         for action in &self.actions {
             action.validate()?;
+            if action.reply.is_some() {
+                if has_reply {
+                    return Err(MULTIPLE_REPLIES_HINT.into());
+                }
+                has_reply = true;
+            }
         }
         Ok(())
     }

@@ -208,6 +208,7 @@ async fn zone_hit_notification_with_two_actions_produces_three_regions() {
                 actions: vec![
                     NotificationAction {
                         copy: None,
+                        reply: None,
                         label: "Yes".to_string(),
                         callback_id: Some("yes".to_string()),
                         url: None,
@@ -215,6 +216,7 @@ async fn zone_hit_notification_with_two_actions_produces_three_regions() {
                     },
                     NotificationAction {
                         copy: None,
+                        reply: None,
                         label: "No".to_string(),
                         callback_id: Some("no".to_string()),
                         url: None,
@@ -300,6 +302,7 @@ async fn zone_hit_tab_order_is_sequential() {
                 actions: vec![
                     NotificationAction {
                         copy: None,
+                        reply: None,
                         label: "A".to_string(),
                         callback_id: Some("a".to_string()),
                         url: None,
@@ -307,6 +310,7 @@ async fn zone_hit_tab_order_is_sequential() {
                     },
                     NotificationAction {
                         copy: None,
+                        reply: None,
                         label: "B".to_string(),
                         callback_id: Some("b".to_string()),
                         url: None,
@@ -724,6 +728,7 @@ async fn drag_handle_regions_cover_visible_tile_and_zone_but_not_widget() {
                 text: "content".into(),
                 actions: vec![tze_hud_scene::NotificationAction {
                     copy: None,
+                    reply: None,
                     label: "Open".into(),
                     callback_id: Some("open".into()),
                     url: None,
@@ -1204,6 +1209,7 @@ async fn drag_visual_feedback_applied_during_active_drag() {
                         actions: (0..if count == 3 { 4 } else { 0 })
                             .map(|n| NotificationAction {
                                 copy: None,
+                                reply: None,
                                 label: format!("Action {n}"),
                                 callback_id: (n != 0).then(|| format!("action-{n}")),
                                 url: (n == 0).then(|| "https://example.com/scale".into()),
@@ -1548,6 +1554,7 @@ fn zone_hit_regions_and_slot_pitch_scale_with_px_scale() {
         });
         let action = |label: &str| NotificationAction {
             copy: None,
+            reply: None,
             label: label.to_string(),
             callback_id: Some(label.to_lowercase()),
             url: None,

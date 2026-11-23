@@ -943,6 +943,10 @@ async fn publish_zone<'a>(
                     PendingActionKind::Callback(callback) => {
                         reply["action"] = json!(callback);
                     }
+                    PendingActionKind::Reply { callback_id, text } => {
+                        reply["action"] = json!(callback_id);
+                        reply["text"] = json!(text);
+                    }
                     PendingActionKind::Dismiss => {
                         reply["action"] = json!("dismiss");
                         reply["kind"] = json!("dismiss");
@@ -1615,6 +1619,9 @@ pub async fn hud_input(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
                         PendingActionKind::Callback(callback) => {
                             json!({"id":a.id,"s":format!("zone:{}",a.zone),"action":callback})
                         }
+                        PendingActionKind::Reply { callback_id, text } => {
+                            json!({"id":a.id,"s":format!("zone:{}",a.zone),"action":callback_id,"text":text})
+                        }
                         PendingActionKind::Dismiss => {
                             json!({"id":a.id,"s":format!("zone:{}",a.zone),"action":"dismiss","kind":"dismiss"})
                         }
@@ -1815,6 +1822,7 @@ fn parse_zone_content(content: &Value) -> Result<ZoneContent, McpError> {
                                     callback_id: target("callback_id")?,
                                     url: target("url")?,
                                     copy: target("copy")?,
+                                    reply: target("reply")?,
                                     role: None,
                                 };
                                 if action.target_count() > 1 {
@@ -1823,7 +1831,7 @@ fn parse_zone_content(content: &Value) -> Result<ZoneContent, McpError> {
                                 action.role = match o.get("role") {
                                     None => None,
                                     Some(value) if value.as_str() == Some("destructive") => {
-                                        if action.url.is_some() || action.copy.is_some() {
+                                        if action.url.is_some() || action.copy.is_some() || action.reply.is_some() {
                                             return Err(invalid(format!(
                                                 "notification.actions[{index}].role needs a callback action")));
                                         }

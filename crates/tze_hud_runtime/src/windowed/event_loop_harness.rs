@@ -3423,6 +3423,7 @@ mod tests {
                                 text: "Blocked browser".into(),
                                 actions: vec![tze_hud_scene::NotificationAction {
                                     copy: None,
+                                    reply: None,
                                     label: "Open".into(),
                                     callback_id: None,
                                     url: Some("https://example.com/frame".into()),
@@ -3784,6 +3785,7 @@ mod tests {
             });
             let action = |id: &str, label: &str| NotificationAction {
                 copy: None,
+                reply: None,
                 label: label.to_string(),
                 callback_id: Some(id.to_string()),
                 url: None,
@@ -5048,6 +5050,7 @@ mod tests {
             for (i, url) in urls.iter().enumerate() {
                 payload.actions[i] = NotificationAction {
                     copy: None,
+                    reply: None,
                     label: format!("Link {i}"),
                     callback_id: None,
                     url: Some((*url).into()),
@@ -5316,6 +5319,7 @@ mod tests {
                 payload.actions[1] = tze_hud_scene::NotificationAction {
                     label: "Copy cmd".into(),
                     copy: Some(TEXT.into()),
+                    reply: None,
                     ..Default::default()
                 };
                 let id = card.publication_id;
@@ -6330,6 +6334,7 @@ mod tests {
                 };
                 payload.actions[0] = NotificationAction {
                     copy: None,
+                    reply: None,
                     label: "Docs".into(),
                     callback_id: None,
                     url: Some(urls[0].into()),
@@ -6337,6 +6342,7 @@ mod tests {
                 };
                 payload.actions[1] = NotificationAction {
                     copy: None,
+                    reply: None,
                     label: "More".into(),
                     callback_id: None,
                     url: Some(urls[1].into()),
@@ -7308,6 +7314,7 @@ mod tests {
                         title: "Deploy".to_string(),
                         actions: vec![NotificationAction {
                             copy: None,
+                            reply: None,
                             label: "Ship".to_string(),
                             callback_id: Some("ship".to_string()),
                             url: None,
@@ -7393,6 +7400,7 @@ mod tests {
                         title: "Control".into(),
                         actions: vec![NotificationAction {
                             copy: None,
+                            reply: None,
                             label: "Keep".into(),
                             callback_id: Some("keep".into()),
                             url: None,

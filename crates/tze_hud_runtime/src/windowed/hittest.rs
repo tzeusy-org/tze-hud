@@ -872,6 +872,7 @@ mod tests {
                     ttl_ms: None,
                     actions: vec![NotificationAction {
                         copy: None,
+                        reply: None,
                         label: "Open".into(),
                         callback_id: Some("open".into()),
                         url: None,
@@ -1316,6 +1317,7 @@ mod tests {
                                 ttl_ms: None,
                                 actions: vec![NotificationAction {
                                     copy: None,
+                                    reply: None,
                                     label: "Open".into(),
                                     callback_id: Some("open".into()),
                                     url: None,

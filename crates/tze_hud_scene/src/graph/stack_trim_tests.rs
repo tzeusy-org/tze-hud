@@ -58,6 +58,7 @@ fn question(text: &str) -> ZoneContent {
         text,
         vec![NotificationAction {
             copy: None,
+            reply: None,
             label: "Yes".into(),
             callback_id: Some(format!("{text}-yes")),
             url: None,
@@ -71,6 +72,7 @@ fn link(text: &str) -> ZoneContent {
         text,
         vec![NotificationAction {
             copy: None,
+            reply: None,
             label: "Open".into(),
             callback_id: None,
             url: Some("https://example.com/report".into()),
@@ -215,6 +217,7 @@ fn cards_with_only_local_actions_are_not_questions() {
                 payload.actions.push(NotificationAction {
                     label: "Copy".into(),
                     copy: Some("job-42".into()),
+                    reply: None,
                     ..Default::default()
                 });
             }

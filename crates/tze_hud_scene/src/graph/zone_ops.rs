@@ -1413,6 +1413,33 @@ impl SceneGraph {
         })
     }
 
+    fn live_notification_control(&self, region: &ZoneHitRegion) -> Option<&ZonePublishRecord> {
+        if !self
+            .overlay
+            .zone_hit_regions
+            .iter()
+            .any(|live| live == region)
+        {
+            return None;
+        }
+        if self
+            .overlay
+            .notification_choices
+            .contains_key(&region.publication_id)
+        {
+            return None;
+        }
+        let now = self.now_wall_us();
+        self.zone_registry
+            .active_for_zone(&region.zone_name)
+            .iter()
+            .find(|record| {
+                record.publication_id == region.publication_id
+                    && record.publisher_namespace == region.publisher_namespace
+                    && record.expires_at_wall_us.is_none_or(|expiry| expiry > now)
+            })
+    }
+
     /// Activate one exact, visible and unexpired notification control. Pointer
     /// releases and keyboard activation both enter here. The FIFO remains the
     /// authoritative answer; its readiness callback must run after unlocking.
@@ -1422,28 +1449,8 @@ impl SceneGraph {
         exit_ms: u32,
     ) -> Option<super::NotificationActivation> {
         self.prune_notification_feedback();
-        if !self
-            .overlay
-            .zone_hit_regions
-            .iter()
-            .any(|live| live == region)
-        {
-            return None;
-        }
         let key = region.publication_id;
-        if self.overlay.notification_choices.contains_key(&key) {
-            return None;
-        }
-        let now = self.now_wall_us();
-        let record = self
-            .zone_registry
-            .active_for_zone(&region.zone_name)
-            .iter()
-            .find(|record| {
-                record.publication_id == region.publication_id
-                    && record.publisher_namespace == region.publisher_namespace
-                    && record.expires_at_wall_us.is_none_or(|expiry| expiry > now)
-            })?;
+        let record = self.live_notification_control(region)?;
         let ZoneContent::Notification(payload) = &record.content else {
             return None;
         };
@@ -1504,6 +1511,53 @@ impl SceneGraph {
             _ => return None,
         };
         let notification_key = record.merge_key.clone().filter(|key| !key.is_empty());
+        let wake = self.finish_notification_action(region, notification_key, kind, exit_ms)?;
+        Some(super::NotificationActivation::Callback(wake))
+    }
+
+    /// Submit the committed text from the exact card's local reply field.
+    /// Notify readiness after releasing the scene lock, as with a button answer.
+    pub fn submit_notification_reply(
+        &mut self,
+        region: &ZoneHitRegion,
+        text: String,
+        exit_ms: u32,
+    ) -> Option<RenderWakeNotifier> {
+        if text.is_empty()
+            || text.len() > crate::types::NOTIFICATION_REPLY_MAX_BYTES
+            || text.contains(['\r', '\n', '\u{0085}', '\u{2028}', '\u{2029}'])
+        {
+            return None;
+        }
+        self.prune_notification_feedback();
+        let ZoneInteractionKind::Action { index } = region.kind else {
+            return None;
+        };
+        let record = self.live_notification_control(region)?;
+        let ZoneContent::Notification(payload) = &record.content else {
+            return None;
+        };
+        let action = payload.actions.get(index)?;
+        action.validate().ok()?;
+        let callback_id = action.reply.clone()?;
+        let notification_key = record.merge_key.clone().filter(|key| !key.is_empty());
+        self.finish_notification_action(
+            region,
+            notification_key,
+            super::PendingActionKind::Reply { callback_id, text },
+            exit_ms,
+        )
+    }
+
+    fn finish_notification_action(
+        &mut self,
+        region: &ZoneHitRegion,
+        notification_key: Option<String>,
+        kind: super::PendingActionKind,
+        exit_ms: u32,
+    ) -> Option<RenderWakeNotifier> {
+        let key = region.publication_id;
+        let now = self.now_wall_us();
         self.finish_notification_wait(key, super::NotificationOutcome::Answered);
         if matches!(region.kind, ZoneInteractionKind::Dismiss) || exit_ms == 0 {
             if !self.dismiss_notification(
@@ -1551,15 +1605,13 @@ impl SceneGraph {
             self.version += 1;
         }
         self.overlay.notification_owner_activated = Some(region.publication_id);
-        Some(super::NotificationActivation::Callback(
-            self.push_pending_action(super::PendingAction {
-                publication_id: Some(region.publication_id),
-                publisher_namespace: region.publisher_namespace.clone(),
-                zone_name: region.zone_name.clone(),
-                kind,
-                key: notification_key,
-            }),
-        ))
+        Some(self.push_pending_action(super::PendingAction {
+            publication_id: Some(region.publication_id),
+            publisher_namespace: region.publisher_namespace.clone(),
+            zone_name: region.zone_name.clone(),
+            kind,
+            key: notification_key,
+        }))
     }
 
     /// Drop ephemeral feedback whenever its exact publication is gone, hidden or

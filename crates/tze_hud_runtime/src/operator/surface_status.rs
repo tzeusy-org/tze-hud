@@ -595,6 +595,7 @@ mod tests {
                     actions: vec![
                         NotificationAction {
                             copy: None,
+                            reply: None,
                             label: "Reply".into(),
                             callback_id: Some("answer".into()),
                             url: None,
@@ -602,6 +603,7 @@ mod tests {
                         },
                         NotificationAction {
                             copy: None,
+                            reply: None,
                             label: "Read".into(),
                             callback_id: None,
                             url: Some("https://example.invalid/?secret=value".into()),

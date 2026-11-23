@@ -453,6 +453,7 @@ fn zone_hit_region_fields_round_trip() {
 fn notification_action_fields_accessible() {
     let action = NotificationAction {
         copy: None,
+        reply: None,
         label: "Confirm".to_string(),
         callback_id: Some("confirm-action".to_string()),
         url: None,
@@ -476,6 +477,7 @@ fn notification_payload_with_actions_serializes() {
         actions: vec![
             NotificationAction {
                 copy: None,
+                reply: None,
                 label: "Yes".to_string(),
                 callback_id: Some("yes".to_string()),
                 url: None,
@@ -483,6 +485,7 @@ fn notification_payload_with_actions_serializes() {
             },
             NotificationAction {
                 copy: None,
+                reply: None,
                 label: "No".to_string(),
                 callback_id: Some("no".to_string()),
                 url: None,

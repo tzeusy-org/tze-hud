@@ -505,6 +505,7 @@ async fn notification_actions_layout_matches_hit_regions() {
                             .enumerate()
                             .map(|(i, label)| NotificationAction {
                                 copy: None,
+                                reply: None,
                                 label: (*label).into(),
                                 callback_id: (i % 2 == 0).then(|| i.to_string()),
                                 url: (i % 2 == 1).then(|| format!("https://example.com/{i}")),
@@ -790,6 +791,7 @@ async fn check_notification_action_row(margin: Option<f32>) {
     );
     let action = |label: &str| tze_hud_scene::types::NotificationAction {
         copy: None,
+        reply: None,
         label: label.to_owned(),
         callback_id: Some(label.to_lowercase()),
         url: None,
@@ -1053,6 +1055,7 @@ async fn notification_action_button_is_visible_and_hover_brightens_it() {
                 title: "Deploy".to_owned(),
                 actions: vec![tze_hud_scene::types::NotificationAction {
                     copy: None,
+                    reply: None,
                     label: "Approve".to_owned(),
                     callback_id: Some("approve".to_owned()),
                     url: None,
@@ -1553,6 +1556,7 @@ async fn test_notification_card_border_is_an_sdf_border() {
                     urgency: if index == 7 { 2 } else { 0 },
                     actions: vec![NotificationAction {
                         copy: None,
+                        reply: None,
                         label: "Act".into(),
                         callback_id: Some("act".into()),
                         url: None,

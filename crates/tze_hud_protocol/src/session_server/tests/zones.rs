@@ -11,7 +11,7 @@ async fn notification_progress_and_copy_admission() {
     let progress_hint = "notification.progress must be a number in 0..1";
     let copy_hint = "action copy must contain 1 to 2048 UTF-8 bytes";
     let nul_hint = "action copy cannot contain NUL";
-    let target_hint = "action needs one of callback_id, url or copy";
+    let target_hint = "action needs one of callback_id, url, copy or reply";
     let cases = [
         (Some(-0.01), None, "", "", Some(progress_hint)),
         (Some(1.01), None, "", "", Some(progress_hint)),
@@ -59,6 +59,7 @@ async fn notification_progress_and_copy_admission() {
                             actions: vec![NotificationActionProto {
                                 label: "Action".into(),
                                 copy: copy.clone(),
+                                reply: None,
                                 callback_id: (*callback_id).into(),
                                 url: (*url).into(),
                             }],
@@ -104,6 +105,108 @@ async fn notification_progress_and_copy_admission() {
         }
     }
     drop(server);
+}
+
+#[tokio::test]
+async fn notification_reply_admission() {
+    use crate::proto::{NotificationActionProto, NotificationPayload, ZoneContent, zone_content};
+    let (mut client, _server, state) =
+        setup_test_with_state_and_render_wake(Default::default()).await;
+    let scene = state.lock().await.scene.clone();
+    scene.lock().await.zone_registry = tze_hud_scene::types::ZoneRegistry::with_defaults();
+    let (tx, _, mut stream) = handshake(&mut client, "card-publisher", "test-key").await;
+    let reply = |callback: &str| NotificationActionProto {
+        label: "Other…".into(),
+        reply: Some(callback.into()),
+        ..Default::default()
+    };
+    let cases = [
+        (
+            vec![NotificationActionProto {
+                callback_id: "approve".into(),
+                ..reply("other")
+            }],
+            Some("action needs one of callback_id, url, copy or reply"),
+        ),
+        (
+            vec![reply("first"), reply("second")],
+            Some("notification allows at most one reply action"),
+        ),
+        (
+            vec![reply("")],
+            Some("action reply needs a non-empty callback ID"),
+        ),
+        (
+            vec![NotificationActionProto {
+                label: String::new(),
+                ..reply("other")
+            }],
+            Some("reply action needs a label"),
+        ),
+        (vec![reply("other")], None),
+    ];
+    let mut sequence = 2;
+    for delay in [0, 60_000_000] {
+        for (actions, hint) in &cases {
+            let before = {
+                let scene = scene.lock().await;
+                (scene.version, scene.scheduled_publications.len())
+            };
+            let result = request(
+                &tx,
+                &mut stream,
+                sequence,
+                ClientPayload::Publish(Publish {
+                    surface: "zone:notification-area".into(),
+                    content: Some(ZoneContent {
+                        payload: Some(zone_content::Payload::Notification(NotificationPayload {
+                            text: "Which database?".into(),
+                            actions: actions.clone(),
+                            ..Default::default()
+                        })),
+                    }),
+                    present_at_us: if delay == 0 { 0 } else { now_wall_us() + delay },
+                    ..Default::default()
+                }),
+            )
+            .await;
+            let scene = scene.lock().await;
+            if let Some(hint) = hint {
+                assert_eq!(
+                    (result.ok, result.code.as_str()),
+                    (false, "INVALID_ARGUMENT")
+                );
+                assert_eq!(
+                    result.hint,
+                    super::verbs::fail(sequence, "INVALID_ARGUMENT", *hint).hint
+                );
+                assert_eq!((scene.version, scene.scheduled_publications.len()), before);
+            } else {
+                assert!(result.ok, "{result:?}");
+                let content = if delay == 0 {
+                    &scene
+                        .zone_registry
+                        .active_for_zone("notification-area")
+                        .last()
+                        .unwrap()
+                        .content
+                } else {
+                    let tze_hud_scene::Publication::Zone { content, .. } =
+                        &scene.scheduled_publications.last().unwrap().publication
+                    else {
+                        panic!("expected a scheduled zone publication");
+                    };
+                    content
+                };
+                let tze_hud_scene::ZoneContent::Notification(card) = content else {
+                    panic!("expected a notification");
+                };
+                assert_eq!(card.actions[0].reply.as_deref(), Some("other"));
+                assert_eq!(card.actions[0].callback_id, None);
+            }
+            sequence += 1;
+        }
+    }
 }
 
 #[tokio::test]
@@ -262,7 +365,7 @@ async fn test_zone_publish_result() {
             super::verbs::fail(
                 sequence,
                 "INVALID_ARGUMENT",
-                "action needs one of callback_id, url or copy"
+                "action needs one of callback_id, url, copy or reply"
             )
             .hint
         );
@@ -279,6 +382,7 @@ async fn test_zone_publish_result() {
                             actions: (0..count)
                                 .map(|i| crate::proto::NotificationActionProto {
                                     copy: None,
+                                    reply: None,
                                     label: format!("Option {i}"),
                                     callback_id: if i % 2 == 0 {
                                         format!("answer-{i}")
@@ -369,12 +473,12 @@ async fn test_zone_publish_result() {
         (
             "go".into(),
             "https://example.com/".into(),
-            Some("action needs one of callback_id, url or copy"),
+            Some("action needs one of callback_id, url, copy or reply"),
         ),
         (
             "".into(),
             "".into(),
-            Some("action needs one of callback_id, url or copy"),
+            Some("action needs one of callback_id, url, copy or reply"),
         ),
         ("legacy".into(), "".into(), None),
         ("".into(), boundary.clone(), None),
@@ -410,6 +514,7 @@ async fn test_zone_publish_result() {
                                 actions: vec![
                                     crate::proto::NotificationActionProto {
                                         copy: None,
+                                        reply: None,
                                         label: "Legacy".into(),
                                         callback_id: "legacy".into(),
                                         url: String::new(),
@@ -417,6 +522,7 @@ async fn test_zone_publish_result() {
                                     // Blank labels on gRPC retain their existing semantics.
                                     crate::proto::NotificationActionProto {
                                         copy: None,
+                                        reply: None,
                                         label: String::new(),
                                         callback_id: callback_id.clone(),
                                         url: url.clone(),

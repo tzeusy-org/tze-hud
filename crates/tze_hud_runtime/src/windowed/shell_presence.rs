@@ -426,6 +426,7 @@ mod tests {
         scene.register_zone(crate::windowed::test_support::make_test_zone("questions"));
         let callback = NotificationAction {
             copy: None,
+            reply: None,
             label: "Answer".into(),
             callback_id: Some("answer".into()),
             url: None,
@@ -436,6 +437,7 @@ mod tests {
             vec![callback],
             vec![NotificationAction {
                 copy: None,
+                reply: None,
                 label: "Open link".into(),
                 callback_id: None,
                 url: Some("https://example.com".into()),
