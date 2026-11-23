@@ -86,7 +86,20 @@ pub(crate) enum TrayCommand {
 
 /// Runs the answer chord's main-thread handoff for a tray visit.
 #[cfg(any(target_os = "windows", test, feature = "test-harness"))]
-pub(crate) type AnswerHook = Arc<dyn Fn() + Send + Sync>;
+pub(crate) type AnswerHook = Arc<dyn Fn(TrayVisit) + Send + Sync>;
+
+/// Captured before the tray's native menu takes the foreground.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct TrayVisit {
+    pub display: Option<String>,
+    pub origin: Option<isize>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct PanelLocation {
+    pub display: Option<String>,
+    pub tray: Option<TrayVisit>,
+}
 
 #[cfg(any(target_os = "windows", test))]
 impl TrayCommand {
@@ -117,7 +130,7 @@ impl TrayCommand {
 pub(crate) enum PanelEvent {
     /// Native tray input is handled even while the panel is closed.
     #[cfg(any(target_os = "windows", test, feature = "test-harness"))]
-    Tray(TrayCommand),
+    Tray(TrayCommand, TrayVisit),
     /// A native global chord or main-thread answer handoff was requested.
     Chord(ChordRole),
     Key(PanelKey),
@@ -150,11 +163,7 @@ pub(crate) enum PanelEvent {
 struct Shared {
     /// What the compositor draws (`None`: closed), with a version that changes
     /// on every publish.
-    model: RwLock<(
-        u64,
-        Option<ControlPanelModel>,
-        std::collections::HashSet<String>,
-    )>,
+    model: RwLock<PublishedModel>,
     /// The notice the compositor draws while the panel is closed, versioned
     /// like `model`.
     closed_notice: RwLock<(u64, Option<PanelNotice>)>,
@@ -179,6 +188,14 @@ struct Shared {
     applied_sent: AtomicU64,
     #[cfg(test)]
     clipboard_sent: AtomicU64,
+}
+
+#[derive(Default)]
+struct PublishedModel {
+    generation: u64,
+    model: Option<ControlPanelModel>,
+    fields: std::collections::HashSet<String>,
+    location: Option<PanelLocation>,
 }
 
 /// Cheap, cloneable access to the panel from every thread.
@@ -213,12 +230,12 @@ impl ControlPanelHandle {
     pub(crate) fn accepts_text(&self, target: &PanelHitTarget) -> bool {
         use tze_hud_compositor::PanelPart;
         let guard = self.shared.model.read().unwrap_or_else(|e| e.into_inner());
-        if guard.1.is_none() {
+        if guard.model.is_none() {
             return false;
         }
         match target {
             PanelHitTarget::Search => true,
-            PanelHitTarget::Row(id, PanelPart::Body) => guard.2.contains(id),
+            PanelHitTarget::Row(id, PanelPart::Body) => guard.fields.contains(id),
             _ => false,
         }
     }
@@ -240,13 +257,31 @@ impl ControlPanelHandle {
 
     /// For the compositor thread: the model when it changed since `seen`
     /// (updating `seen`), else `None`.
-    pub(crate) fn model_if_changed(&self, seen: &mut u64) -> Option<Option<ControlPanelModel>> {
+    pub(crate) fn model_if_changed(
+        &self,
+        seen: &mut u64,
+    ) -> Option<Option<(ControlPanelModel, Option<String>)>> {
         let guard = self.shared.model.read().unwrap_or_else(|e| e.into_inner());
-        if guard.0 == *seen {
+        if guard.generation == *seen {
             return None;
         }
-        *seen = guard.0;
-        Some(guard.1.clone())
+        *seen = guard.generation;
+        Some(guard.model.clone().map(|model| {
+            let display = guard
+                .location
+                .as_ref()
+                .and_then(|location| location.display.clone());
+            (model, display)
+        }))
+    }
+
+    pub(crate) fn location(&self) -> Option<PanelLocation> {
+        self.shared
+            .model
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .location
+            .clone()
     }
 
     /// For the compositor thread: the closed-panel notice when it changed since
@@ -326,7 +361,7 @@ impl ControlPanelHandle {
             .map(|(_, g)| g.clone())
     }
 
-    /// What the panel has at `(x, y)` on the primary display; `None` when the
+    /// What the panel has at display-local `(x, y)`; `None` when the
     /// panel is closed or the point is outside it (it passes through).
     pub(crate) fn hit(&self, x: f32, y: f32) -> Option<PanelHitTarget> {
         if !self.is_open() {
@@ -347,11 +382,16 @@ impl ControlPanelHandle {
             .model
             .read()
             .unwrap_or_else(|e| e.into_inner())
-            .1
+            .model
             .clone()
     }
 
-    fn publish(&self, model: Option<ControlPanelModel>, nav: &Nav) {
+    fn publish(
+        &self,
+        model: Option<ControlPanelModel>,
+        nav: &Nav,
+        location: Option<PanelLocation>,
+    ) {
         let open = model.is_some();
         let fields = nav
             .rows
@@ -362,12 +402,13 @@ impl ControlPanelHandle {
             .collect();
         {
             let mut guard = self.shared.model.write().unwrap_or_else(|e| e.into_inner());
-            if guard.1 == model && guard.2 == fields {
+            if guard.model == model && guard.fields == fields && guard.location == location {
                 return;
             }
-            guard.0 += 1;
-            guard.1 = model;
-            guard.2 = fields;
+            guard.generation += 1;
+            guard.model = model;
+            guard.fields = fields;
+            guard.location = location;
             // Under the model lock: whoever reads this model also reads
             // whether it is open (keys route only to an open panel).
             self.shared.open.store(open, Ordering::Release);
@@ -391,6 +432,9 @@ pub(crate) struct ControlPanelDeps {
     /// The scene, for the visibility rows (its runtime-only overlay state).
     pub scene: Arc<tokio::sync::Mutex<tze_hud_scene::graph::SceneGraph>>,
     pub chords: chords::ChordControl,
+    /// Shared with the question placer. A panel reads it once on opening.
+    pub display_probe: Arc<dyn crate::question_placement::DisplayProbe>,
+    pub display_layout: Arc<std::sync::Mutex<tze_hud_compositor::DisplayLayout>>,
     /// Shows the pairing card (`None` when the MCP port is disabled).
     pub pairing: Option<Arc<crate::pairing::Pairing>>,
     /// The Agents section's roster and actions (`None`: pause only).
@@ -484,7 +528,7 @@ pub(crate) fn spawn_control_panel(
             .as_ref()
             .map(|runtime| runtime.displays.clone()),
         shared: Arc::new(Shared {
-            model: RwLock::new((0, None, Default::default())),
+            model: RwLock::new(PublishedModel::default()),
             closed_notice: RwLock::new((0, None)),
             open: AtomicBool::new(false),
             geometry: RwLock::new(None),
@@ -546,7 +590,7 @@ pub(crate) fn spawn_control_panel(
                                 %error,
                                 "control panel: event handler failed; closing the panel and resuming agents"
                             );
-                            recover.publish(None, &Nav::default());
+                            recover.publish(None, &Nav::default(), None);
                             deps.pause.set(false).await;
                             None
                         }
@@ -637,12 +681,12 @@ impl PanelTask {
                 }
             }
             #[cfg(any(target_os = "windows", test, feature = "test-harness"))]
-            (PanelEvent::Tray(command), _) => {
-                self.on_tray(command).await;
+            (PanelEvent::Tray(command, visit), _) => {
+                self.on_tray(command, visit).await;
                 Vec::new()
             }
             (PanelEvent::Chord(role), _) => {
-                self.on_chord(role).await;
+                self.on_chord(role, None).await;
                 Vec::new()
             }
             // Input that arrives after the panel closed is stale.
@@ -686,7 +730,7 @@ impl PanelTask {
                     | PanelEvent::Applied { .. }
                     | PanelEvent::Clipboard { .. } => Vec::new(),
                     #[cfg(any(target_os = "windows", test, feature = "test-harness"))]
-                    PanelEvent::Tray(_) => Vec::new(),
+                    PanelEvent::Tray(..) => Vec::new(),
                 }
             }
         };
@@ -803,9 +847,9 @@ impl PanelTask {
     }
 
     #[cfg(any(target_os = "windows", test, feature = "test-harness"))]
-    async fn on_tray(&mut self, command: TrayCommand) {
+    async fn on_tray(&mut self, command: TrayCommand, visit: TrayVisit) {
         match command {
-            TrayCommand::TogglePanel => self.on_chord(ChordRole::Panel).await,
+            TrayCommand::TogglePanel => self.on_chord(ChordRole::Panel, Some(visit)).await,
             TrayCommand::AnswerNext => {
                 let answer = self
                     .handle
@@ -817,14 +861,16 @@ impl PanelTask {
                 match answer {
                     // The main thread focuses the card, or opens the panel
                     // when the question has gone.
-                    Some(answer) => answer(),
-                    None if self.open.is_none() => self.on_chord(ChordRole::Panel).await,
+                    Some(answer) => answer(visit),
+                    None if self.open.is_none() => {
+                        self.on_chord(ChordRole::Panel, Some(visit)).await
+                    }
                     None => {}
                 }
             }
             TrayCommand::OpenPanel => {
                 if self.open.is_none() {
-                    self.on_chord(ChordRole::Panel).await;
+                    self.on_chord(ChordRole::Panel, Some(visit)).await;
                 }
             }
             TrayCommand::Pause => {
@@ -832,11 +878,7 @@ impl PanelTask {
                 // choice made from an older snapshot.
                 self.deps.pause.set(true).await;
                 if self.open.is_none() {
-                    self.open = Some(Open::new(ChordRole::Pause));
-                    for section in self.sections.iter() {
-                        section.opened();
-                    }
-                    self.refresh().await;
+                    self.begin_open(ChordRole::Pause, Some(visit)).await;
                 }
             }
             TrayCommand::Resume => self.close().await,
@@ -860,7 +902,7 @@ impl PanelTask {
         }
     }
 
-    async fn on_chord(&mut self, role: ChordRole) {
+    async fn on_chord(&mut self, role: ChordRole, tray: Option<TrayVisit>) {
         if role == ChordRole::Hide {
             // Exactly the Hide all tile's edit: hide everything unless it all
             // is hidden, then show everything. Panel and pause stay as they are.
@@ -875,13 +917,7 @@ impl PanelTask {
         }
         match outcome.panel {
             PanelChange::Open(by) => {
-                let mut open = Open::new(by);
-                open.error = self.closed_failure.take();
-                self.open = Some(open);
-                for section in self.sections.iter() {
-                    section.opened();
-                }
-                self.refresh().await;
+                self.begin_open(by, tray).await;
             }
             PanelChange::Close => self.end_preview().await,
             PanelChange::Keep => {}
@@ -889,6 +925,31 @@ impl PanelTask {
         if outcome.connect {
             self.open_connect();
         }
+    }
+
+    async fn begin_open(&mut self, by: ChordRole, tray: Option<TrayVisit>) {
+        let sampled = match &tray {
+            Some(visit) => visit.display.clone(),
+            None => {
+                crate::question_placement::active_panel_display(self.deps.display_probe.as_ref())
+            }
+        };
+        let display = crate::question_placement::panel_display(
+            &self
+                .deps
+                .display_layout
+                .lock()
+                .unwrap_or_else(|e| e.into_inner()),
+            sampled,
+        );
+        let mut open = Open::new(by);
+        open.location = PanelLocation { display, tray };
+        open.error = self.closed_failure.take();
+        self.open = Some(open);
+        for section in self.sections.iter() {
+            section.opened();
+        }
+        self.refresh().await;
     }
 
     /// Flip a toggle row the way pressing it does (`Set(!on)` from the row's
@@ -1124,7 +1185,11 @@ impl PanelTask {
         if model != self.published {
             self.published = model.clone();
         }
-        self.handle.publish(model, &self.nav);
+        self.handle.publish(
+            model,
+            &self.nav,
+            self.open.as_ref().map(|open| open.location.clone()),
+        );
         if closed {
             let notice = self.closed_notice().await;
             self.handle.publish_closed_notice(notice);

@@ -23,6 +23,8 @@ pub struct SurfaceSnapshot {
     pub notifications: Value,
     pub widgets: Value,
     pub link_launches: u64,
+    /// The overlaid display showing the open control panel.
+    pub panel_display: Option<String>,
     /// The pointer shape the runtime last applied, or `None` while the app
     /// beneath the overlay owns the pointer.
     pub cursor: Option<&'static str>,
@@ -54,6 +56,8 @@ pub struct UiMirror {
     /// OUTPUT reading observations per portal tile (hud-ljhku.2); absent
     /// tiles report `arrow`, no hint and no selection.
     pub reading: HashMap<SceneId, ReadingUi>,
+    /// [`SurfaceSnapshot::panel_display`].
+    pub panel_display: Option<String>,
     /// [`SurfaceSnapshot::cursor`].
     pub cursor: Option<&'static str>,
     /// The pressed link's local feedback: `opening`, `opened` or `failed`.
@@ -116,6 +120,7 @@ pub fn probe(
                     portals: portals_json(&scene, &ui, &displays),
                     notifications: notifications_json(&scene, &displays),
                     widgets: widgets_json(&scene, &ui, &displays),
+                    panel_display: ui.panel_display,
                     link_launches: link_launches.load(Ordering::Relaxed),
                     cursor: ui.cursor,
                     link_feedback: ui.link_feedback,
@@ -125,6 +130,7 @@ pub fn probe(
                 let ui = ui.lock().unwrap_or_else(|e| e.into_inner()).clone();
                 return SurfaceSnapshot {
                     link_launches: link_launches.load(Ordering::Relaxed),
+                    panel_display: ui.panel_display,
                     cursor: ui.cursor,
                     link_feedback: ui.link_feedback,
                     ..Default::default()

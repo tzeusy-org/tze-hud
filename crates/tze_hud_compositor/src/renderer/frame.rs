@@ -26,7 +26,16 @@ struct TargetView<'a> {
     safe_mode_vertices: Cow<'a, [RectVertex]>,
     system_card_vertices: &'a [RectVertex],
     system_card_rounded_rects: &'a [RoundedRectDrawCmd],
+    panel_here: bool,
     widget_quads: &'a [crate::widget::WidgetDrawQuad],
+}
+
+/// Final chrome already laid out in the chosen secondary's pixel space.
+struct SecondaryPanel {
+    display: Rect,
+    vertices: Vec<RectVertex>,
+    shapes: Vec<RoundedRectDrawCmd>,
+    text: Vec<TextItem>,
 }
 
 fn hash_f32s(hasher: &mut impl std::hash::Hasher, values: &[f32]) {
@@ -108,9 +117,9 @@ pub struct WindowedFrameBuild {
     /// How many leading `system_card_rounded_rects` are the closed panel
     /// notice's (0 while the panel is open).
     notice_shapes: usize,
-    /// True while the control panel is open: `/admin/screenshot` then leaves
-    /// the final chrome pass out (docs/invariants.md §3).
-    control_panel_open: bool,
+    /// The panel occupies the primary's final chrome pass.
+    panel_on_primary: bool,
+    secondary_panel: Option<SecondaryPanel>,
     /// Precomputed per-instance widget draw quads.
     widget_quads: Vec<crate::widget::WidgetDrawQuad>,
     /// Wall-clock start of the frame, for the total frame-time telemetry.
@@ -619,7 +628,9 @@ impl Compositor {
         // This is the second big scene read; collecting it here (rather than
         // inside the former post-acquire `encode_frame`) is what lets the encode
         // stage run lock-free.
-        let encode_sources = self.collect_encode_sources(scene, surf_w, surf_h);
+        let panel_display = self.control_panel_secondary().map(|display| display.rect);
+        let panel_on_primary = self.control_panel_open() && panel_display.is_none();
+        let encode_sources = self.collect_encode_sources(scene, surf_w, surf_h, panel_on_primary);
         self.publish_portal_document_layouts(scene);
 
         // ── Widget draw geometry (precomputed from the registry) ─────────────
@@ -656,15 +667,24 @@ impl Compositor {
         // ── Chrome context menu ─────────────────────────────────
         let (context_menu_vertices, context_menu_text) = self.collect_context_menu(scene, sw, sh);
         // The open panel shows the paused state itself; its scrim replaces the
-        // safe-mode dim on the primary display (other displays keep it).
-        let control_panel_open = self.control_panel_open();
-        let safe_mode_vertices = if control_panel_open {
+        // safe-mode dim on the panel's display.
+        let safe_mode_vertices = if panel_on_primary {
             Vec::new()
         } else {
             self.safe_mode_overlay_vertices(sw, sh)
         };
-        let system_card_vertices = self.final_chrome_vertices(sw, sh);
-        let (system_card_rounded_rects, notice_shapes) = self.final_chrome_rounded_rects(sw, sh);
+        let system_card_vertices = self.final_chrome_vertices(sw, sh, panel_on_primary);
+        let (system_card_rounded_rects, notice_shapes) =
+            self.final_chrome_rounded_rects(sw, sh, panel_on_primary);
+        let secondary_panel = panel_display.map(|display| {
+            let (w, h) = (display.width, display.height);
+            SecondaryPanel {
+                display,
+                vertices: self.final_chrome_vertices(w, h, true),
+                shapes: self.final_chrome_rounded_rects(w, h, true).0,
+                text: self.final_chrome_text_items(w, h, true).0,
+            }
+        });
 
         // Populate drag-handle hit regions from the geometry we are about to
         // present so the next input snapshot matches this frame (see the method
@@ -689,7 +709,8 @@ impl Compositor {
             system_card_vertices,
             system_card_rounded_rects,
             notice_shapes,
-            control_panel_open,
+            panel_on_primary,
+            secondary_panel,
             widget_quads,
             frame_start,
         }
@@ -824,7 +845,7 @@ impl Compositor {
         include_panel: bool,
     ) -> (wgpu::CommandEncoder, u64) {
         let mut tv = self.target_view(build, target);
-        if build.control_panel_open && !include_panel {
+        if tv.panel_here && !include_panel {
             tv.card_items = &[];
             tv.system_card_vertices = &[];
             tv.system_card_rounded_rects = &[];
@@ -914,9 +935,8 @@ impl Compositor {
 
     /// Map a canvas-space build onto one display window (see
     /// [`crate::display`]). The primary window borrows the build unchanged;
-    /// any other window gets translated copies, its own safe-mode overlay, and
-    /// none of the primary-only chrome (widgets clamp to the canvas; the
-    /// system card belongs to the primary display).
+    /// any other window gets translated copies and its own safe-mode overlay
+    /// or control panel. Widgets and the system card belong to the primary.
     fn target_view<'a>(
         &self,
         build: &'a WindowedFrameBuild,
@@ -943,6 +963,7 @@ impl Compositor {
                 safe_mode_vertices: Cow::Borrowed(&build.safe_mode_vertices),
                 system_card_vertices: &build.system_card_vertices,
                 system_card_rounded_rects: &build.system_card_rounded_rects,
+                panel_here: build.panel_on_primary,
                 widget_quads: &build.widget_quads,
             };
         }
@@ -1005,7 +1026,10 @@ impl Compositor {
                 cmd
             })
             .collect();
-        let primary_only = |s: &'a [RectVertex]| if target.primary { s } else { &[] };
+        let secondary_panel = build.secondary_panel.as_ref().filter(|panel| {
+            !target.primary && (target.x, target.y) == (panel.display.x, panel.display.y)
+        });
+        let panel_here = (target.primary && build.panel_on_primary) || secondary_panel.is_some();
         TargetView {
             width: tw,
             height: th,
@@ -1017,7 +1041,9 @@ impl Compositor {
             text_items: Cow::Owned(text_items),
             affordance_items: Cow::Owned(shift_text(&build.encode_sources.affordance_items)),
             affordance_rects: Cow::Owned(shift_rr(&build.encode_sources.affordance_rects)),
-            card_items: if target.primary {
+            card_items: if let Some(panel) = secondary_panel {
+                &panel.text
+            } else if target.primary {
                 &build.encode_sources.card_items
             } else {
                 &[]
@@ -1040,13 +1066,26 @@ impl Compositor {
                     })
                     .collect(),
             ),
-            safe_mode_vertices: Cow::Owned(self.safe_mode_overlay_vertices(tw as f32, th as f32)),
-            system_card_vertices: primary_only(&build.system_card_vertices),
-            system_card_rounded_rects: if target.primary {
+            safe_mode_vertices: if panel_here {
+                Cow::Borrowed(&[])
+            } else {
+                Cow::Owned(self.safe_mode_overlay_vertices(tw as f32, th as f32))
+            },
+            system_card_vertices: if let Some(panel) = secondary_panel {
+                &panel.vertices
+            } else if target.primary {
+                &build.system_card_vertices
+            } else {
+                &[]
+            },
+            system_card_rounded_rects: if let Some(panel) = secondary_panel {
+                &panel.shapes
+            } else if target.primary {
                 &build.system_card_rounded_rects
             } else {
                 &[]
             },
+            panel_here,
             widget_quads: if target.primary {
                 &build.widget_quads
             } else {
@@ -1113,10 +1152,11 @@ impl Compositor {
         0xC6u8.hash(&mut hasher); // Content SDF / Chrome flat split
         hash_visible_triangles(&mut hasher, &tv.vertices[chrome..]);
         for list in [
-            &tv.drag_handle_vertices,
-            &tv.focus_ring_vertices,
-            &tv.context_menu_vertices,
-            &tv.safe_mode_vertices,
+            tv.drag_handle_vertices.as_ref(),
+            tv.focus_ring_vertices.as_ref(),
+            tv.context_menu_vertices.as_ref(),
+            tv.safe_mode_vertices.as_ref(),
+            tv.system_card_vertices,
         ] {
             0xC7u8.hash(&mut hasher);
             hash_visible_triangles(&mut hasher, list);
@@ -1144,11 +1184,12 @@ impl Compositor {
             hash_f32s(&mut hasher, tint);
         }
         for list in [
-            &tv.rr_background,
-            &tv.rr_content,
-            &tv.rr_post,
-            &tv.affordance_rects,
-            &tv.drag_highlight_cmds,
+            tv.rr_background.as_ref(),
+            tv.rr_content.as_ref(),
+            tv.rr_post.as_ref(),
+            tv.affordance_rects.as_ref(),
+            tv.drag_highlight_cmds.as_ref(),
+            tv.system_card_rounded_rects,
         ] {
             0xD8u8.hash(&mut hasher);
             for cmd in list.iter() {
@@ -1189,6 +1230,7 @@ impl Compositor {
             .iter()
             .chain(tv.context_menu_text.iter())
             .chain(tv.affordance_items.iter())
+            .chain(tv.card_items)
             .filter(|i| {
                 visible(
                     i.clip_pixel_x,
@@ -1396,8 +1438,8 @@ impl Compositor {
         }
 
         // System card last, above everything.
-        let system_card_vertices = self.final_chrome_vertices(sw, sh);
-        let (system_card_rounded_rects, _) = self.final_chrome_rounded_rects(sw, sh);
+        let system_card_vertices = self.final_chrome_vertices(sw, sh, true);
+        let (system_card_rounded_rects, _) = self.final_chrome_rounded_rects(sw, sh, true);
         self.encode_system_card_pass(
             &mut encoder,
             &frame.view,

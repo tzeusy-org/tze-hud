@@ -1071,6 +1071,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn admin_status_names_the_open_panel_display() {
+        let mut src = admin_source(std::env::temp_dir().join("tze_hud_no_such.log"));
+        let ui = crate::operator::surface_status::UiHandle::default();
+        src.surfaces = Some(crate::operator::surface_status::probe(
+            Arc::new(Mutex::new(SceneGraph::new(1280.0, 720.0))),
+            Arc::clone(&ui),
+            Default::default(),
+        ));
+        let request = admin_get("/admin/status", Some("root-psk"));
+        for display in [None, Some("DISPLAY3"), None] {
+            ui.lock().unwrap().panel_display = display.map(str::to_owned);
+            let response = handle_admin(crate::http::AdminRoute::Status, &request, &src).await;
+            assert_eq!(response.status, 200);
+            let status: serde_json::Value = serde_json::from_slice(&response.body).unwrap();
+            assert_eq!(
+                status.get("panel_display"),
+                Some(&serde_json::json!(display))
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn admin_screenshot_is_guarded_then_served_as_png() {
         use crate::http::AdminRoute::Screenshot;
         let mut src = admin_source(std::env::temp_dir().join("tze_hud_no_such.log"));

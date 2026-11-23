@@ -109,6 +109,44 @@ impl WinitApp {
         self.state.control_panel.as_ref().filter(|p| p.is_open())
     }
 
+    /// The display and native window that own the open panel. A missing
+    /// overlay falls back to the primary, like other local chrome.
+    fn panel_target(&self) -> Option<(Option<usize>, Option<tze_hud_compositor::DisplayRect>)> {
+        let location = self.open_panel()?.location()?;
+        let layout = self
+            .state
+            .placement_layout
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if let Some(name) = location.display
+            && let Some((index, display)) = layout
+                .displays()
+                .iter()
+                .filter(|display| !display.primary)
+                .enumerate()
+                .find(|(_, display)| display.name == name)
+        {
+            return Some((Some(index), Some(display.clone())));
+        }
+        Some((
+            None,
+            layout
+                .displays()
+                .iter()
+                .find(|display| display.primary)
+                .cloned(),
+        ))
+    }
+
+    pub(super) fn panel_display_name(&self) -> Option<String> {
+        self.panel_target()?.1.map(|display| display.name)
+    }
+
+    pub(super) fn panel_targets_window(&self, secondary: Option<usize>) -> bool {
+        self.panel_target()
+            .is_some_and(|(window, _)| window == secondary)
+    }
+
     /// Route a key event to the open panel. Returns true when the panel owns
     /// it (the caller must not dispatch it anywhere else).
     pub(super) fn panel_key_event(&mut self, event: &KeyEvent) -> bool {
@@ -173,21 +211,30 @@ impl WinitApp {
         true
     }
 
-    fn panel_hit(&self, primary: bool) -> Option<PanelHitTarget> {
-        if !primary {
+    fn panel_hit(&self, secondary: Option<usize>) -> Option<PanelHitTarget> {
+        let (window, display) = self.panel_target()?;
+        if window != secondary {
             return None;
         }
+        self.panel_hit_on_display(display)
+    }
+
+    fn panel_hit_on_display(
+        &self,
+        display: Option<tze_hud_compositor::DisplayRect>,
+    ) -> Option<PanelHitTarget> {
+        let (x, y) = display.map_or((0.0, 0.0), |display| (display.rect.x, display.rect.y));
         self.open_panel()?
-            .hit(self.state.cursor_x, self.state.cursor_y)
+            .hit(self.state.cursor_x - x, self.state.cursor_y - y)
     }
 
     /// Pointer moved to the current cursor position. Returns true when it is
     /// over the panel (the scene must not see it).
-    pub(super) fn panel_pointer_moved(&mut self, primary: bool) -> bool {
+    pub(super) fn panel_pointer_moved(&mut self, secondary: Option<usize>) -> bool {
         let Some(panel) = self.open_panel().cloned() else {
             return false;
         };
-        let hit = self.panel_hit(primary);
+        let hit = self.panel_hit(secondary);
         // Hover tracks rows, tiles and chips; the bare panel is no target.
         let hover = hit.clone().filter(|t| *t != PanelHitTarget::Panel);
         if hover != self.state.panel_input.hovered {
@@ -198,18 +245,18 @@ impl WinitApp {
     }
 
     /// Left button edge. Returns true when the panel owns it.
-    pub(super) fn panel_left_button(&mut self, pressed: bool, primary: bool) -> bool {
+    pub(super) fn panel_left_button(&mut self, pressed: bool, secondary: Option<usize>) -> bool {
         let Some(panel) = self.open_panel().cloned() else {
             return false;
         };
-        let hit = self.panel_hit(primary);
+        let hit = self.panel_hit(secondary);
         if pressed {
             if hit.is_none() {
                 return false;
             }
             // Ordinary panel buttons retain the external app's focus. A text
             // field/search click can retry focus refused on panel opening.
-            if let Some(window) = &self.state.window
+            if let Some(window) = self.panel_window(secondary)
                 && !window_is_foreground(window)
                 && hit.as_ref().is_some_and(|hit| panel.accepts_text(hit))
             {
@@ -237,9 +284,9 @@ impl WinitApp {
         &mut self,
         button: winit::event::MouseButton,
         pressed: bool,
-        primary: bool,
+        secondary: Option<usize>,
     ) -> bool {
-        let over = self.panel_hit(primary).is_some();
+        let over = self.panel_hit(secondary).is_some();
         let held = &mut self.state.panel_input.other_pressed;
         let was_held = held.contains(&button);
         held.retain(|b| *b != button);
@@ -253,8 +300,8 @@ impl WinitApp {
     }
 
     /// Wheel over the panel scrolls it. Returns true when the panel owns it.
-    pub(super) fn panel_wheel(&mut self, dy: f32, primary: bool) -> bool {
-        if self.panel_hit(primary).is_none() {
+    pub(super) fn panel_wheel(&mut self, dy: f32, secondary: Option<usize>) -> bool {
+        if self.panel_hit(secondary).is_none() {
             return false;
         }
         if let Some(panel) = self.open_panel() {
@@ -272,15 +319,19 @@ impl WinitApp {
 
     /// The panel target under the cursor, if any.
     fn panel_hit_at_cursor(&self) -> Option<PanelHitTarget> {
-        // While click-through, no `CursorMoved` arrives and the position is
-        // refreshed from the OS in primary-window coordinates, so a
-        // `cursor_window` left over from an earlier move says nothing.
-        let primary = !self.state.overlay_capturing
-            || match (&self.state.window, self.state.cursor_window) {
-                (Some(window), Some(id)) => window.id() == id,
-                _ => true,
-            };
-        self.panel_hit(primary)
+        // Both winit and raw click-through motion use scene coordinates.
+        self.panel_hit_on_display(self.panel_target()?.1)
+    }
+
+    fn panel_window(&self, secondary: Option<usize>) -> Option<&winit::window::Window> {
+        match secondary {
+            Some(index) => self
+                .state
+                .secondaries
+                .get(index)
+                .map(|display| display.window.as_ref()),
+            None => self.state.window.as_deref(),
+        }
     }
 
     /// True while the open panel should capture the pointer at the cursor.
@@ -316,10 +367,15 @@ impl WinitApp {
         if open {
             self.state.answer_keyboard.focus = None;
             self.state.input_processor.chrome_feedback_cancel_pending = true;
-            let focused = self.state.window.as_ref().is_none_or(|window| {
+            let secondary = self.panel_target().and_then(|(index, _)| index);
+            self.state.keyboard_window = secondary;
+            let focused = self.panel_window(secondary).is_none_or(|window| {
                 focus_window_for_text_input(window);
                 window_is_foreground(window)
             });
+            if let Some(visit) = self.open_panel().and_then(|panel| panel.location()?.tray) {
+                super::lifecycle::redirect_focus_return(visit.origin);
+            }
             if !focused {
                 tracing::warn!(
                     "control panel: Windows refused keyboard focus; click the panel to type"
@@ -454,6 +510,18 @@ pub(super) mod panel_task_tests {
         sections: impl FnOnce(&ControlPanelDeps) -> Vec<Box<dyn crate::shell::control_panel::Section>>,
         clock: Arc<dyn tze_hud_scene::Clock>,
     ) -> Fixture {
+        fixture_with_display_probe(
+            sections,
+            clock,
+            Arc::new(crate::question_placement::Win32Probe),
+        )
+    }
+
+    fn fixture_with_display_probe(
+        sections: impl FnOnce(&ControlPanelDeps) -> Vec<Box<dyn crate::shell::control_panel::Section>>,
+        clock: Arc<dyn tze_hud_scene::Clock>,
+        display_probe: Arc<dyn crate::question_placement::DisplayProbe>,
+    ) -> Fixture {
         let state = WindowedRuntimeState::new_headless_with_clock(clock);
         let wakes = Arc::new(AtomicUsize::new(0));
         let w = Arc::clone(&wakes);
@@ -469,6 +537,8 @@ pub(super) mod panel_task_tests {
         });
         let clipboard = Arc::new(Mutex::new(TestClipboard::default()));
         let deps = ControlPanelDeps {
+            display_probe,
+            display_layout: Arc::clone(&state.placement_layout),
             clipboard: crate::clipboard::Clipboard {
                 read: {
                     let clipboard = Arc::clone(&clipboard);
@@ -1029,32 +1099,194 @@ pub(super) mod panel_task_tests {
         assert!(!f.paused(), "closing always resumes");
 
         use crate::shell::control_panel::TrayCommand;
-        f.send_and_wait(PanelEvent::Tray(TrayCommand::OpenPanel), |f| {
-            f.panel.is_open()
-        })
+        f.send_and_wait(
+            PanelEvent::Tray(TrayCommand::OpenPanel, Default::default()),
+            |f| f.panel.is_open(),
+        )
         .await;
-        f.send_and_wait(PanelEvent::Tray(TrayCommand::TogglePanel), |f| {
-            !f.panel.is_open()
-        })
+        f.send_and_wait(
+            PanelEvent::Tray(TrayCommand::TogglePanel, Default::default()),
+            |f| !f.panel.is_open(),
+        )
         .await;
         // Tray Pause works from a closed panel. Resume also closes a panel
         // regardless of which entry point originally opened it.
-        f.send_and_wait(PanelEvent::Tray(TrayCommand::Pause), |f| {
-            f.paused() && f.panel.is_open()
-        })
+        f.send_and_wait(
+            PanelEvent::Tray(TrayCommand::Pause, Default::default()),
+            |f| f.paused() && f.panel.is_open(),
+        )
         .await;
-        f.send_and_wait(PanelEvent::Tray(TrayCommand::Resume), |f| {
-            !f.paused() && !f.panel.is_open()
-        })
+        f.send_and_wait(
+            PanelEvent::Tray(TrayCommand::Resume, Default::default()),
+            |f| !f.paused() && !f.panel.is_open(),
+        )
         .await;
         let shutdown = f.state.shutdown.clone();
         f.panel.set_quit(Arc::new(move || {
             shutdown.trigger(crate::threads::ShutdownReason::Clean)
         }));
-        f.send_and_wait(PanelEvent::Tray(TrayCommand::Quit), |f| {
-            f.state.shutdown.is_triggered()
+        f.send_and_wait(
+            PanelEvent::Tray(TrayCommand::Quit, Default::default()),
+            |f| f.state.shutdown.is_triggered(),
+        )
+        .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn panel_owns_its_opening_monitor_until_close() {
+        use crate::question_placement::{DisplayProbe, Foreground, NotificationState};
+        use crate::shell::control_panel::{TrayCommand, TrayVisit};
+        use crate::windowed::WinitApp;
+        use tze_hud_compositor::{DisplayLayout, DisplayRect, estimate_control_panel_geometry};
+        use tze_hud_scene::Rect;
+        use winit::keyboard::{Key, KeyCode, NamedKey, PhysicalKey};
+
+        #[derive(Debug)]
+        struct Probe(Mutex<&'static str>, AtomicUsize);
+        impl DisplayProbe for Probe {
+            fn foreground(&self) -> Option<Foreground> {
+                self.1.fetch_add(1, Ordering::Relaxed);
+                Some(Foreground {
+                    display: self.0.lock().unwrap().to_string(),
+                    window: 1,
+                })
+            }
+            fn pointer_display(&self) -> Option<String> {
+                None
+            }
+            fn notification_state(&self) -> Option<NotificationState> {
+                None
+            }
+            fn fills_monitor(&self, _: &Foreground) -> bool {
+                false
+            }
+        }
+
+        let probe = Arc::new(Probe(Mutex::new(r"\\.\DISPLAY3"), AtomicUsize::new(0)));
+        let f = fixture_with_display_probe(
+            default_sections,
+            Arc::new(tze_hud_scene::SystemClock::new()),
+            probe.clone(),
+        );
+        let primary = Rect::new(0.0, 0.0, 1280.0, 720.0);
+        let secondary = Rect::new(-880.0, 108.0, 880.0, 500.0);
+        *f.state.placement_layout.lock().unwrap() = DisplayLayout::new(
+            vec![
+                DisplayRect {
+                    name: "DISPLAY1".into(),
+                    rect: primary,
+                    primary: true,
+                },
+                DisplayRect {
+                    name: "DISPLAY3".into(),
+                    rect: secondary,
+                    primary: false,
+                },
+            ],
+            &Default::default(),
+        );
+        let panel = f.panel;
+        let mut app = WinitApp { state: f.state };
+        app.state.control_panel = Some(panel.clone());
+
+        panel.send(PanelEvent::Chord(ChordRole::Panel));
+        wait("panel opens on DISPLAY3", || panel.is_open()).await;
+        app.sync_panel_focus();
+        app.push_focus_ring_owner();
+        assert_eq!(app.state.keyboard_window, Some(0));
+        assert!(app.panel_targets_window(Some(0)));
+        assert!(!app.panel_targets_window(None));
+        assert_eq!(
+            app.state
+                .surface_ui
+                .lock()
+                .unwrap()
+                .panel_display
+                .as_deref(),
+            Some("DISPLAY3")
+        );
+
+        let geometry = estimate_control_panel_geometry(
+            &Default::default(),
+            &panel.current_model().unwrap(),
+            secondary.width,
+            secondary.height,
+        );
+        assert!(geometry.max_scroll > 0.0);
+        let search = geometry
+            .hits
+            .iter()
+            .find(|hit| hit.target == PanelHitTarget::Search)
+            .unwrap()
+            .rect;
+        panel.set_geometry(1, || geometry);
+        app.state.cursor_x = secondary.x + search.x + search.w * 0.5;
+        app.state.cursor_y = secondary.y + search.y + search.h * 0.5;
+        assert_eq!(app.panel_hit(Some(0)), Some(PanelHitTarget::Search));
+        assert!(app.panel_captures_cursor());
+        assert!(!app.panel_wheel(120.0, None));
+        assert!(app.panel_wheel(120.0, Some(0)));
+        wait("secondary wheel scrolls", || {
+            panel.current_model().unwrap().scroll_px > 0.0
         })
         .await;
+        assert!(app.panel_left_button(true, Some(0)));
+        assert!(app.panel_left_button(false, Some(0)));
+
+        *probe.0.lock().unwrap() = "DISPLAY1";
+        app.handle_window_focus_with_foreground(Some(0), false, false);
+        wait("secondary lost focus", || {
+            panel.current_model().unwrap().notice.is_some()
+        })
+        .await;
+        assert_eq!(app.panel_display_name().as_deref(), Some("DISPLAY3"));
+        assert_eq!(probe.1.load(Ordering::Relaxed), 1);
+        assert!(app.panel_key_input(
+            PhysicalKey::Code(KeyCode::Escape),
+            &Key::Named(NamedKey::Escape),
+            None,
+            true,
+        ));
+        wait("panel closed", || !panel.is_open()).await;
+        app.sync_panel_focus();
+        app.push_focus_ring_owner();
+        assert_eq!(app.state.surface_ui.lock().unwrap().panel_display, None);
+
+        for role in [ChordRole::Pause, ChordRole::Pairing, ChordRole::Panel] {
+            panel.send(PanelEvent::Chord(role));
+            wait("reopen re-samples foreground", || panel.is_open()).await;
+            app.sync_panel_focus();
+            assert_eq!(app.panel_display_name().as_deref(), Some("DISPLAY1"));
+            assert_eq!(app.state.keyboard_window, None);
+            panel.send(PanelEvent::Key(PanelKey::Escape));
+            wait("chord-opened panel closed", || !panel.is_open()).await;
+            app.sync_panel_focus();
+        }
+
+        *probe.0.lock().unwrap() = "DISPLAY3";
+        let visit = TrayVisit {
+            display: Some("DISPLAY1".into()),
+            origin: Some(11),
+        };
+        for command in [
+            TrayCommand::TogglePanel,
+            TrayCommand::OpenPanel,
+            TrayCommand::Pause,
+        ] {
+            panel.send(PanelEvent::Tray(command, visit.clone()));
+            wait("tray opens on its click monitor", || panel.is_open()).await;
+            app.sync_panel_focus();
+            assert_eq!(app.panel_display_name().as_deref(), Some("DISPLAY1"));
+            assert_eq!(panel.location().unwrap().tray, Some(visit.clone()));
+            panel.send(PanelEvent::Key(PanelKey::Escape));
+            wait("tray-opened panel closed", || !panel.is_open()).await;
+            app.sync_panel_focus();
+        }
+        assert_eq!(
+            probe.1.load(Ordering::Relaxed),
+            4,
+            "tray never reads foreground"
+        );
     }
 
     /// Visibility (CP-6): Alt+H hides everything, a class row shows one class
@@ -1072,13 +1304,15 @@ pub(super) mod panel_task_tests {
         use crate::shell::control_panel::TrayCommand;
         // Native Hide/Show remains usable when the panel is closed and keeps
         // the very same lease/publication state as the Alt+H path below.
-        f.send_and_wait(PanelEvent::Tray(TrayCommand::HideAll), |_| {
-            hidden() == Some(SurfaceClasses::ALL)
-        })
+        f.send_and_wait(
+            PanelEvent::Tray(TrayCommand::HideAll, Default::default()),
+            |_| hidden() == Some(SurfaceClasses::ALL),
+        )
         .await;
-        f.send_and_wait(PanelEvent::Tray(TrayCommand::ShowAll), |_| {
-            hidden() == Some(SurfaceClasses::NONE)
-        })
+        f.send_and_wait(
+            PanelEvent::Tray(TrayCommand::ShowAll, Default::default()),
+            |_| hidden() == Some(SurfaceClasses::NONE),
+        )
         .await;
         assert!(!f.panel.is_open());
         let row = |id: &str| {
@@ -1787,33 +2021,33 @@ pub(super) mod panel_task_tests {
         );
         assert!(app.panel_captures_cursor());
         assert!(
-            app.panel_other_button(Right, true, true),
+            app.panel_other_button(Right, true, None),
             "a right click over the panel never reaches the scene"
         );
         assert!(
-            app.panel_other_button(Right, false, false),
+            app.panel_other_button(Right, false, Some(0)),
             "nor does its release"
         );
         assert!(
-            !app.panel_other_button(Right, true, false),
+            !app.panel_other_button(Right, true, Some(0)),
             "another display's pointer is the scene's"
         );
-        app.panel_other_button(Right, false, false);
+        app.panel_other_button(Right, false, Some(0));
         // Each button keeps its own press: a middle press over the panel
         // owns its release even after a right press elsewhere ended.
-        assert!(app.panel_other_button(Middle, true, true));
-        assert!(!app.panel_other_button(Right, true, false));
-        assert!(!app.panel_other_button(Right, false, false));
+        assert!(app.panel_other_button(Middle, true, None));
+        assert!(!app.panel_other_button(Right, true, Some(0)));
+        assert!(!app.panel_other_button(Right, false, Some(0)));
         assert!(
-            app.panel_other_button(Middle, false, false),
+            app.panel_other_button(Middle, false, Some(0)),
             "the middle release stays the panel's"
         );
-        assert!(app.panel_left_button(true, true));
-        assert!(app.panel_left_button(false, true));
+        assert!(app.panel_left_button(true, None));
+        assert!(app.panel_left_button(false, None));
         wait("3", || app.state.safe_mode_atomic.load(Ordering::Acquire)).await;
 
         // A release whose press went to the scene stays with the scene.
-        assert!(!app.panel_left_button(false, true));
+        assert!(!app.panel_left_button(false, None));
 
         // In click-through overlay mode raw mouse motion must keep waking the
         // loop while the panel is open, even with nothing interactive in the
@@ -1833,9 +2067,9 @@ pub(super) mod panel_task_tests {
         (app.state.cursor_x, app.state.cursor_y) = (1.0, 1.0);
         assert!(!app.panel_captures_cursor());
         assert!(!app.cursor_entry_signature().capture);
-        assert!(!app.panel_left_button(true, true));
-        assert!(!app.panel_other_button(Right, true, true));
-        assert!(!app.panel_other_button(Right, false, true));
+        assert!(!app.panel_left_button(true, None));
+        assert!(!app.panel_other_button(Right, true, None));
+        assert!(!app.panel_other_button(Right, false, None));
 
         let esc = (
             PhysicalKey::Code(KeyCode::Escape),
@@ -2208,6 +2442,8 @@ pub(super) mod panel_task_tests {
 
         let state = WindowedRuntimeState::new_headless();
         let deps = ControlPanelDeps {
+            display_probe: Arc::new(crate::question_placement::Win32Probe),
+            display_layout: Arc::clone(&state.placement_layout),
             clipboard: Default::default(),
             scene: Arc::clone(&state.shared_state.lock().await.scene),
             pause: PauseControl::new(
@@ -2350,6 +2586,8 @@ pub(super) mod panel_task_tests {
 
         let state = WindowedRuntimeState::new_headless();
         let deps = ControlPanelDeps {
+            display_probe: Arc::new(crate::question_placement::Win32Probe),
+            display_layout: Arc::clone(&state.placement_layout),
             clipboard: Default::default(),
             scene: Arc::clone(&state.shared_state.lock().await.scene),
             pause: PauseControl::new(

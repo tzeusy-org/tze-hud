@@ -228,6 +228,7 @@ impl FieldEdit {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Open {
     pub opened_by: ChordRole,
+    pub location: super::PanelLocation,
     pub query: String,
     pub focus: PanelFocus,
     pub hover: Option<PanelHitTarget>,
@@ -263,6 +264,7 @@ impl Open {
     pub(crate) fn new(opened_by: ChordRole) -> Self {
         Self {
             opened_by,
+            location: super::PanelLocation::default(),
             query: String::new(),
             focus: PanelFocus::Search,
             hover: None,

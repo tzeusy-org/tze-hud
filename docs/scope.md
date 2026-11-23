@@ -73,7 +73,9 @@ tier-W results narrow them but do not close them.
   handles (`hud-h51u7.4.6`); restyled widgets and runtime chrome
   (`hud-h51u7.8.6`); the BEFORE capture for the pairing-card restyle (#1630,
   `hud-h51u7.8.3` AC3); theme, density, motion, reply cue, markdown, timestamps.
-- **Control panel (T11).** Windows interaction and focus; restart timing.
+- **Control panel (T11, T14).** Windows interaction and focus, opening the
+  panel on each monitor by chord and opening it from the tray, and restart
+  timing. The active-monitor placement is implemented by `hud-ljhku.12.3`.
 - **Choice cards (T12).** Hook and combined live Claude AskUserQuestion
   acceptance (`hud-bz9bv`).
 - **Windows experience (T14).**

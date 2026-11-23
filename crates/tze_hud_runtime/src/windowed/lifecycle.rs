@@ -1346,27 +1346,18 @@ pub(super) fn hud_owns_foreground() -> bool {
     }
 }
 
-/// The app window sampled at the last answering tray click (0: none).
-#[cfg(target_os = "windows")]
-static TRAY_CLICK_ORIGIN: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
-
-#[cfg(target_os = "windows")]
-pub(super) fn note_tray_click_origin(origin: Option<isize>) {
-    TRAY_CLICK_ORIGIN.store(origin.unwrap_or(0), std::sync::atomic::Ordering::Release);
-}
-
-/// A tray-started visit returns to the app sampled at the click, consumed
-/// once; the tray, not that app, held the foreground when focus was taken.
-pub(super) fn return_to_tray_click_origin() {
+/// A tray-started visit returns to the app sampled before the tray took focus.
+pub(super) fn redirect_focus_return(origin: Option<isize>) {
     #[cfg(target_os = "windows")]
     {
-        let origin = TRAY_CLICK_ORIGIN.swap(0, std::sync::atomic::Ordering::AcqRel);
         CHROME_NATIVE_OWNER.with(|owner| {
             if let Ok(mut owner) = owner.try_borrow_mut() {
-                owner.focus_origin.redirect((origin != 0).then_some(origin));
+                owner.focus_origin.redirect(origin);
             }
         });
     }
+    #[cfg(not(target_os = "windows"))]
+    let _ = origin;
 }
 
 /// Return focus only on an explicit outer HUD exit, and only if one of our
@@ -2297,6 +2288,7 @@ impl WinitApp {
             .surface_ui
             .lock()
             .unwrap_or_else(|e| e.into_inner()) = crate::operator::surface_status::UiMirror {
+            panel_display: self.panel_display_name(),
             focus: ring_owner.as_ref().map(|o| (o.tile_id, o.node_id)),
             drafts,
             reading: self.reading_ui(),
@@ -2614,13 +2606,13 @@ impl WinitApp {
             // active notification edge indistinguishable from lost history.
             self.drain_chrome_capture_cancellation();
             let chrome_edge = ChromeAppEdge::begin(window_id, pressed);
-            if self.panel_left_button(pressed, secondary.is_none()) {
+            if self.panel_left_button(pressed, secondary) {
                 return;
             }
             if !chrome_edge.retired() {
                 self.handle_left_button(pressed, window_id, secondary);
             }
-        } else if !self.panel_other_button(button, pressed, secondary.is_none())
+        } else if !self.panel_other_button(button, pressed, secondary)
             && button == winit::event::MouseButton::Right
             && !pressed
         {
@@ -2707,7 +2699,7 @@ impl WinitApp {
         focused: bool,
         hud_foreground: bool,
     ) {
-        if secondary.is_none() {
+        if self.panel_targets_window(secondary) {
             self.panel_window_focus(focused);
         }
         if focused {

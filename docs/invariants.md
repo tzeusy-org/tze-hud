@@ -458,12 +458,14 @@ the pill and its hit targets; partial coverage preserves the full label placemen
   `integration` [`poc_override_safe_mode_wins_with_hung_grpc_agent`](../tests/integration/poc_acceptance.rs),
   [`portal_liveness_paused_during_safe_mode`](../crates/tze_hud_runtime/src/windowed/panel_input.rs),
   [`panel_chord_opens_running_and_escape_closes_and_resumes`](../crates/tze_hud_runtime/src/windowed/panel_input.rs),
+  [`panel_owns_its_opening_monitor_until_close`](../crates/tze_hud_runtime/src/windowed/panel_input.rs),
   [`winit_routing_keys_and_pointer_reach_the_open_panel_only`](../crates/tze_hud_runtime/src/windowed/panel_input.rs),
   [`refused_focus_shows_a_notice_and_chords_still_work`](../crates/tze_hud_runtime/src/windowed/panel_input.rs),
   [`an_idle_open_panel_does_not_wake_on_refresh_ticks`](../crates/tze_hud_runtime/src/windowed/panel_input.rs);
   agents never see the panel (except through the portal's native `unread`
   count, above):
   `tze_hud_compositor` [`panel_draws_over_the_frame_and_capture_leaves_it_out`](../crates/tze_hud_compositor/src/renderer/tests/control_panel.rs),
+  [`secondary_panel_draws_at_its_scale_and_leaves_pairing_on_primary`](../crates/tze_hud_compositor/src/renderer/tests/control_panel.rs),
   [`capture_leaves_the_closed_notice_out`](../crates/tze_hud_compositor/src/renderer/tests/control_panel.rs),
   `integration` [`poc_agents_see_the_same_with_the_panel_open_or_content_hidden`](../tests/integration/poc_acceptance.rs)
 - `tze_hud_config` [`safe_mode_hotkey_defaults_overrides_and_rejects_garbage`](../crates/tze_hud_config/src/tests.rs),

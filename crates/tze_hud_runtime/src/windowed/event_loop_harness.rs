@@ -464,6 +464,8 @@ impl HeadlessEventLoopHarness {
         let effects: Arc<std::sync::Mutex<Vec<String>>> = Arc::default();
         let deps = crate::shell::control_panel::ControlPanelDeps {
             clipboard: Default::default(),
+            display_probe: Arc::new(crate::question_placement::Win32Probe),
+            display_layout: Arc::clone(&state.placement_layout),
             scene: Arc::clone(&panel_scene),
             pause: crate::shell::control_panel::PauseControl::new(
                 Arc::clone(&state.shared_state),
@@ -631,7 +633,10 @@ impl HeadlessEventLoopHarness {
             "quit" => TrayCommand::Quit,
             _ => panic!("unknown tray test command"),
         };
-        assert!(self.control_panel().send(PanelEvent::Tray(command)));
+        assert!(
+            self.control_panel()
+                .send(PanelEvent::Tray(command, Default::default()))
+        );
     }
 
     /// Press one of the HUD's global chords.
@@ -7716,10 +7721,10 @@ mod tests {
         };
         let tray = |harness: &mut HeadlessEventLoopHarness, command| {
             let requested = Arc::clone(&harness.app.state.answer_keyboard.tray_requested);
-            assert!(panel.send(PanelEvent::Tray(command)));
+            assert!(panel.send(PanelEvent::Tray(command, Default::default())));
             if command == TrayCommand::AnswerNext {
                 wait("the panel task ran the hook", &|| {
-                    requested.load(std::sync::atomic::Ordering::Acquire)
+                    requested.lock().unwrap().is_some()
                 });
                 harness.drain();
             }

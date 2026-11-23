@@ -85,6 +85,31 @@ pub(crate) trait DisplayProbe: Send + Sync + std::fmt::Debug {
     fn fills_monitor(&self, window: &Foreground) -> bool;
 }
 
+/// Where a foreground-panel chord opens. The existing display probe filters
+/// the HUD and the desktop from the foreground read.
+pub(crate) fn active_panel_display(probe: &dyn DisplayProbe) -> Option<String> {
+    probe
+        .foreground()
+        .map(|window| window.display)
+        .or_else(|| probe.pointer_display())
+}
+
+/// Resolve a sampled display to an overlay, falling back to the primary.
+pub(crate) fn panel_display(layout: &DisplayLayout, sampled: Option<String>) -> Option<String> {
+    overlaid_display(layout, sampled).or_else(|| {
+        layout
+            .displays()
+            .iter()
+            .find(|display| display.primary)
+            .map(|display| display.name.clone())
+    })
+}
+
+fn overlaid_display(layout: &DisplayLayout, name: Option<String>) -> Option<String> {
+    let name = normalize_display_name(&name?);
+    layout.display_rect(&name).map(|_| name)
+}
+
 /// The scene's [`QuestionPlacer`]: the live setting, the OS reads, and the
 /// overlaid displays (kept current by the display publisher).
 #[derive(Debug)]
@@ -130,10 +155,7 @@ pub(crate) fn place(
     probe: &dyn DisplayProbe,
     layout: &DisplayLayout,
 ) -> Option<String> {
-    let overlaid = |name: Option<String>| {
-        let name = normalize_display_name(&name?);
-        layout.display_rect(&name).map(|_| name)
-    };
+    let overlaid = |name| overlaid_display(layout, name);
     let notification = notification_display(layout);
     let chosen = match placement {
         QuestionPlacement::Fixed => None,
@@ -278,6 +300,14 @@ mod win32 {
         class == "Progman" || class == "WorkerW"
     }
 
+    impl super::Win32Probe {
+        /// The monitor at a tray activation's desktop click point.
+        pub(crate) fn display_at(point: POINT) -> Option<String> {
+            // SAFETY: MonitorFromPoint takes values only.
+            monitor_name(unsafe { MonitorFromPoint(point, MONITOR_DEFAULTTONEAREST) })
+        }
+    }
+
     impl super::DisplayProbe for super::Win32Probe {
         fn foreground(&self) -> Option<Foreground> {
             // SAFETY: these take values or out-params owned here and only read.
@@ -303,8 +333,7 @@ mod win32 {
             let mut point = POINT::default();
             // SAFETY: GetCursorPos writes the provided POINT.
             unsafe { GetCursorPos(&mut point) }.ok()?;
-            // SAFETY: MonitorFromPoint takes values only.
-            monitor_name(unsafe { MonitorFromPoint(point, MONITOR_DEFAULTTONEAREST) })
+            Self::display_at(point)
         }
 
         fn notification_state(&self) -> Option<NotificationState> {
