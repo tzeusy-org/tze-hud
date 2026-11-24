@@ -47,6 +47,11 @@ on:
         type: choice
         options: [release-dev, release]
         default: release-dev
+      candidate_pins:
+        description: "Evidence only: exact source/tree/build_source, run/artifact IDs and archive/exe SHA256 JSON"
+        type: string
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -58,6 +63,7 @@ concurrency:
 jobs:
   windows-build:
     name: windows build + boot smoke
+    if: github.event_name != 'workflow_dispatch' || github.ref != 'refs/heads/evidence/hud-vcj7c-late-guard'
     runs-on: windows-latest
     timeout-minutes: 45
     permissions:
@@ -389,6 +395,56 @@ jobs:
           $named = if ($failed) { "required failed: $($failed -join ', ')" } else { "harness failure, timeout or setup failure with required scenarios" }
           Write-Output "::error title=Required gesture scenarios::$named (see the gesture step summary and gestures artifact)"
           exit 1
+
+  card-link-raise:
+    name: Controlled late card-link normal z-order proof
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/evidence/hud-vcj7c-late-guard'
+    runs-on: windows-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 4
+          persist-credentials: false
+
+      - name: Require exact candidate custody pins
+        env:
+          CANDIDATE_PINS: ${{ inputs.candidate_pins }}
+        shell: pwsh
+        run: |
+          $pins = Join-Path $env:RUNNER_TEMP "card-link-late-pins.json"
+          [System.IO.File]::WriteAllText($pins, $env:CANDIDATE_PINS)
+          python scripts/ci/card_link_raise_probe.py --pins $pins --check-pins
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Read the pinned artifact from the first exact candidate run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact_id=$(python -c 'import json, os; print(json.load(open(os.path.join(os.environ["RUNNER_TEMP"], "card-link-late-pins.json")))["artifact_id"])')
+          artifact="repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id"
+          gh api "$artifact" > "$RUNNER_TEMP/card-link-late-artifact.json"
+          gh api "$artifact/zip" > "$RUNNER_TEMP/card-link-late-original.zip"
+
+      - name: Exercise the unchanged candidate with one late owned cover
+        shell: pwsh
+        run: |
+          python scripts/ci/card_link_raise_probe.py --pins "$env:RUNNER_TEMP/card-link-late-pins.json" `
+            --archive "$env:RUNNER_TEMP/card-link-late-original.zip" `
+            --artifact-metadata "$env:RUNNER_TEMP/card-link-late-artifact.json" --out "$env:RUNNER_TEMP/card-link-late"
+          exit $LASTEXITCODE
+
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: card-link-late-witness
+          path: ${{ runner.temp }}/card-link-late/
+          if-no-files-found: warn
 
   release:
     name: sign + publish release
