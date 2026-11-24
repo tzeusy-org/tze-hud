@@ -82,6 +82,14 @@ class Refused(RuntimeError):
     """A guard refused to inject input or to run against something not owned."""
 
 
+class ForeignForeground(Refused):
+    """The Windows guard verified HUD identity, but foreground is unowned."""
+
+    def __init__(self, pid: int) -> None:
+        super().__init__(f"the foreground window belongs to pid {pid}, not an owned process")
+        self.pid = pid
+
+
 class PartialButtonBatch(Refused):
     """A native click may have left a button down. End input on this desktop."""
 
@@ -91,6 +99,14 @@ class ScenarioFailed(AssertionError):
         super().__init__(step)
         self.step = step
         self.last = last
+
+
+class LinkTargetLost(ScenarioFailed):
+    """A link guard observed a changed physical target before native submission."""
+
+    def __init__(self, phase: str, step: str, last: dict) -> None:
+        super().__init__(step, last)
+        self.phase = phase
 
 
 # ── Guards ───────────────────────────────────────────────────────────────────
@@ -115,7 +131,7 @@ def check_owned_windows(*, github_actions: str | None, foreground_pid: int, owne
     """Refuse SendInput unless this is a CI VM and an owned process has the foreground."""
     check_windows_hud(github_actions=github_actions, owned_hud_pid=owned_hud_pid, status_pid=status_pid, url=url)
     if foreground_pid not in {owned_hud_pid, *helper_pids}:
-        raise Refused(f"the foreground window belongs to pid {foreground_pid}, not an owned process")
+        raise ForeignForeground(foreground_pid)
 
 
 def check_windows_hud(*, github_actions: str | None, owned_hud_pid: int | None, status_pid: object, url: str) -> None:
@@ -647,6 +663,10 @@ class Run:
             foreground = observed["foreground"]
             at_target = cursor_at_link(cursor, point)
             foreign_target = at_cursor is not None and at_cursor["pid"] != self.pid
+            if deadline is not None and time.monotonic() >= deadline:
+                raise ScenarioFailed("within the card link press deadline", {
+                    "intended_point": list(point), "click_target_before_send": observed,
+                })
             if (not at_target or at_cursor is None or foreign_target
                     or foreground is None or foreground["pid"] != self.pid
                     or (hwnd is not None and (at_cursor["hwnd"] != hwnd or foreground["hwnd"] != hwnd))):
@@ -655,11 +675,7 @@ class Run:
                     last["expected_hwnd"] = hwnd
                 if at_target:
                     last.update(foreign_link_point_details(at_cursor, self.pid))
-                raise ScenarioFailed("owned HUD at the link click target", last)
-            if deadline is not None and time.monotonic() >= deadline:
-                raise ScenarioFailed("within the card link press deadline", {
-                    "intended_point": list(point), "click_target_before_send": observed,
-                })
+                raise LinkTargetLost("button cursor", "owned HUD at the link click target", last)
 
         self.inj.click(repeat=repeat, before_send=check_target)
 
@@ -1492,7 +1508,7 @@ def expect_link_feedback(run: Run) -> None:
 
 def press_hosted_card_link(run: Run, key: str, label: str, point: tuple[int, int],
                            *, deadline: float, press: str) -> float:
-    """Rearm the original press under an absolute deadline, without retrying input."""
+    """Rearm the original press under an absolute deadline, with one native button submission."""
     if os.environ.get("RUNNER_ENVIRONMENT") != "github-hosted":
         raise Refused("card link rearm requires a disposable GitHub-hosted runner")
     pid = run.pid
@@ -1500,11 +1516,16 @@ def press_hosted_card_link(run: Run, key: str, label: str, point: tuple[int, int
     target = f"{surface}/{key}/0"
     last: dict = {}
 
-    def unavailable() -> ScenarioFailed:
-        return ScenarioFailed(f"owned HUD at the card link point before {press}", {
+    point_step = f"owned HUD at the card link point before {press}"
+
+    def point_details() -> dict:
+        return {
             "intended_point": list(point), "owned_hud_pid": pid, "card_link_point": last,
             **foreign_link_point_details(last.get("at_point"), pid),
-        })
+        }
+
+    def unavailable() -> ScenarioFailed:
+        return ScenarioFailed(point_step, point_details())
 
     def confirm_card() -> None:
         if time.monotonic() >= deadline:
@@ -1539,41 +1560,64 @@ def press_hosted_card_link(run: Run, key: str, label: str, point: tuple[int, int
         raise ScenarioFailed(f"unique owned fullscreen HUD before {press}", {"owned_hud_pid": pid})
     identity = {"hwnd": hwnd, "pid": pid}
     owned = {"at_point": identity, "foreground": identity}
-    stable = 0
-    requested = None
-    while time.monotonic() < deadline:
-        last = observe()
-        if last == owned:
-            stable += 1
-            if stable == 2:
-                break
-            requested = None
-        else:
-            stable = 0
-            if last != requested:
-                confirm_card()
-                if operation := WIN.rearm_link_window(hwnd, pid, point, deadline=deadline):
-                    run.timeline.append({
-                        "t": round(time.monotonic(), 3), "step": f"card link {press} requested {operation}",
-                        "owned_window": identity, "intended_point": list(point), "card_link_point": last,
-                    })
-                requested = last
-        time.sleep(max(0, min(0.02, deadline - time.monotonic())))
-    else:
+
+    def wait_for_target() -> None:
+        nonlocal last
+        stable = 0
+        requested = None
+        while time.monotonic() < deadline:
+            last = observe()
+            if last == owned:
+                stable += 1
+                if stable == 2:
+                    return
+                requested = None
+            else:
+                stable = 0
+                if last != requested:
+                    confirm_card()
+                    if WIN.fullscreen_window(pid) != hwnd:
+                        raise ScenarioFailed(f"same owned fullscreen HUD before {press}", {
+                            "owned_window": identity, "card_link_point": last,
+                        })
+                    if operation := WIN.rearm_link_window(hwnd, pid, point, deadline=deadline):
+                        run.timeline.append({
+                            "t": round(time.monotonic(), 3), "step": f"card link {press} requested {operation}",
+                            "owned_window": identity, "intended_point": list(point), "card_link_point": last,
+                        })
+                        requested = last
+            time.sleep(max(0, min(0.02, deadline - time.monotonic())))
         raise unavailable()
 
-    def confirm_input() -> None:
+    def confirm_input(phase: str) -> None:
         nonlocal last
         confirm_card()
         last = observe()
-        if last != owned or time.monotonic() >= deadline:
+        if time.monotonic() >= deadline:
             raise unavailable()
+        if last != owned:
+            raise LinkTargetLost(phase, point_step, point_details())
 
-    # Readiness is sampled at the intended pixel before any pointer movement.
-    if not cursor_at_link(WIN.click_target_snapshot()["cursor"], point):
-        run.inj.move_abs(*point, before_send=confirm_input)
-    pressed = time.monotonic()
-    run.click_link(point, confirm=confirm_input, hwnd=hwnd, deadline=deadline)
+    while True:
+        wait_for_target()
+        operation = "move"
+        try:
+            # Readiness is sampled at the intended pixel before any pointer movement.
+            if not cursor_at_link(WIN.click_target_snapshot()["cursor"], point):
+                run.inj.move_abs(*point, before_send=lambda: confirm_input("move mapped point"))
+            operation = "button"
+            pressed = time.monotonic()
+            run.click_link(point, confirm=lambda: confirm_input("button mapped point"), hwnd=hwnd, deadline=deadline)
+        except (ForeignForeground, LinkTargetLost) as refusal:
+            # Both refusals originate from guards before the native call.
+            phase, observed = ((refusal.phase, refusal.last) if isinstance(refusal, LinkTargetLost)
+                               else (f"{operation} foreground guard", {"foreground_pid": refusal.pid}))
+            run.timeline.append({
+                "t": round(time.monotonic(), 3), "step": f"card link {press} pre-submission ownership lost",
+                "guard_phase": phase, "observed": observed,
+            })
+        else:
+            break
     receipt = run.inj.calls[-1]
     if 0 < receipt["sent"] < receipt["requested"]:
         raise PartialButtonBatch(f"partial native button batch for the card link {press}")
