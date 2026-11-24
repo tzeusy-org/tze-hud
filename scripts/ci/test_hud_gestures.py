@@ -333,9 +333,12 @@ class WindowsGuardTests(unittest.TestCase):
         }]}
         changed = copy.deepcopy(status)
         changed["notifications"][0]["actions"][0]["rect"]["x"] += 4
-        cases = ("covered", "foreground lost before publish", "deadline", "expired during native recheck", "expired during guard",
-                 "expired at cursor sample", "stale HUD handle", "card moved", "late takeover",
-                 "zero events", "partial click")
+        mapped_point_loss = ("late point recovers", "late move recovers", "late point persists", "HUD replaced after late loss",
+                             "HUD PID changed after late loss", "card moved after late loss")
+        cases = ("covered", "brief native safe sample", "foreground lost before publish", "deadline",
+                 "expired during native recheck", "expired during guard",
+                 "expired at cursor sample", "stale HUD handle", "card moved", "late takeover", "late cursor recovers",
+                 "late foreground recovers", "zero events", "partial click", "native result unavailable", *mapped_point_loss)
         for case in cases:
             with self.subTest(case=case):
                 native = native_input_boundary()
@@ -346,7 +349,10 @@ class WindowsGuardTests(unittest.TestCase):
                 recovered_at = float("inf")
                 scenario_entry = case == "foreground lost before publish"
                 foreground = browser if scenario_entry else hud
-                initially_parked = {"covered", "deadline", "stale HUD handle", "card moved", "expired during native recheck"}
+                initially_parked = {
+                    "covered", "brief native safe sample", "deadline", "stale HUD handle", "card moved",
+                    "expired during native recheck", "late move recovers",
+                }
                 cursor = (1, 1) if case in initially_parked or scenario_entry else point
                 cursor_samples = 0
                 point_samples = 0
@@ -367,7 +373,12 @@ class WindowsGuardTests(unittest.TestCase):
                             "frames_presented": int(published), "idle_since_ms": 500,
                             "link_launches": int(bool(presses)), "link_feedback": "opened" if presses else None,
                         }
-                    return changed if case == "card moved" and now >= 0.04 else status
+                    if case == "HUD PID changed after late loss" and point_samples >= 4:
+                        return {**status, "pid": 9999}
+                    if (case == "card moved" and now >= 0.04
+                            or case == "card moved after late loss" and point_samples >= 4):
+                        return changed
+                    return status
 
                 def tool(name, _payload, **_kwargs):
                     nonlocal published
@@ -392,7 +403,7 @@ class WindowsGuardTests(unittest.TestCase):
                 def raise_window(*args):
                     nonlocal recovered_at
                     self.assertEqual(args, (hud, 0, 0, 0, 0, 0, 0x4213))
-                    if case != "deadline":
+                    if case not in {"deadline", "late point persists"}:
                         recovered_at = now + 0.02
                     return 1  # An accepted request alone must not authorize input.
 
@@ -403,20 +414,32 @@ class WindowsGuardTests(unittest.TestCase):
                     return 1
 
                 def cursor_pos(output):
-                    nonlocal cursor_samples, now
+                    nonlocal cursor_samples, foreground, now
                     cursor_samples += 1
                     output._obj.x, output._obj.y = cursor
                     if case == "expired at cursor sample" and cursor_samples == 2:
                         now = 0.1
+                    if case == "late foreground recovers" and cursor_samples == 1:
+                        foreground = browser
                     return 1
 
                 def window_at(coords):
-                    nonlocal now, point_samples
+                    nonlocal now, point_samples, recovered_at
                     point_samples += 1
                     if case == "expired during native recheck" and point_samples == 2:
                         now = 0.1
+                    if case == "brief native safe sample" and point_samples == 2:
+                        return hud  # The first rearm's own check sees no work to do.
+                    # Samples 1–2 establish readiness. The pre-motion cursor read is third,
+                    # followed by the mapped-point guard and finally the button cursor guard.
+                    if ((case in mapped_point_loss and point_samples == 4)
+                            or (case == "late cursor recovers" and point_samples == 5)):
+                        recovered_at = float("inf")
                     return browser if ((coords.x, coords.y) == point
                                        and (now < recovered_at or (case == "late takeover" and cursor_samples >= 2))) else hud
+
+                def owned_windows(_pid):
+                    return [auxiliary] if case == "HUD replaced after late loss" and point_samples >= 4 else [auxiliary, hud]
 
                 def send(count, items, _size):
                     nonlocal cursor
@@ -425,10 +448,16 @@ class WindowsGuardTests(unittest.TestCase):
                                                 "the pointer must wait for consecutive owned-point samples")
                         cursor = point
                         return count
+                    if not scenario_entry:
+                        self.assertLess(now, 0.1)
+                    self.assertEqual(foreground, hud)
+                    self.assertGreaterEqual(now, recovered_at + (0.02 if recovered_at else 0) - 1e-9)
                     presses.append((now, count))
+                    if case == "native result unavailable":
+                        raise OSError("native result unavailable")
                     return {"partial click": 1, "zero events": 0}.get(case, count)
 
-                if cursor == point:
+                if cursor == point or case == "late move recovers":
                     recovered_at = 0.0
                 native.user32.IsWindowVisible.return_value = True
                 native.user32.GetWindowThreadProcessId.side_effect = window_pid
@@ -443,7 +472,7 @@ class WindowsGuardTests(unittest.TestCase):
                 native.user32.SendInput.side_effect = send
                 run.smoke.call.side_effect = tool
                 with mock.patch.object(g, "WIN", native), mock.patch.object(run, "status", side_effect=status_at), \
-                        mock.patch.object(native, "_windows_of", return_value=[auxiliary, hud]), \
+                        mock.patch.object(native, "_windows_of", side_effect=owned_windows), \
                         mock.patch.object(native, "screen_size", return_value=(1024, 768)), \
                         mock.patch.object(native.ctypes, "get_last_error", return_value=0, create=True), \
                         mock.patch.object(g, "pid_alive", return_value=True), \
@@ -454,6 +483,12 @@ class WindowsGuardTests(unittest.TestCase):
                         return g.press_hosted_card_link(run, "gesture-card-link", "Open test page", point,
                                                         deadline=0.1, press="second press")
 
+                    recovery_phases = {
+                        "late point recovers": "button mapped point",
+                        "late move recovers": "move mapped point",
+                        "late cursor recovers": "button cursor",
+                        "late foreground recovers": "button foreground guard",
+                    }
                     if scenario_entry:
                         g.scenario_card_link(run)
                         self.assertTrue(published)
@@ -461,12 +496,45 @@ class WindowsGuardTests(unittest.TestCase):
                         self.assertLess(presses[1][0] - presses[0][0], 1.8)
                         native.user32.SetForegroundWindow.assert_called_once_with(hud)
                         native.user32.SetWindowPos.assert_called_once()
-                    elif case == "covered":
+                    elif case in {"covered", "brief native safe sample"}:
                         self.assertEqual(attempt(), presses[0][0])
                         self.assertEqual([call["requested"] for call in run.inj.calls], [1, 2])
                         self.assertEqual([count for _, count in presses], [2])
                         native.user32.SetWindowPos.assert_called_once()
                         native.user32.SetForegroundWindow.assert_not_called()
+                    elif case in recovery_phases:
+                        self.assertEqual(attempt(), presses[0][0])
+                        sent = [1, 2] if case == "late move recovers" else [2]
+                        self.assertEqual([call["sent"] for call in run.inj.calls], sent)
+                        self.assertEqual([count for _, count in presses], [2])
+                        self.assertEqual(native.user32.SendInput.call_count, len(sent))
+                        lost, rearm, final = run.timeline[-3:]
+                        self.assertEqual(lost["guard_phase"], recovery_phases[case])
+                        self.assertEqual(final["step"], "link click target before SendInput")
+                        if case in mapped_point_loss:
+                            self.assertEqual(len(run.timeline), 3, "first refusal precedes the final cursor snapshot")
+                            self.assertEqual(lost["observed"]["card_link_point"], {
+                                "at_point": {"hwnd": browser, "pid": 9900}, "foreground": {"hwnd": hud, "pid": 4242},
+                            })
+                        if case == "late foreground recovers":
+                            self.assertEqual(rearm["step"], "card link second press requested activate")
+                            native.user32.SetForegroundWindow.assert_called_once_with(hud)
+                            native.user32.SetWindowPos.assert_not_called()
+                        else:
+                            self.assertEqual(rearm["step"], "card link second press requested raise")
+                            native.user32.SetWindowPos.assert_called_once()
+                            native.user32.SetForegroundWindow.assert_not_called()
+                    elif case == "HUD PID changed after late loss":
+                        with self.assertRaisesRegex(g.Refused, "is not the owned HUD pid"):
+                            attempt()
+                        native.user32.SendInput.assert_not_called()
+                        native.user32.SetWindowPos.assert_not_called()
+                    elif case == "native result unavailable":
+                        with self.assertRaisesRegex(OSError, "native result unavailable"):
+                            attempt()
+                        native.user32.SendInput.assert_called_once()
+                        self.assertEqual([count for _, count in presses], [2])
+                        self.assertEqual(run.inj.calls, [])
                     elif case == "partial click":
                         later = mock.Mock()
                         def card(_run):
@@ -490,18 +558,25 @@ class WindowsGuardTests(unittest.TestCase):
                             self.assertEqual(presses, [])
                             native.user32.SendInput.assert_not_called()
                         if case in {"deadline", "expired during native recheck", "expired during guard",
-                                    "expired at cursor sample", "stale HUD handle"}:
+                                    "expired at cursor sample", "stale HUD handle", "late point persists", "late takeover"}:
                             self.assertEqual(now, 0.1)
-                        if case == "deadline":
+                        if case in {"deadline", "late point persists"}:
                             self.assertEqual(failed.exception.last["card_link_point"]["at_point"]["pid"], 9900)
                             native.user32.SetWindowPos.assert_called_once()
                         elif case in {"stale HUD handle", "expired during native recheck"}:
                             native.user32.SetWindowPos.assert_not_called()
                             native.user32.SetForegroundWindow.assert_not_called()
-                        elif case == "card moved":
+                        elif case in {"card moved", "card moved after late loss"}:
                             self.assertEqual(failed.exception.last["current_point"], (895, 106))
+                            if case == "card moved after late loss":
+                                native.user32.SetWindowPos.assert_not_called()
+                        elif case == "HUD replaced after late loss":
+                            self.assertEqual(failed.exception.step, "same owned fullscreen HUD before second press")
+                            native.user32.SetWindowPos.assert_not_called()
                         elif case == "late takeover":
-                            self.assertEqual(failed.exception.last["click_target_before_send"]["at_cursor"]["pid"], 9900)
+                            losses = [step for step in run.timeline if step.get("guard_phase") == "button cursor"]
+                            self.assertEqual(len(losses), 1)
+                            self.assertEqual(losses[0]["observed"]["click_target_before_send"]["at_cursor"]["pid"], 9900)
 
     def test_a_refused_guard_keeps_earlier_outcomes(self) -> None:
         run = mock.Mock(out=Path("unused"))
