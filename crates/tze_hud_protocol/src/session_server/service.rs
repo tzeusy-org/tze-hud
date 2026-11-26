@@ -39,9 +39,9 @@ pub struct HudSessionImpl {
     /// Credential → agent identity and permissions, shared live with MCP;
     /// loaded once per handshake.
     pub(super) agents: SharedAgents,
-    /// Mutation/lease budget applied to every session.
+    /// Legacy scene metadata; admission checks its update-rate threshold.
     pub(super) resource_budget: ResourceBudget,
-    /// Runtime-owned mutation-intake enforcement bridge.
+    /// Runtime-owned session admission bridge.
     pub(super) budget_enforcer: Option<SharedMutationBudgetEnforcer>,
     /// Bounded never-drop sender for transactional degradation notices.
     pub degradation_notices: super::DegradationNoticeSender,
@@ -56,9 +56,9 @@ pub struct SessionDeps {
     pub state: Arc<Mutex<SharedState>>,
     /// Credential → agent identity and permissions, shared live with MCP.
     pub agents: SharedAgents,
-    /// Mutation/lease budget applied to every session.
+    /// Legacy scene metadata; admission checks its update-rate threshold.
     pub resource_budget: ResourceBudget,
-    /// Runtime-owned mutation-intake enforcement bridge.
+    /// Runtime-owned session admission bridge.
     pub budget_enforcer: Option<SharedMutationBudgetEnforcer>,
     /// Transactional degradation-notice hub, shared with the runtime.
     pub degradation_notices: super::DegradationNoticeSender,
