@@ -2071,128 +2071,67 @@ fn test_zone_animation_state_interpolates() {
 
 /// backdrop_opacity overrides the backdrop color's alpha channel.
 /// When backdrop_opacity=0.6 and backdrop.a=1.0, effective alpha=0.6.
+/// Without a backdrop, neither streams nor urgency-tinted cards emit one.
 #[tokio::test]
 async fn test_backdrop_opacity_overrides_color_alpha() {
     let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
-
-    let mut scene = SceneGraph::new(1280.0, 720.0);
-    // backdrop color has alpha=1.0 but backdrop_opacity=0.6 should override it.
-    scene.register_zone(ZoneDefinition {
-        id: SceneId::new(),
-        name: "subtitle".to_owned(),
-        description: "test backdrop opacity override".to_owned(),
-        geometry_policy: GeometryPolicy::EdgeAnchored {
-            edge: DisplayEdge::Bottom,
-            height_pct: 0.10,
-            width_pct: 0.80,
-            margin_px: 16.0,
-        },
-        accepted_media_types: vec![ZoneMediaType::StreamText],
-        rendering_policy: RenderingPolicy {
-            backdrop: Some(Rgba::new(0.0, 0.0, 0.0, 1.0)), // alpha=1.0
-            backdrop_opacity: Some(0.6),                   // override to 0.6
-            ..Default::default()
-        },
-        contention_policy: ContentionPolicy::LatestWins,
-        max_publishers: 1,
-        auto_clear_ms: None,
-        ephemeral: false,
-        layer_attachment: LayerAttachment::Content,
-    });
-    scene
-        .publish_to_zone(
+    let stream_scene = |description: &str, backdrop, opacity, text: &str| {
+        let mut scene = SceneGraph::new(1280.0, 720.0);
+        scene.register_zone(ZoneDefinition {
+            description: description.into(),
+            rendering_policy: RenderingPolicy {
+                backdrop,
+                backdrop_opacity: Some(opacity),
+                ..Default::default()
+            },
+            ..zone_fixture(
+                "subtitle",
+                GeometryPolicy::EdgeAnchored {
+                    edge: DisplayEdge::Bottom,
+                    height_pct: 0.10,
+                    width_pct: 0.80,
+                    margin_px: 16.0,
+                },
+                ZoneMediaType::StreamText,
+                LayerAttachment::Content,
+            )
+        });
+        publish_zone(
+            &mut scene,
             "subtitle",
-            ZoneContent::StreamText("opacity test".to_owned()),
             "test",
-            None,
-            None,
-            None,
-        )
-        .unwrap();
+            ZoneContent::StreamText(text.into()),
+        );
+        scene
+    };
 
-    // The backdrop rendered should use alpha=0.6 (backdrop_opacity), not 1.0.
-    // We verify this by checking the vertex colors produced — the alpha channel
-    // of the first rect vertex should reflect 0.6.
+    let scene = stream_scene(
+        "test backdrop opacity override",
+        Some(Rgba::new(0.0, 0.0, 0.0, 1.0)),
+        0.6,
+        "opacity test",
+    );
     let mut vertices: Vec<crate::pipeline::RectVertex> = Vec::new();
     compositor.render_zone_content(&scene, &mut vertices, &mut Vec::new(), 1280.0, 720.0, None);
     assert!(!vertices.is_empty(), "expected backdrop vertices");
-    // The RectVertex has color field [f32; 4]; alpha should be ~0.6.
     let alpha = vertices[0].color[3];
     assert!(
         (alpha - 0.6).abs() < 0.01,
         "backdrop alpha should be ~0.6 (backdrop_opacity override), got {alpha}"
     );
-}
 
-/// backdrop=None: no backdrop quad rendered even when backdrop_opacity is set.
-#[tokio::test]
-async fn test_no_backdrop_when_backdrop_is_none() {
-    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
-
-    let mut scene = SceneGraph::new(1280.0, 720.0);
-    scene.register_zone(ZoneDefinition {
-        id: SceneId::new(),
-        name: "subtitle".to_owned(),
-        description: "no-backdrop test".to_owned(),
-        geometry_policy: GeometryPolicy::EdgeAnchored {
-            edge: DisplayEdge::Bottom,
-            height_pct: 0.10,
-            width_pct: 0.80,
-            margin_px: 16.0,
-        },
-        accepted_media_types: vec![ZoneMediaType::StreamText],
-        rendering_policy: RenderingPolicy {
-            backdrop: None,
-            backdrop_opacity: Some(0.9), // ignored because backdrop is None
-            ..Default::default()
-        },
-        contention_policy: ContentionPolicy::LatestWins,
-        max_publishers: 1,
-        auto_clear_ms: None,
-        ephemeral: false,
-        layer_attachment: LayerAttachment::Content,
-    });
-    scene
-        .publish_to_zone(
-            "subtitle",
-            ZoneContent::StreamText("no backdrop".to_owned()),
-            "test",
-            None,
-            None,
-            None,
-        )
-        .unwrap();
-
-    // With backdrop=None, no rect vertices should be emitted.
+    let scene = stream_scene("no-backdrop test", None, 0.9, "no backdrop");
     let mut vertices: Vec<crate::pipeline::RectVertex> = Vec::new();
     compositor.render_zone_content(&scene, &mut vertices, &mut Vec::new(), 1280.0, 720.0, None);
     assert!(
         vertices.is_empty(),
         "no backdrop quad should be rendered when policy.backdrop is None"
     );
-}
 
-/// backdrop=None with Notification content: no backdrop or border quads rendered.
-///
-/// Even though Notification content in a non-alert-banner zone overrides the
-/// backdrop color with urgency-tinted tokens, the override must respect the
-/// policy.backdrop contract: when backdrop is None, nothing is emitted.
-#[tokio::test]
-async fn test_notification_no_backdrop_when_backdrop_is_none() {
-    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
-
+    // Urgency tinting must also respect an absent notification backdrop.
     let mut scene = SceneGraph::new(1280.0, 720.0);
     scene.register_zone(ZoneDefinition {
-        id: SceneId::new(),
-        name: "notification-area".to_owned(),
         description: "notification area with backdrop=None".to_owned(),
-        geometry_policy: GeometryPolicy::Relative {
-            x_pct: 0.75,
-            y_pct: 0.02,
-            width_pct: 0.24,
-            height_pct: 0.30,
-        },
-        accepted_media_types: vec![ZoneMediaType::ShortTextWithIcon],
         rendering_policy: RenderingPolicy {
             backdrop: None,
             backdrop_opacity: Some(0.9),
@@ -2200,28 +2139,27 @@ async fn test_notification_no_backdrop_when_backdrop_is_none() {
         },
         contention_policy: ContentionPolicy::Stack { max_depth: 8 },
         max_publishers: 4,
-        auto_clear_ms: None,
-        ephemeral: false,
-        layer_attachment: LayerAttachment::Chrome,
-    });
-    scene
-        .publish_to_zone(
+        ..zone_fixture(
             "notification-area",
-            ZoneContent::Notification(NotificationPayload {
-                progress: None,
-                text: "no backdrop".to_owned(),
-                icon: String::new(),
-                urgency: 2,
-                ttl_ms: None,
-                title: String::new(),
-                actions: Vec::new(),
-            }),
-            "test",
-            None,
-            None,
-            None,
+            relative(0.75, 0.02, 0.24, 0.30),
+            ZoneMediaType::ShortTextWithIcon,
+            LayerAttachment::Chrome,
         )
-        .unwrap();
+    });
+    publish_zone(
+        &mut scene,
+        "notification-area",
+        "test",
+        ZoneContent::Notification(NotificationPayload {
+            progress: None,
+            text: "no backdrop".to_owned(),
+            icon: String::new(),
+            urgency: 2,
+            ttl_ms: None,
+            title: String::new(),
+            actions: Vec::new(),
+        }),
+    );
 
     let mut vertices: Vec<crate::pipeline::RectVertex> = Vec::new();
     compositor.render_zone_content(&scene, &mut vertices, &mut Vec::new(), 1280.0, 720.0, None);
