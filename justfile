@@ -88,6 +88,13 @@ current-references:
 size-report:
     python3 scripts/ci/size_report.py --output-dir test_results/size-report
 
+# Gate surface growth since this branch diverged from origin/main.
+size-check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    base=$(git merge-base HEAD origin/main)
+    python3 scripts/ci/size_report.py --base "$base" --output-dir test_results/size-report
+
 # cargo check: fast compilation gate (no codegen)
 check:
     {{cargo}} check --workspace
@@ -304,4 +311,4 @@ dev-run dev_dir host="":
 # Excluded by design: the Windows-only jobs (windows.yml) and weekly perf lanes.
 # Boot and pixel-readback tests run in the CI test job; focused recipes remain local.
 # Runs in CI job order: static, clippy (which subsumes `check`), then tests.
-ci: untracked-evidence host-identifiers current-references size-report fmt dev-mode-guard deps-unused cargo-deny test-python clippy clippy-windows-gnu test test-integration token-footprint production-boot canonical-app-boot
+ci: untracked-evidence host-identifiers current-references size-check fmt dev-mode-guard deps-unused cargo-deny test-python clippy clippy-windows-gnu test test-integration token-footprint production-boot canonical-app-boot

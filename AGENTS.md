@@ -30,6 +30,7 @@ just test-python     # pure-Python suites (pytest + scripts/ci unittest)
 just token-footprint # deterministic LLM-facing token-footprint gate
 just current-references # reject retired design citations in current source
 just size-report     # lines per surface, production and test (report only)
+just size-check      # check surface growth against origin/main's merge base
 just idle-efficiency-checker # fail-closed idle artifact contract tests
 just production-boot # vertical_slice production config boot
 just canonical-app-boot # canonical app production config boot
@@ -188,6 +189,12 @@ checked out. Its lock serializes hooks, not other Cargo processes.
 
 ## Git / GitHub Workflow
 
+- Size policy changes in [`scripts/ci/size_targets.toml`](scripts/ci/size_targets.toml)
+  require a citation to the owner's signed approval in the PR. Apply the
+  `owner-merge` hold for every change to ceilings, mappings or allowances,
+  including later amendments. For a feature allowance, cite the signed
+  feature spec in both the PR and the table. The size check validates that the
+  reference is present. The owner verifies that it grants the recorded change.
 - `main` takes no direct merges: the `main merge queue` ruleset requires every PR to land through the queue, so the older `gh pr merge <N> --squash [--delete-branch]` recipes no longer apply. Enqueue instead (CI / Build below) and confirm the landing with `gh pr view <N> --json state,mergedAt`.
 - `beads-pr-reviewer-worker`: automated reviewer threads (Copilot, Gemini) are left by bots and count toward `UNRESOLVED_COUNT`; they must be replied to and resolved before merge just like human threads.
 - `beads-pr-reviewer-worker`: the `list_review_threads.py` helper may return 0 threads even when threads exist; always verify with `evaluate_merge_readiness.py` or `gh api repos/.../pulls/<N>/comments` before treating unresolved count as zero.

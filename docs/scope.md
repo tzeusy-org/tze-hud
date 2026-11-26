@@ -185,6 +185,15 @@ Linux compile jobs install a SHA256-pinned mold linker through
 - **Mirrored locally.** `just ci` runs the required gates in CI order;
   `just pre-push` runs the host-identifier check, fmt and the exact CI clippy command.
 
+The size gate compares tracked physical lines against the branch merge base
+locally and the tested merge's base in PR and merge-queue CI. It fails when a
+mapped surface and metric grow and finish above their target plus signed feature
+allowances. An over-target count may stay flat or shrink. The size report shows
+physical totals for all surfaces and distance to target where a ceiling applies.
+The [target table](../scripts/ci/size_targets.toml) maps the greenfield sketch's
+logical-line estimates to current report surfaces. Each allowance cites the
+owner-signed feature spec that granted it.
+
 Open work toward these targets: `hud-1dnk5` (`just dev-run`, Windows-first
 quickstart, capture diff) and `hud-51ujj.7` (live smoke against the paired
 HUD).

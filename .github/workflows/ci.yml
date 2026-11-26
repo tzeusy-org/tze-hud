@@ -19,7 +19,7 @@
 # Job map:
 #   static  — no Rust compilation:
 #             evidence roots untracked, no host identifiers in tracked
-#             files, cargo fmt --check, locked metadata,
+#             files, size growth gate, cargo fmt --check, locked metadata,
 #             dev-mode guard (default-build closure of every package),
 #             cargo machete (unused deps), cargo deny licenses/bans/sources,
 #             cargo deny advisories (advisory on PR/queue, fatal on main push:
@@ -80,10 +80,31 @@ jobs:
         run: python3 scripts/ci/check_host_identifiers.py
       - name: Check current source references and doc links
         run: python3 scripts/ci/check_current_references.py
-      # Report only; no line target is enforced.
-      - name: Report lines per surface
-        run: python3 scripts/ci/size_report.py --output-dir test_results/size-report
+      - name: Report and check lines per surface
+        env:
+          MERGE_GROUP_BASE: ${{ github.event.merge_group.base_sha }}
+        shell: bash
+        run: |
+          args=(--output-dir test_results/size-report)
+          if [[ "$GITHUB_EVENT_NAME" != push ]]; then
+            if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
+              # The synthetic merge's first parent is its actual base, even on a shallow checkout.
+              base=$(git cat-file commit HEAD | sed -n '2s/^parent //p')
+            else
+              base=$MERGE_GROUP_BASE
+            fi
+            if [[ ! "$base" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "size gate: missing or invalid comparison commit" >&2
+              exit 2
+            fi
+            if ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+              git fetch --no-tags --depth=1 origin "$base"
+            fi
+            args+=(--base "$base")
+          fi
+          python3 scripts/ci/size_report.py "${args[@]}"
       - name: Upload size report
+        if: ${{ !cancelled() && hashFiles('test_results/size-report/size-report.json') != '' }}
         uses: actions/upload-artifact@v4
         with:
           name: size-report
