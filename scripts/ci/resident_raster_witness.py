@@ -39,6 +39,8 @@ POINTS = {
 }
 RPC_TIMEOUT = 5
 SCHEDULE_US = 4_000_000
+DUE_WAIT_SLACK_S = 2.0
+DUE_WAIT_MAX_S = 10.0
 
 
 def wall_us() -> int:
@@ -175,9 +177,53 @@ async def capture(run: Run, report: dict, name: str, check, *, settle_s: float =
     return samples
 
 
-async def wait_due(due: int, *, after_s: float = 0) -> None:
-    await asyncio.sleep(max(0, (due - wall_us()) / 1_000_000) + after_s)
-    assert wall_us() >= due, "system time moved backwards before due"
+async def wait_due(due: int, *, after_s: float = 0, report: dict | None = None) -> None:
+    """Recheck the wall target after timer wakes; never retry a capture."""
+    clock = time.get_clock_info("monotonic")
+    started_wall, started_mono = wall_us(), time.monotonic()
+    # Retain the full requested settle even when the deadline is already past.
+    target = max(due, started_wall) + int(after_s * 1_000_000)
+    duration = (target - started_wall) / 1_000_000
+    not_before_mono = started_mono + duration
+    budget = min(DUE_WAIT_MAX_S, duration + DUE_WAIT_SLACK_S)
+    # asyncio timers may wake early by a clock tick. Avoid a near-target spin.
+    minimum_sleep = max(0.01, 2 * clock.resolution)
+    timing = dict(due_us=due, after_s=after_s, target_wall_us=target,
+                  started_wall_us=started_wall, started_mono_s=started_mono, budget_s=budget,
+                  not_before_mono_s=not_before_mono, minimum_sleep_s=minimum_sleep,
+                  sleeps=0, wakes_before_target=0, wakes_before_minimum=0,
+                  backward_wall_steps=0, largest_backward_us=0, outcome="waiting",
+                  python=sys.version, loop=type(asyncio.get_running_loop()).__name__,
+                  monotonic_clock=clock.implementation, monotonic_resolution_s=clock.resolution,
+                  wall_clock_resolution_s=time.get_clock_info("time").resolution)
+    if report is not None:
+        report["phase"] = "wait-due"
+        report.setdefault("waits", []).append(timing)
+    now_wall, now_mono = started_wall, started_mono
+    while True:
+        elapsed = now_mono - started_mono
+        timing.update(finished_wall_us=now_wall, finished_mono_s=now_mono, elapsed_mono_s=elapsed)
+        if elapsed >= budget:
+            timing["outcome"] = "timeout"
+            raise AssertionError("wall target not observed within the monotonic wait budget")
+        if now_wall >= target and now_mono >= not_before_mono:
+            timing["outcome"] = "reached"
+            return
+        # The floor can exceed the remaining budget by one short sleep; the
+        # next observation still checks timeout before accepting the wall time.
+        remaining = max((target - now_wall) / 1_000_000, not_before_mono - now_mono)
+        delay = max(minimum_sleep, min(remaining, budget - elapsed))
+        timing.update(last_sleep_s=delay, sleeps=timing["sleeps"] + 1)
+        await asyncio.sleep(delay)
+        previous_wall = now_wall
+        now_wall, now_mono = wall_us(), time.monotonic()
+        if now_wall < previous_wall:
+            timing["backward_wall_steps"] += 1
+            timing["largest_backward_us"] = max(timing["largest_backward_us"], previous_wall - now_wall)
+        if now_wall < target:
+            timing["wakes_before_target"] += 1
+        if now_mono < not_before_mono:
+            timing["wakes_before_minimum"] += 1
 
 
 async def exercise(run: Run, report: dict, owner: Resident, peer: Resident) -> None:
@@ -205,7 +251,7 @@ async def exercise(run: Run, report: dict, owner: Resident, peer: Resident) -> N
     report["phase"] = "scheduled-denial"
     denied_due = wall_us() + SCHEDULE_US
     await peer.request("publish", image(AMBIENT, digest, due=denied_due), deny=True)
-    await wait_due(denied_due, after_s=0.5)
+    await wait_due(denied_due, after_s=0.5, report=report)
     await capture(run, report, "after-denied-due", unchanged)
 
     report["phase"] = "peer-first-grant"
@@ -221,7 +267,7 @@ async def exercise(run: Run, report: dict, owner: Resident, peer: Resident) -> N
     due = wall_us() + SCHEDULE_US
     await owner.request("publish", image(PIP, digest, due=due))
     await capture(run, report, "before-due", peer_unchanged, before_us=due)
-    await wait_due(due)
+    await wait_due(due, report=report)
     await capture(run, report, "after-due", lambda s: matches(s["pip"], DIRECTIONAL, 16)
                   and matches(s["ambient"], peer_pixels["ambient"], 6), settle_s=8)
 

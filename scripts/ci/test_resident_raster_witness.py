@@ -11,6 +11,59 @@ from windows_smoke import encode_png_rgba
 
 
 class ResidentRasterWitnessTests(unittest.IsolatedAsyncioTestCase):
+    async def test_wait_due_rechecks_an_early_wake_without_a_backwards_wall_clock(self) -> None:
+        report = {"captures": {"before-due": "unchanged"}}
+        with mock.patch.object(raster, "wall_us", side_effect=[0, 990_000, 1_000_000]), \
+                mock.patch.object(raster, "time") as clock, \
+                mock.patch.object(raster.asyncio, "sleep", new_callable=mock.AsyncMock) as sleep:
+            clock.monotonic.side_effect = [10, 10.99, 11]
+            clock.get_clock_info.return_value = mock.Mock(resolution=0.015625, implementation="fixture clock")
+            await raster.wait_due(1_000_000, report=report)
+        self.assertEqual(sleep.await_count, 2)
+        self.assertEqual([call.args[0] for call in sleep.await_args_list], [1.0, 0.03125])
+        timing, = report["waits"]
+        self.assertEqual((timing["outcome"], timing["wakes_before_target"], timing["backward_wall_steps"]),
+                         ("reached", 1, 0))
+        self.assertEqual(timing["finished_wall_us"], timing["target_wall_us"])
+        self.assertEqual(report["captures"], {"before-due": "unchanged"})
+
+    async def test_wait_due_preserves_settle_and_times_out_on_stalled_or_backward_wall_time(self) -> None:
+        cases = [
+            # name, due, after_s, wall observations, monotonic observations, outcome, sleeps
+            ("already due", 1_000_000, 0, [2_000_000], [5], "reached", []),
+            ("denied settle", 1_000_000, 0.5, [0, 1_000_000, 1_500_000], [5, 6, 6.5], "reached", [1.5, 0.5]),
+            ("past due settle", 1_000_000, 0.5, [2_000_000, 2_500_000], [5, 5.5], "reached", [0.5]),
+            ("forward jump retains settle", 1_000_000, 0.5, [0, 4_000_000, 4_000_000], [5, 5.5, 6.5],
+             "reached", [1.5, 1.0]),
+            ("stalled", 1_000_000, 0, [0, 0], [5, 8], "timeout", [1.0]),
+            ("backward", 1_000_000, 0, [0, -500_000], [5, 8], "timeout", [1.0]),
+            ("absolute cap", 100_000_000, 0, [0, 1_000_000], [5, 15], "timeout", [10.0]),
+            ("late wall target", 1_000_000, 0, [0, 1_000_000], [5, 9], "timeout", [1.0]),
+        ]
+        for name, due, after_s, wall, monotonic, outcome, sleeps in cases:
+            with self.subTest(name=name), mock.patch.object(raster, "wall_us", side_effect=wall), \
+                    mock.patch.object(raster, "time") as clock, \
+                    mock.patch.object(raster.asyncio, "sleep", new_callable=mock.AsyncMock) as sleep:
+                clock.monotonic.side_effect = monotonic
+                clock.get_clock_info.return_value = mock.Mock(resolution=0.015625, implementation="fixture clock")
+                report = {}
+                if outcome == "timeout":
+                    with self.assertRaisesRegex(AssertionError, "monotonic wait budget"):
+                        await raster.wait_due(due, after_s=after_s, report=report)
+                else:
+                    await raster.wait_due(due, after_s=after_s, report=report)
+                timing, = report["waits"]
+                self.assertEqual(timing["outcome"], outcome)
+                self.assertEqual([call.args[0] for call in sleep.await_args_list], sleeps)
+                self.assertEqual(report["phase"], "wait-due")
+                self.assertLessEqual(timing["budget_s"], 10)
+                self.assertEqual(timing["backward_wall_steps"], int(name == "backward"))
+                self.assertTrue(all(delay >= 0.03125 for delay in sleeps))
+                if outcome == "reached":
+                    self.assertGreaterEqual(timing["finished_wall_us"], due)
+                    self.assertGreaterEqual(timing["finished_mono_s"], timing["not_before_mono_s"])
+                    self.assertEqual(timing["target_wall_us"], max(due, wall[0]) + int(after_s * 1_000_000))
+
     def test_running_build_identity_rejects_other_checkouts_and_processes(self) -> None:
         run = mock.Mock(pid=42, **{"status.return_value": {"pid": 42, "sha": "a" * 40}})
         self.assertEqual(raster.build_identity(run, "a" * 40), {"pid": 42, "sha": "a" * 40})
