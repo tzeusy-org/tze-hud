@@ -1112,143 +1112,67 @@ async fn notification_action_button_is_visible_and_hover_brightens_it() {
     );
 }
 
-/// Notification with opaque backdrop: backdrop_opacity=0.9 overrides
-/// the backdrop color's alpha.  The backdrop quad should be rendered with
-/// effective alpha = 0.9.
+/// The alert and notification fill roles resolve in the backdrop pass. With
+/// text initialized, the opaque card also emits its body and dismiss label.
 #[tokio::test]
-async fn test_notification_with_opaque_backdrop() {
+async fn notification_backdrops_follow_zone_policy_and_urgency() {
     let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
-    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
-
-    let mut scene = SceneGraph::new(1280.0, 720.0);
-    scene.register_zone(ZoneDefinition {
-        id: SceneId::new(),
-        name: "notification-area".to_owned(),
-        description: "notification area zone".to_owned(),
-        geometry_policy: GeometryPolicy::EdgeAnchored {
-            edge: DisplayEdge::Top,
-            height_pct: 0.08,
-            width_pct: 0.70,
-            margin_px: 12.0,
-        },
-        accepted_media_types: vec![ZoneMediaType::ShortTextWithIcon],
-        rendering_policy: RenderingPolicy {
-            font_size_px: Some(18.0),
-            backdrop: Some(Rgba::new(0.0, 0.0, 0.0, 1.0)),
-            backdrop_opacity: Some(0.9),
-            text_color: Some(Rgba::new(1.0, 1.0, 1.0, 1.0)),
-            ..Default::default()
-        },
-        contention_policy: ContentionPolicy::Stack { max_depth: 8 },
-        max_publishers: 4,
-        auto_clear_ms: Some(5_000),
-        ephemeral: false,
-        layer_attachment: LayerAttachment::Chrome,
-    });
-    scene
-        .publish_to_zone(
-            "notification-area",
-            ZoneContent::Notification(NotificationPayload {
-                progress: None,
-                text: "Notification with opaque backdrop".to_owned(),
-                icon: String::new(),
-                urgency: 1,
-                ttl_ms: None,
-                title: String::new(),
-                actions: Vec::new(),
-            }),
+    let make_scene = |zone: ZoneDefinition, text: &str, urgency| {
+        let mut scene = SceneGraph::new(1280.0, 720.0);
+        let name = zone.name.clone();
+        scene.register_zone(zone);
+        publish_zone(
+            &mut scene,
+            &name,
             "test",
-            None,
-            None,
-            None,
-        )
-        .unwrap();
+            ZoneContent::Notification(NotificationPayload {
+                text: text.into(),
+                urgency,
+                ..Default::default()
+            }),
+        );
+        scene
+    };
+    let notification_zone = |description: &str, geometry, rendering_policy, max_publishers| {
+        let mut zone = zone_fixture(
+            "notification-area",
+            geometry,
+            ZoneMediaType::ShortTextWithIcon,
+            LayerAttachment::Chrome,
+        );
+        zone.description = description.into();
+        zone.rendering_policy = rendering_policy;
+        zone.contention_policy = ContentionPolicy::Stack { max_depth: 8 };
+        zone.max_publishers = max_publishers;
+        zone
+    };
+    let backdrop_vertices = |compositor: &Compositor, scene: &SceneGraph| {
+        let mut vertices = Vec::new();
+        compositor.render_zone_content(scene, &mut vertices, &mut Vec::new(), 1280.0, 720.0, None);
+        vertices
+    };
 
-    // render_zone_content should produce backdrop rect vertices.
-    let mut vertices: Vec<crate::pipeline::RectVertex> = Vec::new();
-    compositor.render_zone_content(&scene, &mut vertices, &mut Vec::new(), 1280.0, 720.0, None);
-    // We check that vertices were emitted (backdrop rendered).
-    assert!(
-        !vertices.is_empty(),
-        "expected backdrop vertices for notification with opaque backdrop"
-    );
-
-    // Also verify the text items use the policy text_color.
-    // collect_text_items emits 2 items for a notification slot when the text
-    // rasterizer is active: the notification body text + the dismiss "X" button.
-    let items = compositor.collect_text_items(&scene, 1280.0, 720.0);
-    assert_eq!(
-        items.len(),
-        2,
-        "expected two TextItems: notification body + dismiss button"
-    );
-    // The first item is the notification body text. White text → R channel near 255.
-    assert!(
-        items[0].color[0] > 200,
-        "text color R should be near-white from policy.text_color"
-    );
-}
-
-/// Alert-banner severity mapping: urgency 2 (warning) should map to
-/// color.severity.warning (amber/yellow), NOT the policy backdrop.
-/// We verify by inspecting the vertices emitted by render_zone_content.
-#[tokio::test]
-async fn test_alert_banner_urgency2_maps_to_alert_caution_container() {
-    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
-
-    let mut scene = SceneGraph::new(1280.0, 720.0);
-    scene.register_zone(ZoneDefinition {
-        id: SceneId::new(),
-        name: "alert-banner".to_owned(),
-        description: "alert banner zone".to_owned(),
-        geometry_policy: GeometryPolicy::EdgeAnchored {
+    let mut alert = zone_fixture(
+        "alert-banner",
+        GeometryPolicy::EdgeAnchored {
             edge: DisplayEdge::Top,
             height_pct: 0.07,
             width_pct: 1.0,
             margin_px: 0.0,
         },
-        accepted_media_types: vec![ZoneMediaType::ShortTextWithIcon],
-        rendering_policy: RenderingPolicy {
-            font_size_px: Some(20.0),
-            backdrop: Some(Rgba::new(0.08, 0.08, 0.08, 1.0)), // dark default
-            backdrop_opacity: Some(1.0),
-            text_color: Some(Rgba::new(1.0, 1.0, 1.0, 1.0)),
-            ..Default::default()
-        },
-        contention_policy: ContentionPolicy::LatestWins,
-        max_publishers: 1,
-        auto_clear_ms: None,
-        ephemeral: false,
-        layer_attachment: LayerAttachment::Chrome,
-    });
-
-    // Publish urgency=2 (warning).
-    scene
-        .publish_to_zone(
-            "alert-banner",
-            ZoneContent::Notification(NotificationPayload {
-                progress: None,
-                text: "Warning: disk space low".to_owned(),
-                icon: String::new(),
-                urgency: 2,
-                ttl_ms: None,
-                title: String::new(),
-                actions: Vec::new(),
-            }),
-            "test",
-            None,
-            None,
-            None,
-        )
-        .unwrap();
-
-    // Collect vertices from render_zone_content.
-    let mut vertices: Vec<crate::pipeline::RectVertex> = Vec::new();
-    compositor.render_zone_content(&scene, &mut vertices, &mut Vec::new(), 1280.0, 720.0, None);
-
-    // The backdrop should be severity warning color (~amber: R=1.0, G~0.72, B=0.0).
-    // rect_vertices emits 6 vertices; each has color at the end.
-    // We check that the R component is high (>0.9) and G is mid (~0.5-0.8) and B is low.
+        ZoneMediaType::ShortTextWithIcon,
+        LayerAttachment::Chrome,
+    );
+    alert.description = "alert banner zone".into();
+    alert.rendering_policy = RenderingPolicy {
+        font_size_px: Some(20.0),
+        backdrop: Some(Rgba::new(0.08, 0.08, 0.08, 1.0)),
+        backdrop_opacity: Some(1.0),
+        text_color: Some(Rgba::WHITE),
+        ..Default::default()
+    };
+    let scene = make_scene(alert, "Warning: disk space low", 2);
+    let vertices = backdrop_vertices(&compositor, &scene);
     assert!(
         !vertices.is_empty(),
         "expected backdrop vertices for alert-banner urgency=2"
@@ -1264,6 +1188,106 @@ async fn test_alert_banner_urgency2_maps_to_alert_caution_container() {
     assert!(
         style.mark(2, false).is_some(),
         "urgency 2 shows the caution severity mark"
+    );
+
+    let card_geometry = relative(0.75, 0.02, 0.24, 0.30);
+    let critical = notification_zone(
+        "notification area - uses notification urgency tokens, not severity",
+        card_geometry,
+        RenderingPolicy {
+            backdrop: Some(Rgba::new(0.05, 0.05, 0.05, 0.85)),
+            backdrop_opacity: Some(0.85),
+            text_color: Some(Rgba::WHITE),
+            ..Default::default()
+        },
+        16,
+    );
+    let scene = make_scene(critical, "System alert", 3);
+    assert!(
+        !is_alert_banner_zone("notification-area"),
+        "notification-area must not be treated as alert-banner"
+    );
+    let vertices = backdrop_vertices(&compositor, &scene);
+    assert!(
+        !vertices.is_empty(),
+        "expected backdrop vertices for notification-area urgency=3"
+    );
+    // The card's error container differs from the critical severity mark.
+    let first = &vertices[0];
+    assert!(
+        first.color[0] < 0.7,
+        "notification-area urgency=3 R must NOT be severity critical (~1.0), got {}",
+        first.color[0]
+    );
+
+    let opacity = notification_zone(
+        "notification area urgency opacity test",
+        card_geometry,
+        RenderingPolicy {
+            backdrop: Some(Rgba::new(0.0, 0.0, 0.0, 0.5)),
+            backdrop_opacity: Some(0.5),
+            text_color: Some(Rgba::WHITE),
+            ..Default::default()
+        },
+        4,
+    );
+    let mut scene = make_scene(opacity, "test", 1);
+    let vertices = backdrop_vertices(&compositor, &scene);
+    assert!(!vertices.is_empty(), "expected vertices");
+    let first_alpha = vertices[0].color[3];
+    assert!(
+        (first_alpha - 0.5).abs() < 0.01,
+        "explicit backdrop_opacity must win, got {first_alpha}"
+    );
+    // Without it, the card takes opacity.notification (canonical 0.92).
+    scene
+        .zone_registry
+        .zones
+        .get_mut("notification-area")
+        .unwrap()
+        .rendering_policy
+        .backdrop_opacity = None;
+    let vertices = backdrop_vertices(&compositor, &scene);
+    assert!(
+        (vertices[0].color[3] - 0.92).abs() < 0.01,
+        "opacity.notification default, got {}",
+        vertices[0].color[3]
+    );
+
+    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+    let mut opaque = notification_zone(
+        "notification area zone",
+        GeometryPolicy::EdgeAnchored {
+            edge: DisplayEdge::Top,
+            height_pct: 0.08,
+            width_pct: 0.70,
+            margin_px: 12.0,
+        },
+        RenderingPolicy {
+            font_size_px: Some(18.0),
+            backdrop: Some(Rgba::BLACK),
+            backdrop_opacity: Some(0.9),
+            text_color: Some(Rgba::WHITE),
+            ..Default::default()
+        },
+        4,
+    );
+    opaque.auto_clear_ms = Some(5_000);
+    let scene = make_scene(opaque, "Notification with opaque backdrop", 1);
+    let vertices = backdrop_vertices(&compositor, &scene);
+    assert!(
+        !vertices.is_empty(),
+        "expected backdrop vertices for notification with opaque backdrop"
+    );
+    let items = compositor.collect_text_items(&scene, 1280.0, 720.0);
+    assert_eq!(
+        items.len(),
+        2,
+        "expected two TextItems: notification body + dismiss button"
+    );
+    assert!(
+        items[0].color[0] > 200,
+        "text color R should be near-white from policy.text_color"
     );
 }
 
@@ -1287,82 +1311,6 @@ async fn test_alert_banner_urgency_low_maps_to_info() {
     assert_eq!(info0.mark, info1.mark);
     assert_eq!(severity_glyph(0), severity_glyph(1));
     assert_ne!(severity_glyph(1), severity_glyph(2));
-}
-
-/// notification-area does NOT use urgency-to-severity mapping (color.severity.*).
-/// It uses the card's urgency tones (`color.error.container` at urgency 3).
-/// Even with urgency=3, it must NOT produce severity critical (red #FF0000).
-#[tokio::test]
-async fn test_notification_area_does_not_use_severity_tokens() {
-    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
-
-    let mut scene = SceneGraph::new(1280.0, 720.0);
-    scene.register_zone(ZoneDefinition {
-        id: SceneId::new(),
-        name: "notification-area".to_owned(),
-        description: "notification area - uses notification urgency tokens, not severity"
-            .to_owned(),
-        geometry_policy: GeometryPolicy::Relative {
-            x_pct: 0.75,
-            y_pct: 0.02,
-            width_pct: 0.24,
-            height_pct: 0.30,
-        },
-        accepted_media_types: vec![ZoneMediaType::ShortTextWithIcon],
-        rendering_policy: RenderingPolicy {
-            backdrop: Some(Rgba::new(0.05, 0.05, 0.05, 0.85)),
-            backdrop_opacity: Some(0.85),
-            text_color: Some(Rgba::WHITE),
-            ..Default::default()
-        },
-        contention_policy: ContentionPolicy::Stack { max_depth: 8 },
-        max_publishers: 16,
-        auto_clear_ms: None,
-        ephemeral: false,
-        layer_attachment: LayerAttachment::Chrome,
-    });
-    scene
-        .publish_to_zone(
-            "notification-area",
-            ZoneContent::Notification(NotificationPayload {
-                progress: None,
-                text: "System alert".to_owned(),
-                icon: String::new(),
-                urgency: 3, // Critical — the error-container tone, NOT color.severity.critical
-                ttl_ms: None,
-                title: String::new(),
-                actions: Vec::new(),
-            }),
-            "test",
-            None,
-            None,
-            None,
-        )
-        .unwrap();
-
-    // notification-area must NOT be treated as alert-banner.
-    assert!(
-        !is_alert_banner_zone("notification-area"),
-        "notification-area must not be treated as alert-banner"
-    );
-
-    // Render and check: the backdrop must NOT be severity critical (pure red R~1.0, G~0.0, B~0.0).
-    // It should be the card's error-container tone.
-    let mut vertices: Vec<crate::pipeline::RectVertex> = Vec::new();
-    compositor.render_zone_content(&scene, &mut vertices, &mut Vec::new(), 1280.0, 720.0, None);
-
-    assert!(
-        !vertices.is_empty(),
-        "expected backdrop vertices for notification-area urgency=3"
-    );
-
-    // Check first vertex: R should NOT be ~1.0 (that would be severity critical).
-    let first = &vertices[0];
-    assert!(
-        first.color[0] < 0.7,
-        "notification-area urgency=3 R must NOT be severity critical (~1.0), got {}",
-        first.color[0]
-    );
 }
 
 // ── Notification urgency tone tests ──────────────────────────────────────
@@ -1423,83 +1371,6 @@ fn test_notification_urgency_color_tokens() {
             "opacity.notification applies: {c:?}"
         );
     }
-}
-
-/// notification-area card fill opacity: an explicit zone
-/// `backdrop_opacity` keeps precedence; otherwise the card takes
-/// `opacity.notification`.
-#[tokio::test]
-async fn test_notification_area_backdrop_opacity() {
-    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
-
-    let mut scene = SceneGraph::new(1280.0, 720.0);
-    scene.register_zone(ZoneDefinition {
-        id: SceneId::new(),
-        name: "notification-area".to_owned(),
-        description: "notification area urgency opacity test".to_owned(),
-        geometry_policy: GeometryPolicy::Relative {
-            x_pct: 0.75,
-            y_pct: 0.02,
-            width_pct: 0.24,
-            height_pct: 0.30,
-        },
-        accepted_media_types: vec![ZoneMediaType::ShortTextWithIcon],
-        rendering_policy: RenderingPolicy {
-            backdrop: Some(Rgba::new(0.0, 0.0, 0.0, 0.5)),
-            // An explicit zone opacity wins over opacity.notification.
-            backdrop_opacity: Some(0.5),
-            text_color: Some(Rgba::WHITE),
-            ..Default::default()
-        },
-        contention_policy: ContentionPolicy::Stack { max_depth: 8 },
-        max_publishers: 4,
-        auto_clear_ms: None,
-        ephemeral: false,
-        layer_attachment: LayerAttachment::Chrome,
-    });
-    scene
-        .publish_to_zone(
-            "notification-area",
-            ZoneContent::Notification(NotificationPayload {
-                progress: None,
-                text: "test".to_owned(),
-                icon: String::new(),
-                urgency: 1, // normal
-                ttl_ms: None,
-                title: String::new(),
-                actions: Vec::new(),
-            }),
-            "test",
-            None,
-            None,
-            None,
-        )
-        .unwrap();
-
-    let mut vertices: Vec<crate::pipeline::RectVertex> = Vec::new();
-    compositor.render_zone_content(&scene, &mut vertices, &mut Vec::new(), 1280.0, 720.0, None);
-
-    assert!(!vertices.is_empty(), "expected vertices");
-    let first_alpha = vertices[0].color[3];
-    assert!(
-        (first_alpha - 0.5).abs() < 0.01,
-        "explicit backdrop_opacity must win, got {first_alpha}"
-    );
-    // Without it, the card takes opacity.notification (canonical 0.92).
-    scene
-        .zone_registry
-        .zones
-        .get_mut("notification-area")
-        .unwrap()
-        .rendering_policy
-        .backdrop_opacity = None;
-    let mut vertices: Vec<crate::pipeline::RectVertex> = Vec::new();
-    compositor.render_zone_content(&scene, &mut vertices, &mut Vec::new(), 1280.0, 720.0, None);
-    assert!(
-        (vertices[0].color[3] - 0.92).abs() < 0.01,
-        "opacity.notification default, got {}",
-        vertices[0].color[3]
-    );
 }
 
 /// A Stack `notification-area` scene with one urgency-0 notification, for the
