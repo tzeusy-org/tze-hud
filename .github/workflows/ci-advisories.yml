@@ -1,0 +1,27 @@
+name: Dependency advisories
+
+on:
+  schedule:
+    - cron: "17 22 * * *"  # Daily at 22:17 UTC.
+
+permissions:
+  contents: read
+
+jobs:
+  advisories:
+    name: cargo deny advisories
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.88"
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny@0.20.2
+      - name: Check dependency advisories
+        run: cargo deny --log-level warn check advisories
