@@ -1765,6 +1765,7 @@ mod tests {
     #[test]
     fn head_stays_put_while_tail_advances_by_whole_lines() {
         let mut fonts = fonts();
+        let metrics = Metrics::new(FONT, LINE);
         for max_lines in [1, 2, 3] {
             let height = LINE * max_lines as f32 + 1.0;
             let before = "line 01\nline 02\nline 03\nline 04";
@@ -1780,18 +1781,8 @@ mod tests {
             assert!(tail.was_truncated);
             assert!(tail.text.starts_with(ELLIPSIS) && tail.text.ends_with("line 05 latest"));
             assert!(!tail.text.contains("line 01"));
-            assert!(
-                shape(
-                    &tail.text,
-                    400.0,
-                    Wrap::Word,
-                    Metrics::new(FONT, LINE),
-                    &mut fonts
-                )
-                .layout_runs()
-                .count()
-                    <= max_lines
-            );
+            let shaped = shape(&tail.text, 400.0, Wrap::Word, metrics, &mut fonts);
+            assert!(shaped.layout_runs().count() <= max_lines);
         }
     }
 
@@ -2203,19 +2194,28 @@ mod tests {
             prop_assert!(row.ends_with(retained));
             prop_assert_eq!(retained.len() % grapheme.len(), 0);
         }
+    }
 
-        #[test]
-        fn tail_keeps_whole_graphemes_and_logical_newest_content(repeat in 3usize..11usize) {
+    #[test]
+    fn tail_keeps_whole_graphemes_and_logical_newest_content() {
+        // Exhaust the finite domain instead of sampling the same repeats again.
+        for repeat in 3usize..11usize {
             let mut fonts = fonts();
-            for portion in ["السلام عليكم", "Hello السلام", "👨‍👩‍👧‍👦e\u{301}"] {
+            for portion in ["السلام عليكم", "Hello السلام", "👨‍👩‍👧‍👦e\u{301}"]
+            {
+                let case = (repeat, portion);
                 let last = portion.repeat(repeat);
                 let text = format!("old line\nolder line\n{last}");
                 let result = truncate(TailAnchored, &text, 150.0, LINE + 1.0, &mut fonts);
-                prop_assert!(result.was_truncated);
-                let retained = result.text.strip_prefix(ELLIPSIS).expect("leading ellipsis");
-                prop_assert!(!retained.is_empty() && last.ends_with(retained), "{retained:?} of {last:?}");
+                assert!(result.was_truncated, "case={case:?}");
+                let retained = result.text.strip_prefix(ELLIPSIS).expect("ellipsis");
+                assert!(!retained.is_empty(), "case={case:?}");
+                assert!(last.ends_with(retained), "{retained:?} of {last:?}");
                 let offset = last.len() - retained.len();
-                prop_assert!(last.grapheme_indices(true).any(|(start, _)| start == offset));
+                let whole_grapheme = last
+                    .grapheme_indices(true)
+                    .any(|(start, _)| start == offset);
+                assert!(whole_grapheme, "{case:?}: {retained:?}");
             }
         }
     }
