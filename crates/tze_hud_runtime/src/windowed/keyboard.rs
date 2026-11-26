@@ -542,13 +542,12 @@ impl WinitApp {
 
         // Held local keys never turn into agent input after focus or publication
         // changes. Shell/panel routing still has first refusal.
-        if self
-            .state
-            .notification_keydowns
-            .contains(&keyboard_key_identity(&raw.key_code, &raw.key))
-        {
-            if self.state.notification_reply.active.is_some() {
-                self.state.notification_reply.ignore_character_at = Some(raw.timestamp_mono_us);
+        let key_identity = keyboard_key_identity(&raw.key_code, &raw.key);
+        let reply = &mut self.state.notification_reply;
+        let held_reply_key = reply.active.is_none() && reply.keydowns.contains(&key_identity);
+        if held_reply_key || self.state.notification_keydowns.contains(&key_identity) {
+            if held_reply_key || reply.active.is_some() {
+                reply.ignore_character_at = Some(raw.timestamp_mono_us);
             }
             return;
         }
@@ -556,9 +555,7 @@ impl WinitApp {
         // Finish the physical exit sequence before letting any later key reach
         // the saved editor. Its character event is consumed by the same debt.
         if self.state.answer_keyboard.return_key.is_some() {
-            self.state
-                .notification_keydowns
-                .insert(keyboard_key_identity(&raw.key_code, &raw.key));
+            self.state.notification_keydowns.insert(key_identity);
             return;
         }
 

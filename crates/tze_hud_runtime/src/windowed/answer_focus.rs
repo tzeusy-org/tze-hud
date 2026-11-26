@@ -460,6 +460,7 @@ impl WinitApp {
         // release debt can remain after the user switched apps while holding
         // a key; it must not suppress this new answer or its characters.
         self.state.notification_keydowns.clear();
+        self.release_composer_preedit_for_notification();
         self.state.answer_keyboard.return_key = None;
         self.state.answer_keyboard.invalidate_visit();
         self.state.answer_keyboard.focus = Some(focus);

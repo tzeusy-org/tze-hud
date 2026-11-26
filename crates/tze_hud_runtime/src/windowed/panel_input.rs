@@ -196,9 +196,13 @@ impl WinitApp {
         );
         if !pressed {
             self.state.notification_keydowns.remove(&identity);
+            self.state.notification_reply.keydowns.remove(&identity);
             self.state
                 .consumed_shell_shortcut_keydowns
                 .remove(&identity);
+            return true;
+        }
+        if self.state.notification_reply.keydowns.contains(&identity) {
             return true;
         }
         // Its release must not reach an agent if the panel closes first.
@@ -409,6 +413,7 @@ impl WinitApp {
         }
         self.state.panel_input.visit = visit;
         if let Some((visit, location)) = opening {
+            self.blur_notification_reply();
             self.state.answer_keyboard.focus = None;
             self.state.input_processor.chrome_feedback_cancel_pending = true;
             let secondary = self.panel_display_target(location.display.as_deref()).0;

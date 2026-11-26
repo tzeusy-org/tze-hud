@@ -2616,8 +2616,6 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
             // IME-composed characters (CJK, accented inputs, etc.). In v1 the
             // commit text is forwarded as a RawCharacterEvent so agents receive
             // CharacterEvent payloads regardless of input method.
-            //
-            // Preedit (above) is drawn locally and never forwarded to agents.
             // ── IME preedit: composition drawn at the composer caret ─────────
             // hud-ljhku.13: forwarded to the composer echo (underlined at the
             // caret); only Ime::Commit text enters the draft.
@@ -2628,23 +2626,11 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                 self.set_text_input_preedit(text, cursor);
             }
             WindowEvent::Ime(winit::event::Ime::Disabled) => {
-                self.set_text_input_preedit(String::new(), None);
+                self.disable_text_input_ime();
             }
             WindowEvent::Ime(winit::event::Ime::Commit(text)) => {
-                self.state.composer_preedit = None;
-                self.state.notification_reply.composing = false;
-                if self.panel_text(secondary, &text) {
-                    return;
-                }
-                if let Some(source) = wake_source {
-                    self.state.wake.mark_main_work_pending(source);
-                }
                 let timestamp_mono_us = tze_hud_scene::MonoUs(nanoseconds_since_start() / 1_000);
-                let raw_char = RawCharacterEvent {
-                    character: text.clone(),
-                    timestamp_mono_us,
-                };
-                self.dispatch_character_event(&raw_char);
+                self.dispatch_text_input_commit(secondary, text, timestamp_mono_us);
             }
 
             // ── Redraw ────────────────────────────────────────────────────

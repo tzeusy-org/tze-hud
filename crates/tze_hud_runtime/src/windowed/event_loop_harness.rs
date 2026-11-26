@@ -5306,26 +5306,29 @@ mod tests {
         assert!(take_action_ids(&harness).is_empty());
     }
 
+    fn set_reply_action(harness: &HeadlessEventLoopHarness, expiry: Option<u64>) {
+        let mut scene = harness.scene();
+        let card = &mut scene
+            .zone_registry
+            .active_publishes
+            .get_mut("notification-area")
+            .unwrap()[0];
+        card.expires_at_wall_us = expiry;
+        let tze_hud_scene::ZoneContent::Notification(payload) = &mut card.content else {
+            panic!("notification card");
+        };
+        payload.actions = vec![tze_hud_scene::NotificationAction {
+            label: "Other…".into(),
+            reply: Some("database".into()),
+            ..Default::default()
+        }];
+        scene.version += 1;
+    }
+
     #[test]
     fn notification_reply_only_question_digit_keeps_its_draft_across_escape_and_sends_once() {
         let mut harness = approve_reject_notification_harness();
-        {
-            let mut scene = harness.scene();
-            let card = &mut scene
-                .zone_registry
-                .active_publishes
-                .get_mut("notification-area")
-                .unwrap()[0];
-            let tze_hud_scene::ZoneContent::Notification(payload) = &mut card.content else {
-                panic!("notification card");
-            };
-            payload.actions = vec![tze_hud_scene::NotificationAction {
-                label: "Other…".into(),
-                reply: Some("database".into()),
-                ..Default::default()
-            }];
-            scene.version += 1;
-        }
+        set_reply_action(&harness, None);
         assert!(harness.tick());
         let start = harness.notification_action_center("database").unwrap();
         let open = |harness: &mut HeadlessEventLoopHarness| {
@@ -5396,10 +5399,7 @@ mod tests {
         harness.app.set_text_input_preedit(String::new(), None);
         harness
             .app
-            .dispatch_character_event(&tze_hud_input::keyboard::RawCharacterEvent {
-                character: "漢".into(),
-                timestamp_mono_us: tze_hud_scene::MonoUs(0),
-            });
+            .dispatch_text_input_commit(None, "漢".into(), MonoUs(0));
         harness.drain();
         assert!(harness.tick());
         let card = harness.scene().overlay.notification_geometry[0].clone();
@@ -5439,8 +5439,21 @@ mod tests {
             .safe_mode_atomic
             .store(false, std::sync::atomic::Ordering::Release);
         harness.type_text("!");
+        // The headless parent has no native window. Seed the memo that a
+        // previous native caret update would have stored on this session.
+        let reply = &mut harness.app.state.notification_reply;
+        assert_eq!(reply.replace_test_ime_anchor(Some(local)), None);
         harness.press_named_key("Enter");
         harness.drain();
+        assert_eq!(
+            harness
+                .app
+                .state
+                .notification_reply
+                .replace_test_ime_anchor(None),
+            None,
+            "a later portal caret update cannot leave the next reply using this memo"
+        );
         let mut scene = harness.scene();
         assert!(scene.overlay.notification_reply.is_none());
         let actions = scene.take_pending_actions("notif-agent");
@@ -5452,6 +5465,60 @@ mod tests {
                 text: "use the staging DB漢!".into(),
             }
         );
+    }
+
+    #[test]
+    fn panel_open_releases_the_elapsed_notification_reply_deadline() {
+        use crate::shell::control_panel::PanelEvent;
+        use tze_hud_scene::{TestClock, config::ChordRole};
+
+        let clock = Arc::new(TestClock::new(1_000));
+        let mut harness = approve_reject_notification_harness_on(clock.clone());
+        let expiry = clock.now_us() + 20_000;
+        set_reply_action(&harness, Some(expiry));
+        assert!(harness.tick());
+        assert_eq!(harness.app.focus_newest_question(false), Ok(true));
+        harness.type_text("1");
+        harness.type_text("draft");
+        harness.drain();
+        clock.set_us(expiry);
+        {
+            let mut scene = harness.scene();
+            assert_eq!(scene.drain_expired_zone_publications(), 0);
+            assert_eq!(
+                scene.overlay.notification_reply.as_ref().unwrap().text,
+                "draft"
+            );
+        }
+
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let fixture =
+            runtime.block_on(async { super::super::panel_input::panel_task_tests::fixture() });
+        let panel = fixture.panel.clone();
+        harness.app.state.control_panel = Some(panel.clone());
+        panel.send(PanelEvent::Chord(ChordRole::Panel));
+        runtime.block_on(async {
+            tokio::time::timeout(std::time::Duration::from_secs(2), async {
+                while !panel.is_open() {
+                    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+                }
+            })
+            .await
+            .expect("panel opens");
+        });
+        harness.app.sync_panel_focus();
+        assert!(panel.is_open());
+        assert!(harness.app.state.notification_reply.active.is_none());
+        let scene = harness.scene();
+        assert!(scene.overlay.notification_reply.is_none());
+        assert!(
+            scene
+                .zone_registry
+                .active_for_zone("notification-area")
+                .is_empty()
+        );
+        drop(scene);
+        assert!(take_action_ids(&harness).is_empty());
     }
 
     #[test]
@@ -8911,6 +8978,90 @@ mod tests {
             }
             assert!(harness.tick());
             harness
+        }
+
+        // The nested reply owns its held letter through collapse and release.
+        // A portal composition from before the handoff cannot become card text.
+        {
+            let mut harness = card_with_editor();
+            set_reply_action(&harness, None);
+            assert!(harness.tick());
+            harness.type_text("portal");
+            harness.drain();
+            harness.app.set_text_input_preedit("ポータル".into(), None);
+            assert!(harness.app.state.composer_preedit.is_some());
+            assert_eq!(harness.app.focus_newest_question(true), Ok(true));
+            assert!(harness.app.state.answer_keyboard.focus.unwrap().nested);
+
+            let PendingKeyboardEvent::KeyDown(digit) = key_down("Digit1", "1", 100) else {
+                unreachable!();
+            };
+            assert!(harness.app.dispatch_os_key_down(&digit));
+            harness.enqueue(character("1", 100));
+            harness.enqueue(key_up("Digit1", "1", 101));
+            harness.drain();
+            assert!(harness.app.state.composer_preedit.is_none());
+            harness.app.set_text_input_preedit(String::new(), None);
+            harness
+                .app
+                .dispatch_text_input_commit(None, "ポータル".into(), MonoUs(102));
+
+            harness.enqueue(key_down("KeyA", "a", 103));
+            harness.enqueue(character("a", 103));
+            harness.drain();
+            assert_eq!(
+                harness
+                    .scene()
+                    .overlay
+                    .notification_reply
+                    .as_ref()
+                    .unwrap()
+                    .text,
+                "a"
+            );
+            press(&mut harness, "Escape", "Escape", false);
+            assert!(harness.scene().overlay.notification_reply.is_none());
+            assert!(harness.app.state.answer_keyboard.return_key.is_none());
+
+            let mut repeat = key_down("KeyA", "A", 1_200);
+            if let PendingKeyboardEvent::KeyDown(raw) = &mut repeat {
+                raw.repeat = true;
+            }
+            harness.enqueue(repeat);
+            harness.enqueue(character("A", 1_200));
+            // While A remains held, a distinct physical key can edit the saved
+            // portal. Its character has a different native event timestamp.
+            harness.enqueue(key_down("KeyB", "b", 1_201));
+            harness.enqueue(character("b", 1_201));
+            harness.enqueue(key_up("KeyB", "b", 1_202));
+            harness.drain();
+            assert_eq!(harness.composer_draft().as_deref(), Some("portalb"));
+            harness.enqueue(key_up("KeyA", "A", 1_203));
+            harness.drain();
+            harness.type_text("a");
+            harness.drain();
+            assert_eq!(harness.composer_draft().as_deref(), Some("portalba"));
+
+            assert_eq!(harness.app.focus_newest_question(true), Ok(true));
+            harness.type_text("1");
+            harness.drain();
+            harness.app.set_text_input_preedit("カード".into(), None);
+            assert!(harness.app.blur_notification_reply());
+            harness.app.set_text_input_preedit(String::new(), None);
+            harness
+                .app
+                .dispatch_text_input_commit(None, "カード".into(), MonoUs(1_204));
+            harness.drain();
+            assert_eq!(harness.composer_draft().as_deref(), Some("portalba"));
+
+            harness.app.set_text_input_preedit("次".into(), None);
+            harness.app.set_text_input_preedit(String::new(), None);
+            harness
+                .app
+                .dispatch_text_input_commit(None, "次".into(), MonoUs(1_205));
+            harness.drain();
+            assert_eq!(harness.composer_draft().as_deref(), Some("portalba次"));
+            assert!(take_action_ids(&harness).is_empty());
         }
 
         // Use the actual main-thread intent and pending-keyboard drain. Each

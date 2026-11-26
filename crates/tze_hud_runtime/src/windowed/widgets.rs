@@ -303,13 +303,49 @@ impl WinitApp {
 
     pub(super) fn set_text_input_preedit(&mut self, text: String, cursor: Option<(usize, usize)>) {
         let reply = &mut self.state.notification_reply;
+        if !reply.update_ime_preedit(!text.is_empty()) {
+            return;
+        }
         if reply.active.is_some() {
             // The card keeps only committed text. The IME owns the keys during
             // composition, including Enter when it confirms its candidate.
             reply.composing = !text.is_empty();
-        } else {
+        } else if self.state.answer_keyboard.focus.is_none() {
             self.set_composer_preedit(text, cursor);
         }
+    }
+
+    pub(super) fn release_composer_preedit_for_notification(&mut self) {
+        self.state.notification_reply.abandon_ime_preedit();
+        self.set_composer_preedit(String::new(), None);
+    }
+
+    pub(super) fn disable_text_input_ime(&mut self) {
+        self.state.notification_reply.reset_ime_preedit();
+        self.set_text_input_preedit(String::new(), None);
+    }
+
+    pub(super) fn dispatch_text_input_commit(
+        &mut self,
+        secondary: Option<usize>,
+        text: String,
+        timestamp_mono_us: tze_hud_scene::MonoUs,
+    ) {
+        if !self.state.notification_reply.receive_ime_commit() {
+            return;
+        }
+        self.state.composer_preedit = None;
+        self.state.notification_reply.composing = false;
+        if self.panel_text(secondary, &text) {
+            return;
+        }
+        self.state
+            .wake
+            .mark_main_work_pending(crate::idle_efficiency::RuntimeWakeupSource::SceneChange);
+        self.dispatch_character_event(&tze_hud_input::keyboard::RawCharacterEvent {
+            character: text,
+            timestamp_mono_us,
+        });
     }
 
     pub(super) fn set_composer_preedit(&mut self, text: String, cursor: Option<(usize, usize)>) {

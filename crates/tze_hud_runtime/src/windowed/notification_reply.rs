@@ -23,7 +23,20 @@ pub(super) struct NotificationReplyState {
     refresh_view: bool,
     nested_focus: bool,
     ime_anchor: Option<(winit::window::WindowId, Rect)>,
+    ime_preedit: Option<ImePreedit>,
     drafts: HashMap<SceneId, ReplyDraft>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ImeOwner {
+    OutsideReply,
+    Reply(SceneId),
+    Abandoned,
+}
+
+struct ImePreedit {
+    owner: ImeOwner,
+    has_text: bool,
 }
 
 struct ReplyDraft {
@@ -48,11 +61,79 @@ impl Default for ReplyDraft {
 
 impl NotificationReplyState {
     fn activate(&mut self, region: ZoneHitRegion) {
+        if self
+            .active
+            .as_ref()
+            .is_some_and(|active| active.publication_id != region.publication_id)
+        {
+            self.abandon_ime_preedit();
+        }
         self.drafts.entry(region.publication_id).or_default();
         self.active = Some(region);
         self.blur_pending = false;
         self.composing = false;
         self.refresh_view = true;
+        self.ime_anchor = None;
+    }
+
+    fn deactivate(&mut self) {
+        self.abandon_ime_preedit();
+        self.active = None;
+        self.composing = false;
+        self.ime_anchor = None;
+    }
+
+    fn ime_owner(&self) -> ImeOwner {
+        self.active
+            .as_ref()
+            .filter(|_| !self.blur_pending)
+            .map_or(ImeOwner::OutsideReply, |region| {
+                ImeOwner::Reply(region.publication_id)
+            })
+    }
+
+    pub(super) fn abandon_ime_preedit(&mut self) {
+        let owner = self.ime_owner();
+        if let Some(preedit) = &mut self.ime_preedit
+            && preedit.owner == owner
+        {
+            preedit.owner = ImeOwner::Abandoned;
+        }
+    }
+
+    /// An empty preedit precedes a commit. Keep its owner until that commit,
+    /// disable, or the start of another composition.
+    pub(super) fn update_ime_preedit(&mut self, has_text: bool) -> bool {
+        let owner = self.ime_owner();
+        if has_text
+            && self
+                .ime_preedit
+                .as_ref()
+                .is_none_or(|preedit| !preedit.has_text)
+        {
+            self.ime_preedit = Some(ImePreedit { owner, has_text });
+        }
+        self.ime_preedit.as_mut().is_none_or(|preedit| {
+            preedit.has_text = has_text;
+            preedit.owner == owner
+        })
+    }
+
+    pub(super) fn receive_ime_commit(&mut self) -> bool {
+        let owner = self.ime_owner();
+        self.ime_preedit
+            .take()
+            .is_none_or(|preedit| preedit.owner == owner)
+    }
+
+    pub(super) fn reset_ime_preedit(&mut self) {
+        self.ime_preedit = None;
+    }
+
+    #[cfg(test)]
+    pub(super) fn replace_test_ime_anchor(&mut self, area: Option<Rect>) -> Option<Rect> {
+        let anchor = area.map(|area| (winit::window::WindowId::dummy(), area));
+        std::mem::replace(&mut self.ime_anchor, anchor).map(|(_, area)| area)
     }
 
     fn prune(&mut self, scene: &SceneGraph) {
@@ -82,6 +163,7 @@ impl super::WinitApp {
             region.bounds.y + region.bounds.height * 0.5,
         );
         if self.state.notification_reply.active.is_none() {
+            self.release_composer_preedit_for_notification();
             self.state.notification_reply.nested_focus = self
                 .state
                 .answer_keyboard
@@ -97,6 +179,7 @@ impl super::WinitApp {
 
     pub(super) fn blur_notification_reply(&mut self) -> bool {
         if self.state.notification_reply.active.is_some() {
+            self.state.notification_reply.abandon_ime_preedit();
             self.state.notification_reply.blur_pending = true;
             self.sync_notification_reply();
         }
@@ -121,8 +204,7 @@ impl super::WinitApp {
             };
             if reply.blur_pending {
                 reply.blur_pending = false;
-                reply.composing = false;
-                reply.active = None;
+                reply.deactivate();
                 scene.set_notification_reply_view(None);
                 scene.focus_notification(None);
             }
@@ -135,8 +217,7 @@ impl super::WinitApp {
                     .is_none_or(|view| view.publication_id != target.publication_id)
             });
             if stale {
-                reply.composing = false;
-                reply.active = None;
+                reply.deactivate();
                 self.state.answer_keyboard.focus = None;
             }
             let suspended = self
@@ -269,7 +350,7 @@ impl super::WinitApp {
             .keydowns
             .insert(keyboard_key_identity(&raw.key_code, &raw.key));
         if exit {
-            reply.active = None;
+            reply.deactivate();
             self.state.answer_keyboard.focus = None;
             self.state.answer_keyboard.invalidate_visit();
             if wake.is_some() || !reply.nested_focus {
