@@ -107,9 +107,7 @@ tier-W results narrow them but do not close them.
     and MCP adapter acceptance.
 - **Time-based.** Sleep/wake, hot-plug and overnight leases.
 - **Measurement holds.** Publish-to-present on the Windows host
-  (`hud-ddm2g`); merge-group 6-minute target misses (`hud-4k3b2`) and the
-  owner merge of the #1648 merge-budget proposal (`hud-rnad7`); the
-  delayed-subtitle witness (`hud-rnq52`, `hud-q26ya`).
+  (`hud-ddm2g`) and the delayed-subtitle witness (`hud-rnq52`, `hud-q26ya`).
 
 ## Where the rest lives
 
@@ -172,7 +170,7 @@ Linux compile jobs install a SHA256-pinned mold linker through
   and use each original attempt. A passing cohort requires 20 complete,
   successful first attempts with all required jobs and timestamps. Report run
   IDs, count, p95, maximum and any failures or incomplete records. Suites
-  that cannot fit run in the weekly lanes (`perf-budget.yml`, `perf-assert.yml`)
+  that cannot fit run in the weekly performance workflow (`perf-budget.yml`)
   or in `windows.yml`, never in the required set. Twenty observations give 5%
   empirical tail resolution. The five cases investigated in
   [PR #1648](https://github.com/tzeusy-org/tze-hud/pull/1648) do not establish
