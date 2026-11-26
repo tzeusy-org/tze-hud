@@ -1,86 +1,15 @@
 use super::*;
 
-/// Alert-banner zone resolve_zone_geometry gives backdrop width = display width.
-///
-/// At 1920×1080, the backdrop must span from x=0 to x=1920.
 #[test]
 fn test_alert_banner_backdrop_spans_full_display_width() {
     use tze_hud_scene::types::ZoneRegistry;
 
     let registry = ZoneRegistry::with_defaults();
-    let zone = registry
-        .get_by_name("alert-banner")
-        .expect("alert-banner zone must exist");
-
-    let (x, _y, w, _h) = Compositor::resolve_zone_geometry(&zone.geometry_policy, 1920.0, 1080.0);
-    assert_eq!(x, 0.0, "alert-banner left edge must be at x=0");
-    assert_eq!(
-        w, 1920.0,
-        "alert-banner width must equal display width (1920)"
-    );
+    let zone = registry.get_by_name("alert-banner").unwrap();
+    let (x, _, width, _) = Compositor::resolve_zone_geometry(&zone.geometry_policy, 1920.0, 1080.0);
+    assert_eq!((x, width), (0.0, 1920.0));
 }
 
-/// When no alert-banner publications are active, render_zone_content emits zero
-/// backdrop vertices — the zone occupies zero visible space.
-///
-/// Acceptance criterion -Banner Chrome-Layer Positioning:
-///   "When no alerts are active, the alert-banner zone MUST occupy zero vertical space."
-#[tokio::test]
-async fn test_alert_banner_zero_height_when_inactive() {
-    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
-
-    let mut scene = SceneGraph::new(1280.0, 720.0);
-    // Register alert-banner zone with a visible backdrop so it would render if active.
-    scene.register_zone(ZoneDefinition {
-        id: SceneId::new(),
-        name: "alert-banner".to_owned(),
-        description: "zero-height-when-inactive test".to_owned(),
-        geometry_policy: GeometryPolicy::EdgeAnchored {
-            edge: DisplayEdge::Top,
-            height_pct: 0.06,
-            width_pct: 1.0,
-            margin_px: 0.0,
-        },
-        accepted_media_types: vec![ZoneMediaType::ShortTextWithIcon],
-        rendering_policy: RenderingPolicy {
-            font_size_px: Some(24.0),
-            backdrop: Some(Rgba::new(1.0, 0.0, 0.0, 1.0)), // bright red — visible if leaked
-            backdrop_opacity: Some(0.9),
-            text_color: Some(Rgba::WHITE),
-            ..Default::default()
-        },
-        contention_policy: ContentionPolicy::Replace,
-        max_publishers: 1,
-        auto_clear_ms: None,
-        ephemeral: false,
-        layer_attachment: LayerAttachment::Chrome,
-    });
-
-    // No publications — zone is inactive.
-    let mut vertices: Vec<crate::pipeline::RectVertex> = Vec::new();
-    compositor.render_zone_content(&scene, &mut vertices, &mut Vec::new(), 1280.0, 720.0, None);
-
-    // Zero vertices emitted → zone occupies zero visible space.
-    assert!(
-        vertices.is_empty(),
-        "no backdrop quad must be emitted for inactive alert-banner zone (zero visible space)"
-    );
-
-    // Also verify no TextItems produced.
-    let items = compositor.collect_text_items(&scene, 1280.0, 720.0);
-    assert!(
-        items.is_empty(),
-        "no text must be rendered for inactive alert-banner zone"
-    );
-}
-
-// ─── Alert-banner severity-stack tests ───────────────────────────────────
-
-/// Helper: build a SceneGraph with an alert-banner Stack zone for severity tests.
-///
-/// Zone: full-width, EdgeAnchored top, height_pct=0.05 (36px at 720p).
-/// font_size_px=16, default margin_v=8 → slot_h = 16 + 2×8 + 2 = 34px.
-/// max_depth=8, max_publishers=16.
 fn make_alert_banner_scene() -> SceneGraph {
     let mut scene = SceneGraph::new(1280.0, 720.0);
     scene.register_zone(ZoneDefinition {
@@ -113,19 +42,14 @@ fn make_alert_banner_scene() -> SceneGraph {
     scene
 }
 
-/// Helper: publish an alert banner notification.
 fn publish_alert(scene: &mut SceneGraph, text: &str, urgency: u32, publisher: &str) {
     scene
         .publish_to_zone(
             "alert-banner",
             ZoneContent::Notification(NotificationPayload {
-                progress: None,
                 text: text.to_owned(),
-                icon: String::new(),
                 urgency,
-                ttl_ms: None,
-                title: String::new(),
-                actions: Vec::new(),
+                ..Default::default()
             }),
             publisher,
             None,
@@ -135,18 +59,66 @@ fn publish_alert(scene: &mut SceneGraph, text: &str, urgency: u32, publisher: &s
         .expect("alert-banner publish must succeed");
 }
 
-/// Banners stack by severity, critical on top, whatever the arrival order; equal
-/// severities stack newest first. Each row lists (text, urgency) in publish order
-/// and the expected top-to-bottom order.
 #[tokio::test]
 async fn test_alert_banner_stacks_by_severity_then_recency() {
     let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
+    let assert_rendered = |scene: &SceneGraph, expected: &[&str]| {
+        let mut vertices = Vec::new();
+        compositor.render_zone_content(scene, &mut vertices, &mut Vec::new(), 1280.0, 720.0, None);
+        assert_eq!(
+            vertices.len(),
+            6 * expected.len(),
+            "backdrops for {expected:?}"
+        );
+        if expected.len() == 3 {
+            // The third quad must start below the nominal 36 px zone height.
+            let first_top = vertices[0].position[1];
+            let third_top = vertices[12].position[1];
+            assert!(third_top < first_top && third_top < 1.0 - 2.0 * 36.0 / 720.0);
+        }
+
+        let items = compositor.collect_text_items(scene, 1280.0, 720.0);
+        let order: Vec<&str> = items.iter().map(|item| item.text.as_ref()).collect();
+        assert_eq!(order, expected);
+        assert!(items.windows(2).all(|w| w[0].pixel_y < w[1].pixel_y));
+        for item in &items {
+            // Outer inset + policy margin + severity mark column + gap.
+            assert_eq!(item.pixel_x, 16.0 + 8.0 + 24.0 + 12.0);
+            assert_eq!((item.font_size_px, item.font_weight), (24.0, 700));
+        }
+    };
+
+    let mut replace_scene = make_alert_banner_scene();
+    let zone = replace_scene
+        .zone_registry
+        .zones
+        .get_mut("alert-banner")
+        .unwrap();
+    zone.geometry_policy = GeometryPolicy::EdgeAnchored {
+        edge: DisplayEdge::Top,
+        height_pct: 0.06,
+        width_pct: 1.0,
+        margin_px: 0.0,
+    };
+    zone.rendering_policy.backdrop = Some(Rgba::new(1.0, 0.0, 0.0, 1.0));
+    zone.rendering_policy.backdrop_opacity = Some(0.9);
+    zone.contention_policy = ContentionPolicy::Replace;
+    zone.max_publishers = 1;
+    assert_rendered(&replace_scene, &[]);
+
     type Case = (&'static [(&'static str, u32)], &'static [&'static str]);
-    let cases: [Case; 3] = [
+    let cases: [Case; 7] = [
+        (&[], &[]),
+        (&[("Single banner", 2)], &["Single banner"]),
         (&[("Warning", 2), ("Critical", 3)], &["Critical", "Warning"]),
+        (&[("Critical", 3), ("Warning", 2)], &["Critical", "Warning"]),
         (
             &[("Info", 0), ("Warning", 2), ("Critical", 3)],
             &["Critical", "Warning", "Info"],
+        ),
+        (
+            &[("Banner A", 1), ("Banner B", 2), ("Banner C", 3)],
+            &["Banner C", "Banner B", "Banner A"],
         ),
         (
             &[("Warning A", 2), ("Warning B", 2)],
@@ -158,154 +130,28 @@ async fn test_alert_banner_stacks_by_severity_then_recency() {
         for (i, &(text, urgency)) in published.iter().enumerate() {
             publish_alert(&mut scene, text, urgency, &format!("agent-{i}"));
         }
-        let items = compositor.collect_text_items(&scene, 1280.0, 720.0);
-        let order: Vec<&str> = items.iter().map(|item| &*item.text).collect();
-        assert_eq!(order, expected, "published {published:?}");
-        assert!(
-            items.windows(2).all(|w| w[0].pixel_y < w[1].pixel_y),
-            "slots must descend the screen in order"
-        );
-        // The zone's typography reaches every TextItem: size, weight and the
-        // text's left edge in the full-width zone (x = 0): the canonical
-        // `space.alert.margin` (16) inset, the policy's 8 dp
-        // margin_horizontal, then the severity mark's `space.xl` (24) column
-        // and its `space.m` (12) gap.
-        for item in &items {
-            assert_eq!(item.font_size_px, 24.0, "policy font size");
-            assert_eq!(item.font_weight, 700, "policy font weight");
-            assert_eq!(item.pixel_x, 16.0 + 8.0 + 24.0 + 12.0, "text left edge");
-        }
+        assert_rendered(&scene, expected);
     }
 }
 
-/// Alert-banner zone height grows dynamically with active banner count.
-///
-/// Test helper zone: height_pct=0.05, so static zone height at 720p = 36px.
-/// slot_h = font_size_px(16) + 2 × margin_v(8) + SLOT_BASELINE_GAP(2) = 34px.
-///
-/// - 0 banners → 0 vertices (zero height, nothing rendered).
-/// - 1 banner  → 1 backdrop quad (6 vertices), slot at y=0..34px.
-/// - 3 banners → 3 backdrop quads (18 vertices), 3rd slot at y=68..102px —
-///   this exceeds the 36px static height, proving dynamic expansion.
-#[tokio::test]
-async fn test_alert_banner_zone_height_grows_with_active_count() {
-    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
-
-    // ── 0 banners: no vertices emitted ──────────────────────────────────
-    {
-        let scene = make_alert_banner_scene();
-        let mut vertices: Vec<crate::pipeline::RectVertex> = Vec::new();
-        compositor.render_zone_content(&scene, &mut vertices, &mut Vec::new(), 1280.0, 720.0, None);
-        assert!(
-            vertices.is_empty(),
-            "0 banners → 0 vertices (zero height); got {} vertices",
-            vertices.len()
-        );
-    }
-
-    // ── 1 banner: one backdrop quad (6 vertices) ────────────────────────
-    {
-        let mut scene = make_alert_banner_scene();
-        publish_alert(&mut scene, "Single banner", 2, "agent-a");
-        let mut vertices: Vec<crate::pipeline::RectVertex> = Vec::new();
-        compositor.render_zone_content(&scene, &mut vertices, &mut Vec::new(), 1280.0, 720.0, None);
-        assert_eq!(
-            vertices.len(),
-            6,
-            "1 banner → 1 backdrop quad (6 vertices); got {}",
-            vertices.len()
-        );
-    }
-
-    // ── 3 banners: three backdrop quads (18 vertices) ───────────────────
-    //
-    // The static zone height is 36px (height_pct=0.05 × 720p).  Each slot
-    // is 34px.  Under fixed-height logic the 2nd slot (y=34) would be
-    // clipped at 36px (~2px visible) and the 3rd (y=68) would be invisible.
-    // Dynamic height = 3 × 34 = 102px allows all three to render fully.
-    {
-        let mut scene = make_alert_banner_scene();
-        publish_alert(&mut scene, "Banner A", 1, "agent-a");
-        publish_alert(&mut scene, "Banner B", 2, "agent-b");
-        publish_alert(&mut scene, "Banner C", 3, "agent-c");
-        let mut vertices: Vec<crate::pipeline::RectVertex> = Vec::new();
-        compositor.render_zone_content(&scene, &mut vertices, &mut Vec::new(), 1280.0, 720.0, None);
-        assert_eq!(
-            vertices.len(),
-            18,
-            "3 banners → 3 backdrop quads (18 vertices); got {} — \
-                 dynamic height must expand beyond static zone height",
-            vertices.len()
-        );
-        // Verify that all 3 quads are at distinct y positions (slot 0 ≠ slot 2).
-        // Vertex layout from rect_vertices: vertex 0 is top-left [left, top] in NDC.
-        // Slot 0 starts at pixel y=0 → NDC y_top=1.0.
-        // Slot 2 starts at pixel y≈68px → NDC y_top≈0.811 (strictly less than 1.0).
-        let slot0_ndc_y = vertices[0].position[1];
-        let slot2_ndc_y = vertices[12].position[1];
-        assert!(
-            slot2_ndc_y < slot0_ndc_y,
-            "3rd slot must be below 1st slot in NDC y; slot0={slot0_ndc_y}, slot2={slot2_ndc_y}"
-        );
-    }
-}
-
-/// Banner text takes its alert text role for its urgency (`color.on_alert`
-/// for a lone line at urgency 0-2, `color.on_alert.error` at 3) over the
-/// policy text color, draws no outline, and the severity mark draws its
-/// glyph in the severity tint.
-#[tokio::test]
-async fn test_alert_banner_text_uses_alert_text_roles() {
-    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
-    // The severity mark's glyph is a text item only with a rasterizer.
-    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
-    compositor.set_token_map(
-        [
-            ("color.on_alert", "#000000"),
-            ("color.on_alert.error", "#FFFFFF"),
-            ("color.severity.warning", "#00FF00"),
-        ]
-        .into_iter()
-        .map(|(k, v)| (k.to_owned(), v.to_owned()))
-        .collect(),
-    );
-    let mut scene = make_alert_banner_scene();
-    publish_alert(&mut scene, "Disk almost full", 2, "agent-a");
-    publish_alert(&mut scene, "Service down", 3, "agent-b");
-    let items = compositor.collect_text_items(&scene, 1280.0, 720.0);
-    let item = |text: &str| {
-        items
-            .iter()
-            .find(|i| &*i.text == text)
-            .unwrap_or_else(|| panic!("no text item {text:?}"))
-    };
-    assert_eq!(item("Disk almost full").color[..3], [0, 0, 0]);
-    assert_eq!(item("Service down").color[..3], [255, 255, 255]);
-    assert!(item("Disk almost full").outline_color.is_none());
-    // The caution mark's `!` sits left of the caution text, in its tint.
-    let mark = items
-        .iter()
-        .find(|i| &*i.text == "!" && i.color[..3] == [0, 255, 0])
-        .expect("caution severity mark glyph");
-    assert!(mark.pixel_x < item("Disk almost full").pixel_x);
-}
-
-/// A Tonal Glass banner is an inset card: drawn backdrop, hit-tested card
-/// bounds and dismiss × all use the `space.alert.margin` inset, and banners
-/// stack that margin apart below a top margin.
+/// Tonal Glass uses the same inset for the backdrop, hit card and dismiss target.
 #[tokio::test]
 async fn test_alert_banner_is_an_inset_card_matching_its_hit_regions() {
-    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
-    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
-    compositor.set_token_map(HashMap::from([(
-        "space.alert.margin".to_owned(),
-        "16".to_owned(),
-    )]));
+    let (mut compositor, _surface) = require_gpu!(make_text_compositor(1280, 720).await);
+    compositor.set_token_map(token_overrides([
+        ("space.alert.margin", "16"),
+        ("color.on_alert", "#000000"),
+        ("color.on_alert.error", "#FFFFFF"),
+        ("color.severity.warning", "#00FF00"),
+    ]));
     let mut scene = make_alert_banner_scene();
-    {
-        let zone = scene.zone_registry.zones.get_mut("alert-banner").unwrap();
-        zone.rendering_policy.backdrop_radius = Some(10.0);
-    }
+    scene
+        .zone_registry
+        .zones
+        .get_mut("alert-banner")
+        .unwrap()
+        .rendering_policy
+        .backdrop_radius = Some(10.0);
     publish_alert(&mut scene, "Disk almost full", 2, "agent-a");
     publish_alert(&mut scene, "Service down", 3, "agent-b");
     compositor.populate_zone_hit_regions(&mut scene, 1280.0, 720.0);
@@ -315,12 +161,14 @@ async fn test_alert_banner_is_an_inset_card_matching_its_hit_regions() {
         .iter()
         .map(|g| g.bounds)
         .collect();
-    assert_eq!(cards.len(), 2);
+    let [top, next] = cards.as_slice() else {
+        panic!("expected two inset cards");
+    };
     for card in &cards {
         assert_eq!((card.x, card.width), (16.0, 1280.0 - 32.0), "side inset");
     }
-    assert_eq!(cards[0].y, 16.0, "top inset");
-    assert_eq!(cards[1].y, cards[0].y + cards[0].height + 16.0, "stack gap");
+    assert_eq!(top.y, 16.0, "top inset");
+    assert_eq!(next.y, top.y + top.height + 16.0, "stack gap");
     let backdrops: Vec<_> = compositor
         .collect_all_rounded_rect_cmds(&scene, 1280.0, 720.0)
         .chrome
@@ -329,16 +177,33 @@ async fn test_alert_banner_is_an_inset_card_matching_its_hit_regions() {
         .map(|c| Rect::new(c.x, c.y, c.width, c.height))
         .collect();
     assert_eq!(backdrops, cards, "drawn backdrops are the hit-tested cards");
-    for (g, region) in scene.overlay.notification_geometry.iter().zip(
-        scene
-            .overlay
-            .zone_hit_regions
-            .iter()
-            .filter(|r| r.kind == ZoneInteractionKind::Dismiss),
-    ) {
+    let dismiss = scene
+        .overlay
+        .zone_hit_regions
+        .iter()
+        .filter(|r| r.kind == ZoneInteractionKind::Dismiss);
+    assert_eq!(dismiss.clone().count(), cards.len());
+    for (g, region) in scene.overlay.notification_geometry.iter().zip(dismiss) {
         assert_eq!(region.bounds, g.close, "dismiss hit region is the drawn ×");
         assert!(g.close.x + g.close.width <= g.bounds.x + g.bounds.width);
     }
+
+    let items = compositor.collect_text_items(&scene, 1280.0, 720.0);
+    let item = |text: &str| {
+        items
+            .iter()
+            .find(|i| i.text.as_ref() == text)
+            .unwrap_or_else(|| panic!("no text item {text:?}"))
+    };
+    let warning = item("Disk almost full");
+    assert_eq!(warning.color[..3], [0, 0, 0]);
+    assert_eq!(item("Service down").color[..3], [255, 255, 255]);
+    assert!(warning.outline_color.is_none());
+    let mark = items
+        .iter()
+        .find(|i| i.text.as_ref() == "!" && i.color[..3] == [0, 255, 0])
+        .expect("caution severity mark glyph");
+    assert!(mark.pixel_x < warning.pixel_x);
 
     // Frame priming and inset drawing must retain the same live-font action
     // descriptor. Include flush Classic geometry and custom outer insets.
