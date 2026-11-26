@@ -47,6 +47,10 @@ on:
         type: choice
         options: [release-dev, release]
         default: release-dev
+      mouse_receipt_diagnostics:
+        description: "Retain scoped existing mouse DEBUG logs for the unchanged fullscreen gesture sequence"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -238,6 +242,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GESTURES_REQUIRED: ""
+          MOUSE_RECEIPT_DIAGNOSTICS: ${{ github.event_name == 'workflow_dispatch' && inputs.mouse_receipt_diagnostics }}
         shell: pwsh
         run: |
           # Keep Edge onboarding out of the link clicks on this disposable VM.
@@ -261,7 +266,11 @@ jobs:
                 Write-Warning "Could not configure Edge first-run suppression: $_"
               }
             }
-            python scripts/ci/hud_gestures.py --injector sendinput --exe "target/$env:HUD_BUILD_PROFILE/tze_hud.exe" --out "$env:RUNNER_TEMP/gestures" "--required=$env:GESTURES_REQUIRED"
+            $mouseReceiptArgs = @()
+            if ($env:MOUSE_RECEIPT_DIAGNOSTICS -eq 'true') {
+              $mouseReceiptArgs = @('--mouse-receipt-diagnostics')
+            }
+            python scripts/ci/hud_gestures.py --injector sendinput --exe "target/$env:HUD_BUILD_PROFILE/tze_hud.exe" --out "$env:RUNNER_TEMP/gestures" "--required=$env:GESTURES_REQUIRED" @mouseReceiptArgs
             $fullscreenExit = $LASTEXITCODE
           } finally {
             if ($edgeKey) {
