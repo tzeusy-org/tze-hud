@@ -2745,8 +2745,8 @@ def scenario_capture_exclusion(run: Run) -> None:
 
 
 # Windows only: they need Win32 foreground/edit-control access or global hotkeys.
-OVERLAY_SCENARIOS = {"overlay-pointer", "tray", "tray-answer", "go-to-session"}
-TIER_W_ONLY = OVERLAY_SCENARIOS | {"no-focus-steal", "safe-mode", "capture-exclusion"}
+OVERLAY_SCENARIOS = ("tray", "go-to-session", "overlay-pointer", "tray-answer")
+TIER_W_ONLY = {*OVERLAY_SCENARIOS, "no-focus-steal", "safe-mode", "capture-exclusion"}
 
 SCENARIOS: dict[str, Callable[[Run], None]] = {
     "output-anchor": scenario_output_anchor,          # 1

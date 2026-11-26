@@ -887,7 +887,7 @@ class RequiredGateTests(unittest.TestCase):
                     raise err
                 return results
 
-            gate = [] if required is None else ["--required", required]
+            gate = [] if required is None else [f"--required={required}"]
             with mock.patch.object(g, "WINDOWS", True), mock.patch.object(g, "Run", return_value=fake), \
                     mock.patch.object(g, "run_scenarios", side_effect=scenarios) as run, \
                     contextlib.redirect_stdout(io.StringIO()):
@@ -919,9 +919,13 @@ class RequiredGateTests(unittest.TestCase):
                 self.assertEqual(verdict["blocking"], bool(expected))
         _, _, verdict = self.gate("composer", {"keyboard": "FAIL"})
         self.assertEqual(verdict["informational_failed"], ["keyboard"])
+        code, _, verdict = self.gate("", {"tray": "FAIL"}, mode="overlay")
+        self.assertEqual(code, 0)
+        self.assertEqual(verdict["required"], [])
+        self.assertEqual(verdict["informational_failed"], ["tray"])
         for refusal in (g.Refused, g.PartialButtonBatch):
             with self.subTest(refusal=refusal):
-                code, _, verdict = self.gate("tray", {}, refuse=0, refusal=refusal)
+                code, _, verdict = self.gate("", {}, refuse=0, refusal=refusal)
                 self.assertEqual(code, 0, "the fullscreen harness has no required scenario in this invocation")
                 self.assertIs(verdict["partial_button_batch"], refusal is g.PartialButtonBatch)
         self.assertEqual(verdict["required_failed"], [])
@@ -933,14 +937,14 @@ class RequiredGateTests(unittest.TestCase):
         self.assertEqual(failure.exception.code, 2)
 
     def test_overlay_wrapper_passes_the_list_and_gates_setup_failure_on_it(self) -> None:
-        for required, expected in ((None, 1), ("composer", 0), ("composer,tray", 1)):
+        for required, expected in ((None, 1), ("", 0), ("composer", 0), ("composer,tray", 1)):
             with self.subTest(required=required), tempfile.TemporaryDirectory() as directory, \
                     mock.patch.object(overlay.sys, "platform", "win32"), \
                     mock.patch.dict(overlay.os.environ, {"GITHUB_ACTIONS": "true", "WINDIR": directory}), \
                     mock.patch.object(overlay.hud_gestures, "windows_huds", return_value=[]), \
                     mock.patch.dict(sys.modules, {"winreg": mock.Mock()}), \
                     contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-                gate = [] if required is None else ["--required", required]
+                gate = [] if required is None else [f"--required={required}"]
                 # No Vulkan loader under WINDIR: setup fails before any scenario.
                 self.assertEqual(overlay.main(["--exe", "unused.exe", "--out", directory, *gate]), expected)
         with tempfile.TemporaryDirectory() as directory, mock.patch.object(overlay.sys, "platform", "win32"), \
@@ -953,10 +957,12 @@ class RequiredGateTests(unittest.TestCase):
                 contextlib.redirect_stdout(io.StringIO()):
             (Path(directory) / "System32").mkdir()
             (Path(directory) / "System32/vulkan-1.dll").write_bytes(b"")
-            self.assertEqual(overlay.main(["--exe", "x.exe", "--out", directory, "--required", "tray"]), 0)
-            argv = scenarios.call_args.args[0]
-            self.assertEqual(argv[argv.index("--required") + 1], "tray")
-            self.assertEqual(argv[-4:], ["go-to-session", "overlay-pointer", "tray", "tray-answer"])
+            for gate in ([], ["--required="], ["--required=tray"]):
+                with self.subTest(gate=gate):
+                    self.assertEqual(overlay.main(["--exe", "x.exe", "--out", directory, *gate]), 0)
+                    argv = scenarios.call_args.args[0]
+                    self.assertEqual(argv[argv.index("--out") + 2:],
+                                     [*gate, "tray", "go-to-session", "overlay-pointer", "tray-answer"])
 
 
 class OverlayInstallerTests(unittest.TestCase):

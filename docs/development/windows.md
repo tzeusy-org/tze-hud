@@ -666,14 +666,17 @@ python scripts/ci/windows_overlay_gestures.py --exe target/release-dev/tze_hud.e
 The existing `gestures` artifact includes `overlay/timeline.json`, native logs,
 status and desktop captures, plus `overlay/setup.json` with setup and total
 added occupancy (target: combined gesture step at most four minutes). Native
-failures remain failures in these artifacts. Scenario 11 (`overlay-pointer`)
-and `tray` are in the step's `GESTURES_REQUIRED`
-list, so their failure, or a setup failure, fails `windows-build` in its last
-step and withholds the `dev` prerelease; merges are unaffected. The overlay run
-also carries the informational `tray-answer` (a real tray left click with a
-question waiting, then Esc and a keystroke that must reach Notepad); an icon
-in overflow leaves it a limited proof. This checks hosted software-rendered mechanics; owner GPU,
-DWM transparency, multiple monitors and DPI acceptance remain separate.
+failures remain failures in these artifacts. The hosted `GESTURES_REQUIRED`
+list is empty. The overlay sweep runs `tray`, `go-to-session`, `overlay-pointer`,
+and `tray-answer` in that order, all informational. Tray lost its required
+status after its foreground check timed out before the first chord. Each
+scenario needs ten consecutive main passes before it can become required.
+[Actual-main tray failure](https://github.com/tzeusy-org/tze-hud/actions/runs/45875969078)
+
+The `tray-answer` scenario uses a real tray left click with a question waiting,
+then Esc and a keystroke that must reach Notepad. An icon in overflow limits
+the proof. This checks hosted software-rendered mechanics. Owner GPU, DWM
+transparency, multiple monitors and DPI acceptance remain separate.
 
 On the disposable GitHub-hosted runner, the fullscreen step attempts to
 suppress Edge onboarding through a browser policy and restores the previous
