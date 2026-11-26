@@ -956,8 +956,9 @@ class WindowsGuardTests(unittest.TestCase):
                     self.assertEqual("tray-answer" in selected, mode == "overlay")
                     self.assertEqual("go-to-session" in selected, mode == "overlay")
                     self.assertEqual("card-copy" in selected, mode == "fullscreen")
+                    self.assertEqual("card-reply" in selected, mode == "fullscreen")
                     self.assertEqual("card-reveal" in selected, mode == "fullscreen")
-                    self.assertEqual(len(selected), len(g.OVERLAY_SCENARIOS) if mode == "overlay" else 32)
+                    self.assertEqual(len(selected), len(g.OVERLAY_SCENARIOS) if mode == "overlay" else 33)
                     # Real link handoffs can foreground a browser late, so they run
                     # after every other injecting scenario; MCP-only restart stays last.
                     self.assertEqual(selected[-3:] == ["portal-reading", "card-link", "restart"],

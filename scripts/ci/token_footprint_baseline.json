@@ -428,9 +428,9 @@
     }
   },
   "approval": {
-    "status": "pending_owner_review",
-    "decision_reference": "hud-ljhku.11 R11.1 S2 and G6 require owner review of the measured tools/list growth.",
-    "basis": "Two byte-identical measurements at 5a54a96b record tools/list moving from 2,749 to 2,806 model-visible bytes and 635 to 647 tokens (wire 2,851 to 2,908 bytes and 672 to 684 tokens). The other eight flow fingerprints and metrics, the action-limit error, the tokenizer and the flow ceilings are unchanged."
+    "status": "owner_approved",
+    "decision_reference": "hud-ljhku.11 R11.1 S2 and G6: owner questionnaire decision typed-reply-tools-list, option A, accepted up to 2,806 model-visible bytes and 647 tokens on 2026-11-26.",
+    "basis": "Two byte-identical source-bound measurements at 3f99c25d confirm tools/list moves from 2,749 to 2,806 model-visible bytes and 635 to 647 tokens (wire 2,851 to 2,908 bytes and 672 to 684 tokens). The other eight flow fingerprints and metrics, the action-limit error, the tokenizer and the flow ceilings are unchanged."
   },
   "previous_approval": {
     "status": "owner_approved",
