@@ -2,7 +2,7 @@
 #
 # Required checks: p95 <=360 s wall-clock over the last 20 main merge groups;
 # first attempts must pass (docs/scope.md "Merge gate and testability").
-# Anything slower goes in the weekly lanes (perf-budget.yml, perf-assert.yml).
+# Longer performance checks run in perf-budget.yml.
 # Every job has a job-level timeout-minutes and every apt step has its own, so
 # a stalled runner or mirror fails fast instead of timing out the merge queue.
 #

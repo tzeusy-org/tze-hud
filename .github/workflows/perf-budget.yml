@@ -8,6 +8,7 @@
 #     plus a real constrained WARP overlay quiescent-efficiency artifact gate
 #   constrained-envelope-budget — llvmpipe proxy, exactly two logical CPUs,
 #     same normalized ceilings
+#   timing-asserts — gated portal cadence and vertical slice timing assertions
 
 name: Performance budget
 
@@ -34,6 +35,9 @@ jobs:
     runs-on: windows-latest
     if: github.event_name != 'pull_request' || github.event.label.name == 'perf-assert'
     timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
@@ -66,61 +70,39 @@ jobs:
           .\scripts\ci\windows\run-quiescent-efficiency.ps1 `
             -ExePath target\release\tze_hud.exe `
             -OutputDir test_results\windows-performance-budget\quiescent-efficiency
-      # ── Cross-run telemetry trend (informational) ─────────────────────
-      #
-      # The gate above is a hard PASS/FAIL against the checked-in baseline; it
-      # does not retain prior numeric values, so within-budget drift is
-      # invisible. This step surfaces the numeric deltas.
-      #
-      # RETENTION/SCOPE POLICY : the trend baseline is MAIN-PINNED,
-      # not branch-scoped. Every run compares against the budget-gate summary
-      # published as an artifact by the latest SUCCESSFUL `main` run. This gives
-      # a stable baseline immune to per-branch cache divergence — a PR no longer
-      # drifts against its own prior PR runs, and the headline "vs main" delta is
-      # what a reviewer actually wants. The previous branch-scoped actions/cache
-      # approach was replaced because it made each branch its own moving target.
-      #
-      # We fetch the main artifact with `gh run download` (cross-run, so plain
-      # actions/download-artifact does not apply): pick the latest successful run
-      # of this workflow on `main` and pull its `windows-perf-baseline-main`
-      # artifact. On the first main run there may be no prior green main yet -> the
-      # reporter handles the no-baseline case gracefully (prints a notice).
-      - name: Download main-pinned Windows perf baseline
+      # Only exact main attempts with both original budget jobs green can
+      # establish a trend baseline. The separate timing verdict is independent.
+      - name: Select main-pinned Windows perf baseline
         id: perf-baseline
         if: always()
-        shell: pwsh
+        timeout-minutes: 2
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          $ErrorActionPreference = "Stop"
-          New-Item -ItemType Directory -Force -Path perf-baseline-main | Out-Null
-          # Latest successful CI run on main (exclude this run if we ARE main).
-          $runId = gh run list --workflow perf-budget.yml --branch main --status success `
-            --limit 1 --json databaseId --jq '.[0].databaseId' 2>$null
-          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($runId)) {
-            Write-Host "No successful main run found yet; no baseline to download."
-          } else {
-            Write-Host "Downloading perf baseline artifact from main run $runId"
-            # Non-fatal: a green run may predate this artifact name.
-            gh run download $runId `
-              --name windows-perf-baseline-main `
-              --dir perf-baseline-main 2>$null
-            if ($LASTEXITCODE -ne 0) {
-              Write-Host "Baseline artifact not present on run $runId; treating as no baseline."
-            }
-          }
-          # Missing baseline is the expected bootstrap state, not a step failure.
-          # GitHub's pwsh shell appends `exit $LASTEXITCODE`, so clear any
-          # non-zero code left by the probing `gh` calls above.
-          $global:LASTEXITCODE = 0
+        run: python scripts/ci/select_windows_perf_baseline.py
+      - name: Download main-pinned Windows perf baseline
+        id: perf-baseline-download
+        if: ${{ !cancelled() && steps.perf-baseline.outputs.artifact-id != '' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ steps.perf-baseline.outputs.artifact-id }}
+          run-id: ${{ steps.perf-baseline.outputs.run-id }}
+          github-token: ${{ github.token }}
+          path: perf-baseline-main
+          digest-mismatch: error
       - name: Report Windows perf trend deltas (vs main baseline)
         if: always()
         shell: pwsh
+        env:
+          BASELINE_DOWNLOAD_OUTCOME: ${{ steps.perf-baseline-download.outcome }}
         run: |
           $ErrorActionPreference = "Stop"
           $baseline = "perf-baseline-main/budget-gate.json"
           $baselineArg = @()
-          if (Test-Path $baseline) { $baselineArg = @("--baseline", $baseline) }
+          if ($env:BASELINE_DOWNLOAD_OUTCOME -eq 'success' -and (Test-Path $baseline)) {
+            $baselineArg = @("--baseline", $baseline)
+          }
           python scripts/ci/report_telemetry_trend.py `
             --current test_results/windows-performance-budget/budget-gate.json `
             @baselineArg
@@ -132,7 +114,7 @@ jobs:
         if: success() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v6
         with:
-          name: windows-perf-baseline-main
+          name: windows-perf-baseline-main-attempt-${{ github.run_attempt }}
           path: test_results/windows-performance-budget/budget-gate.json
           if-no-files-found: error
           retention-days: 90
@@ -172,3 +154,103 @@ jobs:
           name: constrained-envelope-budget
           path: test_results/constrained-envelope-budget/
           if-no-files-found: error
+
+  timing-asserts:
+    name: Linux timing assertions
+    runs-on: ubuntu-24.04
+    if: github.event_name != 'pull_request' || github.event.label.name == 'perf-assert'
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.88"
+      - uses: Swatinem/rust-cache@v2.9.1
+        timeout-minutes: 10
+      - name: Install Mesa / llvmpipe
+        id: mesa
+        timeout-minutes: 5
+        run: |
+          sudo apt-get $APT_OPTS update -q
+          sudo apt-get $APT_OPTS install -y --no-install-recommends \
+            libvulkan1 \
+            mesa-vulkan-drivers \
+            mesa-utils \
+            libegl-mesa0 \
+            libgl1-mesa-dri
+
+      # Keep the portal's original hard verdict and retain its historical
+      # 358829us and 535336us burst misses against 250000us.
+      # https://github.com/tzeusy-org/tze-hud/actions/runs/45155588920
+      # https://github.com/tzeusy-org/tze-hud/actions/runs/42591938633
+      - name: Assert portal cadence timing budgets
+        shell: bash
+        env:
+          TZE_HUD_PERF_ASSERT: "1"
+        run: |
+          mkdir -p test_results/perf-assert
+          cargo test -p integration --test it text_stream_portal_cadence:: -- --nocapture \
+            2>&1 | tee test_results/perf-assert/portal.log
+      - name: Assert vertical slice timing budgets
+        if: ${{ !cancelled() && steps.mesa.outcome == 'success' }}
+        shell: bash
+        env:
+          TZE_HUD_PERF_ASSERT: "1"
+        run: |
+          mkdir -p test_results/perf-assert
+          cargo test -p vertical_slice --test budget_assertions -- --nocapture \
+            2>&1 | tee test_results/perf-assert/budget.log
+
+      - name: Collect p99 JSON trend artifacts
+        if: ${{ !cancelled() && hashFiles('test_results/perf-assert/budget.log') != '' }}
+        run: |
+          mkdir -p test_results/perf-assert
+          python3 - <<'EOF'
+          import json, re, pathlib
+
+          log = pathlib.Path("test_results/perf-assert/budget.log").read_text(errors="replace")
+          entries = []
+          for line in log.splitlines():
+              # Match PASS lines: "[PASS] metric p99=NNNus within budget=MMMus ..."
+              m_pass = re.match(
+                  r'\[PASS\]\s+(\S+)\s+p99=(\d+)us\s+within.*?budget=(\d+)us',
+                  line,
+              )
+              if m_pass:
+                  entries.append({
+                      "status": "PASS",
+                      "metric": m_pass.group(1),
+                      "p99_us": int(m_pass.group(2)),
+                      "budget_us": int(m_pass.group(3)),
+                  })
+                  continue
+              # Match SKIP-TIMING lines: "[SKIP-TIMING] metric raw_p99=NNNus; ..."
+              m_skip = re.match(r'\[SKIP-TIMING\]\s+(\S+)\s+raw_p99=(\d+)us', line)
+              if m_skip:
+                  entries.append({
+                      "status": "SKIP-TIMING",
+                      "metric": m_skip.group(1),
+                      "p99_us": int(m_skip.group(2)),
+                  })
+                  continue
+              # Match UNCALIBRATED lines: "[UNCALIBRATED] metric raw_p99=NNNus; ..."
+              m_uncal = re.match(r'\[UNCALIBRATED\]\s+(\S+)\s+raw_p99=(\d+)us', line)
+              if m_uncal:
+                  entries.append({
+                      "status": "UNCALIBRATED",
+                      "metric": m_uncal.group(1),
+                      "p99_us": int(m_uncal.group(2)),
+                  })
+
+          out = pathlib.Path("test_results/perf-assert/budget-p99.json")
+          out.write_text(json.dumps({"entries": entries}, indent=2))
+          print(f"Captured {len(entries)} p99 entries -> {out}")
+          EOF
+
+      - name: Upload p99 trend artifacts
+        uses: actions/upload-artifact@v6
+        if: ${{ !cancelled() && hashFiles('test_results/perf-assert/*.log') != '' }}
+        with:
+          name: perf-assert-budget-p99
+          path: test_results/perf-assert/
+          if-no-files-found: warn

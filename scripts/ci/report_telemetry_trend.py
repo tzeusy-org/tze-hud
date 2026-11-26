@@ -15,7 +15,7 @@ deltas, and appends a Markdown table to the GitHub Actions step summary when
 
 Baseline source (retention/scope policy — hud-bp3c3): the baseline is the
 budget-gate summary published as a *main-pinned artifact* from the latest
-successful ``main`` run, NOT a branch-scoped cache. Every branch/PR run compares
+``main`` attempt with both budget jobs successful. Every branch/PR run compares
 against the same stable main baseline, so the trend delta is immune to
 per-branch cache divergence (a PR no longer drifts against its own prior PR
 runs). The CI workflow downloads that main artifact and passes it via
@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 from pathlib import Path
 from typing import Any
@@ -56,7 +57,7 @@ def load_report(path: Path) -> dict[str, Any]:
     try:
         with path.open("r", encoding="utf-8") as handle:
             payload = json.load(handle)
-    except json.JSONDecodeError as exc:
+    except (ValueError, RecursionError) as exc:
         raise SystemExit(f"{path}: invalid JSON: {exc}") from exc
     except OSError as exc:
         raise SystemExit(f"{path}: unable to read: {exc}") from exc
@@ -105,6 +106,18 @@ def observed_value(result: dict[str, Any]) -> int | float | None:
             if isinstance(value, (int, float)):
                 return value
     return None
+
+
+def baseline_observations_are_finite(baseline: dict[str, Any]) -> bool:
+    observations = (
+        observed_value(result)
+        for (_, metric), result in index_results(baseline).items()
+        if metric in TREND_METRICS
+    )
+    try:
+        return all(value is None or math.isfinite(value) for value in observations)
+    except OverflowError:
+        return False
 
 
 def unit_for(metric: str) -> str:
@@ -190,9 +203,9 @@ def render_markdown_table(deltas: list[dict[str, Any]]) -> str:
     lines = [
         "### Windows performance budget — cross-run trend",
         "",
-        "Informational trend deltas vs the main-pinned baseline (latest green "
-        "main run's summary). The hard PASS/FAIL baseline gate is enforced "
-        "separately and is unaffected by within-budget drift.",
+        "Informational trend deltas vs the latest main attempt with successful "
+        "Windows and constrained budget jobs. The hard PASS/FAIL baseline gate "
+        "is enforced separately and is unaffected by within-budget drift.",
         "",
         "| Session | Metric | Previous | Current | Delta | % | Budget |",
         "|---|---|---|---|---|---|---|",
@@ -235,27 +248,37 @@ def main() -> int:
         required=True,
         help="Path to the current run's budget-gate report JSON.",
     )
-    # The baseline is the main-pinned budget-gate summary (artifact from the
-    # latest successful main run); ``--previous`` is a back-compat alias.
+    # The baseline is the main-pinned budget-gate summary. ``--previous`` is a back-compat alias.
     parser.add_argument(
         "--baseline",
         "--previous",
         dest="baseline",
         type=Path,
         help="Path to the baseline budget-gate report JSON, downloaded from the "
-        "main-pinned artifact of the latest successful main run. Optional: when "
-        "absent or missing on disk (e.g. no green main baseline yet), the "
-        "no-baseline case is handled gracefully.",
+        "latest main attempt with successful Windows and constrained budget jobs. "
+        "Optional if that artifact is unavailable.",
     )
     args = parser.parse_args()
 
     current = load_report(args.current)
 
-    if args.baseline is None or not args.baseline.exists():
+    # Keep a bad optional artifact informational after validating the current report.
+    baseline = None
+    if args.baseline is not None:
+        try:
+            baseline = load_report(args.baseline)
+        except SystemExit:
+            pass
+    if (
+        baseline is None
+        or baseline.get("verdict") != "pass"
+        or baseline.get("failures") != []
+        or not isinstance(baseline.get("results"), list)
+        or not baseline_observations_are_finite(baseline)
+    ):
         notice = (
-            "No main-pinned Windows performance baseline found — no green main "
-            "artifact yet. Trend deltas will appear once main publishes a "
-            "baseline summary."
+            "No main-pinned Windows performance baseline available. Trend deltas "
+            "will appear when a qualifying main baseline can be downloaded."
         )
         print(notice)
         write_step_summary(
@@ -264,7 +287,6 @@ def main() -> int:
         )
         return 0
 
-    baseline = load_report(args.baseline)
     deltas = compute_deltas(current, baseline)
 
     if not deltas:

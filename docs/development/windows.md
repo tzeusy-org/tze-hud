@@ -98,7 +98,7 @@ cargo build --profile release-dev -p tze_hud_app --bin tze_hud
 Non-docs PR/main builds and manual Windows builds use `release-dev`: optimized
 code with thin LTO and 16 codegen units. Version tags keep `--release` with
 full LTO and one codegen unit; `perf-budget.yml` also keeps `--release`.
-`perf-assert.yml` keeps its existing default test profile.
+The Linux timing assertions in `perf-budget.yml` keep the default test profile.
 `.cargo/config.toml` links the CRT statically for `x86_64-pc-windows-msvc`,
 so the exe needs no VC++ redistributable. A debug build
 (`cargo build -p tze_hud_app --bin tze_hud`) is fine for iteration.
