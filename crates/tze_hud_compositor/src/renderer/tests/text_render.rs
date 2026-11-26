@@ -1,723 +1,245 @@
 use super::*;
 
-// ── Text rendering pixel tests ────────────────────────────────────────────
-//
-// These tests validate acceptance criteria 1–4
-//  1. publish_to_zone with StreamText → visible text at zone geometry.
-//  2. TextMarkdownNode renders text (some non-background pixels in text area).
-//  3. Overflow Clip and Ellipsis modes: glyphs stay within TextBounds.
-//  4. Headless pixel readback detects text presence.
-//
-// All tests initialise the text renderer via `compositor.init_text_renderer`
-// targeting `Rgba8UnormSrgb` (the headless surface format).
-
-/// Pixel readback validates text presence in a TextMarkdownNode tile.
-///
-/// After text rendering, pixels in the text region should differ from the
-/// solid background color — glyphs overwrite some pixels.  We can't check
-/// exact glyph shapes without font-specific knowledge, so we verify that
-/// at least one pixel in the tile area differs from the pure background
-/// color.
-#[tokio::test]
-async fn test_text_markdown_node_renders_visible_text() {
-    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(256, 256).await);
-    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
-
-    // Dark-blue background, white text — high contrast for pixel detection.
-    let node = Node {
-        layout: Default::default(),
-        id: SceneId::new(),
-        children: vec![],
-        data: NodeData::TextMarkdown(TextMarkdownNode {
-            content: "Hello world".to_owned(),
-            bounds: Rect::new(0.0, 0.0, 256.0, 256.0),
-            font_size_px: 24.0,
-            font_family: FontFamily::SystemSansSerif,
-            color: Rgba::new(1.0, 1.0, 1.0, 1.0), // white
-            background: Some(Rgba::new(0.0, 0.0, 0.5, 1.0)), // dark blue
-            alignment: TextAlign::Start,
-            overflow: TextOverflow::Clip,
-            color_runs: Box::default(),
-        }),
-    };
-    let mut scene = scene_with_node(node);
-    compositor.prime_markdown_cache(&scene);
-    compositor.prime_truncation_cache(&scene);
-    compositor.render_frame_headless(&mut scene, &surface);
-
-    let pixels = surface.read_pixels(&compositor.device);
-    assert_eq!(pixels.len(), 256 * 256 * 4, "pixel buffer size");
-
-    // The background is dark blue — sRGB of linear [0,0,0.5] ≈ [0, 0, 188].
-    // White text (sRGB [255, 255, 255]) glyphs should appear in the tile.
-    // We check that at least one pixel has R > 200 AND G > 200 (white).
-    let any_bright_pixel = pixels
-        .chunks(4)
-        .any(|p| p[0] > 200 && p[1] > 200 && p[2] > 200);
-    assert!(
-        any_bright_pixel,
-        "expected white text pixels in TextMarkdownNode tile — none found"
-    );
+fn pixels_in_rect(pixels: &[u8], frame_width: usize, rect: Rect) -> impl Iterator<Item = &[u8]> {
+    let left = rect.x as usize * 4;
+    let right = (rect.x + rect.width) as usize * 4;
+    pixels
+        .chunks_exact(frame_width * 4)
+        .skip(rect.y as usize)
+        .take(rect.height as usize)
+        .flat_map(move |row| row[left..right].chunks_exact(4))
 }
 
-/// When the text rasterizer is active, TextMarkdownNode must not fall back
-/// to the old full-width placeholder bar path.
-#[tokio::test]
-async fn test_text_markdown_node_avoids_placeholder_bar_when_text_renderer_active() {
-    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(160, 80).await);
-    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
-
-    let node = Node {
-        layout: Default::default(),
-        id: SceneId::new(),
-        children: vec![],
-        data: NodeData::TextMarkdown(TextMarkdownNode {
-            content: "I".to_owned(),
-            bounds: Rect::new(20.0, 16.0, 100.0, 40.0),
-            font_size_px: 28.0,
-            font_family: FontFamily::SystemSansSerif,
-            color: Rgba::new(1.0, 1.0, 1.0, 1.0),
-            background: Some(Rgba::new(0.0, 0.0, 0.0, 1.0)),
-            alignment: TextAlign::Start,
-            overflow: TextOverflow::Clip,
-            color_runs: Box::default(),
-        }),
-    };
-    let mut scene = scene_with_node(node);
-    compositor.prime_markdown_cache(&scene);
-    compositor.prime_truncation_cache(&scene);
-    compositor.render_frame_headless(&mut scene, &surface);
-
-    let pixels = surface.read_pixels(&compositor.device);
-    let width = 160usize;
-    let height = 80usize;
-    let bright = |rgba: &[u8]| rgba[0] > 200 && rgba[1] > 200 && rgba[2] > 200;
-
-    let max_bright_run = (0..height)
-        .map(|row| {
-            (0..width)
-                .filter(|col| bright(&pixels[(row * width + col) * 4..][..4]))
-                .count()
-        })
-        .max()
-        .unwrap_or(0);
-
-    assert!(
-        max_bright_run < 40,
-        "text renderer should not paint a placeholder bar; brightest row had {max_bright_run} bright pixels"
-    );
+fn bright(pixel: &[u8], threshold: u8) -> bool {
+    pixel[..3].iter().all(|&channel| channel > threshold)
 }
 
-/// Text stays within the TextBounds clip rectangle (Clip overflow mode).
-///
-/// We render white text in a small region at the top-left of a dark tile.
-/// The bottom-right quadrant should remain all-dark (no text overflow).
 #[tokio::test]
 async fn test_text_clip_overflow_stays_within_bounds() {
-    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(256, 256).await);
-    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
-
-    // Text node occupies only top-left 64x64 pixels of the 256x256 tile.
-    // Content: many lines so overflow is tested.
-    let content = "Line1\nLine2\nLine3\nLine4\nLine5\nLine6\nLine7\nLine8".to_owned();
-    let node = Node {
-        layout: Default::default(),
-        id: SceneId::new(),
-        children: vec![],
-        data: NodeData::TextMarkdown(TextMarkdownNode {
-            content,
-            bounds: Rect::new(0.0, 0.0, 64.0, 32.0), // small box
-            font_size_px: 12.0,
-            font_family: FontFamily::SystemSansSerif,
-            color: Rgba::new(1.0, 1.0, 1.0, 1.0), // white
-            background: Some(Rgba::new(0.0, 0.0, 0.0, 1.0)), // pure black bg
-            alignment: TextAlign::Start,
-            overflow: TextOverflow::Clip,
-            color_runs: Box::default(),
-        }),
-    };
-    let mut scene = scene_with_node(node);
-    compositor.prime_markdown_cache(&scene);
-    compositor.prime_truncation_cache(&scene);
-    compositor.render_frame_headless(&mut scene, &surface);
-
-    let pixels = surface.read_pixels(&compositor.device);
-
-    // Bottom-right quadrant: rows 128..256, cols 128..256.
-    // Tile background is ~[0.15, 0.15, 0.25] (tile_background_color default).
-    // There should be no white pixels (from text) there.
-    let mut bright_outside = false;
-    for row in 128..256_usize {
-        for col in 128..256_usize {
-            let offset = (row * 256 + col) * 4;
-            let p = &pixels[offset..offset + 4];
-            // White text would have R > 200 AND G > 200 AND B > 200.
-            if p[0] > 200 && p[1] > 200 && p[2] > 200 {
-                bright_outside = true;
-                break;
+    let (mut compositor, surface) = require_gpu!(make_text_compositor(256, 256).await);
+    let bounds = Rect::new(20.0, 16.0, 100.0, 40.0);
+    let mut scene = scene_with_node(leaf(NodeData::TextMarkdown(TextMarkdownNode {
+        background: Some(Rgba::BLACK),
+        ..markdown_text("I\nI\nI\nI", bounds, 28.0)
+    })));
+    prime_text(&mut compositor, &scene);
+    let pixels = render_pixels(&mut compositor, &mut scene, &surface);
+    assert_eq!(pixels.len(), 256 * 256 * 4);
+    let mut brightest_row = 0;
+    for (y, row) in pixels.chunks_exact(256 * 4).enumerate() {
+        let mut count = 0;
+        for (x, pixel) in row.chunks_exact(4).enumerate() {
+            if bright(pixel, 200) {
+                assert!(
+                    bounds.contains_point(x as f32, y as f32),
+                    "glyph escapes clip at {x},{y}"
+                );
+                count += 1;
             }
         }
-        if bright_outside {
-            break;
-        }
+        brightest_row = brightest_row.max(count);
     }
     assert!(
-        !bright_outside,
-        "text overflow detected outside clip bounds (bottom-right quadrant has bright pixels)"
+        (1..40).contains(&brightest_row),
+        "expected a narrow visible glyph in place of a placeholder bar, got {brightest_row} bright pixels"
     );
+
+    let bounds = Rect::new(0.0, 0.0, 120.0, 40.0);
+    let mut scene = scene_with_node(leaf(NodeData::TextMarkdown(TextMarkdownNode {
+        background: Some(Rgba::new(0.1, 0.1, 0.1, 1.0)),
+        overflow: TextOverflow::Ellipsis,
+        ..markdown_text(
+            "A very long line that definitely overflows the available width of this tile",
+            bounds,
+            14.0,
+        )
+    })));
+    prime_text(&mut compositor, &scene);
+    let pixels = render_pixels(&mut compositor, &mut scene, &surface);
+    assert_eq!(pixels.len(), 256 * 256 * 4);
+    assert!(pixels_in_rect(&pixels, 256, bounds).any(|pixel| bright(pixel, 200)));
 }
 
-/// Ellipsis overflow mode: text renders without panic; background present.
-///
-/// We don't assert exact "…" pixel shape — that's platform-font-specific.
-/// We verify: (a) no panic, (b) background exists, (c) some non-background
-/// pixels appear (text was rendered at all).
 #[tokio::test]
-async fn test_text_ellipsis_overflow_no_panic() {
-    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(256, 256).await);
-    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
-
-    let long_line = "A very long line that definitely overflows the available width of this tile";
-    let node = Node {
-        layout: Default::default(),
-        id: SceneId::new(),
-        children: vec![],
-        data: NodeData::TextMarkdown(TextMarkdownNode {
-            content: long_line.to_owned(),
-            bounds: Rect::new(0.0, 0.0, 120.0, 40.0),
-            font_size_px: 14.0,
-            font_family: FontFamily::SystemSansSerif,
-            color: Rgba::new(1.0, 1.0, 1.0, 1.0),
-            background: Some(Rgba::new(0.1, 0.1, 0.1, 1.0)),
-            alignment: TextAlign::Start,
-            overflow: TextOverflow::Ellipsis,
-            color_runs: Box::default(),
-        }),
-    };
-    let mut scene = scene_with_node(node);
-    compositor.prime_markdown_cache(&scene);
-    compositor.prime_truncation_cache(&scene);
-    // Must not panic.
-    compositor.render_frame_headless(&mut scene, &surface);
-    let pixels = surface.read_pixels(&compositor.device);
-    assert_eq!(
-        pixels.len(),
-        256 * 256 * 4,
-        "pixel buffer must be full size"
-    );
-}
-
-/// Zone StreamText publish renders visible text at zone geometry.
-///
-/// Acceptance criterion 1: publish_to_zone with StreamText content displays
-/// readable text at the zone geometry position.
-#[tokio::test]
-async fn test_zone_stream_text_renders_visible_text() {
-    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
-    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
-
-    let mut scene = SceneGraph::new(1280.0, 720.0);
-
-    // Register a subtitle zone (bottom edge, 10% height).
-    scene.register_zone(ZoneDefinition {
-        id: SceneId::new(),
-        name: "subtitle".to_owned(),
-        description: "subtitle zone".to_owned(),
-        geometry_policy: GeometryPolicy::EdgeAnchored {
-            edge: DisplayEdge::Bottom,
-            height_pct: 0.10,
-            width_pct: 0.80,
-            margin_px: 16.0,
-        },
-        accepted_media_types: vec![ZoneMediaType::StreamText],
-        rendering_policy: RenderingPolicy {
-            font_size_px: Some(22.0),
-            backdrop: Some(Rgba::new(0.0, 0.0, 0.0, 0.7)),
-            text_align: None,
-            margin_px: None,
-            ..Default::default()
-        },
-        contention_policy: ContentionPolicy::LatestWins,
-        max_publishers: 1,
-        auto_clear_ms: None,
-        ephemeral: false,
-        layer_attachment: LayerAttachment::Content,
-    });
-
-    // Publish "Hello Zone" to the subtitle zone.
-    scene
-        .publish_to_zone(
+async fn test_zone_publications_render_visible_text_in_their_geometry() {
+    let (mut compositor, surface) = require_gpu!(make_text_compositor(1280, 720).await);
+    let cases = [
+        (
             "subtitle",
-            ZoneContent::StreamText("Hello Zone".to_owned()),
-            "test",
-            None,
-            None,
-            None,
-        )
-        .unwrap();
-
-    compositor.prime_markdown_cache(&scene);
-    compositor.prime_truncation_cache(&scene);
-    compositor.render_frame_headless(&mut scene, &surface);
-    let pixels = surface.read_pixels(&compositor.device);
-    assert_eq!(pixels.len(), 1280 * 720 * 4, "pixel buffer size");
-
-    // The zone is at the bottom 10% (y ~648..720) centered (x ~128..1152).
-    // We check for any bright pixels in that area (white text on dark bg).
-    // Zone bg is semi-transparent dark [0.1, 0.1, 0.15, 0.85] rendered over
-    // the default compositor clear [0.05, 0.05, 0.1] → still quite dark.
-    // White text glyphs should show as bright pixels.
-    let mut found_bright = false;
-    // Sample a row in the subtitle zone (row 660 ≈ 91.7% of 720 = 661).
-    for row in 652usize..715 {
-        for col in 150usize..1130 {
-            let offset = (row * 1280 + col) * 4;
-            let p = &pixels[offset..offset + 4];
-            if p[0] > 180 && p[1] > 180 && p[2] > 180 {
-                found_bright = true;
-                break;
-            }
-        }
-        if found_bright {
-            break;
-        }
-    }
-    assert!(
-        found_bright,
-        "expected bright (text) pixels in zone subtitle area (rows 652..715)"
-    );
-}
-
-/// Zone ShortTextWithIcon/Notification publish renders visible text at zone geometry.
-///
-/// Publishing to a zone with
-/// `ZoneContent::Notification(NotificationPayload)` produces a `TextItem` in
-/// `collect_text_items` and causes bright glyph pixels to appear in the zone
-/// geometry area.
-#[tokio::test]
-async fn test_zone_notification_renders_visible_text() {
-    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
-    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
-
-    let mut scene = SceneGraph::new(1280.0, 720.0);
-
-    // Register a notification zone (top edge, 8% height).
-    scene.register_zone(ZoneDefinition {
-        id: SceneId::new(),
-        name: "notification".to_owned(),
-        description: "notification zone".to_owned(),
-        geometry_policy: GeometryPolicy::EdgeAnchored {
-            edge: DisplayEdge::Top,
-            height_pct: 0.08,
-            width_pct: 0.70,
-            margin_px: 12.0,
-        },
-        accepted_media_types: vec![ZoneMediaType::ShortTextWithIcon],
-        rendering_policy: RenderingPolicy {
-            font_size_px: Some(20.0),
-            backdrop: Some(Rgba::new(0.0, 0.0, 0.0, 0.75)),
-            text_align: None,
-            margin_px: None,
-            ..Default::default()
-        },
-        contention_policy: ContentionPolicy::LatestWins,
-        max_publishers: 1,
-        auto_clear_ms: None,
-        ephemeral: false,
-        layer_attachment: LayerAttachment::Content,
-    });
-
-    // Publish a notification to the zone.
-    scene
-        .publish_to_zone(
+            ZoneMediaType::StreamText,
+            ZoneContent::StreamText("Hello Zone".into()),
+            GeometryPolicy::EdgeAnchored {
+                edge: DisplayEdge::Bottom,
+                height_pct: 0.10,
+                width_pct: 0.80,
+                margin_px: 16.0,
+            },
+            22.0,
+            Rect::new(150.0, 652.0, 980.0, 63.0),
+        ),
+        (
             "notification",
+            ZoneMediaType::ShortTextWithIcon,
             ZoneContent::Notification(NotificationPayload {
-                progress: None,
-                text: "Alert: system ready".to_owned(),
-                icon: String::new(),
+                text: "Alert: system ready".into(),
                 urgency: 1,
-                ttl_ms: None,
-                title: String::new(),
-                actions: Vec::new(),
+                ..Default::default()
             }),
-            "test",
-            None,
-            None,
-            None,
-        )
-        .unwrap();
-
-    compositor.prime_markdown_cache(&scene);
-    compositor.prime_truncation_cache(&scene);
-    compositor.render_frame_headless(&mut scene, &surface);
-    let pixels = surface.read_pixels(&compositor.device);
-    assert_eq!(pixels.len(), 1280 * 720 * 4, "pixel buffer size");
-
-    // The zone is at the top edge: y ≈ 12..(12 + 720*0.08) ≈ 12..69.6,
-    // centered: x ≈ (1280-896)/2..896+192 = 192..1088.
-    // White text glyphs should appear as bright pixels (r,g,b > 180).
-    let mut found_bright = false;
-    for row in 12usize..70 {
-        for col in 200usize..1080 {
-            let offset = (row * 1280 + col) * 4;
-            let p = &pixels[offset..offset + 4];
-            if p[0] > 180 && p[1] > 180 && p[2] > 180 {
-                found_bright = true;
-                break;
-            }
-        }
-        if found_bright {
-            break;
-        }
-    }
-    assert!(
-        found_bright,
-        "expected bright (text) pixels in notification zone area (rows 12..70)"
-    );
-}
-
-/// Zone StatusBar (KeyValuePairs) publish renders visible text at zone geometry.
-///
-/// Acceptance criteria
-///   1. `publish_to_zone` with `ZoneContent::StatusBar` produces a `TextItem` in
-///      `collect_text_items`.
-///   2. The key-value pairs are rendered as text at the zone geometry position.
-#[tokio::test]
-async fn test_zone_status_bar_renders_visible_text() {
-    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
-    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
-
-    let mut scene = SceneGraph::new(1280.0, 720.0);
-
-    // Register a status-bar zone (top edge, 5% height).
-    scene.register_zone(ZoneDefinition {
-        id: SceneId::new(),
-        name: "statusbar".to_owned(),
-        description: "status bar zone".to_owned(),
-        geometry_policy: GeometryPolicy::EdgeAnchored {
-            edge: DisplayEdge::Top,
-            height_pct: 0.05,
-            width_pct: 0.80,
-            margin_px: 8.0,
-        },
-        accepted_media_types: vec![ZoneMediaType::KeyValuePairs],
-        rendering_policy: RenderingPolicy {
-            font_size_px: Some(16.0),
-            backdrop: Some(Rgba::new(0.0, 0.0, 0.0, 0.7)),
-            text_align: None,
-            margin_px: None,
-            ..Default::default()
-        },
-        contention_policy: ContentionPolicy::LatestWins,
-        max_publishers: 1,
-        auto_clear_ms: None,
-        ephemeral: false,
-        layer_attachment: LayerAttachment::Content,
-    });
-
-    // Publish StatusBar content with key-value pairs.
-    let mut entries = std::collections::HashMap::new();
-    entries.insert("battery".to_owned(), "95%".to_owned());
-    entries.insert("time".to_owned(), "12:34".to_owned());
-    scene
-        .publish_to_zone(
+            GeometryPolicy::EdgeAnchored {
+                edge: DisplayEdge::Top,
+                height_pct: 0.08,
+                width_pct: 0.70,
+                margin_px: 12.0,
+            },
+            20.0,
+            Rect::new(200.0, 12.0, 880.0, 58.0),
+        ),
+        (
             "statusbar",
-            ZoneContent::StatusBar(StatusBarPayload { entries }),
-            "test",
-            None,
-            None,
-            None,
-        )
-        .unwrap();
-
-    // Horizontal key/value pairs are sorted, including in a custom top-edge zone.
-    let items = compositor.collect_text_items(&scene, 1280.0, 720.0);
-    let texts: Vec<&str> = items.iter().map(|i| &*i.text).collect();
-    assert_eq!(
-        texts,
-        ["battery", "95%", "time", "12:34"],
-        "horizontal entries sorted by key"
-    );
-    let item = &items[0];
-    // Zone top-edge: y = 8.0 (margin_px), height = 720*0.05 = 36.
-    assert!(
-        item.pixel_y >= 8.0,
-        "text y should be at or below zone top margin"
-    );
-    assert!(
-        item.pixel_y < 720.0 * 0.10,
-        "text y should be within top zone area"
-    );
-
-    // Render to pixels and verify bright text appears in the top zone area.
-    compositor.prime_markdown_cache(&scene);
-    compositor.prime_truncation_cache(&scene);
-    compositor.render_frame_headless(&mut scene, &surface);
-    let pixels = surface.read_pixels(&compositor.device);
-    assert_eq!(pixels.len(), 1280 * 720 * 4, "pixel buffer size");
-
-    // The zone is at the top ~8..44px, centered horizontally.
-    // White text glyphs should show as bright pixels.
-    let mut found_bright = false;
-    for row in 10usize..42 {
-        for col in 150usize..1130 {
-            let offset = (row * 1280 + col) * 4;
-            let p = &pixels[offset..offset + 4];
-            if p[0] > 180 && p[1] > 180 && p[2] > 180 {
-                found_bright = true;
-                break;
-            }
+            ZoneMediaType::KeyValuePairs,
+            ZoneContent::StatusBar(StatusBarPayload {
+                entries: [
+                    ("battery".into(), "95%".into()),
+                    ("time".into(), "12:34".into()),
+                ]
+                .into(),
+            }),
+            GeometryPolicy::EdgeAnchored {
+                edge: DisplayEdge::Top,
+                height_pct: 0.05,
+                width_pct: 0.80,
+                margin_px: 8.0,
+            },
+            16.0,
+            Rect::new(150.0, 10.0, 980.0, 32.0),
+        ),
+    ];
+    for (name, media, content, geometry, font_size, sample) in cases {
+        let mut scene = SceneGraph::new(1280.0, 720.0);
+        scene.register_zone(ZoneDefinition {
+            rendering_policy: RenderingPolicy {
+                font_size_px: Some(font_size),
+                backdrop: Some(Rgba::new(0.0, 0.0, 0.0, 0.7)),
+                ..Default::default()
+            },
+            ..zone_fixture(name, geometry, media, LayerAttachment::Content)
+        });
+        publish_zone(&mut scene, name, "test", content);
+        if media == ZoneMediaType::KeyValuePairs {
+            let items = compositor.collect_text_items(&scene, 1280.0, 720.0);
+            let texts: Vec<_> = items.iter().map(|item| &*item.text).collect();
+            assert_eq!(texts, ["battery", "95%", "time", "12:34"]);
+            assert!((8.0..72.0).contains(&items[0].pixel_y));
         }
-        if found_bright {
-            break;
-        }
+        prime_text(&mut compositor, &scene);
+        let pixels = render_pixels(&mut compositor, &mut scene, &surface);
+        assert_eq!(pixels.len(), 1280 * 720 * 4);
+        assert!(
+            pixels_in_rect(&pixels, 1280, sample).any(|pixel| bright(pixel, 180)),
+            "expected visible text in the {name} zone"
+        );
     }
-    assert!(
-        found_bright,
-        "expected bright (text) pixels in status bar zone area (rows 10..42)"
-    );
 }
 
-/// `init_text_renderer` called multiple times replaces the rasterizer (no panic).
-#[tokio::test]
-async fn test_init_text_renderer_idempotent() {
-    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(64, 64).await);
-    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
-    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
-    let mut scene = SceneGraph::new(64.0, 64.0);
-    compositor.prime_markdown_cache(&scene);
-    compositor.prime_truncation_cache(&scene);
-    compositor.render_frame_headless(&mut scene, &surface);
-    // No panic = pass.
-}
-
-/// Text rendering with no text items (empty scene) must not panic.
 #[tokio::test]
 async fn test_text_renderer_empty_scene_no_panic() {
-    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(64, 64).await);
+    let (mut compositor, surface) = require_gpu!(make_text_compositor(64, 64).await);
     compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
     let mut scene = SceneGraph::new(64.0, 64.0);
-    compositor.prime_markdown_cache(&scene);
-    compositor.prime_truncation_cache(&scene);
-    compositor.render_frame_headless(&mut scene, &surface);
+    prime_text(&mut compositor, &scene);
+    assert_eq!(
+        render_pixels(&mut compositor, &mut scene, &surface).len(),
+        64 * 64 * 4
+    );
 }
 
-/// Font roles follow the token map: `font.*` tokens rebuild the rasterizer for
-/// the new families (keeping agent-uploaded fonts), default-equivalent tokens
-/// are a no-op, and the config survives a later `init_text_renderer`.
+/// Presence card labels can be shorter than one line of text.
 #[tokio::test]
-async fn font_tokens_select_role_families_and_rebuild_only_on_change() {
-    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(64, 64).await);
-    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+async fn ellipsis_labels_shorter_than_a_line_render_and_update() {
+    let (mut compositor, surface) = require_gpu!(make_text_compositor(320, 112).await);
+    let tile_bounds = Rect::new(0.0, 0.0, 320.0, 112.0);
+    let mut scene = SceneGraph::new(tile_bounds.width, tile_bounds.height);
+    let tab = scene.create_tab("card", 0).unwrap();
+    let lease = scene.grant_lease("card", 60_000);
+    let tile = scene
+        .create_tile(tab, "card", lease, tile_bounds, 1)
+        .unwrap();
+    let root = solid_node(tile_bounds, Rgba::BLACK, None);
+    let root_id = root.id;
+    scene.set_tile_root(tile, root).unwrap();
+
+    let label = |text: &str, bounds, size| {
+        NodeData::TextMarkdown(TextMarkdownNode {
+            overflow: TextOverflow::Ellipsis,
+            ..markdown_text(text, bounds, size)
+        })
+    };
+    let labels = [
+        ("RESIDENT AGENT", Rect::new(96.0, 18.0, 152.0, 12.0), 11.0),
+        ("**POC tile**", Rect::new(96.0, 34.0, 152.0, 26.0), 20.0),
+        ("Connected", Rect::new(96.0, 68.0, 148.0, 18.0), 13.0),
+    ];
+    let [_, _, status] = labels.map(|(text, bounds, size)| {
+        let node = leaf(label(text, bounds, size));
+        let id = node.id;
+        scene.add_node_to_tile(tile, Some(root_id), node).unwrap();
+        id
+    });
+    prime_text(&mut compositor, &scene);
+    let before = render_pixels(&mut compositor, &mut scene, &surface);
+    for (text, bounds, _) in labels {
+        let lit = pixels_in_rect(&before, 320, bounds)
+            .filter(|pixel| pixel[0] > 128)
+            .count();
+        assert!(lit > 20, "{text} drew only {lit} lit pixels");
+    }
+    let (_, bounds, size) = labels[2];
+    scene
+        .update_node_content(tile, status, label("UPDATED", bounds, size))
+        .unwrap();
+    prime_text(&mut compositor, &scene);
+    let after = render_pixels(&mut compositor, &mut scene, &surface);
+    assert!(
+        !pixels_in_rect(&before, 320, bounds)
+            .map(|pixel| pixel[0])
+            .eq(pixels_in_rect(&after, 320, bounds).map(|pixel| pixel[0]))
+    );
+}
+
+/// A live font change rebuilds both text owners and preserves uploaded faces.
+#[tokio::test]
+async fn font_sans_change_rerasterizes_published_widget_text() {
+    let (mut compositor, surface) = require_gpu!(make_text_compositor(256, 128).await);
     assert_eq!(
         compositor.resolved_fonts(),
         Some(&crate::fonts::ResolvedFonts::default())
     );
-
-    // A real face as the "uploaded" font, so it must survive the rebuild.
-    let uploaded_id = [0x5A; 32];
+    let uploaded = [0x5A; 32];
     let face = include_bytes!("../../../fonts/ibm-plex/IBMPlexMono-Regular.ttf");
-    assert!(compositor.load_font_bytes(uploaded_id, face));
-    let faces_before = compositor
+    assert!(compositor.load_font_bytes(uploaded, face));
+    let faces = compositor
         .text_rasterizer
         .as_ref()
         .unwrap()
         .font_face_count();
-
-    let tokens = |sans: &str| -> HashMap<String, String> {
-        [("font.sans".to_owned(), sans.to_owned())].into()
-    };
-    // Mark the live rasterizer; a rebuild replaces it (counter back to 0).
-    let marker = |c: &Compositor| c.text_rasterizer.as_ref().unwrap().shape_call_count;
-    compositor
-        .text_rasterizer
-        .as_mut()
-        .unwrap()
-        .shape_call_count = 12_345;
-
-    // The default spelled out normalizes to the default config: no rebuild.
-    compositor.set_token_map(tokens("IBM Plex Sans"));
-    assert_eq!(
-        marker(&compositor),
-        12_345,
-        "default-equivalent tokens rebuilt"
-    );
-
-    compositor.set_token_map(tokens("DejaVu Sans"));
-    assert_eq!(marker(&compositor), 0, "changed font.sans did not rebuild");
-    let resolved = compositor.resolved_fonts().unwrap().clone();
-    assert_eq!(resolved.sans, "DejaVu Sans");
-    assert_eq!(resolved.mono, crate::fonts::DEFAULT_MONO_FAMILY);
-    let rasterizer = compositor.text_rasterizer.as_ref().unwrap();
-    assert!(
-        rasterizer.has_font(&uploaded_id),
-        "uploaded font carried over"
-    );
-    assert_eq!(rasterizer.font_face_count(), faces_before);
-
-    // Re-init (surface format change) keeps the configured roles.
-    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
-    assert_eq!(compositor.resolved_fonts().unwrap().sans, "DejaVu Sans");
-}
-
-/// Single-line Ellipsis labels in boxes shorter than one line height still
-/// render, and replacing their content changes the pixels.
-///
-/// The Presence Card sizes its labels to the glyphs, not the 1.4x line height:
-/// 20 px name in a 26 px box, 13 px status in 18 px, 11 px eyebrow in 12 px.
-/// Proto `TextOverflow` defaults to Ellipsis, whose whole-line budget was
-/// `floor(height / line_height) == 0`, so those labels drew nothing while the
-/// 10 px chip in a 20 px box did.
-#[tokio::test]
-async fn ellipsis_labels_shorter_than_a_line_render_and_update() {
-    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(320, 112).await);
-    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
-    let mut scene = SceneGraph::new(320.0, 112.0);
-    let tab_id = scene.create_tab("card", 0).unwrap();
-    let lease_id = scene.grant_lease("card", 60_000);
-    let tile_id = scene
-        .create_tile(
-            tab_id,
-            "card",
-            lease_id,
-            Rect::new(0.0, 0.0, 320.0, 112.0),
-            1,
-        )
-        .unwrap();
-    let root = Node {
-        layout: Default::default(),
-        id: SceneId::new(),
-        children: vec![],
-        data: NodeData::SolidColor(SolidColorNode {
-            color: Rgba::new(0.0, 0.0, 0.0, 1.0),
-            bounds: Rect::new(0.0, 0.0, 320.0, 112.0),
-            radius: None,
-        }),
-    };
-    let root_id = root.id;
-    scene.set_tile_root(tile_id, root).unwrap();
-
-    let label = |content: &str, bounds: Rect, font_size_px: f32| {
-        NodeData::TextMarkdown(TextMarkdownNode {
-            content: content.to_owned(),
-            bounds,
-            font_size_px,
-            font_family: FontFamily::SystemSansSerif,
-            color: Rgba::new(1.0, 1.0, 1.0, 1.0),
-            background: None,
-            alignment: TextAlign::Start,
-            overflow: TextOverflow::Ellipsis,
-            color_runs: Box::default(),
-        })
-    };
-    let labels = [
-        (
-            "eyebrow",
-            "RESIDENT AGENT",
-            Rect::new(96.0, 18.0, 152.0, 12.0),
-            11.0,
-        ),
-        (
-            "name",
-            "**POC tile**",
-            Rect::new(96.0, 34.0, 152.0, 26.0),
-            20.0,
-        ),
-        (
-            "status",
-            "Connected",
-            Rect::new(96.0, 68.0, 148.0, 18.0),
-            13.0,
-        ),
-    ];
-    let mut status_id = None;
-    for (name, content, bounds, size) in labels {
-        let node = Node {
-            layout: Default::default(),
-            id: SceneId::new(),
-            children: vec![],
-            data: label(content, bounds, size),
-        };
-        if name == "status" {
-            status_id = Some(node.id);
-        }
-        scene
-            .add_node_to_tile(tile_id, Some(root_id), node)
-            .unwrap();
-    }
-
-    let render = |compositor: &mut Compositor, scene: &mut SceneGraph| {
-        compositor.prime_markdown_cache(scene);
-        compositor.prime_truncation_cache(scene);
-        compositor.render_frame_headless(scene, &surface);
-        surface.read_pixels(&compositor.device)
-    };
-    let region = |pixels: &[u8], r: Rect| -> Vec<u8> {
-        let mut out = Vec::new();
-        for y in r.y as usize..(r.y + r.height) as usize {
-            for x in r.x as usize..(r.x + r.width) as usize {
-                out.push(pixels[(y * 320 + x) * 4]);
-            }
-        }
-        out
-    };
-
-    let before = render(&mut compositor, &mut scene);
-    for (name, _, bounds, _) in labels {
-        let lit = region(&before, bounds).iter().filter(|&&r| r > 128).count();
-        assert!(
-            lit > 20,
-            "{name} label drew {lit} lit pixels; expected visible text"
-        );
-    }
-
-    let status_bounds = labels[2].2;
-    scene
-        .update_node_content(
-            tile_id,
-            status_id.unwrap(),
-            label("UPDATED", status_bounds, 13.0),
-        )
-        .unwrap();
-    let after = render(&mut compositor, &mut scene);
-    assert_ne!(
-        region(&before, status_bounds),
-        region(&after, status_bounds),
-        "replacing the status text must change its pixels"
-    );
-}
-
-/// A live `font.sans` change re-rasterizes an already drawn widget with the
-/// new face: no stale raster from a cache or the clean texture.
-#[tokio::test]
-async fn font_sans_change_rerasterizes_published_widget_text() {
-    let (mut compositor, mut surface) = require_gpu!(make_compositor_and_surface(256, 128).await);
-    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
     compositor.init_widget_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
     compositor.widget_renderer_mut().unwrap().register_svg(
         "font-probe",
         "label.svg",
-        br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 60"><text x="10" y="44" font-family="sans-serif" font-size="40" fill="#ffffff">Agag</text></svg>"##
-            .to_vec(),
+        br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 60"><text x="10" y="44" font-family="sans-serif" font-size="40" fill="#ffffff">Agag</text></svg>"##.to_vec(),
     );
-
     let mut scene = SceneGraph::new(256.0, 128.0);
     let tab = scene.create_tab("Main", 0).unwrap();
     scene.widget_registry.register_definition(WidgetDefinition {
-        id: "font-probe".to_string(),
-        name: "Font probe".to_string(),
-        description: "text-only widget".to_string(),
+        id: "font-probe".into(),
+        name: "Font probe".into(),
+        description: "text-only widget".into(),
         parameter_schema: vec![],
         layers: vec![WidgetSvgLayer {
-            svg_file: "label.svg".to_string(),
+            svg_file: "label.svg".into(),
             bindings: vec![],
         }],
-        default_geometry_policy: GeometryPolicy::Relative {
-            x_pct: 0.0,
-            y_pct: 0.0,
-            width_pct: 1.0,
-            height_pct: 0.5,
-        },
+        default_geometry_policy: relative(0.0, 0.0, 1.0, 0.5),
         default_rendering_policy: RenderingPolicy::default(),
         default_contention_policy: ContentionPolicy::LatestWins,
         max_publishers: WidgetDefinition::default_max_publishers(),
@@ -726,11 +248,11 @@ async fn font_sans_change_rerasterizes_published_widget_text() {
     });
     scene.widget_registry.register_instance(WidgetInstance {
         id: SceneId::new(),
-        widget_type_name: "font-probe".to_string(),
+        widget_type_name: "font-probe".into(),
         tab_id: tab,
         geometry_override: None,
         contention_override: None,
-        instance_name: "probe".to_string(),
+        instance_name: "probe".into(),
         current_params: HashMap::new(),
         auto_clear_ms: None,
     });
@@ -738,35 +260,51 @@ async fn font_sans_change_rerasterizes_published_widget_text() {
         .publish_to_widget("probe", HashMap::new(), "agent-a", None, 0, None)
         .unwrap();
 
-    let draw = |c: &mut Compositor, scene: &mut SceneGraph, s: &mut HeadlessSurface| {
-        c.prime_markdown_cache(scene);
-        c.render_frame_headless(scene, s);
-        s.read_pixels(&c.device)
+    let draw = |compositor: &mut Compositor, scene: &mut SceneGraph| {
+        prime_text(compositor, scene);
+        render_pixels(compositor, scene, &surface)
     };
     let count = |c: &Compositor| c.widget_renderer().unwrap().raster_count("probe");
-
-    let plex = draw(&mut compositor, &mut scene, &mut surface);
+    let plex = draw(&mut compositor, &mut scene);
     assert_eq!(count(&compositor), 1);
-    assert!(
-        plex.chunks_exact(4).any(|p| p[0] > 128),
-        "widget text drew no light pixels"
-    );
-    // Unchanged fonts: idle, no re-raster.
-    draw(&mut compositor, &mut scene, &mut surface);
+    assert!(plex.chunks_exact(4).any(|pixel| pixel[0] > 128));
+    assert_eq!(draw(&mut compositor, &mut scene), plex);
     assert_eq!(count(&compositor), 1);
 
-    let tokens = |sans: &str| -> HashMap<String, String> {
-        [("font.sans".to_owned(), sans.to_owned())].into()
-    };
-    compositor.set_token_map(tokens("DejaVu Serif"));
-    let serif = draw(&mut compositor, &mut scene, &mut surface);
-    assert_eq!(count(&compositor), 2, "font change did not re-rasterize");
-    assert!(plex != serif, "widget still shows the old face");
-
-    // Back to the default: re-rasterized again, identical to the first frame
-    // (the default-set raster may come from the cache, never the serif one).
+    let tokens = |sans: &str| token_overrides([("font.sans", sans)]);
+    compositor
+        .text_rasterizer
+        .as_mut()
+        .unwrap()
+        .shape_call_count = 12_345;
     compositor.set_token_map(tokens("IBM Plex Sans"));
-    let back = draw(&mut compositor, &mut scene, &mut surface);
+    assert_eq!(
+        compositor
+            .text_rasterizer
+            .as_ref()
+            .unwrap()
+            .shape_call_count,
+        12_345
+    );
+    assert_eq!(draw(&mut compositor, &mut scene), plex);
+    assert_eq!(count(&compositor), 1);
+
+    compositor.set_token_map(tokens("DejaVu Serif"));
+    let rasterizer = compositor.text_rasterizer.as_ref().unwrap();
+    assert_eq!(rasterizer.shape_call_count, 0);
+    assert!(rasterizer.has_font(&uploaded));
+    assert_eq!(rasterizer.font_face_count(), faces);
+    let resolved = compositor.resolved_fonts().unwrap();
+    assert_eq!(resolved.sans, "DejaVu Serif");
+    assert_eq!(resolved.mono, crate::fonts::DEFAULT_MONO_FAMILY);
+    let serif = draw(&mut compositor, &mut scene);
+    assert_eq!(count(&compositor), 2);
+    assert_ne!(plex, serif, "widget still shows the old face");
+    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+    assert_eq!(compositor.resolved_fonts().unwrap().sans, "DejaVu Serif");
+
+    compositor.set_token_map(tokens("IBM Plex Sans"));
+    let back = draw(&mut compositor, &mut scene);
     assert_eq!(count(&compositor), 3);
-    assert!(plex == back, "default face did not come back");
+    assert_eq!(plex, back, "default face did not come back");
 }
