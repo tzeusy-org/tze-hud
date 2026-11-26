@@ -644,67 +644,45 @@ async fn test_merge_by_key_zone_merges_entries_updates_and_positions_icons() {
 /// publications are present (regression guard).
 #[tokio::test]
 async fn test_latest_wins_zone_renders_only_latest_publication() {
-    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
-    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
-
-    let mut scene = SceneGraph::new(1280.0, 720.0);
-    scene.register_zone(ZoneDefinition {
-        id: SceneId::new(),
-        name: "subtitle".to_owned(),
-        description: "latest-wins regression guard".to_owned(),
-        geometry_policy: GeometryPolicy::EdgeAnchored {
-            edge: DisplayEdge::Bottom,
-            height_pct: 0.10,
-            width_pct: 0.80,
-            margin_px: 16.0,
-        },
-        accepted_media_types: vec![ZoneMediaType::StreamText],
+    let (mut compositor, surface) = require_gpu!(make_text_compositor(1280, 720).await);
+    let stream_zone = |name, description: &str, edge| ZoneDefinition {
+        description: description.into(),
         rendering_policy: RenderingPolicy {
             backdrop: Some(Rgba::new(0.0, 0.0, 0.0, 0.7)),
             text_color: Some(Rgba::WHITE),
             ..Default::default()
         },
-        contention_policy: ContentionPolicy::LatestWins,
-        max_publishers: 1,
-        auto_clear_ms: None,
-        ephemeral: false,
-        layer_attachment: LayerAttachment::Content,
-    });
-
-    // LatestWins should only keep the last publication.
-    scene
-        .publish_to_zone(
-            "subtitle",
-            ZoneContent::StreamText("Old content".to_owned()),
-            "agent",
-            None,
-            None,
-            None,
+        ..zone_fixture(
+            name,
+            GeometryPolicy::EdgeAnchored {
+                edge,
+                height_pct: 0.10,
+                width_pct: 0.80,
+                margin_px: 16.0,
+            },
+            ZoneMediaType::StreamText,
+            LayerAttachment::Content,
         )
-        .unwrap();
-    // With LatestWins policy the scene graph may have already replaced it,
-    // but we publish again to ensure only one ends up active.
-    scene
-        .publish_to_zone(
-            "subtitle",
-            ZoneContent::StreamText("New content".to_owned()),
-            "agent",
-            None,
-            None,
-            None,
-        )
-        .unwrap();
+    };
+    let publish = |scene: &mut SceneGraph, zone, text: &str| {
+        publish_zone(scene, zone, "agent", ZoneContent::StreamText(text.into()));
+    };
 
+    let mut scene = SceneGraph::new(1280.0, 720.0);
+    scene.register_zone(stream_zone(
+        "subtitle",
+        "latest-wins regression guard",
+        DisplayEdge::Bottom,
+    ));
+    publish(&mut scene, "subtitle", "Old content");
+    publish(&mut scene, "subtitle", "New content");
     let items = compositor.collect_text_items(&scene, 1280.0, 720.0);
-
-    // LatestWins must produce exactly one TextItem.
     assert_eq!(
         items.len(),
         1,
         "LatestWins zone must produce exactly 1 TextItem; got {}",
         items.len()
     );
-    // The item should contain the latest content.
     assert!(
         items[0].text.contains("New content"),
         "LatestWins must render latest publish; got: {}",
@@ -712,70 +690,29 @@ async fn test_latest_wins_zone_renders_only_latest_publication() {
     );
 
     // Distinct text keeps the two zones' shaping-cache controls independent.
-    scene.register_zone(ZoneDefinition {
-        id: SceneId::new(),
-        name: "secondary".to_owned(),
-        description: "unchanged shaping control".to_owned(),
-        geometry_policy: GeometryPolicy::EdgeAnchored {
-            edge: DisplayEdge::Top,
-            height_pct: 0.10,
-            width_pct: 0.80,
-            margin_px: 16.0,
-        },
-        accepted_media_types: vec![ZoneMediaType::StreamText],
-        rendering_policy: RenderingPolicy {
-            backdrop: Some(Rgba::new(0.0, 0.0, 0.0, 0.7)),
-            text_color: Some(Rgba::WHITE),
-            ..Default::default()
-        },
-        contention_policy: ContentionPolicy::LatestWins,
-        max_publishers: 1,
-        auto_clear_ms: None,
-        ephemeral: false,
-        layer_attachment: LayerAttachment::Content,
-    });
-    scene
-        .publish_to_zone(
-            "secondary",
-            ZoneContent::StreamText("Secondary control".to_owned()),
-            "agent",
-            None,
-            None,
-            None,
-        )
-        .unwrap();
+    scene.register_zone(stream_zone(
+        "secondary",
+        "unchanged shaping control",
+        DisplayEdge::Top,
+    ));
+    publish(&mut scene, "secondary", "Secondary control");
 
-    // Both zones shape once, then the real unchanged frame reuses both buffers.
-    for expected_layout in [2, 0] {
+    for (replacement, expected_layout, phase) in [
+        (None, 2, "warm/unchanged"),
+        (None, 0, "warm/unchanged"),
+        (Some("Changed content"), 1, "changed/unchanged"),
+        (None, 0, "changed/unchanged"),
+    ] {
+        if let Some(text) = replacement {
+            publish(&mut scene, "subtitle", text);
+        }
         compositor.prime_markdown_cache(&scene);
         compositor.render_frame_headless(&mut scene, &surface);
         let work = compositor.take_work_counts().expect("completed zone frame");
         assert_eq!(
             (work.layout, work.raster, work.upload),
             (expected_layout, 0, 0),
-            "warm/unchanged zone work: {work:?}"
-        );
-    }
-
-    scene
-        .publish_to_zone(
-            "subtitle",
-            ZoneContent::StreamText("Changed content".to_owned()),
-            "agent",
-            None,
-            None,
-            None,
-        )
-        .unwrap();
-    // Only changed text shapes. Zero widget work does not mean no GPU submit.
-    for expected_layout in [1, 0] {
-        compositor.prime_markdown_cache(&scene);
-        compositor.render_frame_headless(&mut scene, &surface);
-        let work = compositor.take_work_counts().expect("completed zone frame");
-        assert_eq!(
-            (work.layout, work.raster, work.upload),
-            (expected_layout, 0, 0),
-            "changed/unchanged zone work: {work:?}"
+            "{phase} zone work: {work:?}"
         );
     }
     assert!(
