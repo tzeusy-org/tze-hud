@@ -1715,6 +1715,7 @@ async fn test_notification_card_border_is_an_sdf_border() {
 /// Pixel check of the SDF border on a rounded card (fullscreen, opaque border
 /// token): just inside the rounded corner is border colour, the middle is
 /// fill, and the bounding-box corner outside the curve stays clear.
+/// Check alert and urgency token geometry on the same compositor before drawing the frame.
 #[tokio::test]
 async fn test_rounded_card_border_follows_the_corner() {
     let built = make_compositor_and_surface(1280, 720).await;
@@ -1725,6 +1726,146 @@ async fn test_rounded_card_border_follows_the_corner() {
         );
     }
     let (mut compositor, surface) = require_gpu!(built);
+
+    let alert_scene = |description: &str, text: &str, text_color| {
+        let mut zone = zone_fixture(
+            "alert-banner",
+            GeometryPolicy::EdgeAnchored {
+                edge: DisplayEdge::Top,
+                height_pct: 0.07,
+                width_pct: 1.0,
+                margin_px: 0.0,
+            },
+            ZoneMediaType::ShortTextWithIcon,
+            LayerAttachment::Chrome,
+        );
+        zone.description = description.into();
+        zone.rendering_policy = RenderingPolicy {
+            font_size_px: Some(20.0),
+            backdrop: Some(Rgba::new(0.08, 0.08, 0.08, 1.0)),
+            backdrop_opacity: Some(1.0),
+            text_color,
+            ..Default::default()
+        };
+        let mut scene = SceneGraph::new(1280.0, 720.0);
+        scene.register_zone(zone);
+        publish_zone(
+            &mut scene,
+            "alert-banner",
+            "test",
+            ZoneContent::Notification(NotificationPayload {
+                text: text.into(),
+                urgency: 2,
+                ..Default::default()
+            }),
+        );
+        scene
+    };
+    let backdrop_vertices = |compositor: &Compositor, scene: &SceneGraph| {
+        let mut vertices = Vec::new();
+        compositor.render_zone_content(scene, &mut vertices, &mut Vec::new(), 1280.0, 720.0, None);
+        vertices
+    };
+
+    // Classic's transparent outline and severity roles leave the flat strip alone.
+    compositor.set_token_map(
+        [
+            "color.alert.outline",
+            "color.severity.info",
+            "color.severity.warning",
+            "color.severity.critical",
+        ]
+        .into_iter()
+        .map(|k| (k.to_owned(), "#00000000".to_owned()))
+        .collect(),
+    );
+
+    let scene = alert_scene("alert banner — no border", "no border here", None);
+    let vertices = backdrop_vertices(&compositor, &scene);
+
+    // alert-banner: only 6 vertices (one backdrop quad) and no SDF border.
+    assert_eq!(
+        vertices.len(),
+        6,
+        "alert-banner must emit exactly 6 vertices (backdrop only), got {}",
+        vertices.len()
+    );
+    let rr = compositor.collect_all_rounded_rect_cmds(&scene, 1280.0, 720.0);
+    assert!(
+        rr.chrome.is_empty(),
+        "alert-banner must emit no border: {:?}",
+        rr.chrome
+    );
+
+    // Each notification urgency uses its own outline role.
+    for (urgency, key) in [
+        (0, "color.notification.outline"),
+        (2, "color.notification.caution.outline"),
+        (3, "color.notification.error.outline"),
+    ] {
+        // Install the role as pure cyan (#00FFFF).
+        compositor.set_token_map(HashMap::from([(key.to_string(), "#00FFFF".to_string())]));
+        let mut scene = bordered_notification_scene(None);
+        if let ZoneContent::Notification(n) = &mut scene
+            .zone_registry
+            .active_publishes
+            .get_mut("notification-area")
+            .unwrap()[0]
+            .content
+        {
+            n.urgency = urgency;
+        }
+        let cmds = compositor
+            .collect_all_rounded_rect_cmds(&scene, 1280.0, 720.0)
+            .chrome;
+        let border = cmds[0].border.expect("card border").color;
+        assert!(
+            border[0] < 0.1 && border[1] > 0.9 && border[2] > 0.9,
+            "urgency {urgency} hairline must be the cyan {key}, got {border:?}"
+        );
+    }
+
+    // Install a custom token map: override warning with pure green (#00FF00).
+    let mut token_map = HashMap::new();
+    token_map.insert(
+        "color.alert.caution.container".to_string(),
+        "#00FF00".to_string(),
+    );
+    compositor.set_token_map(token_map);
+
+    let scene = alert_scene(
+        "alert banner zone",
+        "Custom token warning",
+        Some(Rgba::WHITE),
+    );
+    let vertices = backdrop_vertices(&compositor, &scene);
+
+    // rect_vertices emits 6 vertices per quad; each vertex has a `color: [f32; 4]` field.
+    // The backdrop should be green (R~0.0, G~1.0, B~0.0), not amber.
+    assert!(
+        !vertices.is_empty(),
+        "expected backdrop vertices for alert-banner"
+    );
+
+    // Check first vertex color. RectVertex layout: [position: [f32; 2], color: [f32; 4]].
+    let first = &vertices[0];
+    assert!(
+        first.color[1] > 0.9,
+        "alert-banner backdrop G should be ~1.0 (custom green token), got {}",
+        first.color[1]
+    );
+    assert!(
+        first.color[0] < 0.1,
+        "alert-banner backdrop R should be ~0.0 (custom green token), got {}",
+        first.color[0]
+    );
+    assert!(
+        first.color[2] < 0.1,
+        "alert-banner backdrop B should be ~0.0 (custom green token), got {}",
+        first.color[2]
+    );
+
+    // Read the rounded notification hairline with its own outline and fill tokens.
     let mut tokens = HashMap::new();
     tokens.insert(
         "color.notification.outline".to_string(),
@@ -1811,121 +1952,6 @@ async fn test_rounded_card_border_follows_the_corner() {
     );
 }
 
-/// An alert banner whose `color.alert.outline` and `color.severity.*` are
-/// transparent (Classic's legacy strip) draws neither a hairline nor a
-/// severity mark: only its flat backdrop quad.
-#[tokio::test]
-async fn test_alert_banner_transparent_roles_draw_no_border_or_mark() {
-    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
-    compositor.set_token_map(
-        [
-            "color.alert.outline",
-            "color.severity.info",
-            "color.severity.warning",
-            "color.severity.critical",
-        ]
-        .into_iter()
-        .map(|k| (k.to_owned(), "#00000000".to_owned()))
-        .collect(),
-    );
-
-    let mut scene = SceneGraph::new(1280.0, 720.0);
-    scene.register_zone(ZoneDefinition {
-        id: SceneId::new(),
-        name: "alert-banner".to_owned(),
-        description: "alert banner — no border".to_owned(),
-        geometry_policy: GeometryPolicy::EdgeAnchored {
-            edge: DisplayEdge::Top,
-            height_pct: 0.07,
-            width_pct: 1.0,
-            margin_px: 0.0,
-        },
-        accepted_media_types: vec![ZoneMediaType::ShortTextWithIcon],
-        rendering_policy: RenderingPolicy {
-            font_size_px: Some(20.0),
-            backdrop: Some(Rgba::new(0.08, 0.08, 0.08, 1.0)),
-            backdrop_opacity: Some(1.0),
-            ..Default::default()
-        },
-        contention_policy: ContentionPolicy::LatestWins,
-        max_publishers: 1,
-        auto_clear_ms: None,
-        ephemeral: false,
-        layer_attachment: LayerAttachment::Chrome,
-    });
-    scene
-        .publish_to_zone(
-            "alert-banner",
-            ZoneContent::Notification(NotificationPayload {
-                progress: None,
-                text: "no border here".to_owned(),
-                icon: String::new(),
-                urgency: 2,
-                ttl_ms: None,
-                title: String::new(),
-                actions: Vec::new(),
-            }),
-            "test",
-            None,
-            None,
-            None,
-        )
-        .unwrap();
-
-    let mut vertices: Vec<crate::pipeline::RectVertex> = Vec::new();
-    compositor.render_zone_content(&scene, &mut vertices, &mut Vec::new(), 1280.0, 720.0, None);
-
-    // alert-banner: only 6 vertices (one backdrop quad) and no SDF border.
-    assert_eq!(
-        vertices.len(),
-        6,
-        "alert-banner must emit exactly 6 vertices (backdrop only), got {}",
-        vertices.len()
-    );
-    let rr = compositor.collect_all_rounded_rect_cmds(&scene, 1280.0, 720.0);
-    assert!(
-        rr.chrome.is_empty(),
-        "alert-banner must emit no border: {:?}",
-        rr.chrome
-    );
-}
-
-/// The card hairline is its urgency tone's outline role: neutral cards
-/// `color.notification.outline`, urgency 2
-/// `color.notification.caution.outline`, urgency 3
-/// `color.notification.error.outline`.
-#[tokio::test]
-async fn test_notification_area_border_uses_border_default_token() {
-    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
-
-    for (urgency, key) in [
-        (0, "color.notification.outline"),
-        (2, "color.notification.caution.outline"),
-        (3, "color.notification.error.outline"),
-    ] {
-        // Install the role as pure cyan (#00FFFF).
-        compositor.set_token_map(HashMap::from([(key.to_string(), "#00FFFF".to_string())]));
-        let mut scene = bordered_notification_scene(None);
-        if let ZoneContent::Notification(n) = &mut scene
-            .zone_registry
-            .active_publishes
-            .get_mut("notification-area")
-            .unwrap()[0]
-            .content
-        {
-            n.urgency = urgency;
-        }
-        let cmds = compositor
-            .collect_all_rounded_rect_cmds(&scene, 1280.0, 720.0)
-            .chrome;
-        let border = cmds[0].border.expect("card border").color;
-        assert!(
-            border[0] < 0.1 && border[1] > 0.9 && border[2] > 0.9,
-            "urgency {urgency} hairline must be the cyan {key}, got {border:?}"
-        );
-    }
-}
-
 // ── Token-resolved severity color tests ───────────────────────────────────
 
 /// The alert roles override their canonical values (info covers urgency 0
@@ -1986,99 +2012,6 @@ fn test_alert_role_tokens_override_or_fall_back() {
         NotificationStyle::resolve(&HashMap::new(), &RenderingPolicy::default())
             .mark(3, false)
             .is_none()
-    );
-}
-
-/// Custom alert role tokens in [design_tokens] affect alert-banner backdrop colors.
-///
-/// This is the end-to-end integration test: `set_token_map` populates the
-/// compositor, and `render_zone_content` uses the token-resolved color for the
-/// alert-banner backdrop.
-#[tokio::test]
-async fn test_custom_alert_tokens_affect_alert_banner_backdrop() {
-    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
-
-    // Install a custom token map: override warning with pure green (#00FF00).
-    let mut token_map = HashMap::new();
-    token_map.insert(
-        "color.alert.caution.container".to_string(),
-        "#00FF00".to_string(),
-    );
-    compositor.set_token_map(token_map);
-
-    let mut scene = SceneGraph::new(1280.0, 720.0);
-    scene.register_zone(ZoneDefinition {
-        id: SceneId::new(),
-        name: "alert-banner".to_owned(),
-        description: "alert banner zone".to_owned(),
-        geometry_policy: GeometryPolicy::EdgeAnchored {
-            edge: DisplayEdge::Top,
-            height_pct: 0.07,
-            width_pct: 1.0,
-            margin_px: 0.0,
-        },
-        accepted_media_types: vec![ZoneMediaType::ShortTextWithIcon],
-        rendering_policy: RenderingPolicy {
-            font_size_px: Some(20.0),
-            backdrop: Some(Rgba::new(0.08, 0.08, 0.08, 1.0)),
-            backdrop_opacity: Some(1.0),
-            text_color: Some(Rgba::new(1.0, 1.0, 1.0, 1.0)),
-            ..Default::default()
-        },
-        contention_policy: ContentionPolicy::LatestWins,
-        max_publishers: 1,
-        auto_clear_ms: None,
-        ephemeral: false,
-        layer_attachment: LayerAttachment::Chrome,
-    });
-
-    // Publish urgency=2 (warning) — should use custom green token.
-    scene
-        .publish_to_zone(
-            "alert-banner",
-            ZoneContent::Notification(NotificationPayload {
-                progress: None,
-                text: "Custom token warning".to_owned(),
-                icon: String::new(),
-                urgency: 2,
-                ttl_ms: None,
-                title: String::new(),
-                actions: Vec::new(),
-            }),
-            "test",
-            None,
-            None,
-            None,
-        )
-        .unwrap();
-
-    // Collect vertices from render_zone_content.
-    let mut vertices: Vec<crate::pipeline::RectVertex> = Vec::new();
-    compositor.render_zone_content(&scene, &mut vertices, &mut Vec::new(), 1280.0, 720.0, None);
-
-    // rect_vertices emits 6 vertices per quad; each vertex has a `color: [f32; 4]` field.
-    // The backdrop should be green (R~0.0, G~1.0, B~0.0), not amber.
-    assert!(
-        !vertices.is_empty(),
-        "expected backdrop vertices for alert-banner"
-    );
-
-    // Check first vertex color. RectVertex layout: [position: [f32; 2], color: [f32; 4]].
-    let first = &vertices[0];
-    assert!(
-        first.color[1] > 0.9,
-        "alert-banner backdrop G should be ~1.0 (custom green token), got {}",
-        first.color[1]
-    );
-    assert!(
-        first.color[0] < 0.1,
-        "alert-banner backdrop R should be ~0.0 (custom green token), got {}",
-        first.color[0]
-    );
-    assert!(
-        first.color[2] < 0.1,
-        "alert-banner backdrop B should be ~0.0 (custom green token), got {}",
-        first.color[2]
     );
 }
 
