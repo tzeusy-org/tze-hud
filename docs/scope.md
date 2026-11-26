@@ -162,10 +162,21 @@ the [`ci.yml`](../.github/workflows/ci.yml) header and this section together.
 Linux compile jobs install a SHA256-pinned mold linker through
 [`install_mold.py`](../scripts/ci/install_mold.py).
 
-- **Fast.** A merge-group run's required checks finish within 6 minutes of the
-  run starting. Suites that cannot fit run in the weekly lanes
-  (`perf-budget.yml`, `perf-assert.yml`) or in `windows.yml`, never in the
-  required set.
+- **Fast.** Keep 360 seconds as the per-run target for all required checks,
+  including hosted-runner wait. Timing acceptance is nearest-rank p95 ≤360
+  seconds over the last 20 chronological natural first-attempt `main`
+  merge-group runs of `ci.yml`. Measure each run from `run_started_at` to the
+  last required-check completion. Sort those wall times in ascending order
+  and take rank 19 of 20. Select runs by creation time, with run ID breaking
+  ties. Include failed, cancelled and incomplete runs in the selected cohort
+  and use each original attempt. A passing cohort requires 20 complete,
+  successful first attempts with all required jobs and timestamps. Report run
+  IDs, count, p95, maximum and any failures or incomplete records. Suites
+  that cannot fit run in the weekly lanes (`perf-budget.yml`, `perf-assert.yml`)
+  or in `windows.yml`, never in the required set. Twenty observations give 5%
+  empirical tail resolution. The five cases investigated in
+  [PR #1648](https://github.com/tzeusy-org/tze-hud/pull/1648) do not establish
+  a cohort result. The original 460-second run remains a per-run miss.
 - **Not queued.** Wall time is run time plus the wait for a hosted runner, and
   every job, PR push, merge-group build and main push draws on one shared
   pool. Required checks are three jobs (`static checks`, `cargo clippy`,
