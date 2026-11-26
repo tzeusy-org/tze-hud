@@ -9165,7 +9165,8 @@ mod tests {
             // a portal key lifecycle even while the reply remembers the press.
             harness.type_text("z");
             harness.drain();
-            assert_eq!(harness.composer_draft().as_deref(), Some("portalba次z"));
+            // The pointer handoff clicked at the beginning of the composer.
+            assert_eq!(harness.composer_draft().as_deref(), Some("次zportalba"));
             assert!(take_action_ids(&harness).is_empty());
         }
 
