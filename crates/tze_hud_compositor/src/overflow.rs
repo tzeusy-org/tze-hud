@@ -2204,18 +2204,33 @@ mod tests {
             prop_assert_eq!(retained.len() % grapheme.len(), 0);
         }
 
-        #[test]
-        fn tail_keeps_whole_graphemes_and_logical_newest_content(repeat in 3usize..11usize) {
+    }
+
+    #[test]
+    fn tail_keeps_whole_graphemes_and_logical_newest_content() {
+        // Exhaust the finite domain instead of sampling the same repeats again.
+        for repeat in 3usize..11usize {
             let mut fonts = fonts();
-            for portion in ["السلام عليكم", "Hello السلام", "👨‍👩‍👧‍👦e\u{301}"] {
+            for portion in ["السلام عليكم", "Hello السلام", "👨‍👩‍👧‍👦e\u{301}"]
+            {
                 let last = portion.repeat(repeat);
                 let text = format!("old line\nolder line\n{last}");
                 let result = truncate(TailAnchored, &text, 150.0, LINE + 1.0, &mut fonts);
-                prop_assert!(result.was_truncated);
-                let retained = result.text.strip_prefix(ELLIPSIS).expect("leading ellipsis");
-                prop_assert!(!retained.is_empty() && last.ends_with(retained), "{retained:?} of {last:?}");
+                assert!(result.was_truncated, "repeat={repeat}, portion={portion:?}");
+                let retained = result
+                    .text
+                    .strip_prefix(ELLIPSIS)
+                    .expect("leading ellipsis");
+                assert!(
+                    !retained.is_empty() && last.ends_with(retained),
+                    "repeat={repeat}, portion={portion:?}: {retained:?} of {last:?}"
+                );
                 let offset = last.len() - retained.len();
-                prop_assert!(last.grapheme_indices(true).any(|(start, _)| start == offset));
+                assert!(
+                    last.grapheme_indices(true)
+                        .any(|(start, _)| start == offset),
+                    "repeat={repeat}, portion={portion:?}: {retained:?} is not a whole-grapheme suffix"
+                );
             }
         }
     }
