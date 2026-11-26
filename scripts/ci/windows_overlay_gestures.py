@@ -104,16 +104,16 @@ def main(argv: list[str] | None = None) -> int:
             manifest = extract_driver(Path(directory))
             with registered_driver(manifest, winreg):
                 receipt["setup_seconds"] = round(time.monotonic() - started, 3)
-                gate = [] if args.required is None else ["--required", args.required]
+                gate = [] if args.required is None else [f"--required={args.required}"]
                 result = hud_gestures.main(["--exe", str(args.exe), "--injector", "sendinput",
                                            "--window-mode", "overlay", "--out", str(args.out),
-                                           *gate, *sorted(OVERLAY_SCENARIOS)])
+                                           *gate, *OVERLAY_SCENARIOS])
                 receipt["scenario_exit"] = result
             receipt["registration_removed"] = True
     except Exception as error:  # retain setup/cleanup failures alongside the scenario artifacts
         receipt["failure"] = f"{type(error).__name__}: {error}"
         print(f"FAIL overlay setup/cleanup: {receipt['failure']}", file=sys.stderr)
-        overlay_required = OVERLAY_SCENARIOS.intersection(hud_gestures.required_names(args.required or ""))
+        overlay_required = set(hud_gestures.required_names(args.required or "")).intersection(OVERLAY_SCENARIOS)
         result = 1 if args.required is None or overlay_required else 0
     finally:
         receipt["total_seconds"] = round(time.monotonic() - started, 3)
