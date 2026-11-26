@@ -2,226 +2,102 @@ use super::*;
 
 // ── Multi-publication rendering: Stack and MergeByKey policies ──────────
 
-/// Stack zone with two notifications: render_zone_content must emit a
-/// separate backdrop quad for each publication, stacked vertically.
-/// With max_depth=4 and zone height=400px, each slot is 100px tall.
-/// Two publications → two quads; the second quad starts at y+100.
+/// Stack publishes emit separate backdrops and text in their own vertical slots.
 #[tokio::test]
-async fn test_stack_zone_renders_separate_backdrop_per_publication() {
-    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
+async fn stack_draws_separate_backdrops_and_text_in_vertical_slots() {
+    let (width, height) = (1280.0, 720.0);
+    let (compositor, _surface) =
+        require_gpu!(make_compositor_and_surface(width as u32, height as u32).await);
+    let zone = "notification-area";
+    let stack_scene = |cards: &[(&str, &str, u32)], backdrop_opacity| {
+        let mut scene = SceneGraph::new(width, height);
+        scene.register_zone(ZoneDefinition {
+            rendering_policy: RenderingPolicy {
+                backdrop: Some(Rgba::new(0.1, 0.1, 0.1, 0.9)),
+                backdrop_opacity,
+                text_color: Some(Rgba::WHITE),
+                ..Default::default()
+            },
+            contention_policy: ContentionPolicy::Stack { max_depth: 4 },
+            max_publishers: 4,
+            ..zone_fixture(
+                zone,
+                relative(0.75, 0.0, 0.25, 0.5556),
+                ZoneMediaType::ShortTextWithIcon,
+                LayerAttachment::Chrome,
+            )
+        });
+        for &(publisher, text, urgency) in cards {
+            publish_zone(
+                &mut scene,
+                zone,
+                publisher,
+                ZoneContent::Notification(NotificationPayload {
+                    text: text.into(),
+                    urgency,
+                    ..Default::default()
+                }),
+            );
+        }
+        scene
+    };
 
-    let mut scene = SceneGraph::new(1280.0, 720.0);
-    // Zone: top-right, 200×400 px via Relative.
-    scene.register_zone(ZoneDefinition {
-        id: SceneId::new(),
-        name: "notification-area".to_owned(),
-        description: "stack zone for multi-pub test".to_owned(),
-        geometry_policy: GeometryPolicy::Relative {
-            x_pct: 0.75,
-            y_pct: 0.0,
-            width_pct: 0.25,    // 320 px at 1280 wide
-            height_pct: 0.5556, // ~400 px at 720 tall (≈400/720)
-        },
-        accepted_media_types: vec![ZoneMediaType::ShortTextWithIcon],
-        rendering_policy: RenderingPolicy {
-            backdrop: Some(Rgba::new(0.1, 0.1, 0.1, 0.9)),
-            backdrop_opacity: Some(0.9),
-            text_color: Some(Rgba::WHITE),
-            ..Default::default()
-        },
-        contention_policy: ContentionPolicy::Stack { max_depth: 4 },
-        max_publishers: 4,
-        auto_clear_ms: None,
-        ephemeral: false,
-        layer_attachment: LayerAttachment::Chrome,
-    });
-
-    // Publish two separate notifications.
-    scene
-        .publish_to_zone(
-            "notification-area",
-            ZoneContent::Notification(NotificationPayload {
-                progress: None,
-                text: "First notification".to_owned(),
-                icon: String::new(),
-                urgency: 1,
-                ttl_ms: None,
-                title: String::new(),
-                actions: Vec::new(),
-            }),
-            "agent-a",
-            None,
-            None,
-            None,
+    let backdrop_scene = stack_scene(
+        &[
+            ("agent-a", "First notification", 1),
+            ("agent-b", "Second notification", 1),
+        ],
+        Some(0.9),
+    );
+    let mut vertices = Vec::new();
+    compositor.render_zone_content(
+        &backdrop_scene,
+        &mut vertices,
+        &mut Vec::new(),
+        width,
+        height,
+        None,
+    );
+    assert_eq!(vertices.len(), 12, "one six-vertex backdrop per card");
+    // NDC y increases upward. Compare both edges of each emitted quad.
+    let y_edges = |quad: &[crate::pipeline::RectVertex]| {
+        let ys = quad.iter().map(|vertex| vertex.position[1]);
+        (
+            ys.clone().fold(f32::NEG_INFINITY, f32::max),
+            ys.fold(f32::INFINITY, f32::min),
         )
-        .unwrap();
-    scene
-        .publish_to_zone(
-            "notification-area",
-            ZoneContent::Notification(NotificationPayload {
-                progress: None,
-                text: "Second notification".to_owned(),
-                icon: String::new(),
-                urgency: 1,
-                ttl_ms: None,
-                title: String::new(),
-                actions: Vec::new(),
-            }),
-            "agent-b",
-            None,
-            None,
-            None,
-        )
-        .unwrap();
-
-    let mut vertices: Vec<crate::pipeline::RectVertex> = Vec::new();
-    compositor.render_zone_content(&scene, &mut vertices, &mut Vec::new(), 1280.0, 720.0, None);
-
-    // Two publications → two backdrop quads (6 verts each). Their borders and
-    // dismiss outlines are SDF commands (collect_all_rounded_rect_cmds).
-    assert_eq!(
-        vertices.len(),
-        12,
-        "Stack zone with 2 publications must emit 2 backdrop quads, got {} vertices",
-        vertices.len()
-    );
-
-    // Each slot starts at its own y. Vertices are NDC [x, y]; the second
-    // backdrop quad starts at vertex 6.
-    let first_quad_y = vertices[0].position[1];
-    let second_quad_y = vertices[6].position[1];
+    };
+    let (first_top, first_bottom) = y_edges(&vertices[..6]);
+    let (second_top, second_bottom) = y_edges(&vertices[6..]);
+    assert!(first_top - second_top > 0.01, "distinct backdrop origins");
     assert!(
-        (first_quad_y - second_quad_y).abs() > 0.01,
-        "second Stack slot must start at a different y than the first; got first={first_quad_y:.4}, second={second_quad_y:.4}"
-    );
-}
-
-/// Stack zone: collect_text_items must produce a separate TextItem for
-/// each publication, with each item positioned in its own vertical slot.
-#[tokio::test]
-async fn test_stack_zone_collect_text_items_per_publication() {
-    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
-
-    let mut scene = SceneGraph::new(1280.0, 720.0);
-    scene.register_zone(ZoneDefinition {
-        id: SceneId::new(),
-        name: "notification-area".to_owned(),
-        description: "stack zone text items test".to_owned(),
-        geometry_policy: GeometryPolicy::Relative {
-            x_pct: 0.75,
-            y_pct: 0.0,
-            width_pct: 0.25,
-            height_pct: 0.5556,
-        },
-        accepted_media_types: vec![ZoneMediaType::ShortTextWithIcon],
-        rendering_policy: RenderingPolicy {
-            backdrop: Some(Rgba::new(0.1, 0.1, 0.1, 0.9)),
-            text_color: Some(Rgba::WHITE),
-            ..Default::default()
-        },
-        contention_policy: ContentionPolicy::Stack { max_depth: 4 },
-        max_publishers: 4,
-        auto_clear_ms: None,
-        ephemeral: false,
-        layer_attachment: LayerAttachment::Chrome,
-    });
-
-    scene
-        .publish_to_zone(
-            "notification-area",
-            ZoneContent::Notification(NotificationPayload {
-                progress: None,
-                text: "Alpha alert".to_owned(),
-                icon: String::new(),
-                urgency: 0,
-                ttl_ms: None,
-                title: String::new(),
-                actions: Vec::new(),
-            }),
-            "agent-a",
-            None,
-            None,
-            None,
-        )
-        .unwrap();
-    scene
-        .publish_to_zone(
-            "notification-area",
-            ZoneContent::Notification(NotificationPayload {
-                progress: None,
-                text: "Beta alert".to_owned(),
-                icon: String::new(),
-                urgency: 1,
-                ttl_ms: None,
-                title: String::new(),
-                actions: Vec::new(),
-            }),
-            "agent-b",
-            None,
-            None,
-            None,
-        )
-        .unwrap();
-    scene
-        .publish_to_zone(
-            "notification-area",
-            ZoneContent::Notification(NotificationPayload {
-                progress: None,
-                text: "Gamma alert".to_owned(),
-                icon: String::new(),
-                urgency: 2,
-                ttl_ms: None,
-                title: String::new(),
-                actions: Vec::new(),
-            }),
-            "agent-c",
-            None,
-            None,
-            None,
-        )
-        .unwrap();
-
-    let items = compositor.collect_text_items(&scene, 1280.0, 720.0);
-
-    // Three publications in a Stack zone must produce three TextItems.
-    assert_eq!(
-        items.len(),
-        3,
-        "Stack zone with 3 publications must produce 3 TextItems, got {}",
-        items.len()
+        first_top > first_bottom && first_bottom >= second_top && second_top > second_bottom,
+        "two non-overlapping backdrop quads: {first_top}..{first_bottom}, {second_top}..{second_bottom}"
     );
 
-    // Items should be ordered newest-first (slot 0 = newest at top of zone).
-    assert!(
-        items[0].text.contains("Gamma"),
-        "first TextItem should be the newest publication (Gamma), got: {}",
-        items[0].text
+    let text_scene = stack_scene(
+        &[
+            ("agent-a", "Alpha alert", 0),
+            ("agent-b", "Beta alert", 1),
+            ("agent-c", "Gamma alert", 2),
+        ],
+        None,
     );
-    assert!(
-        items[1].text.contains("Beta"),
-        "second TextItem should be Beta, got: {}",
-        items[1].text
-    );
-    assert!(
-        items[2].text.contains("Alpha"),
-        "third TextItem should be the oldest publication (Alpha), got: {}",
-        items[2].text
-    );
-
-    // Each item should occupy a different vertical slot; slot 0 is at top
-    // (lowest y), slot 1 below it, slot 2 below that.
-    assert!(
-        items[1].pixel_y > items[0].pixel_y,
-        "slot 1 y ({}) must be below slot 0 y ({})",
-        items[1].pixel_y,
-        items[0].pixel_y
-    );
-    assert!(
-        items[2].pixel_y > items[1].pixel_y,
-        "slot 2 y ({}) must be below slot 1 y ({})",
-        items[2].pixel_y,
-        items[1].pixel_y
-    );
+    let items = compositor.collect_text_items(&text_scene, width, height);
+    assert_eq!(items.len(), 3, "one text item per card");
+    for (item, label) in items.iter().zip(["Gamma", "Beta", "Alpha"]) {
+        assert!(
+            item.text.contains(label),
+            "expected {label}, got {}",
+            item.text
+        );
+    }
+    for pair in items.windows(2) {
+        assert!(
+            pair[0].pixel_y < pair[1].pixel_y,
+            "newest text is above older text"
+        );
+    }
 }
 
 // ── Slot layout: content-sized slots, newest-first ───────────────────────
