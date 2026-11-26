@@ -13,9 +13,5 @@ pub use types::LeaseId;
 pub use crate::types::LeaseState;
 pub use orphan::{DEFAULT_GRACE_PERIOD_MS as ORPHAN_GRACE_PERIOD_MS, TileVisualHint};
 
-// ─── Resource Budget ─────────────────────────────────────────────────────────
-
-// `ResourceBudget` is the single canonical type defined in `crate::types`.
-// Re-exported here so that `budget.rs` and other lease sub-modules can import
-// it via `super::ResourceBudget` without knowing the originating module.
+// Preserve the legacy import path for serialized scene budget metadata.
 pub use crate::types::ResourceBudget;

@@ -36,11 +36,11 @@ use tze_hud_scene::types::ResourceBudget;
 
 use crate::mutation_budget_bridge::DEFAULT_MAX_GUEST_SESSIONS;
 
-/// Absolute maximum tiles any agent may hold, regardless of config.
+/// Hard ceiling for legacy per-agent tile-count metadata.
 const HARD_MAX_TILES: u32 = 64;
-/// Absolute maximum texture memory any agent may hold, regardless of config.
+/// Hard ceiling for legacy per-agent tile-texture metadata.
 const HARD_MAX_TEXTURE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
-/// Absolute maximum update rate any agent may sustain, regardless of config.
+/// Hard ceiling for the session registration update-rate threshold.
 const HARD_MAX_UPDATE_RATE_HZ: f32 = 120.0;
 
 // ─── Operational runtime envelope ────────────────────────────────────────────
@@ -66,7 +66,7 @@ pub struct RuntimeResidentStoreLimits {
     pub font_bytes: usize,
 }
 
-/// Immutable profile-derived limits consumed by runtime admission paths.
+/// Immutable profile values for admission, resident stores and legacy metadata.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OperationalRuntimeEnvelope {
     pub profile_name: String,
@@ -207,8 +207,8 @@ impl RuntimeContext {
         }
     }
 
-    /// The mutation/lease budget every session gets: canonical defaults
-    /// capped by the profile and the absolute hard maximum.
+    /// Legacy scene metadata and the session registration update-rate threshold,
+    /// preserving canonical defaults capped by the profile and hard maxima.
     pub fn resource_budget(&self) -> ResourceBudget {
         let canonical = ResourceBudget::default();
         ResourceBudget {
