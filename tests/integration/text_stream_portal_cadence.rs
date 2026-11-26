@@ -354,20 +354,16 @@ async fn frame_budgets_hold_under_burst() {
         clock.now_us().saturating_sub(accepted_at) <= CADENCE_BURST_WINDOW_MS * 1_000,
         "accepted burst remains within the 250 ms workload window"
     );
-    assert!(
-        scene_handle(&runtime)
-            .await
-            .lock()
-            .await
-            .tiles
-            .values()
-            .any(|tile| tile.namespace == "tze_hud_portal_driver"),
-        "real driver must have rendered the burst portal"
-    );
-
     let shared_scene = scene_handle(&runtime).await;
     {
         let scene = shared_scene.lock().await;
+        assert!(
+            scene
+                .tiles
+                .values()
+                .any(|tile| tile.namespace == "tze_hud_portal_driver"),
+            "real driver must have rendered the burst portal"
+        );
         assert_eq!(
             runtime.compositor.prepared_portal_content_bytes(&scene),
             None
