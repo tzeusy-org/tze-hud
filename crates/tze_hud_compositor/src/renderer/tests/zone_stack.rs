@@ -618,138 +618,70 @@ fn test_zone_slot_layout_iter_visible_clips_and_clamps() {
     );
 }
 
-/// MergeByKey zone: every StatusBar publication's entries are merged, one
-/// key/value pair per unique key, in key order.
+/// A merged status bar orders unique keys, shows replacement values, and
+/// reserves space only for mapped icons.
 #[tokio::test]
-async fn test_merge_by_key_zone_merges_all_status_bar_entries() {
+async fn test_merge_by_key_zone_merges_entries_updates_and_positions_icons() {
     let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
+    let make_zone = |description: &str, height_pct, max_keys, max_publishers| {
+        let mut zone = zone_fixture(
+            "status-bar",
+            GeometryPolicy::EdgeAnchored {
+                edge: DisplayEdge::Bottom,
+                height_pct,
+                width_pct: 1.0,
+                margin_px: 0.0,
+            },
+            ZoneMediaType::KeyValuePairs,
+            LayerAttachment::Chrome,
+        );
+        zone.description = description.into();
+        zone.rendering_policy.backdrop = Some(Rgba::new(0.08, 0.08, 0.08, 1.0));
+        zone.rendering_policy.text_color = Some(Rgba::WHITE);
+        zone.contention_policy = ContentionPolicy::MergeByKey { max_keys };
+        zone.max_publishers = max_publishers;
+        zone
+    };
+    let publish =
+        |scene: &mut SceneGraph, agent, merge_key: Option<&str>, entries: &[(&str, &str)]| {
+            scene
+                .publish_to_zone(
+                    "status-bar",
+                    ZoneContent::StatusBar(StatusBarPayload {
+                        entries: entries
+                            .iter()
+                            .map(|&(key, value)| (key.into(), value.into()))
+                            .collect(),
+                    }),
+                    agent,
+                    merge_key.map(str::to_owned),
+                    None,
+                    None,
+                )
+                .unwrap();
+        };
 
     let mut scene = SceneGraph::new(1280.0, 720.0);
-    scene.register_zone(ZoneDefinition {
-        id: SceneId::new(),
-        name: "status-bar".to_owned(),
-        description: "merge-by-key zone test".to_owned(),
-        geometry_policy: GeometryPolicy::EdgeAnchored {
-            edge: DisplayEdge::Bottom,
-            height_pct: 0.20,
-            width_pct: 1.0,
-            margin_px: 0.0,
-        },
-        accepted_media_types: vec![ZoneMediaType::KeyValuePairs],
-        rendering_policy: RenderingPolicy {
-            backdrop: Some(Rgba::new(0.08, 0.08, 0.08, 1.0)),
-            text_color: Some(Rgba::WHITE),
-            ..Default::default()
-        },
-        contention_policy: ContentionPolicy::MergeByKey { max_keys: 32 },
-        max_publishers: 8,
-        auto_clear_ms: None,
-        ephemeral: false,
-        layer_attachment: LayerAttachment::Chrome,
-    });
-
-    let mut entries_a = std::collections::HashMap::new();
-    entries_a.insert("cpu".to_owned(), "45%".to_owned());
-    entries_a.insert("mem".to_owned(), "8.2 GB".to_owned());
-    scene
-        .publish_to_zone(
-            "status-bar",
-            ZoneContent::StatusBar(StatusBarPayload { entries: entries_a }),
-            "agent-a",
-            Some("cpu-mem".to_owned()),
-            None,
-            None,
-        )
-        .unwrap();
-    let mut entries_b = std::collections::HashMap::new();
-    entries_b.insert("net".to_owned(), "1.2 MB/s".to_owned());
-    scene
-        .publish_to_zone(
-            "status-bar",
-            ZoneContent::StatusBar(StatusBarPayload { entries: entries_b }),
-            "agent-b",
-            Some("net".to_owned()),
-            None,
-            None,
-        )
-        .unwrap();
-
-    let texts: Vec<String> = compositor
-        .collect_text_items(&scene, 1280.0, 720.0)
-        .iter()
-        .map(|i| i.text.to_string())
-        .collect();
-    assert_eq!(texts, ["cpu", "45%", "mem", "8.2 GB", "net", "1.2 MB/s"]);
-}
-
-/// MergeByKey zone: when a key appears in multiple publications, the latest
-/// value wins (last-write-wins per key semantics).
-#[tokio::test]
-async fn test_merge_by_key_latest_value_wins_for_duplicate_keys() {
-    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
-
-    let mut scene = SceneGraph::new(1280.0, 720.0);
-    scene.register_zone(ZoneDefinition {
-        id: SceneId::new(),
-        name: "status-bar".to_owned(),
-        description: "merge-by-key duplicate key test".to_owned(),
-        geometry_policy: GeometryPolicy::EdgeAnchored {
-            edge: DisplayEdge::Bottom,
-            height_pct: 0.04,
-            width_pct: 1.0,
-            margin_px: 0.0,
-        },
-        accepted_media_types: vec![ZoneMediaType::KeyValuePairs],
-        rendering_policy: RenderingPolicy {
-            backdrop: Some(Rgba::new(0.08, 0.08, 0.08, 1.0)),
-            text_color: Some(Rgba::WHITE),
-            ..Default::default()
-        },
-        contention_policy: ContentionPolicy::MergeByKey { max_keys: 32 },
-        max_publishers: 8,
-        auto_clear_ms: None,
-        ephemeral: false,
-        layer_attachment: LayerAttachment::Chrome,
-    });
-
-    // First publish: cpu = "10%"
-    let mut entries_old = std::collections::HashMap::new();
-    entries_old.insert("cpu".to_owned(), "10%".to_owned());
-    scene
-        .publish_to_zone(
-            "status-bar",
-            ZoneContent::StatusBar(StatusBarPayload {
-                entries: entries_old,
-            }),
-            "agent-a",
-            Some("cpu".to_owned()),
-            None,
-            None,
-        )
-        .unwrap();
-
-    // Second publish: same key "cpu" with updated value "90%"
-    let mut entries_new = std::collections::HashMap::new();
-    entries_new.insert("cpu".to_owned(), "90%".to_owned());
-    scene
-        .publish_to_zone(
-            "status-bar",
-            ZoneContent::StatusBar(StatusBarPayload {
-                entries: entries_new,
-            }),
-            "agent-a",
-            Some("cpu".to_owned()),
-            None,
-            None,
-        )
-        .unwrap();
-
+    scene.register_zone(make_zone("merge-by-key zone test", 0.20, 32, 8));
+    publish(
+        &mut scene,
+        "agent-a",
+        Some("cpu-mem"),
+        &[("cpu", "45%"), ("mem", "8.2 GB")],
+    );
+    publish(&mut scene, "agent-b", Some("net"), &[("net", "1.2 MB/s")]);
     let items = compositor.collect_text_items(&scene, 1280.0, 720.0);
+    let texts: Vec<_> = items.iter().map(|item| item.text.as_ref()).collect();
+    assert_eq!(texts, ["cpu", "45%", "mem", "8.2 GB", "net", "1.2 MB/s"]);
 
+    let mut scene = SceneGraph::new(1280.0, 720.0);
+    scene.register_zone(make_zone("merge-by-key duplicate key test", 0.04, 32, 8));
+    for value in ["10%", "90%"] {
+        publish(&mut scene, "agent-a", Some("cpu"), &[("cpu", value)]);
+    }
+    let items = compositor.collect_text_items(&scene, 1280.0, 720.0);
     assert_eq!(items.len(), 2, "one merged key/value pair");
     let text = &items[1].text;
-
-    // The latest value "90%" must appear; "10%" must not.
     assert!(
         text.contains("90%"),
         "merged text must show latest cpu value '90%'; got: {text}"
@@ -758,65 +690,20 @@ async fn test_merge_by_key_latest_value_wins_for_duplicate_keys() {
         !text.contains("10%"),
         "merged text must not show stale cpu value '10%'; got: {text}"
     );
-}
-
-// ── StatusBar icon layout tests ─────────────────────────────
-
-/// `key_icon_map` non-empty → per-entry TextItems; icon-mapped entries have
-/// text `pixel_x` inset by `ICON_SIZE_PX + ICON_TEXT_GAP_PX`.
-///
-/// We don't use real SVG files here since tests can't rely on specific
-/// filesystem paths.  Instead we verify the TextItem layout (pixel_x
-/// position) produced by `status_bar_text_items` directly — the icon
-/// draw command path is exercised separately.
-#[tokio::test]
-async fn test_status_bar_key_icon_map_produces_per_entry_text_items() {
-    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
-
-    let mut key_icon_map = std::collections::HashMap::new();
-    // Map only "cpu" to an icon path; "mem" has no mapping.
-    key_icon_map.insert("cpu".to_owned(), "/nonexistent/cpu.svg".to_owned());
 
     let mut scene = SceneGraph::new(1280.0, 720.0);
-    scene.register_zone(ZoneDefinition {
-        id: SceneId::new(),
-        name: "status-bar".to_owned(),
-        description: "icon layout: per-entry TextItems".to_owned(),
-        geometry_policy: GeometryPolicy::EdgeAnchored {
-            edge: DisplayEdge::Bottom,
-            height_pct: 0.10,
-            width_pct: 1.0,
-            margin_px: 0.0,
-        },
-        accepted_media_types: vec![ZoneMediaType::KeyValuePairs],
-        rendering_policy: RenderingPolicy {
-            backdrop: Some(Rgba::new(0.08, 0.08, 0.08, 1.0)),
-            text_color: Some(Rgba::WHITE),
-            font_size_px: Some(16.0),
-            key_icon_map,
-            ..Default::default()
-        },
-        contention_policy: ContentionPolicy::MergeByKey { max_keys: 16 },
-        max_publishers: 4,
-        auto_clear_ms: None,
-        ephemeral: false,
-        layer_attachment: LayerAttachment::Chrome,
-    });
-
-    let mut entries = std::collections::HashMap::new();
-    entries.insert("cpu".to_owned(), "45%".to_owned());
-    entries.insert("mem".to_owned(), "8 GB".to_owned());
-    scene
-        .publish_to_zone(
-            "status-bar",
-            ZoneContent::StatusBar(StatusBarPayload { entries }),
-            "agent",
-            None,
-            None,
-            None,
-        )
-        .unwrap();
-
+    let mut zone = make_zone("icon layout: per-entry TextItems", 0.10, 16, 4);
+    zone.rendering_policy.font_size_px = Some(16.0);
+    // The glyph asset is irrelevant to text layout. Only the "cpu" key has an icon.
+    zone.rendering_policy.key_icon_map =
+        HashMap::from([("cpu".into(), "/nonexistent/cpu.svg".into())]);
+    scene.register_zone(zone);
+    publish(
+        &mut scene,
+        "agent",
+        None,
+        &[("cpu", "45%"), ("mem", "8 GB")],
+    );
     let items = compositor.collect_text_items(&scene, 1280.0, 720.0);
 
     assert_eq!(items.len(), 4, "one key/value pair per entry");
