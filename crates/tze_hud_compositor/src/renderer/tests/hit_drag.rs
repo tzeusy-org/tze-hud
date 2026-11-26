@@ -1658,68 +1658,22 @@ fn zone_hit_regions_and_slot_pitch_scale_with_px_scale() {
     assert_eq!(secondary, one, "a 1x secondary ignores the 1.5x primary");
 }
 
-/// The published pip zone gets a resize grip in its corner toward the display
-/// centre, beside its move handle; other zones get only the move handle.
-#[tokio::test]
-async fn pip_zone_gets_a_resize_grip_in_the_corner_toward_the_centre() {
-    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);
-    let (sw, sh) = (1920.0, 1080.0);
-    let mut scene = SceneGraph::new(sw, sh);
-    let mut ids = Vec::new();
-    for (name, x_pct) in [(PIP_ZONE, 0.70), ("other-zone", 0.05)] {
-        let id = SceneId::new();
-        ids.push(id);
-        scene.register_zone(ZoneDefinition {
-            id,
-            name: name.to_string(),
-            description: name.to_string(),
-            geometry_policy: GeometryPolicy::Relative {
-                x_pct,
-                y_pct: 0.70,
-                width_pct: 0.25,
-                height_pct: 0.25,
-            },
-            accepted_media_types: vec![ZoneMediaType::StreamText],
-            rendering_policy: RenderingPolicy::default(),
-            contention_policy: ContentionPolicy::LatestWins,
-            max_publishers: 1,
-            auto_clear_ms: None,
-            layer_attachment: LayerAttachment::Chrome,
-            ephemeral: false,
-        });
-        scene
-            .publish_to_zone(
-                name,
-                ZoneContent::StreamText("shown".to_string()),
-                "agent-a",
-                None,
-                None,
-                None,
-            )
-            .unwrap();
-    }
-    populate_drag_handles(&compositor, &mut scene, sw, sh);
-
-    let regions = &scene.overlay.drag_handle_hit_regions;
-    let grips: Vec<_> = regions.iter().filter(|r| r.resize_grip.is_some()).collect();
-    assert_eq!(grips.len(), 1, "only the pip has a grip: {regions:?}");
-    let grip = grips[0];
-    assert_eq!(grip.element_id, ids[0]);
-    assert!(grip.interaction_id.starts_with(RESIZE_GRIP_PREFIX));
-    // The pip sits right of and below the centre: its grip is top-left.
-    assert_eq!(grip.resize_grip, Some((true, true)));
-    let pip = Rect::new(0.70 * sw, 0.70 * sh, 0.25 * sw, 0.25 * sh);
-    assert!((grip.bounds.x - pip.x).abs() < 0.5 && (grip.bounds.y - pip.y).abs() < 0.5);
-    for id in &ids {
-        assert_eq!(
-            regions
-                .iter()
-                .filter(|r| r.element_id == *id && r.resize_grip.is_none())
-                .count(),
-            1,
-            "each zone keeps one move handle"
-        );
-    }
+fn publish_grip_test_zone(scene: &mut SceneGraph, name: &str, x_pct: f32, y_pct: f32) -> SceneId {
+    let zone = zone_fixture(
+        name,
+        relative(x_pct, y_pct, 0.25, 0.25),
+        ZoneMediaType::StreamText,
+        LayerAttachment::Chrome,
+    );
+    let id = zone.id;
+    scene.register_zone(zone);
+    publish_zone(
+        scene,
+        name,
+        "agent-a",
+        ZoneContent::StreamText("shown".into()),
+    );
+    id
 }
 
 /// One published pip at `(x_pct, y_pct)` (25%×25% of 1920×1080) with its
@@ -1731,54 +1685,49 @@ fn pip_regions(
     y_pct: f32,
 ) -> (SceneId, Rect) {
     let (sw, sh) = (1920.0, 1080.0);
-    let id = SceneId::new();
-    scene.register_zone(ZoneDefinition {
-        id,
-        name: PIP_ZONE.to_string(),
-        description: "pip".to_string(),
-        geometry_policy: GeometryPolicy::Relative {
-            x_pct,
-            y_pct,
-            width_pct: 0.25,
-            height_pct: 0.25,
-        },
-        accepted_media_types: vec![ZoneMediaType::StreamText],
-        rendering_policy: RenderingPolicy::default(),
-        contention_policy: ContentionPolicy::LatestWins,
-        max_publishers: 1,
-        auto_clear_ms: None,
-        layer_attachment: LayerAttachment::Chrome,
-        ephemeral: false,
-    });
-    scene
-        .publish_to_zone(
-            PIP_ZONE,
-            ZoneContent::StreamText("shown".to_string()),
-            "agent-a",
-            None,
-            None,
-            None,
-        )
-        .unwrap();
+    let id = publish_grip_test_zone(scene, PIP_ZONE, x_pct, y_pct);
     populate_drag_handles(compositor, scene, sw, sh);
     (id, Rect::new(x_pct * sw, y_pct * sh, 0.25 * sw, 0.25 * sh))
 }
 
-fn grip_region(scene: &SceneGraph) -> DragHandleHitRegion {
+fn grip_region(scene: &SceneGraph) -> &DragHandleHitRegion {
     scene
         .overlay
         .drag_handle_hit_regions
         .iter()
         .find(|r| r.resize_grip.is_some())
-        .cloned()
         .expect("the pip has a grip")
 }
 
-/// In each display quadrant the grip takes the pip corner facing the centre,
-/// its region sits in that corner, and its glyph fits inside the square.
+/// The pip alone gets a resize grip. Its hit region and glyph face the display
+/// centre in all four quadrants, and its corner stays fixed during a drag.
 #[tokio::test]
 async fn pip_grip_takes_the_corner_facing_the_centre_in_every_quadrant() {
     let (compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);
+    let (sw, sh) = (1920.0, 1080.0);
+    let mut scene = SceneGraph::new(sw, sh);
+    let pip_id = publish_grip_test_zone(&mut scene, PIP_ZONE, 0.70, 0.70);
+    let other = publish_grip_test_zone(&mut scene, "other-zone", 0.05, 0.70);
+    populate_drag_handles(&compositor, &mut scene, sw, sh);
+    let pip = Rect::new(0.70 * sw, 0.70 * sh, 0.25 * sw, 0.25 * sh);
+    let regions = &scene.overlay.drag_handle_hit_regions;
+    assert_eq!(regions.len(), 3, "two move handles and one PiP resize grip");
+    let grip = grip_region(&scene);
+    assert_eq!(grip.element_id, pip_id);
+    assert!(grip.interaction_id.starts_with(RESIZE_GRIP_PREFIX));
+    assert_eq!(grip.resize_grip, Some((true, true)));
+    assert!((grip.bounds.x - pip.x).abs() < 0.5 && (grip.bounds.y - pip.y).abs() < 0.5);
+    for id in [pip_id, other] {
+        assert_eq!(
+            regions
+                .iter()
+                .filter(|r| r.element_id == id && r.resize_grip.is_none())
+                .count(),
+            1,
+            "each zone keeps one move handle"
+        );
+    }
+
     for ((x_pct, y_pct), corner) in [
         ((0.70, 0.70), (true, true)),   // bottom-right quadrant: grip top-left
         ((0.05, 0.05), (false, false)), // top-left quadrant: grip bottom-right
@@ -1846,13 +1795,8 @@ async fn pip_grip_takes_the_corner_facing_the_centre_in_every_quadrant() {
         assert!(has_dot_in(corner), "corner cell");
         assert!(!has_dot_in((!left, !top)), "opposite cell");
     }
-}
 
-/// While its drag is active the grip keeps its emitted corner, even when the
-/// pip's box has moved past the display centre.
-#[tokio::test]
-async fn pip_grip_keeps_its_corner_while_dragging() {
-    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);
+    // A PiP drag freezes the emitted corner until release.
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let (id, _) = pip_regions(&compositor, &mut scene, 0.70, 0.70);
     assert_eq!(grip_region(&scene).resize_grip, Some((true, true)));
