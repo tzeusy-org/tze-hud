@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import sys
 from tempfile import TemporaryDirectory
 import textwrap
 import unittest
@@ -221,7 +222,8 @@ class BaselineSelectionTests(unittest.TestCase):
                     )
                 )
 
-    def test_lookup_unavailability_is_informational_and_leaves_no_output(self):
+class BaselineLookupTests(unittest.TestCase):
+    def call_with_environment(self, replies):
         with TemporaryDirectory() as directory:
             output_path = Path(directory) / "output"
             env = {
@@ -232,12 +234,85 @@ class BaselineSelectionTests(unittest.TestCase):
             }
             with (
                 patch.dict(os.environ, env),
-                patch.object(selector, "select_baseline", side_effect=subprocess.TimeoutExpired("gh", 15)),
+                patch.object(selector.subprocess, "check_output", side_effect=replies) as provider,
                 redirect_stdout(StringIO()) as stdout,
             ):
                 selector.main()
-            self.assertIn("lookup unavailable", stdout.getvalue())
-            self.assertFalse(output_path.exists())
+            outputs = output_path.read_text(encoding="utf-8") if output_path.exists() else None
+            return stdout.getvalue(), outputs, provider.call_args_list
+
+    def test_utf8_provider_response_decodes_real_non_ascii_bytes(self):
+        row = {"display_title": "緊急 – Résumé"}
+        response = json.dumps([{"workflow_runs": [row]}], ensure_ascii=False).encode("utf-8")
+        check_output = subprocess.check_output
+
+        def fake_gh(argv, **kwargs):
+            self.assertEqual(argv[:5], ["gh", "api", "--method", "GET", "--paginate"])
+            self.assertEqual(kwargs["encoding"], "utf-8")
+            return check_output(
+                [sys.executable, "-c", f"import sys; sys.stdout.buffer.write({response!r})"],
+                **kwargs,
+            )
+
+        with patch.object(selector.subprocess, "check_output", side_effect=fake_gh):
+            self.assertEqual(
+                selector.github_rows("private-route", "workflow_runs", deadline=selector.monotonic() + 5),
+                [row],
+            )
+
+    def test_timeout_retries_same_get_then_selects_verified_artifact(self):
+        transient = subprocess.TimeoutExpired("private-route", 15)
+        log, outputs, calls = self.call_with_environment([
+            transient,
+            json.dumps([{"workflow_runs": [run(5)]}]),
+            json.dumps([{"jobs": jobs(5)}]),
+            json.dumps([{"artifacts": [artifact(5)]}]),
+        ])
+        self.assertEqual(len(calls), 4)
+        self.assertEqual(calls[0], calls[1])
+        self.assertTrue(all(0 < c.kwargs["timeout"] <= 15 for c in calls))
+        self.assertEqual(outputs, "run-id=5\nartifact-id=501\n")
+        self.assertIn("stage=workflow_runs reason=timeout", log)
+        self.assertIn("Windows perf baseline run 5 attempt 1, artifact 501", log)
+        self.assertNotIn("private-route", log)
+
+    def test_timeout_retry_cannot_extend_total_deadline(self):
+        transient = subprocess.TimeoutExpired("private-route", 15)
+        with (
+            patch.object(selector, "monotonic", side_effect=[10, 10, 25, 25, 28]),
+            patch.object(selector.subprocess, "check_output", side_effect=transient) as provider,
+            redirect_stdout(StringIO()),
+        ):
+            with self.assertRaises(selector.LookupUnavailable) as raised:
+                selector.github_rows("private-route", "jobs", deadline=28)
+        self.assertEqual((raised.exception.stage, raised.exception.reason), ("jobs", "timeout"))
+        self.assertEqual([c.kwargs["timeout"] for c in provider.call_args_list], [15, 3])
+
+    def test_lookup_unavailability_is_typed_sanitized_and_leaves_no_output(self):
+        private = "private-route-and-stderr"
+        cases = (
+            ("provider-exit", [subprocess.CalledProcessError(1, private, stderr=private)]),
+            ("encoding", [UnicodeDecodeError("utf-8", private.encode(), 0, 1, private)]),
+            ("process-io", [OSError(private)]),
+            ("json", [private]),
+            ("response-shape", [json.dumps([{"jobs": private}])]),
+        )
+        runs = json.dumps([{"workflow_runs": [run(5)]}])
+        for reason, replies in cases:
+            with self.subTest(reason=reason):
+                log, outputs, calls = self.call_with_environment([runs, *replies])
+                self.assertIsNone(outputs)
+                self.assertEqual(len(calls), 2)
+                self.assertIn("lookup unavailable", log)
+                self.assertRegex(log, rf"stage=jobs reason={reason} elapsed=\d+\.\d{{3}}s")
+                self.assertNotIn(private, log)
+
+    def test_empty_eligible_history_is_distinct_from_lookup_failure(self):
+        log, outputs, calls = self.call_with_environment(['[{"workflow_runs":[]}]'])
+        self.assertIsNone(outputs)
+        self.assertEqual(len(calls), 1)
+        self.assertIn("No eligible main Windows perf baseline found.", log)
+        self.assertNotIn("lookup unavailable", log)
 
 
 class TimingRouteTests(unittest.TestCase):

@@ -2,11 +2,13 @@
 """Select the exact main attempt that supplies the Windows perf trend baseline."""
 
 from datetime import datetime, timedelta, timezone
+from functools import partial
 import json
 import os
 from pathlib import Path
 import re
 import subprocess
+from time import monotonic
 from urllib.parse import urlencode
 
 WINDOWS_JOB = "Windows performance budget"
@@ -15,16 +17,57 @@ TIMING_JOB = "Linux timing assertions"
 PUBLISH_STEP = "Publish main-pinned Windows perf baseline"
 BASELINE = "windows-perf-baseline-main"
 COMPLETE_CONCLUSIONS = ("success", "failure", "timed_out")
+COMMAND_TIMEOUT_SECONDS = 15
+LOOKUP_TIMEOUT_SECONDS = 60
 
 
-def github_rows(route, key):
-    output = subprocess.check_output(
-        ["gh", "api", "--method", "GET", "--paginate", "--slurp", route],
-        text=True,
-        stderr=subprocess.DEVNULL,
-        timeout=15,
-    )
-    return [row for page in json.loads(output) for row in page[key]]
+class LookupUnavailable(Exception):
+    def __init__(self, stage, reason):
+        self.stage = stage
+        self.reason = reason
+
+
+def github_rows(route, key, *, deadline):
+    started = monotonic()
+    for attempt in range(2):
+        remaining = deadline - monotonic()
+        if remaining <= 0:
+            raise LookupUnavailable(key, "deadline")
+        try:
+            output = subprocess.check_output(
+                ["gh", "api", "--method", "GET", "--paginate", "--slurp", route],
+                encoding="utf-8",
+                stderr=subprocess.DEVNULL,
+                timeout=min(COMMAND_TIMEOUT_SECONDS, remaining),
+            )
+            break
+        except subprocess.TimeoutExpired:
+            now = monotonic()
+            if attempt or now >= deadline:
+                raise LookupUnavailable(key, "timeout") from None
+            print(
+                f"Windows perf baseline lookup retry. stage={key} reason=timeout "
+                f"elapsed={now - started:.3f}s"
+            )
+        except subprocess.SubprocessError:
+            raise LookupUnavailable(key, "provider-exit") from None
+        except UnicodeDecodeError:
+            raise LookupUnavailable(key, "encoding") from None
+        except OSError:
+            raise LookupUnavailable(key, "process-io") from None
+
+    try:
+        pages = json.loads(output)
+    except (ValueError, RecursionError):
+        raise LookupUnavailable(key, "json") from None
+    if not isinstance(pages, list) or not pages or any(
+        not isinstance(page, dict) or not isinstance(page.get(key), list) for page in pages
+    ):
+        raise LookupUnavailable(key, "response-shape")
+    rows = [row for page in pages for row in page[key]]
+    if not all(isinstance(row, dict) for row in rows):
+        raise LookupUnavailable(key, "response-shape")
+    return rows
 
 
 def positive_int(value):
@@ -66,7 +109,9 @@ def upload_time_matches(artifact, publish_step):
         return False
 
 
-def select_baseline(repo, repo_id, current_run, get_rows=github_rows):
+def select_baseline(repo, repo_id, current_run, get_rows=None):
+    if get_rows is None:
+        get_rows = partial(github_rows, deadline=monotonic() + LOOKUP_TIMEOUT_SECONDS)
     root = f"repos/{repo}/actions"
     # Include runs created just before the 90-day artifact retention window.
     since = datetime.now(timezone.utc).date() - timedelta(days=91)
@@ -147,23 +192,46 @@ def select_baseline(repo, repo_id, current_run, get_rows=github_rows):
     return None
 
 
+def unavailable(stage, reason, started):
+    print(
+        f"::notice::Windows perf baseline lookup unavailable. stage={stage} reason={reason} "
+        f"elapsed={monotonic() - started:.3f}s. No baseline downloaded."
+    )
+
+
 def main():
+    started = monotonic()
+    stage = "configuration"
     try:
-        choice = select_baseline(
-            os.environ["GITHUB_REPOSITORY"],
-            int(os.environ["GITHUB_REPOSITORY_ID"]),
-            int(os.environ["GITHUB_RUN_ID"]),
-        )
-    except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError, AttributeError):
-        print("::notice::Windows perf baseline lookup unavailable. No baseline downloaded.")
+        repo = os.environ["GITHUB_REPOSITORY"]
+        repo_id = int(os.environ["GITHUB_REPOSITORY_ID"])
+        current_run = int(os.environ["GITHUB_RUN_ID"])
+        stage = "selection"
+        choice = select_baseline(repo, repo_id, current_run)
+        if choice is not None:
+            stage = "output"
+            run_id, attempt, artifact_id = choice
+            with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
+                output.write(f"run-id={run_id}\nartifact-id={artifact_id}\n")
+    except LookupUnavailable as error:
+        unavailable(error.stage, error.reason, started)
+        return
+    except (ValueError, KeyError, TypeError, AttributeError):
+        unavailable(stage, "invalid-data", started)
+        return
+    except OSError:
+        unavailable(stage, "io", started)
         return
     if choice is None:
-        print("::notice::No eligible main Windows perf baseline found.")
+        print(
+            "::notice::No eligible main Windows perf baseline found. "
+            f"elapsed={monotonic() - started:.3f}s"
+        )
         return
-    run_id, attempt, artifact_id = choice
-    with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
-        output.write(f"run-id={run_id}\nartifact-id={artifact_id}\n")
-    print(f"Windows perf baseline run {run_id} attempt {attempt}, artifact {artifact_id}")
+    print(
+        f"Windows perf baseline run {run_id} attempt {attempt}, artifact {artifact_id}. "
+        f"elapsed={monotonic() - started:.3f}s"
+    )
 
 
 if __name__ == "__main__":
