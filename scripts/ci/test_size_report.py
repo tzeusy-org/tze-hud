@@ -32,6 +32,18 @@ rust_test = 2
 """
 
 
+def inflight(feature="initial-feature", lines=1, signed_at="2026-11-09"):
+    return f"""
+[[inflight_allowances]]
+feature = "{feature}"
+approval = "signed feature spec"
+signed_at = "{signed_at}"
+decision = "hud-3n24e.32"
+target = "engine"
+rust = {lines}
+"""
+
+
 class SizeReportTest(unittest.TestCase):
     def test_splits_rust_production_and_test_per_surface(self):
         rows = size_report.count({
@@ -195,6 +207,96 @@ rust = 6
         status, _, err = self.report("--base", "HEAD")
         self.assertEqual(status, 1)
         self.assertIn("12 lines above its 11-line ceiling", err)
+
+    def test_inflight_growth_applies_once_above_an_already_exceeded_ceiling(self):
+        self.write("crates/a/src/lib.rs", "// a\n" * 7)
+        self.write("scripts/ci/size_targets.toml", TARGETS + inflight())
+        status, out, err = self.report("--base", "HEAD")
+        self.assertEqual((status, err), (0, ""))
+        self.assertIn("- engine (rust) 10 → 11, +1 lines", out)
+        self.git("add", ".")
+        self.git("-c", "user.name=Size Gate", "-c", "user.email=gate@example.invalid",
+                 "-c", "commit.gpgSign=false", "commit", "-qm", "Land the approved growth")
+        self.write("crates/a/src/lib.rs", "// a\n" * 8)
+        status, out, err = self.report("--base", "HEAD")
+        self.assertEqual(status, 1)
+        self.assertNotIn("In-flight allowances applied", out)
+        self.assertIn("engine (rust) grew from 11 to 12 lines above its 5-line ceiling", err)
+
+    def test_inflight_receipts_measure_net_group_growth_once(self):
+        self.write("crates/a/src/lib.rs", "// a\n" * 9)
+        self.write("scripts/ci/size_targets.toml", TARGETS + inflight(lines=1) + inflight("second", lines=2))
+        self.assertEqual(self.report("--base", "HEAD")[0], 0)
+        for change, expected in ((5, 4), (3, 2)):
+            with self.subTest(expected=expected):
+                self.write("crates/b/src/lib.rs", "// b\n" * change)
+                status, _, err = self.report("--base", "HEAD")
+                self.assertEqual(status, 1)
+                self.assertIn(f"has 3 in-flight allowance lines but needs {expected} for measured growth", err)
+
+    def test_inflight_signature_requires_provenance_and_precedes_cutoff(self):
+        self.write("crates/a/src/lib.rs", "// a\n" * 7)
+        older = inflight(signed_at="2026-11-26T17:38:18Z")
+        self.write("scripts/ci/size_targets.toml", TARGETS + older)
+        self.assertEqual(self.report("--base", "HEAD")[0], 0)
+        for receipt in (
+            inflight(signed_at="2026-11-26"),
+            inflight(signed_at="2026-11-26T17:38:19Z"),
+            inflight(signed_at="2026-11-26T17:38:18"),
+            inflight().replace('approval = "signed feature spec"\n', ""),
+            inflight().replace("hud-3n24e.32", "unrelated-decision"),
+            inflight(lines=0),
+            inflight() + inflight(),
+        ):
+            with self.subTest(receipt=receipt):
+                self.write("scripts/ci/size_targets.toml", TARGETS + receipt)
+                self.assertEqual(self.report("--base", "HEAD")[0], 2)
+
+    def test_inflight_history_cannot_be_changed_or_removed(self):
+        self.write("scripts/ci/size_targets.toml", TARGETS + inflight())
+        self.git("add", ".")
+        self.git("-c", "user.name=Size Gate", "-c", "user.email=gate@example.invalid",
+                 "-c", "commit.gpgSign=false", "commit", "-qm", "Land the receipt")
+        for amendment in (TARGETS, TARGETS + inflight(lines=2)):
+            with self.subTest(amendment=amendment):
+                self.write("scripts/ci/size_targets.toml", amendment)
+                status, _, err = self.report("--base", "HEAD")
+                self.assertEqual(status, 2)
+                self.assertIn("existing in-flight size allowance for engine must stay unchanged", err)
+
+    def test_inflight_cannot_join_a_target_change_or_bank_unused_growth(self):
+        self.write("crates/a/src/lib.rs", "// a\n" * 7)
+        self.write("scripts/ci/size_targets.toml", TARGETS.replace("rust = 5", "rust = 6") + inflight())
+        status, _, err = self.report("--base", "HEAD")
+        self.assertEqual(status, 2)
+        self.assertIn("requires an unchanged target engine", err)
+        self.write("scripts/ci/size_targets.toml", TARGETS + inflight())
+        self.write("crates/a/src/lib.rs", "// a\n" * 6)
+        status, _, err = self.report("--base", "HEAD")
+        self.assertEqual(status, 1)
+        self.assertIn("has 1 in-flight allowance lines but needs 0", err)
+
+    def test_current_and_comparison_policy_must_be_regular(self):
+        policy = self.root / "scripts/ci/size_targets.toml"
+        policy.rename(policy.with_name("linked.toml"))
+        try:
+            policy.symlink_to("linked.toml")
+        except OSError as error:
+            if getattr(error, "winerror", None) == 1314:
+                self.skipTest("Windows account lacks symlink creation privilege")
+            raise
+        self.git("config", "core.symlinks", "true")
+        status, _, err = self.report("--base", "HEAD")
+        self.assertEqual(status, 2)
+        self.assertIn("size_targets.toml must be a regular file", err)
+        self.git("add", ".")
+        self.git("-c", "user.name=Size Gate", "-c", "user.email=gate@example.invalid",
+                 "-c", "commit.gpgSign=false", "commit", "-qm", "Link the size policy")
+        policy.unlink()
+        policy.write_text(TARGETS)
+        status, _, err = self.report("--base", "HEAD")
+        self.assertEqual(status, 2)
+        self.assertIn("comparison source must be a regular file: scripts/ci/size_targets.toml", err)
 
     def test_report_only_can_run_without_gate_inputs(self):
         (self.root / "scripts/ci/size_targets.toml").unlink()

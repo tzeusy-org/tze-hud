@@ -203,7 +203,12 @@ allowances. An over-target count may stay flat or shrink. The size report shows
 physical totals for all surfaces and distance to target where a ceiling applies.
 The [target table](../scripts/ci/size_targets.toml) maps the greenfield sketch's
 logical-line estimates to current report surfaces. Each allowance cites the
-owner-signed feature spec that granted it.
+owner-signed feature spec that granted it. Owner decision `hud-3n24e.32` also
+allows a feature signed before #1714 merged at **2026-11-26 17:38:19 UTC** to
+land with its measured growth above the effective ceiling. That entry records
+the signed spec, signing time and decision. The check matches new entries to
+the exact growth against the tested base and reports the applied amounts.
+Subsequent landings keep the entries as history and compare their own growth.
 
 Open work toward these targets: `hud-1dnk5` (`just dev-run`, Windows-first
 quickstart, capture diff) and `hud-51ujj.7` (live smoke against the paired
