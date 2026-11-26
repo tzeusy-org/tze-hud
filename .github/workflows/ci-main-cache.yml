@@ -1,0 +1,78 @@
+name: Main Rust cache
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-main-cache
+  queue: max
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  warm-cache:
+    name: Warm Rust build caches
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Install pinned mold (native Linux linker)
+        run: python3 scripts/ci/install_mold.py
+        timeout-minutes: 5
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.88"
+          targets: x86_64-pc-windows-gnu
+
+      # Explicit shared keys match the incumbent protected job IDs. Keep the
+      # cache paths and hashed environment identical to the consumers.
+      # Restore both namespaces before warming. A fallback restore can clean
+      # the shared target, and a new archive may contain artifacts for both
+      # builds. Each post action saves only its own missing key. The cache
+      # step and job timeouts bound stalls such as the save in PR #606.
+      - uses: Swatinem/rust-cache@v2.9.1
+        id: clippy-cache
+        timeout-minutes: 10
+        with:
+          shared-key: clippy
+          save-if: true
+      - uses: Swatinem/rust-cache@v2.9.1
+        id: test-cache
+        timeout-minutes: 10
+        with:
+          shared-key: test
+          save-if: true
+
+      - name: Compile workspace and integration test targets
+        if: steps.clippy-cache.outputs.cache-hit != 'true' || steps.test-cache.outputs.cache-hit != 'true'
+        run: |
+          cargo test --locked --no-run --workspace --all-targets --exclude integration --features tze_hud_runtime/dev-mode
+          cargo test --locked --no-run -p integration --tests
+          cargo test --locked --no-run -p benchmark --features headless --bin token_footprint_calibration
+          cargo build --locked -p benchmark --features headless --bin token_footprint_calibration
+      - name: Prepare native lint dependencies
+        if: steps.clippy-cache.outputs.cache-hit != 'true' || steps.test-cache.outputs.cache-hit != 'true'
+        run: cargo check --locked --workspace --all-targets --features benchmark/headless
+      - name: Prepare Windows GNU lint dependencies
+        if: steps.clippy-cache.outputs.cache-hit != 'true' || steps.test-cache.outputs.cache-hit != 'true'
+        env:
+          CARGO_FEATURE_PURE: "1"
+        run: |
+          cargo check --locked \
+            -p tze_hud_runtime \
+            -p tze_hud_compositor \
+            -p tze_hud_config \
+            --target x86_64-pc-windows-gnu

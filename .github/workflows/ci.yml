@@ -6,12 +6,10 @@
 # Every job has a job-level timeout-minutes and every apt step has its own, so
 # a stalled runner or mirror fails fast instead of timing out the merge queue.
 #
-# Three jobs, by design. Every job pays ~30–60 s of runner setup (toolchain,
-# cache restore, apt) and holds one slot of the org's shared hosted-runner
-# pool. With nine jobs per run, PR pushes, up to three merge-group builds and
-# main pushes queued 4–15 min for runners while each job ran ≤3.3 min
-# (2026-11-01 measurement). Fewer, fuller jobs keep the wall time near the
-# run time. Add a step to an existing job before adding a job.
+# Three jobs on each PR and merge group. Every job pays runner setup and
+# holds one slot of the org's shared hosted-runner pool. Main pushes warm
+# the Rust caches via ci-main-cache.yml. The fatal advisory check is
+# scheduled in ci-advisories.yml.
 #
 # Required checks (ruleset "main merge queue"; job `name:`s must not change):
 #   static checks, cargo clippy, cargo test
@@ -22,8 +20,7 @@
 #             files, size growth gate, cargo fmt --check, locked metadata,
 #             dev-mode guard (default-build closure of every package),
 #             cargo machete (unused deps), cargo deny licenses/bans/sources,
-#             cargo deny advisories (advisory on PR/queue, fatal on main push:
-#             a new RUSTSEC entry must not block unrelated merges),
+#             cargo deny advisories (informational),
 #             pure-Python suites (user-test skill, scripts/tests, scripts/ci)
 #   clippy  — workspace all-targets + benchmark/headless, -D warnings (subsumes
 #             cargo check), then the cfg(windows) crates on the windows-gnu
@@ -39,15 +36,13 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
   # GitHub merge queue: required checks must also run on the queue's temporary
   # `gh-readonly-queue/main/*` branches, or queued PRs never become mergeable.
   merge_group:
 
-# A new push to a PR supersedes its running checks; queue and main runs finish.
+# A new push to a PR supersedes its running checks. Queue runs finish.
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -85,24 +80,22 @@ jobs:
           MERGE_GROUP_BASE: ${{ github.event.merge_group.base_sha }}
         shell: bash
         run: |
-          args=(--output-dir test_results/size-report)
-          if [[ "$GITHUB_EVENT_NAME" != push ]]; then
-            if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
+          case "$GITHUB_EVENT_NAME" in
+            pull_request)
               # The synthetic merge's first parent is its actual base, even on a shallow checkout.
               base=$(git cat-file commit HEAD | sed -n '2s/^parent //p')
-            else
-              base=$MERGE_GROUP_BASE
-            fi
-            if [[ ! "$base" =~ ^[0-9a-f]{40}$ ]]; then
-              echo "size gate: missing or invalid comparison commit" >&2
-              exit 2
-            fi
-            if ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
-              git fetch --no-tags --depth=1 origin "$base"
-            fi
-            args+=(--base "$base")
+              ;;
+            merge_group) base=$MERGE_GROUP_BASE ;;
+            *) echo "size gate: unexpected event $GITHUB_EVENT_NAME" >&2; exit 2 ;;
+          esac
+          if [[ ! "$base" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "size gate: missing or invalid comparison commit" >&2
+            exit 2
           fi
-          python3 scripts/ci/size_report.py "${args[@]}"
+          if ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            git fetch --no-tags --depth=1 origin "$base"
+          fi
+          python3 scripts/ci/size_report.py --output-dir test_results/size-report --base "$base"
       - name: Upload size report
         if: ${{ !cancelled() && hashFiles('test_results/size-report/size-report.json') != '' }}
         uses: actions/upload-artifact@v4
@@ -130,7 +123,7 @@ jobs:
       - name: cargo deny (licenses, bans, sources)
         run: cargo deny --log-level warn check licenses bans sources
       - name: cargo deny (advisories)
-        continue-on-error: ${{ github.event_name != 'push' }}
+        continue-on-error: true
         run: cargo deny --log-level warn check advisories
       - uses: actions/setup-python@v5
         with:
@@ -179,13 +172,12 @@ jobs:
           toolchain: "1.88"
           components: clippy
           targets: x86_64-pc-windows-gnu
-      # timeout-minutes caps cache-save hangs (incident: PR #606, canonical-app-production-boot
-      # hung 15+ min in the Swatinem/rust-cache post-step, required --admin merge).
-      # v2.9.1 pins to a specific stable release rather than the floating v2 alias.
       - uses: Swatinem/rust-cache@v2.9.1
         timeout-minutes: 10
         with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          # ci-main-cache.yml saves the incumbent clippy key on main.
+          shared-key: clippy
+          save-if: false
       - name: cargo clippy (workspace, all targets, deny warnings)
         run: cargo clippy --workspace --all-targets --features benchmark/headless -- -D warnings
       - name: cargo clippy (windows-gnu, cfg(windows) crates, deny warnings)
@@ -224,13 +216,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.88"
-      # timeout-minutes caps cache-save hangs (incident: PR #606, canonical-app-production-boot
-      # hung 15+ min in the Swatinem/rust-cache post-step, required --admin merge).
-      # v2.9.1 pins to a specific stable release rather than the floating v2 alias.
       - uses: Swatinem/rust-cache@v2.9.1
         timeout-minutes: 10
         with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          # ci-main-cache.yml saves the incumbent test key on main.
+          shared-key: test
+          save-if: false
       - name: Install Mesa / llvmpipe
         timeout-minutes: 5
         run: |

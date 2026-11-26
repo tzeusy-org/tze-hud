@@ -181,9 +181,13 @@ Linux compile jobs install a SHA256-pinned mold linker through
   every job, PR push, merge-group build and main push draws on one shared
   pool. Required checks are three jobs (`static checks`, `cargo clippy`,
   `cargo test`); a new gate is a step in one of them, not a new job.
-  Superseded PR runs are cancelled, and `windows.yml` keeps its
-  informational idle measurement off PRs and runs its theme captures only
-  when a PR touches rendered paths.
+  Superseded PR runs are cancelled. A push to main runs the
+  [Rust cache job](../.github/workflows/ci-main-cache.yml) to warm build
+  dependencies for the protected Clippy and test jobs. Dependency advisories
+  remain informational in PRs and the queue, with a fatal
+  [daily advisory check](../.github/workflows/ci-advisories.yml).
+  `windows.yml` keeps its informational idle measurement off PRs and runs its
+  theme captures only when a PR touches rendered paths.
 - **Repeatable.** A correct change passes on the first attempt. Nextest runs
   with `retries = 0`; a per-test retry override in
   [`.config/nextest.toml`](../.config/nextest.toml) names its reason and is
