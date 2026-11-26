@@ -32,6 +32,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import secrets
 import select
 import shutil
@@ -328,6 +329,132 @@ def windows_huds() -> list[int]:
     return [int(row.split('","')[1]) for row in out.splitlines() if row.startswith('"tze_hud.exe"')]
 
 
+MOUSE_RECEIPT_LINE = re.compile(
+    r"(?P<timestamp>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z) +DEBUG +"
+    r"tze_hud_runtime::windowed: main thread: mouse input "
+    r"state=(?P<state>Pressed|Released) button=(?P<button>Left|Right|Middle|Back|Forward|Other\(\d{1,5}\)) "
+    r"secondary=(?P<secondary>None|Some\(\d{1,10}\)) "
+    r"x=(?P<x>-?\d{1,20}(?:\.\d{1,20})?(?:[eE][+-]?\d{1,3})?) "
+    r"y=(?P<y>-?\d{1,20}(?:\.\d{1,20})?(?:[eE][+-]?\d{1,3})?)"
+)
+
+
+@dataclass
+class MouseReceiptCapture:
+    """Optional existing-log evidence; never decides a gesture's result."""
+
+    out: Path
+    directory: Path | None = None
+    evidence: dict = field(default_factory=lambda: {
+        "filter": "info,tze_hud_runtime::windowed=debug",
+        "identities": [], "errors": [], "absence_is_inconclusive": True,
+    })
+
+    def prepare(self, env: dict, exe: Path) -> None:
+        try:
+            self.evidence["clock_anchor"] = {"unix_s": time.time(), "monotonic_s": time.monotonic()}
+            self.evidence["source_sha"] = subprocess.run(
+                ["git", "rev-parse", "HEAD"], cwd=REPO, capture_output=True, text=True,
+                check=True, timeout=5).stdout.strip()
+            with exe.open("rb") as binary:
+                self.evidence["exe_sha256"] = hashlib.file_digest(binary, "sha256").hexdigest()
+            self.evidence["exe"] = str(exe)
+            directory = Path(tempfile.mkdtemp(prefix="hud_mouse_receipts_"))
+            if directory.resolve().is_relative_to(self.out.resolve()):
+                shutil.rmtree(directory)
+                raise ValueError("raw log scratch must be outside the artifact tree")
+            self.directory = directory
+            env.update(TZE_HUD_LOG_DIR=str(self.directory), TZE_HUD_FILE_LOG=self.evidence["filter"])
+        except Exception as err:  # Optional evidence must not change the input run's result.
+            self.evidence["errors"].append(f"prepare: {type(err).__name__}: {err}")
+
+    def observe(self, status: dict, owned_pid: int | None) -> None:
+        # Called after startup or predecessor exit, using status already fetched by the harness.
+        self.evidence["identities"].append({
+            "owned_pid": owned_pid, "status_pid": status.get("pid"), "sha": status.get("sha"),
+            "matches": (owned_pid is not None and status.get("pid") == owned_pid
+                        and bool(self.evidence.get("source_sha"))
+                        and status.get("sha") == self.evidence.get("source_sha")),
+            "unix_s": time.time(), "monotonic_s": time.monotonic(),
+        })
+
+    def end_interval(self) -> None:
+        if self.evidence["identities"] and "until" not in self.evidence["identities"][-1]:
+            self.evidence["identities"][-1]["until"] = {
+                "unix_s": time.time(), "monotonic_s": time.monotonic(),
+            }
+
+    def finish(self, owned_pids: list[int], survivors: list[str]) -> dict:
+        evidence = self.evidence
+        evidence.update(owned_pids=list(owned_pids), files=[], source_files=[], mouse_records=0,
+                        unparsed_mouse_records=0, projection_truncated=False, logger_started=False,
+                        pid_attribution="identity intervals exclude restart overlap; shared log lines have no PID")
+        try:
+            records = []
+            if self.directory:
+                for name in ("tze_hud.log.1", "tze_hud.log"):
+                    path = self.directory / name
+                    if not path.exists():
+                        continue
+                    # The existing logger rotates at 10 MiB, retaining one predecessor.
+                    # Limit the read itself too, even if a surviving writer grows it.
+                    with path.open("rb") as raw:
+                        data = raw.read(12 * 1024 * 1024 + 1)
+                    if len(data) > 12 * 1024 * 1024:
+                        raise ValueError(f"{name} exceeds bounded log inspection")
+                    evidence["source_files"].append({"name": name, "bytes": len(data),
+                                                     "sha256": hashlib.sha256(data).hexdigest(),
+                                                     "mouse_records": data.count(b"main thread: mouse input")})
+                    evidence["mouse_records"] += data.count(b"main thread: mouse input")
+                    evidence["logger_started"] |= b"log file path=" in data
+                    for number, line in enumerate(data.decode("utf-8", errors="replace").splitlines(), 1):
+                        if "main thread: mouse input" not in line:
+                            continue
+                        match = MOUSE_RECEIPT_LINE.fullmatch(line)
+                        if not match:
+                            evidence["unparsed_mouse_records"] += 1
+                        elif len(records) < 10_000:
+                            records.append(dict(match.groupdict(), source_file=name, source_line=number))
+                        else:
+                            evidence["projection_truncated"] = True
+                evidence["rotated"] = (self.directory / "tze_hud.log.1").exists()
+                # Publish only validated fields, never raw INFO, diagnostics or rejected files.
+                if evidence["source_files"]:
+                    data = "".join(json.dumps(record) + "\n" for record in records).encode("utf-8")
+                    projection = self.out / "mouse-receipts.jsonl"
+                    projection.write_bytes(data)
+                    evidence["files"].append({"name": projection.name, "bytes": len(data),
+                                              "sha256": hashlib.sha256(data).hexdigest()})
+            evidence["projected_mouse_records"] = len(records)
+        except Exception as err:  # Preserve the original gesture outcome even on artifact failure.
+            evidence["errors"].append(f"capture: {type(err).__name__}: {err}")
+        finally:
+            if self.directory and not survivors:
+                try:
+                    shutil.rmtree(self.directory)
+                    evidence["raw_cleanup"] = "removed"
+                except OSError as err:
+                    evidence["errors"].append(f"cleanup: {type(err).__name__}: {err}")
+            elif self.directory:
+                evidence["raw_cleanup"] = "deferred until surviving owned processes exit; outside artifact tree"
+        try:
+            identity_ok = bool(evidence["identities"]) and all(i["matches"] for i in evidence["identities"])
+            if not evidence["files"]:
+                evidence["capture_status"] = "unavailable"
+            elif (evidence["errors"] or not identity_ok or survivors or not evidence["logger_started"]
+                  or evidence.get("rotated") or len(owned_pids) > 1 or evidence["unparsed_mouse_records"]
+                  or evidence["projection_truncated"]):
+                evidence["capture_status"] = "partial"
+            else:
+                evidence["capture_status"] = "captured"
+            # This is capture health, never a verdict that a missing mouse edge was not delivered.
+            (self.out / "mouse-receipts.json").write_text(json.dumps(evidence, indent=1), encoding="utf-8")
+        except Exception as err:  # The timeline still receives status if the separate receipt cannot be written.
+            evidence["errors"].append(f"receipt: {type(err).__name__}: {err}")
+            evidence["capture_status"] = "partial" if evidence["files"] else "unavailable"
+        return evidence
+
+
 @dataclass
 class Run:
     exe: Path
@@ -354,6 +481,7 @@ class Run:
     timeline: list[dict] = field(default_factory=list)
     publications: set[tuple[str, str | None]] = field(default_factory=set)
     grpc_port: int = field(default=0, init=False)
+    mouse_receipts: MouseReceiptCapture | None = None
 
     @property
     def pid(self) -> int | None:
@@ -409,6 +537,8 @@ class Run:
         self.log = self.out / "hud.log"
         dimensions = (["--width", str(SCREEN[0]), "--height", str(SCREEN[1])]
                       if self.window_mode == "fullscreen" else [])
+        if self.mouse_receipts:
+            self.mouse_receipts.prepare(env, self.exe)
         with open(self.log, "wb") as log:
             self.hud = subprocess.Popen(
                 [str(self.exe), "--config", str(config), "--window-mode", self.window_mode,
@@ -1964,6 +2094,8 @@ def scenario_dismiss(run: Run) -> None:
 def restart_owned(run: Run) -> dict:
     """POST /admin/restart, own the replacement and wait out the old instance."""
     old = run.pid
+    if run.mouse_receipts:
+        run.mouse_receipts.end_interval()
     status, _, _ = run.smoke.request("POST", "/admin/restart")
     if status != 202:
         raise ScenarioFailed("POST /admin/restart accepted", {"status": status})
@@ -1984,6 +2116,8 @@ def restart_owned(run: Run) -> dict:
             raise ScenarioFailed("old instance exits", {"pid": old}) from None
     else:
         wait_until(lambda: (not pid_alive(old), old), what="old instance exits", timeout_s=30)
+    if run.mouse_receipts:
+        run.mouse_receipts.observe(status, run.pid)
     return status
 
 
@@ -2863,6 +2997,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--window-mode", choices=("fullscreen", "overlay"), default="fullscreen")
     parser.add_argument("--out", type=Path, help="artifact dir (default test_results/gestures/<sha>/<run>)")
     parser.add_argument("--list", action="store_true", help="list scenarios and exit")
+    parser.add_argument("--mouse-receipt-diagnostics", action="store_true",
+                        help="retain optional scoped existing mouse DEBUG logs; does not change gesture verdicts")
     parser.add_argument("--required", type=required_names, metavar="NAMES",
                         help="comma-separated scenarios whose failure fails the run; the rest become "
                              "informational (listed, exit 0). Without it every scenario is required.")
@@ -2905,6 +3041,8 @@ def main(argv: list[str] | None = None) -> int:
     out.mkdir(parents=True, exist_ok=True)
     run = Run(exe=args.exe.resolve(), out=out, injector=args.injector, window_mode=args.window_mode,
               go_to_probe="go-to-session" in names)
+    if args.mouse_receipt_diagnostics:
+        run.mouse_receipts = MouseReceiptCapture(out)
     started = time.monotonic()
     results: list[dict] = []
     failure = None
@@ -2912,6 +3050,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         run.start()
         status = run.status()
+        if args.mouse_receipt_diagnostics:
+            run.mouse_receipts.observe(status, run.pid)
         # Gesture scenarios read desktop pixels: a HUD excluded from capture
         # would make every pixel check vacuous.
         if (status.get("capture_exclusion") or {}).get("on"):
@@ -2928,6 +3068,8 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as err:  # noqa: BLE001
         failure = f"harness: {type(err).__name__}: {err}"
     finally:
+        if args.mouse_receipt_diagnostics:
+            run.mouse_receipts.end_interval()
         survivors = run.stop() if run.home else []
         if survivors:
             failure = (failure + "; " if failure else "") + "left running: " + ", ".join(survivors)
@@ -2942,6 +3084,8 @@ def main(argv: list[str] | None = None) -> int:
             "steps": run.timeline,
             "sendinput_calls": getattr(run.inj, "calls", None) if args.injector == "sendinput" else None,
         }
+        if args.mouse_receipt_diagnostics:
+            timeline["mouse_receipts"] = run.mouse_receipts.finish(run.owned_pids, survivors)
         (out / "timeline.json").write_text(json.dumps(timeline, indent=1))
         if run.log and run.log.exists():
             tail = run.log.read_text(errors="replace").splitlines()[-200:]

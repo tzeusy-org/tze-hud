@@ -688,6 +688,28 @@ it and in the foreground immediately before SendInput. These samples describe
 the windows observed before injection. The HUD's launch count and feedback are
 the link activation evidence.
 
+A manual `windows` dispatch can opt into `mouse_receipt_diagnostics` (default
+false). It runs the same full fullscreen sequence and guards, while the existing
+file logger uses `info,tze_hud_runtime::windowed=debug` in unique owned scratch
+outside the uploaded artifact tree. `gestures/mouse-receipts.json` and the matching timeline field record
+checkout/build identity, executable hash, owned PIDs, clock anchors, capture
+health and inspected source log hashes/counts. Only validated mouse timestamps,
+state, button, secondary and cursor fields are retained in `mouse-receipts.jsonl`,
+bounded to 10,000 records. Raw INFO, panic diagnostics, oversized files and
+unrecognized lines are excluded; the owned scratch is removed after inspection
+once all owned processes exit. Truncation or unrecognized mouse records are partial evidence.
+Capture errors remain evidence limitations and never change gesture verdicts.
+Self-restarts inherit the log directory; lines have no PID, so attribution after
+replacement uses the recorded stable PID intervals (after the predecessor exits
+until the next restart begins). Transition lines and any rotation are explicitly
+partial.
+
+`main thread: mouse input` proves the existing Winit callback ran before native
+chrome admission; it does not prove a hit or accepted action. Missing records
+remain inconclusive, including when identity, file capture or retained history
+is incomplete. Boot-time hashing and post-exit inspection run outside input
+deadlines; synchronous DEBUG formatting and writes can perturb scheduling.
+
 An original scenario failure is preserved if its failure screenshot also
 fails (`diagnostic_error`). Desktop captures check GDI results and release
 their owned DCs and bitmap on error.

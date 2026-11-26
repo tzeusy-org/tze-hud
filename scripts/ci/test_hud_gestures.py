@@ -50,13 +50,103 @@ OWNED = dict(started_display=":91", target_display=":91", owned_pid=4242, status
 
 
 class GuardTests(unittest.TestCase):
+    def test_optional_mouse_receipts_bind_identity_and_report_incomplete_capture_without_raising(self) -> None:
+        for case in ("captured", "empty", "no-startup", "rotation", "identity", "survivor", "restart", "read-error",
+                     "prepare-error", "receipt-error", "oversized", "unparsed", "truncated", "contained-scratch"):
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as tmp:
+                out = Path(tmp)
+                exe = out / "tze_hud.exe"
+                exe.write_bytes(b"owned test executable")
+                capture = g.MouseReceiptCapture(out)
+                env = {"TZE_HUD_LOG": "info", "TZE_HUD_LOG_JSON": "1"}
+                prepare_error = (mock.patch.object(g.hashlib, "file_digest", side_effect=OSError("unreadable"))
+                                 if case == "prepare-error" else contextlib.nullcontext())
+                if case == "contained-scratch":
+                    (out / "raw").mkdir()
+                scratch = (mock.patch.object(g.tempfile, "mkdtemp", return_value=str(out / "raw"))
+                           if case == "contained-scratch" else contextlib.nullcontext())
+                with mock.patch.object(g.subprocess, "run", return_value=mock.Mock(stdout="a" * 40)), prepare_error, scratch:
+                    capture.prepare(env, exe)
+                self.assertEqual(env["TZE_HUD_LOG"], "info")
+                self.assertEqual(env["TZE_HUD_LOG_JSON"], "1")
+                if case in ("prepare-error", "contained-scratch"):
+                    self.assertNotIn("TZE_HUD_FILE_LOG", env)
+                else:
+                    self.assertEqual(env["TZE_HUD_FILE_LOG"], "info,tze_hud_runtime::windowed=debug")
+                    self.assertFalse(capture.directory.is_relative_to(out))
+                    self.assertEqual(Path(env["TZE_HUD_LOG_DIR"]), capture.directory)
+                    (capture.directory / "hud-diag.log").write_bytes(b"UNRELATED_PANIC_PAYLOAD\n")
+                    if case != "empty":
+                        log = capture.directory / "tze_hud.log"
+                        mouse = (b"2026-11-27T12:00:00.123456Z DEBUG tze_hud_runtime::windowed: "
+                                 b"main thread: mouse input state=Pressed button=Left secondary=None x=42.0 y=-1.5\n"
+                                 b"2026-11-27T12:00:00.124456Z DEBUG tze_hud_runtime::windowed: "
+                                 b"main thread: mouse input state=Released button=Left secondary=Some(1) x=42.0 y=-1.5\n")
+                        log.write_bytes((b"" if case == "no-startup" else b"INFO log file path=owned\n")
+                                        + b"INFO UNRELATED_INFO_PAYLOAD\n" + mouse * (5_001 if case == "truncated" else 1))
+                        if case == "rotation":
+                            (capture.directory / "tze_hud.log.1").write_bytes(b"older history\n")
+                        elif case == "oversized":
+                            with log.open("ab") as raw:
+                                raw.truncate(13 * 1024 * 1024)
+                        elif case == "unparsed":
+                            with log.open("ab") as raw:
+                                raw.write(b"main thread: mouse input UNPARSED_PAYLOAD\n")
+                capture.observe({"pid": 4242, "sha": "b" * 40 if case == "identity" else "a" * 40}, 4242)
+                owned = [4242]
+                if case == "restart":
+                    capture.end_interval()
+                    self.assertIn("until", capture.evidence["identities"][0])
+                    owned.append(4243)
+                    capture.observe({"pid": 4243, "sha": "a" * 40}, 4243)
+                read_error = (mock.patch.object(Path, "open", side_effect=OSError("capture unavailable"))
+                              if case == "read-error" else contextlib.nullcontext())
+                receipt_error = (mock.patch.object(Path, "write_text", side_effect=OSError("receipt unavailable"))
+                                 if case == "receipt-error" else contextlib.nullcontext())
+                with read_error, receipt_error:
+                    receipt = capture.finish(owned, ["hud pid 4242"] if case == "survivor" else [])
+                expected = ("captured" if case == "captured" else
+                            "unavailable" if case in ("empty", "prepare-error", "read-error", "oversized", "contained-scratch")
+                            else "partial")
+                self.assertEqual(receipt["capture_status"], expected)
+                self.assertTrue(receipt["absence_is_inconclusive"])
+                self.assertEqual(receipt["owned_pids"], owned)
+                if case == "captured":
+                    self.assertEqual(receipt["mouse_records"], 2)
+                    self.assertEqual(receipt["exe_sha256"], hashlib.sha256(exe.read_bytes()).hexdigest())
+                    self.assertTrue(receipt["identities"][0]["matches"])
+                    records = [json.loads(line) for line in (out / "mouse-receipts.jsonl").read_text().splitlines()]
+                    self.assertEqual([r["state"] for r in records], ["Pressed", "Released"])
+                    self.assertEqual([r["secondary"] for r in records], ["None", "Some(1)"])
+                    self.assertEqual(records[0]["timestamp"], "2026-11-27T12:00:00.123456Z")
+                    self.assertEqual((records[0]["button"], records[0]["x"], records[0]["y"]), ("Left", "42.0", "-1.5"))
+                    self.assertEqual(receipt["source_files"][0]["mouse_records"], 2)
+                if case == "truncated":
+                    self.assertTrue(receipt["projection_truncated"])
+                    self.assertEqual(receipt["projected_mouse_records"], 10_000)
+                if capture.directory:
+                    self.assertEqual(capture.directory.exists(), case == "survivor")
+                    if case == "survivor":
+                        g.shutil.rmtree(capture.directory)
+                for artifact in out.iterdir():
+                    data = artifact.read_bytes()
+                    for excluded in (b"UNRELATED_PANIC_PAYLOAD", b"UNRELATED_INFO_PAYLOAD", b"UNPARSED_PAYLOAD"):
+                        self.assertNotIn(excluded, data)
+                self.assertFalse((out / "tze_hud.log").exists())
+                self.assertFalse((out / "hud-diag.log").exists())
+                if case.endswith("error"):
+                    self.assertTrue(receipt["errors"])
+
     def test_only_the_resident_witness_enables_grpc_and_it_requires_the_owned_pid(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)
-            for witness, reported_pid in ((False, 4242), (True, 4242), (True, 999)):
-                with self.subTest(witness=witness, reported_pid=reported_pid):
+            for witness, reported_pid, diagnostics in ((False, 4242, False), (True, 4242, False),
+                                                       (True, 999, False), (False, 4242, True)):
+                with self.subTest(witness=witness, reported_pid=reported_pid, diagnostics=diagnostics):
                     run = g.Run(exe=Path("tze_hud"), out=workspace)
-                    home = workspace / f"home-{witness}-{reported_pid}"
+                    if diagnostics:
+                        run.mouse_receipts = g.MouseReceiptCapture(workspace)
+                    home = workspace / f"home-{witness}-{reported_pid}-{diagnostics}"
                     home.mkdir()
                     xvfb = mock.Mock(**{"poll.return_value": None})
                     hud = mock.Mock(pid=4242, **{"poll.return_value": None})
@@ -67,6 +157,7 @@ class GuardTests(unittest.TestCase):
                             mock.patch.object(g.subprocess, "Popen", return_value=hud) as spawn, \
                             mock.patch.object(g, "wait_for_mcp"), \
                             mock.patch.object(g, "XTest") as injector, \
+                            mock.patch.object(g.MouseReceiptCapture, "prepare") as prepare, \
                             mock.patch.object(g.Run, "guard"), \
                             mock.patch.object(g.Run, "status", return_value={"pid": reported_pid}):
                         if reported_pid != hud.pid:
@@ -75,6 +166,10 @@ class GuardTests(unittest.TestCase):
                         else:
                             run.start(resident_raster=witness)
                         command = spawn.call_args.args[0]
+                        self.assertEqual(prepare.call_count, int(diagnostics))
+                        if diagnostics:
+                            self.assertIs(prepare.call_args.args[0], spawn.call_args.kwargs["env"])
+                            self.assertEqual(prepare.call_args.args[1], run.exe)
                         grpc_port = int(command[command.index("--grpc-port") + 1])
                         mcp_port = int(command[command.index("--mcp-port") + 1])
                         self.assertGreater(mcp_port, 0)
@@ -836,16 +931,23 @@ class WindowsGuardTests(unittest.TestCase):
             fake = mock.Mock(home=None, log=None, display="", port=0)
             fake.exe = Path("target/release-dev/tze_hud.exe")
             fake.timeline = []
+            fake.owned_pids = []
+            fake.pid = 4242
             fake.status.return_value = {}
             fake.inj = None
             fake.smoke.ok.return_value = {}
-            for mode in ("fullscreen", "overlay"):
-                with self.subTest(mode=mode), mock.patch.object(g, "WINDOWS", True), \
+            for mode, diagnostics in (("fullscreen", False), ("overlay", False), ("fullscreen", True)):
+                with self.subTest(mode=mode, diagnostics=diagnostics), mock.patch.object(g, "WINDOWS", True), \
                         mock.patch.object(g, "Run", return_value=fake), \
                         mock.patch.object(g, "run_scenarios", return_value=[]) as scenarios, \
                         mock.patch.object(g, "write_step_summary"), contextlib.redirect_stdout(io.StringIO()):
                     self.assertEqual(g.main(["--exe", "unused.exe", "--injector", "sendinput",
-                                             "--window-mode", mode, "--out", directory]), 0)
+                                             "--window-mode", mode, "--out", directory,
+                                             *(["--mouse-receipt-diagnostics"] if diagnostics else [])]), 0)
+                    timeline = json.loads((Path(directory) / "timeline.json").read_text())
+                    self.assertEqual("mouse_receipts" in timeline, diagnostics)
+                    if diagnostics:
+                        self.assertEqual(timeline["mouse_receipts"]["capture_status"], "unavailable")
                     selected = scenarios.call_args.args[1]
                     self.assertEqual("overlay-pointer" in selected, mode == "overlay")
                     self.assertEqual("tray" in selected, mode == "overlay")
@@ -868,12 +970,14 @@ class WindowsGuardTests(unittest.TestCase):
 class RequiredGateTests(unittest.TestCase):
     """hud-ljhku.16: only required scenarios (and harness failures that cost one its PASS) fail the run."""
 
-    def gate(self, required, outcomes, *, refuse=None, mode="fullscreen", refusal=g.Refused):
+    def gate(self, required, outcomes, *, refuse=None, mode="fullscreen", refusal=g.Refused, diagnostics=False):
         """`refuse` is how many scenarios finish before the harness refuses."""
         with tempfile.TemporaryDirectory() as directory:
             fake = mock.Mock(home=Path(directory), log=None, display="", port=0)
             fake.exe = Path("target/release-dev/tze_hud.exe")
             fake.timeline = []
+            fake.owned_pids = []
+            fake.pid = 4242
             fake.status.return_value = {}
             fake.inj = None
             fake.smoke.ok.return_value = {}
@@ -892,7 +996,8 @@ class RequiredGateTests(unittest.TestCase):
                     mock.patch.object(g, "run_scenarios", side_effect=scenarios) as run, \
                     contextlib.redirect_stdout(io.StringIO()):
                 code = g.main(["--exe", "unused.exe", "--injector", "sendinput", "--window-mode", mode,
-                               "--out", directory, *gate])
+                               "--out", directory, *gate,
+                               *(["--mouse-receipt-diagnostics"] if diagnostics else [])])
             verdict = json.loads((Path(directory) / "verdict.json").read_text())
             fake.stop.assert_called_once_with()
             return code, run.call_args.args[1] if run.call_args else None, verdict
@@ -913,10 +1018,11 @@ class RequiredGateTests(unittest.TestCase):
             ("no --required keeps every scenario required", None, {"keyboard": "FAIL"}, None, 1),
         ]
         for label, required, outcomes, refuse, expected in cases:  # refuse: scenarios done first
-            with self.subTest(label):
-                code, _, verdict = self.gate(required, outcomes, refuse=refuse)
-                self.assertEqual(code, expected)
-                self.assertEqual(verdict["blocking"], bool(expected))
+            for diagnostics in (False, True):
+                with self.subTest(label=label, diagnostics=diagnostics):
+                    code, _, verdict = self.gate(required, outcomes, refuse=refuse, diagnostics=diagnostics)
+                    self.assertEqual(code, expected)
+                    self.assertEqual(verdict["blocking"], bool(expected))
         _, _, verdict = self.gate("composer", {"keyboard": "FAIL"})
         self.assertEqual(verdict["informational_failed"], ["keyboard"])
         code, _, verdict = self.gate("", {"tray": "FAIL"}, mode="overlay")
