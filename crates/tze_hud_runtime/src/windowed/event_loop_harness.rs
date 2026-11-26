@@ -5331,6 +5331,7 @@ mod tests {
         at: u64,
     ) {
         let window = harness.app.text_input_window_id().unwrap();
+        harness.app.update_text_input_ime_focus(window, true);
         harness
             .app
             .dispatch_text_input_ime(window, None, event, MonoUs(at));
@@ -5599,9 +5600,19 @@ mod tests {
         };
         assert_eq!(text(&harness), "");
 
-        // A loses native focus as the input owner moves to B. Delayed
-        // events sent by A must leave the current composition intact.
-        harness.app.blur_text_input_ime(a);
+        // A loses native focus before B gains it. The remembered keyboard
+        // destination is still A, with no pending preedit to identify a
+        // delayed direct Commit. Its empty preedit and commit are refused.
+        send_text_input_ime(&mut harness, Ime::Disabled, 104);
+        harness.app.update_text_input_ime_focus(a, false);
+        for event in [Ime::Preedit(String::new(), None), Ime::Commit("旧".into())] {
+            harness
+                .app
+                .dispatch_text_input_ime(a, None, event, MonoUs(104));
+        }
+        assert_eq!(text(&harness), "");
+
+        // Delayed events from A also cannot alter B's current composition.
         harness.app.state.notification_reply.test_ime_window = Some(b);
         send_text_input_ime(&mut harness, Ime::Preedit("新".into(), None), 104);
         for event in [

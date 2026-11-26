@@ -25,6 +25,7 @@ pub(super) struct NotificationReplyState {
     refresh_view: bool,
     nested_focus: bool,
     ime_anchor: Option<(WindowId, Rect)>,
+    pub(super) ime_focused_window: Option<WindowId>,
     ime_preedits: HashMap<WindowId, ImePreedit>,
     #[cfg(test)]
     pub(super) test_ime_window: Option<WindowId>,

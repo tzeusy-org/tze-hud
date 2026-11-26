@@ -318,7 +318,7 @@ impl WinitApp {
         }
     }
 
-    pub(super) fn blur_text_input_ime(&mut self, window: WindowId) {
+    fn blur_text_input_ime(&mut self, window: WindowId) {
         self.state
             .notification_reply
             .abandon_window_ime_preedit(window);
@@ -326,6 +326,27 @@ impl WinitApp {
             self.state.notification_reply.composing = false;
             self.set_composer_preedit(String::new(), None);
         }
+    }
+
+    pub(super) fn update_text_input_ime_focus(&mut self, window: WindowId, focused: bool) {
+        let ime_focus = &mut self.state.notification_reply.ime_focused_window;
+        if focused {
+            if let Some(previous) = ime_focus.replace(window)
+                && previous != window
+            {
+                self.blur_text_input_ime(previous);
+            }
+        } else {
+            if *ime_focus == Some(window) {
+                *ime_focus = None;
+            }
+            self.blur_text_input_ime(window);
+        }
+    }
+
+    pub(super) fn accepts_text_input_ime(&self, window: WindowId) -> bool {
+        self.state.notification_reply.ime_focused_window == Some(window)
+            && self.text_input_window_id() == Some(window)
     }
 
     pub(super) fn select_text_input_window(&mut self, secondary: Option<usize>) {
@@ -368,7 +389,7 @@ impl WinitApp {
         event: Ime,
         timestamp_mono_us: tze_hud_scene::MonoUs,
     ) {
-        if self.text_input_window_id() != Some(window) {
+        if !self.accepts_text_input_ime(window) {
             if matches!(event, Ime::Commit(_) | Ime::Disabled) {
                 self.state
                     .notification_reply

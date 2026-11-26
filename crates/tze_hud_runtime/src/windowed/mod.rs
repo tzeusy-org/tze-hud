@@ -2463,9 +2463,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
             }
 
             WindowEvent::Focused(focused) => {
-                if !focused {
-                    self.blur_text_input_ime(window_id);
-                }
+                self.update_text_input_ime_focus(window_id, focused);
                 self.handle_window_focus(secondary, focused);
             }
 
@@ -2624,7 +2622,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
             // caret); only Ime::Commit text enters the draft.
             WindowEvent::Ime(event) => {
                 if matches!(event, winit::event::Ime::Preedit(..))
-                    && self.text_input_window_id() == Some(window_id)
+                    && self.accepts_text_input_ime(window_id)
                     && let Some(source) = wake_source
                 {
                     self.state.wake.mark_main_work_pending(source);
@@ -2633,6 +2631,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                 self.dispatch_text_input_ime(window_id, secondary, event, timestamp_mono_us);
             }
             WindowEvent::Destroyed => {
+                self.update_text_input_ime_focus(window_id, false);
                 self.state
                     .notification_reply
                     .reset_window_ime_preedit(window_id);
