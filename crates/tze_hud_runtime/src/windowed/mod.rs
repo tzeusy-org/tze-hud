@@ -2463,6 +2463,9 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
             }
 
             WindowEvent::Focused(focused) => {
+                if !focused {
+                    self.blur_text_input_ime(window_id);
+                }
                 self.handle_window_focus(secondary, focused);
             }
 
@@ -2619,18 +2622,20 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
             // ── IME preedit: composition drawn at the composer caret ─────────
             // hud-ljhku.13: forwarded to the composer echo (underlined at the
             // caret); only Ime::Commit text enters the draft.
-            WindowEvent::Ime(winit::event::Ime::Preedit(text, cursor)) => {
-                if let Some(source) = wake_source {
+            WindowEvent::Ime(event) => {
+                if matches!(event, winit::event::Ime::Preedit(..))
+                    && self.text_input_window_id() == Some(window_id)
+                    && let Some(source) = wake_source
+                {
                     self.state.wake.mark_main_work_pending(source);
                 }
-                self.set_text_input_preedit(text, cursor);
-            }
-            WindowEvent::Ime(winit::event::Ime::Disabled) => {
-                self.disable_text_input_ime();
-            }
-            WindowEvent::Ime(winit::event::Ime::Commit(text)) => {
                 let timestamp_mono_us = tze_hud_scene::MonoUs(nanoseconds_since_start() / 1_000);
-                self.dispatch_text_input_commit(secondary, text, timestamp_mono_us);
+                self.dispatch_text_input_ime(window_id, secondary, event, timestamp_mono_us);
+            }
+            WindowEvent::Destroyed => {
+                self.state
+                    .notification_reply
+                    .reset_window_ime_preedit(window_id);
             }
 
             // ── Redraw ────────────────────────────────────────────────────

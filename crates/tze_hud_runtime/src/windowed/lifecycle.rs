@@ -2777,7 +2777,7 @@ impl WinitApp {
     ) {
         self.panel_window_focus(secondary, focused);
         if focused {
-            self.state.keyboard_window = secondary;
+            self.select_text_input_window(secondary);
         }
         if !focused {
             // A key hold ends when the HUD loses keyboard focus.
@@ -3768,6 +3768,10 @@ impl WinitApp {
         // The accepted input is committed and both scene/state guards are gone.
         if take_text_focus {
             self.blur_notification_reply();
+            if let Some(window) = self.state.press_window {
+                let secondary = super::displays::secondary_index(&self.state.secondaries, window);
+                self.select_text_input_window(secondary);
+            }
             let window = self
                 .state
                 .window

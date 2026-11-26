@@ -163,17 +163,18 @@ impl WinitApp {
     /// Route a key event to the open panel. Returns true when the panel owns
     /// it (the caller must not dispatch it anywhere else).
     pub(super) fn panel_key_event(&mut self, secondary: Option<usize>, event: &KeyEvent) -> bool {
-        self.panel_key_input(
+        self.route_panel_key_input(
             secondary,
             event.physical_key,
             &event.logical_key,
             event.text.as_deref(),
             event.state == ElementState::Pressed,
+            event.repeat,
         )
     }
 
-    /// [`Self::panel_key_event`] from its parts (testable without a winit
-    /// event).
+    /// A test-generated press has no native repeat.
+    #[cfg(any(test, feature = "test-harness"))]
     pub(super) fn panel_key_input(
         &mut self,
         secondary: Option<usize>,
@@ -181,6 +182,18 @@ impl WinitApp {
         logical: &Key,
         text: Option<&str>,
         pressed: bool,
+    ) -> bool {
+        self.route_panel_key_input(secondary, physical, logical, text, pressed, false)
+    }
+
+    fn route_panel_key_input(
+        &mut self,
+        secondary: Option<usize>,
+        physical: PhysicalKey,
+        logical: &Key,
+        text: Option<&str>,
+        pressed: bool,
+        repeat: bool,
     ) -> bool {
         if self.state.answer_keyboard.focus.is_some()
             || self.state.answer_keyboard.return_key.is_some()
@@ -196,13 +209,17 @@ impl WinitApp {
         );
         if !pressed {
             self.state.notification_keydowns.remove(&identity);
-            self.state.notification_reply.keydowns.remove(&identity);
+            self.state.notification_reply.release_key(&identity);
             self.state
                 .consumed_shell_shortcut_keydowns
                 .remove(&identity);
             return true;
         }
-        if self.state.notification_reply.keydowns.contains(&identity) {
+        if self
+            .state
+            .notification_reply
+            .suppress_held_key(&identity, repeat, false)
+        {
             return true;
         }
         // Its release must not reach an agent if the panel closes first.
@@ -417,7 +434,7 @@ impl WinitApp {
             self.state.answer_keyboard.focus = None;
             self.state.input_processor.chrome_feedback_cancel_pending = true;
             let secondary = self.panel_display_target(location.display.as_deref()).0;
-            self.state.keyboard_window = secondary;
+            self.select_text_input_window(secondary);
             // A coalesced reopen keeps the outer origin if HUD already has
             // focus. If an external app is in front now, the focus take
             // records it. Tray visits carry the origin from click time.

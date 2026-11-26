@@ -1,7 +1,7 @@
 //! Local editing for one focused notification. Collapsed drafts stay with
 //! their exact publications and never enter the publisher's input queue.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use tze_hud_input::{
     composer_draft::{ComposerDraft, EditOutcome},
@@ -12,18 +12,22 @@ use tze_hud_scene::{
     graph::{SceneGraph, overlay::NotificationReplyView},
     types::{NOTIFICATION_REPLY_LINE_BREAKS, NOTIFICATION_REPLY_MAX_BYTES},
 };
+use winit::window::WindowId;
 
 #[derive(Default)]
 pub(super) struct NotificationReplyState {
     pub(super) active: Option<ZoneHitRegion>,
-    pub(super) keydowns: HashSet<String>,
+    keydowns: HashMap<String, u64>,
+    keyboard_visit: u64,
     pub(super) ignore_character_at: Option<tze_hud_scene::MonoUs>,
     pub(super) composing: bool,
     blur_pending: bool,
     refresh_view: bool,
     nested_focus: bool,
-    ime_anchor: Option<(winit::window::WindowId, Rect)>,
-    ime_preedit: Option<ImePreedit>,
+    ime_anchor: Option<(WindowId, Rect)>,
+    ime_preedits: HashMap<WindowId, ImePreedit>,
+    #[cfg(test)]
+    pub(super) test_ime_window: Option<WindowId>,
     drafts: HashMap<SceneId, ReplyDraft>,
 }
 
@@ -64,10 +68,14 @@ impl NotificationReplyState {
         if self
             .active
             .as_ref()
-            .is_some_and(|active| active.publication_id != region.publication_id)
+            .is_some_and(|active| active.publication_id == region.publication_id)
+            && !self.blur_pending
         {
-            self.abandon_ime_preedit();
+            self.active = Some(region);
+            return;
         }
+        self.abandon_ime_preedit();
+        self.keyboard_visit = self.keyboard_visit.wrapping_add(1);
         self.drafts.entry(region.publication_id).or_default();
         self.active = Some(region);
         self.blur_pending = false;
@@ -83,6 +91,31 @@ impl NotificationReplyState {
         self.ime_anchor = None;
     }
 
+    pub(super) fn suppress_held_key(
+        &mut self,
+        identity: &str,
+        repeat: bool,
+        can_edit_reply: bool,
+    ) -> bool {
+        if !repeat {
+            // The original release may have occurred in a different app.
+            self.release_key(identity);
+            return false;
+        }
+        self.keydowns.get(identity).is_some_and(|visit| {
+            !can_edit_reply || self.active.is_none() || *visit != self.keyboard_visit
+        })
+    }
+
+    pub(super) fn release_key(&mut self, identity: &str) -> bool {
+        self.keydowns.remove(identity).is_some()
+    }
+
+    fn retain_key(&mut self, raw: &RawKeyDownEvent) {
+        let identity = super::keyboard::keyboard_key_identity(&raw.key_code, &raw.key);
+        self.keydowns.insert(identity, self.keyboard_visit);
+    }
+
     fn ime_owner(&self) -> ImeOwner {
         self.active
             .as_ref()
@@ -94,45 +127,52 @@ impl NotificationReplyState {
 
     pub(super) fn abandon_ime_preedit(&mut self) {
         let owner = self.ime_owner();
-        if let Some(preedit) = &mut self.ime_preedit
-            && preedit.owner == owner
-        {
+        for preedit in self.ime_preedits.values_mut() {
+            if preedit.owner == owner {
+                preedit.owner = ImeOwner::Abandoned;
+            }
+        }
+    }
+
+    pub(super) fn abandon_window_ime_preedit(&mut self, window: WindowId) {
+        if let Some(preedit) = self.ime_preedits.get_mut(&window) {
             preedit.owner = ImeOwner::Abandoned;
         }
     }
 
     /// An empty preedit precedes a commit. Keep its owner until that commit,
     /// disable, or the start of another composition.
-    pub(super) fn update_ime_preedit(&mut self, has_text: bool) -> bool {
+    pub(super) fn update_ime_preedit(&mut self, window: WindowId, has_text: bool) -> bool {
         let owner = self.ime_owner();
         if has_text
             && self
-                .ime_preedit
-                .as_ref()
+                .ime_preedits
+                .get(&window)
                 .is_none_or(|preedit| !preedit.has_text)
         {
-            self.ime_preedit = Some(ImePreedit { owner, has_text });
+            self.ime_preedits
+                .insert(window, ImePreedit { owner, has_text });
         }
-        self.ime_preedit.as_mut().is_none_or(|preedit| {
+        self.ime_preedits.get_mut(&window).is_none_or(|preedit| {
             preedit.has_text = has_text;
             preedit.owner == owner
         })
     }
 
-    pub(super) fn receive_ime_commit(&mut self) -> bool {
+    pub(super) fn receive_ime_commit(&mut self, window: WindowId) -> bool {
         let owner = self.ime_owner();
-        self.ime_preedit
-            .take()
+        self.ime_preedits
+            .remove(&window)
             .is_none_or(|preedit| preedit.owner == owner)
     }
 
-    pub(super) fn reset_ime_preedit(&mut self) {
-        self.ime_preedit = None;
+    pub(super) fn reset_window_ime_preedit(&mut self, window: WindowId) {
+        self.ime_preedits.remove(&window);
     }
 
     #[cfg(test)]
     pub(super) fn replace_test_ime_anchor(&mut self, area: Option<Rect>) -> Option<Rect> {
-        let anchor = area.map(|area| (winit::window::WindowId::dummy(), area));
+        let anchor = area.map(|area| (WindowId::dummy(), area));
         std::mem::replace(&mut self.ime_anchor, anchor).map(|(_, area)| area)
     }
 
@@ -181,6 +221,8 @@ impl super::WinitApp {
         if self.state.notification_reply.active.is_some() {
             self.state.notification_reply.abandon_ime_preedit();
             self.state.notification_reply.blur_pending = true;
+            self.state.answer_keyboard.focus = None;
+            self.state.answer_keyboard.invalidate_visit();
             self.sync_notification_reply();
         }
         !self.state.notification_reply.blur_pending
@@ -281,13 +323,10 @@ impl super::WinitApp {
         &mut self,
         raw: &RawKeyDownEvent,
     ) -> Result<bool, ()> {
-        use super::keyboard::keyboard_key_identity;
         use super::lifecycle::{INTERACTION_LOCK_BUDGET, spin_acquire};
         let reply = &mut self.state.notification_reply;
         if reply.blur_pending || reply.composing {
-            reply
-                .keydowns
-                .insert(keyboard_key_identity(&raw.key_code, &raw.key));
+            reply.retain_key(raw);
             return Ok(true);
         }
         let suspended = self
@@ -346,9 +385,7 @@ impl super::WinitApp {
             }
             (exit, wake, scene.take_notification_wait_notifiers())
         };
-        reply
-            .keydowns
-            .insert(keyboard_key_identity(&raw.key_code, &raw.key));
+        reply.retain_key(raw);
         if exit {
             reply.deactivate();
             self.state.answer_keyboard.focus = None;

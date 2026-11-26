@@ -2,6 +2,7 @@ use std::time::Instant;
 
 use tze_hud_compositor::LocalComposerState;
 use tze_hud_scene::types::{DragHandleContextMenuState, WidgetParameterValue};
+use winit::{event::Ime, window::WindowId};
 
 use super::hittest::{combined_overlay_hit_regions, pressable_control_regions};
 use super::input_dispatch::nanoseconds_since_start;
@@ -301,9 +302,49 @@ impl WinitApp {
         true
     }
 
-    pub(super) fn set_text_input_preedit(&mut self, text: String, cursor: Option<(usize, usize)>) {
+    pub(super) fn text_input_window_id(&self) -> Option<WindowId> {
+        #[cfg(test)]
+        if self.state.window.is_none() {
+            return Some(
+                self.state
+                    .notification_reply
+                    .test_ime_window
+                    .unwrap_or_else(WindowId::dummy),
+            );
+        }
+        match self.state.keyboard_window {
+            Some(index) => self.state.secondaries.get(index).map(|d| d.window.id()),
+            None => self.state.window.as_ref().map(|window| window.id()),
+        }
+    }
+
+    pub(super) fn blur_text_input_ime(&mut self, window: WindowId) {
+        self.state
+            .notification_reply
+            .abandon_window_ime_preedit(window);
+        if self.text_input_window_id() == Some(window) {
+            self.state.notification_reply.composing = false;
+            self.set_composer_preedit(String::new(), None);
+        }
+    }
+
+    pub(super) fn select_text_input_window(&mut self, secondary: Option<usize>) {
+        if self.state.keyboard_window != secondary {
+            if let Some(previous) = self.text_input_window_id() {
+                self.blur_text_input_ime(previous);
+            }
+            self.state.keyboard_window = secondary;
+        }
+    }
+
+    fn set_text_input_preedit(
+        &mut self,
+        window: WindowId,
+        text: String,
+        cursor: Option<(usize, usize)>,
+    ) {
         let reply = &mut self.state.notification_reply;
-        if !reply.update_ime_preedit(!text.is_empty()) {
+        if !reply.update_ime_preedit(window, !text.is_empty()) {
             return;
         }
         if reply.active.is_some() {
@@ -320,18 +361,46 @@ impl WinitApp {
         self.set_composer_preedit(String::new(), None);
     }
 
-    pub(super) fn disable_text_input_ime(&mut self) {
-        self.state.notification_reply.reset_ime_preedit();
-        self.set_text_input_preedit(String::new(), None);
+    pub(super) fn dispatch_text_input_ime(
+        &mut self,
+        window: WindowId,
+        secondary: Option<usize>,
+        event: Ime,
+        timestamp_mono_us: tze_hud_scene::MonoUs,
+    ) {
+        if self.text_input_window_id() != Some(window) {
+            if matches!(event, Ime::Commit(_) | Ime::Disabled) {
+                self.state
+                    .notification_reply
+                    .reset_window_ime_preedit(window);
+            }
+            return;
+        }
+        match event {
+            Ime::Preedit(text, cursor) => {
+                self.set_text_input_preedit(window, text, cursor);
+            }
+            Ime::Disabled => {
+                self.state
+                    .notification_reply
+                    .reset_window_ime_preedit(window);
+                self.set_text_input_preedit(window, String::new(), None);
+            }
+            Ime::Commit(text) => {
+                self.dispatch_text_input_commit(window, secondary, text, timestamp_mono_us);
+            }
+            Ime::Enabled => {}
+        }
     }
 
-    pub(super) fn dispatch_text_input_commit(
+    fn dispatch_text_input_commit(
         &mut self,
+        window: WindowId,
         secondary: Option<usize>,
         text: String,
         timestamp_mono_us: tze_hud_scene::MonoUs,
     ) {
-        if !self.state.notification_reply.receive_ime_commit() {
+        if !self.state.notification_reply.receive_ime_commit(window) {
             return;
         }
         self.state.composer_preedit = None;

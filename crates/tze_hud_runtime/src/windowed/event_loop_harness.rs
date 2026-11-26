@@ -5325,8 +5325,21 @@ mod tests {
         scene.version += 1;
     }
 
+    fn send_text_input_ime(
+        harness: &mut HeadlessEventLoopHarness,
+        event: winit::event::Ime,
+        at: u64,
+    ) {
+        let window = harness.app.text_input_window_id().unwrap();
+        harness
+            .app
+            .dispatch_text_input_ime(window, None, event, MonoUs(at));
+    }
+
     #[test]
     fn notification_reply_only_question_digit_keeps_its_draft_across_escape_and_sends_once() {
+        use winit::event::Ime;
+
         let mut harness = approve_reject_notification_harness();
         set_reply_action(&harness, None);
         assert!(harness.tick());
@@ -5380,9 +5393,7 @@ mod tests {
             "use the staging DB"
         );
         // The pending IME candidate owns Enter and does not alter the draft.
-        harness
-            .app
-            .set_text_input_preedit("かん".into(), Some((3, 3)));
+        send_text_input_ime(&mut harness, Ime::Preedit("かん".into(), Some((3, 3))), 0);
         harness.press_named_key("Enter");
         harness.drain();
         assert!(take_action_ids(&harness).is_empty());
@@ -5396,10 +5407,8 @@ mod tests {
                 .text,
             "use the staging DB"
         );
-        harness.app.set_text_input_preedit(String::new(), None);
-        harness
-            .app
-            .dispatch_text_input_commit(None, "漢".into(), MonoUs(0));
+        send_text_input_ime(&mut harness, Ime::Preedit(String::new(), None), 1);
+        send_text_input_ime(&mut harness, Ime::Commit("漢".into()), 2);
         harness.drain();
         assert!(harness.tick());
         let card = harness.scene().overlay.notification_geometry[0].clone();
@@ -5519,6 +5528,98 @@ mod tests {
         );
         drop(scene);
         assert!(take_action_ids(&harness).is_empty());
+    }
+
+    #[test]
+    fn notification_reply_owns_held_keys_by_visit_and_ime_by_window() {
+        use winit::{event::Ime, window::WindowId};
+
+        let mut harness = approve_reject_notification_harness();
+        set_reply_action(&harness, None);
+        {
+            let mut scene = harness.scene();
+            let mut content = scene.zone_registry.active_for_zone("notification-area")[0]
+                .content
+                .clone();
+            let tze_hud_scene::ZoneContent::Notification(card) = &mut content else {
+                unreachable!();
+            };
+            card.actions[0].reply = Some("replica".into());
+            scene
+                .publish_to_zone(
+                    "notification-area",
+                    content,
+                    "notif-agent",
+                    Some("replica".into()),
+                    None,
+                    None,
+                )
+                .unwrap();
+        }
+        let select = |harness: &mut HeadlessEventLoopHarness, action| {
+            assert!(harness.tick());
+            let point = harness.notification_action_center(action).unwrap();
+            harness.click(point.0, point.1);
+            harness.drain();
+        };
+        let a = WindowId::from(100);
+        let b = WindowId::from(200);
+        harness.app.state.notification_reply.test_ime_window = Some(a);
+        select(&mut harness, "database");
+        harness.enqueue(key_down("KeyA", "a", 100));
+        harness.enqueue(character("a", 100));
+        harness.drain();
+        send_text_input_ime(&mut harness, Ime::Preedit("旧".into(), None), 101);
+
+        // Clicking the same reply button is not a new editing visit.
+        select(&mut harness, "database");
+        harness.press_named_key("Enter");
+        harness.drain();
+        assert!(harness.app.state.notification_reply.composing);
+        assert!(take_action_ids(&harness).is_empty());
+
+        select(&mut harness, "replica");
+        let mut repeat = key_down("KeyA", "A", 102);
+        if let PendingKeyboardEvent::KeyDown(raw) = &mut repeat {
+            raw.repeat = true;
+        }
+        harness.enqueue(repeat);
+        harness.enqueue(character("A", 102));
+        harness.enqueue(key_up("KeyA", "A", 103));
+        harness.drain();
+        let text = |harness: &HeadlessEventLoopHarness| {
+            harness
+                .scene()
+                .overlay
+                .notification_reply
+                .as_ref()
+                .unwrap()
+                .text
+                .clone()
+        };
+        assert_eq!(text(&harness), "");
+
+        // A loses native focus as the input owner moves to B. Delayed
+        // events sent by A must leave the current composition intact.
+        harness.app.blur_text_input_ime(a);
+        harness.app.state.notification_reply.test_ime_window = Some(b);
+        send_text_input_ime(&mut harness, Ime::Preedit("新".into(), None), 104);
+        for event in [
+            Ime::Preedit("旧".into(), None),
+            Ime::Preedit(String::new(), None),
+            Ime::Commit("旧".into()),
+            Ime::Disabled,
+        ] {
+            harness
+                .app
+                .dispatch_text_input_ime(a, None, event, MonoUs(105));
+        }
+        assert!(harness.app.state.notification_reply.composing);
+        assert_eq!(text(&harness), "");
+        send_text_input_ime(&mut harness, Ime::Preedit(String::new(), None), 106);
+        send_text_input_ime(&mut harness, Ime::Commit("新".into()), 106);
+        harness.drain();
+        assert_eq!(text(&harness), "新");
     }
 
     #[test]
@@ -8932,6 +9033,8 @@ mod tests {
 
     #[test]
     fn notification_keyboard_cycle_activation_and_return_preserve_portal_editor() {
+        use winit::event::Ime;
+
         fn press(harness: &mut HeadlessEventLoopHarness, code: &str, key: &str, reverse: bool) {
             let mut down = key_down(code, key, 1_000);
             if let PendingKeyboardEvent::KeyDown(raw) = &mut down {
@@ -8988,7 +9091,7 @@ mod tests {
             assert!(harness.tick());
             harness.type_text("portal");
             harness.drain();
-            harness.app.set_text_input_preedit("ポータル".into(), None);
+            send_text_input_ime(&mut harness, Ime::Preedit("ポータル".into(), None), 90);
             assert!(harness.app.state.composer_preedit.is_some());
             assert_eq!(harness.app.focus_newest_question(true), Ok(true));
             assert!(harness.app.state.answer_keyboard.focus.unwrap().nested);
@@ -9001,10 +9104,8 @@ mod tests {
             harness.enqueue(key_up("Digit1", "1", 101));
             harness.drain();
             assert!(harness.app.state.composer_preedit.is_none());
-            harness.app.set_text_input_preedit(String::new(), None);
-            harness
-                .app
-                .dispatch_text_input_commit(None, "ポータル".into(), MonoUs(102));
+            send_text_input_ime(&mut harness, Ime::Preedit(String::new(), None), 102);
+            send_text_input_ime(&mut harness, Ime::Commit("ポータル".into()), 102);
 
             harness.enqueue(key_down("KeyA", "a", 103));
             harness.enqueue(character("a", 103));
@@ -9045,22 +9146,26 @@ mod tests {
             assert_eq!(harness.app.focus_newest_question(true), Ok(true));
             harness.type_text("1");
             harness.drain();
-            harness.app.set_text_input_preedit("カード".into(), None);
-            assert!(harness.app.blur_notification_reply());
-            harness.app.set_text_input_preedit(String::new(), None);
-            harness
-                .app
-                .dispatch_text_input_commit(None, "カード".into(), MonoUs(1_204));
+            harness.enqueue(key_down("KeyZ", "z", 1_204));
+            harness.drain();
+            send_text_input_ime(&mut harness, Ime::Preedit("カード".into(), None), 1_205);
+            harness.click(10.0, 10.0);
+            harness.drain();
+            assert!(harness.scene().overlay.notification_reply.is_none());
+            assert!(harness.app.state.answer_keyboard.focus.is_none());
+            send_text_input_ime(&mut harness, Ime::Preedit(String::new(), None), 1_206);
+            send_text_input_ime(&mut harness, Ime::Commit("カード".into()), 1_206);
             harness.drain();
             assert_eq!(harness.composer_draft().as_deref(), Some("portalba"));
 
-            harness.app.set_text_input_preedit("次".into(), None);
-            harness.app.set_text_input_preedit(String::new(), None);
-            harness
-                .app
-                .dispatch_text_input_commit(None, "次".into(), MonoUs(1_205));
+            send_text_input_ime(&mut harness, Ime::Preedit("次".into(), None), 1_207);
+            send_text_input_ime(&mut harness, Ime::Preedit(String::new(), None), 1_208);
+            send_text_input_ime(&mut harness, Ime::Commit("次".into()), 1_208);
+            // The old Z release happened off HUD. A fresh non-repeat starts
+            // a portal key lifecycle even while the reply remembers the press.
+            harness.type_text("z");
             harness.drain();
-            assert_eq!(harness.composer_draft().as_deref(), Some("portalba次"));
+            assert_eq!(harness.composer_draft().as_deref(), Some("portalba次z"));
             assert!(take_action_ids(&harness).is_empty());
         }
 

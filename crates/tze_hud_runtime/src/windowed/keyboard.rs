@@ -544,7 +544,7 @@ impl WinitApp {
         // changes. Shell/panel routing still has first refusal.
         let key_identity = keyboard_key_identity(&raw.key_code, &raw.key);
         let reply = &mut self.state.notification_reply;
-        let held_reply_key = reply.active.is_none() && reply.keydowns.contains(&key_identity);
+        let held_reply_key = reply.suppress_held_key(&key_identity, raw.repeat, true);
         if held_reply_key || self.state.notification_keydowns.contains(&key_identity) {
             if held_reply_key || reply.active.is_some() {
                 reply.ignore_character_at = Some(raw.timestamp_mono_us);
@@ -1571,8 +1571,7 @@ impl WinitApp {
                 .remove(&keyboard_key_identity(&raw.key_code, &raw.key));
             self.state
                 .notification_reply
-                .keydowns
-                .remove(&keyboard_key_identity(&raw.key_code, &raw.key));
+                .release_key(&keyboard_key_identity(&raw.key_code, &raw.key));
             self.state.answer_keyboard.hold_key = None;
             tracing::debug!(
                 key = %str_preview(&raw.key),
@@ -1610,7 +1609,7 @@ impl WinitApp {
         active_tab: Option<tze_hud_scene::SceneId>,
     ) {
         let key_identity = keyboard_key_identity(&raw.key_code, &raw.key);
-        let reply_key = self.state.notification_reply.keydowns.remove(&key_identity);
+        let reply_key = self.state.notification_reply.release_key(&key_identity);
         // Releasing a held key ends its hold this turn (settle cancels it).
         if self.state.answer_keyboard.hold_key.as_ref() == Some(&key_identity) {
             self.state.answer_keyboard.hold_key = None;

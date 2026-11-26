@@ -346,6 +346,7 @@ impl WinitApp {
     /// Take OS keyboard focus on the window that shows scene point (x, y).
     pub(super) fn focus_native_window_at(&mut self, x: f32, y: f32) {
         let secondary = self.display_window_at(x, y);
+        self.select_text_input_window(secondary);
         let window = secondary
             .and_then(|index| self.state.secondaries.get(index))
             .map(|display| &display.window)
@@ -353,7 +354,6 @@ impl WinitApp {
         if let Some(window) = window {
             super::lifecycle::focus_window_for_text_input(window);
         }
-        self.state.keyboard_window = secondary;
         self.state
             .wake
             .mark_main_work_pending(crate::idle_efficiency::RuntimeWakeupSource::SceneChange);
