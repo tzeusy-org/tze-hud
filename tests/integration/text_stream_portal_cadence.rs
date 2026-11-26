@@ -354,20 +354,16 @@ async fn frame_budgets_hold_under_burst() {
         clock.now_us().saturating_sub(accepted_at) <= CADENCE_BURST_WINDOW_MS * 1_000,
         "accepted burst remains within the 250 ms workload window"
     );
-    assert!(
-        scene_handle(&runtime)
-            .await
-            .lock()
-            .await
-            .tiles
-            .values()
-            .any(|tile| tile.namespace == "tze_hud_portal_driver"),
-        "real driver must have rendered the burst portal"
-    );
-
     let shared_scene = scene_handle(&runtime).await;
     {
         let scene = shared_scene.lock().await;
+        assert!(
+            scene
+                .tiles
+                .values()
+                .any(|tile| tile.namespace == "tze_hud_portal_driver"),
+            "real driver must have rendered the burst portal"
+        );
         assert_eq!(
             runtime.compositor.prepared_portal_content_bytes(&scene),
             None
@@ -386,11 +382,15 @@ async fn frame_budgets_hold_under_burst() {
         );
     }
     eprintln!(
-        "burst stage3={}us stage4={}us stage5={}us frame={}us",
+        "burst stage3={}us stage4={}us stage5={}us frame={}us \
+         markdown_prime={}us encode={}us submit={}us",
         burst_telemetry.stage3_mutation_intake_us,
         burst_telemetry.stage4_scene_commit_us,
         burst_telemetry.stage5_layout_resolve_us,
-        burst_telemetry.frame_time_us
+        burst_telemetry.frame_time_us,
+        burst_telemetry.markdown_prime_us,
+        burst_telemetry.stage6_render_encode_us,
+        burst_telemetry.stage7_gpu_submit_us
     );
 
     if perf_assert_enabled() {
