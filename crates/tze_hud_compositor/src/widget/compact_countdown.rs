@@ -36,7 +36,13 @@ fn text_bounds(svg: &str, id: &str) -> Option<(Rect, Rect)> {
     let resvg::usvg::Node::Text(text) = tree.node_by_id(id)? else {
         return None;
     };
-    Some((text.abs_bounding_box(), text.flattened().abs_bounding_box()))
+    // usvg's flattened glyph group remains in text-local coordinates; apply
+    // the text's absolute transform once to compare ink and advance on canvas.
+    let ink = text
+        .flattened()
+        .bounding_box()
+        .transform(text.abs_transform())?;
+    Some((text.abs_bounding_box(), ink))
 }
 
 #[cfg(test)]
