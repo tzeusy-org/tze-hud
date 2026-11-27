@@ -1883,12 +1883,34 @@ async fn dock_session_caption_follows_only_its_accepted_display() {
         .filter(|(_, (label, blank))| label != blank)
         .collect();
     assert!(diff.len() >= 20);
-    for (index, (pixel, _)) in diff {
-        assert!((24..108).contains(&(index % 480)) && (30..70).contains(&(index / 480)));
+    let mut green_cores = 0;
+    let mut fringe = None;
+    for (index, (pixel, blank)) in diff {
+        let (x, y) = (index % 480, index / 480);
         assert!(
-            pixel[1] > pixel[0] && pixel[1] > pixel[2],
-            "secondary foreground role"
+            (24..108).contains(&x) && (30..70).contains(&y),
+            "caption outside its reserved box at ({x}, {y}): {pixel:?} over {blank:?}"
         );
+        // A low-coverage green glyph can still look blue over the clear color.
+        assert!(
+            pixel[1].saturating_add(1) >= blank[1]
+                && pixel[0] <= blank[0].saturating_add(1)
+                && pixel[2] <= blank[2].saturating_add(1),
+            "secondary foreground moved away from green at ({x}, {y}): {pixel:?} over {blank:?}"
+        );
+        if pixel[1] >= blank[1].saturating_add(48) && pixel[1] > pixel[0].max(pixel[2]) {
+            green_cores += 1;
+        }
+        if pixel[1] <= pixel[0].max(pixel[2]) {
+            fringe.get_or_insert((x, y, pixel, blank));
+        }
+    }
+    assert!(
+        green_cores >= 8,
+        "secondary foreground has only {green_cores} strong green pixels; fringe {fringe:?}"
+    );
+    if let Some((x, y, pixel, blank)) = fringe {
+        eprintln!("caption fringe at ({x}, {y}): {pixel:?} over {blank:?}");
     }
     assert_ne!(
         gpu.compositor
