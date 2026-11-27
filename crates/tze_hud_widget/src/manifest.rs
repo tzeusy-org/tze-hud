@@ -71,6 +71,19 @@ pub struct RawManifest {
     /// Optional runtime-managed hover behavior.
     #[serde(default)]
     pub hover_behavior: Option<RawHoverBehavior>,
+    /// Owner-authored alternate selected only by the runtime widget dock.
+    /// It shares this manifest's parameter schema and widget identity.
+    #[serde(default)]
+    pub dock: Option<RawDockPresentation>,
+}
+
+/// One dock presentation; it cannot declare another schema or widget type.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct RawDockPresentation {
+    pub layers: Vec<RawLayer>,
+    #[serde(default)]
+    pub hover_behavior: Option<RawHoverBehavior>,
 }
 
 /// A single parameter declaration in `[[parameter_schema]]`.

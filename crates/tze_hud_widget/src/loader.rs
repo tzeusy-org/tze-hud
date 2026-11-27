@@ -43,6 +43,18 @@ pub struct LoadedBundle {
     /// Raw SVG bytes keyed by filename within the bundle directory.
     /// These can be uploaded to the resource store as IMAGE_SVG resources.
     pub svg_contents: HashMap<String, Vec<u8>>,
+    /// Optional owner-authored dock layout, sharing `definition`'s schema.
+    /// Default layers and runtime-registered agent asset targets stay unchanged.
+    pub dock: Option<LoadedDockPresentation>,
+}
+
+/// Loaded dock sources and their authored extent, before any display scaling.
+#[derive(Clone, Debug)]
+pub struct LoadedDockPresentation {
+    pub layers: Vec<WidgetSvgLayer>,
+    pub width: f32,
+    pub height: f32,
+    pub hover_behavior: Option<WidgetHoverBehavior>,
 }
 
 /// Outcome of scanning a bundle directory: either a successful load or a
@@ -357,59 +369,76 @@ fn load_bundle_inner(
 
     // Step 6: Load SVG files and resolve bindings.
     let mut svg_contents: HashMap<String, Vec<u8>> = HashMap::new();
-    let mut layers: Vec<WidgetSvgLayer> = Vec::new();
-
-    for raw_layer in &raw.layers {
-        let svg_file = raw_layer
-            .svg_file
-            .as_deref()
-            .filter(|s| !s.is_empty())
-            .ok_or_else(|| BundleError::InvalidManifest {
-                path: path_str.to_string(),
-                detail: "a layer entry is missing required field 'svg_file'".to_string(),
-            })?;
-
-        // Step 5a/5b: Read the SVG (missing file is a distinct error).
-        let svg_bytes = read(svg_file).map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                BundleError::MissingSvg {
+    let layers = load_layers(
+        &raw.layers,
+        read,
+        path_str,
+        &binding_validation_context,
+        &mut svg_contents,
+    )?;
+    let dock = raw
+        .dock
+        .as_ref()
+        .map(|dock| {
+            if dock.layers.is_empty() {
+                return Err(BundleError::InvalidManifest {
                     path: path_str.to_string(),
-                    svg_file: svg_file.to_string(),
-                }
-            } else {
-                BundleError::SvgParseError {
-                    path: path_str.to_string(),
-                    svg_file: svg_file.to_string(),
-                    detail: format!("cannot read file: {e}"),
-                }
+                    detail: "dock needs at least one SVG layer".into(),
+                });
             }
-        })?;
-        // Step 5b-post/5c/5d: validate SVG + binding targets.
-        let (resolved_svg, bindings) = validate_svg_layer_and_manifest_bindings(
-            path_str,
-            svg_file,
-            &svg_bytes,
-            tokens,
-            &raw_layer.bindings,
-            &binding_validation_context,
-        )?;
+            let default_files: HashSet<_> = layers.iter().map(|l| l.svg_file.as_str()).collect();
+            if dock.layers.iter().any(|layer| {
+                layer
+                    .svg_file
+                    .as_deref()
+                    .is_some_and(|file| default_files.contains(file))
+            }) {
+                return Err(BundleError::InvalidManifest {
+                    path: path_str.to_string(),
+                    detail: "dock SVG filenames must differ from the default layers".into(),
+                });
+            }
+            let dock_layers = load_layers(
+                &dock.layers,
+                read,
+                path_str,
+                &binding_validation_context,
+                &mut svg_contents,
+            )?;
+            let mut extent = None;
+            for layer in &dock_layers {
+                let size =
+                    dock_svg_extent(path_str, &layer.svg_file, &svg_contents[&layer.svg_file])?;
+                if extent.is_some_and(|previous| previous != size) {
+                    return Err(BundleError::InvalidManifest {
+                        path: path_str.to_string(),
+                        detail: "dock SVG layers must have the same authored extent".into(),
+                    });
+                }
+                extent = Some(size);
+            }
+            let (width, height) = extent.expect("nonempty dock layers were loaded");
+            Ok(LoadedDockPresentation {
+                layers: dock_layers,
+                width,
+                height,
+                hover_behavior: parse_hover_behavior(
+                    dock.hover_behavior.as_ref(),
+                    &parameter_schema,
+                    tokens,
+                    path_str,
+                )?,
+            })
+        })
+        .transpose()?;
 
-        // Store the resolved SVG text (post-substitution) as bytes.
-        svg_contents.insert(svg_file.to_string(), resolved_svg);
-        layers.push(WidgetSvgLayer {
-            svg_file: svg_file.to_string(),
-            bindings,
-        });
-    }
-
-    // Step 7: Build WidgetDefinition.
+    // Step 7: Build the unchanged default WidgetDefinition. Dock metadata is
+    // a loading catalog entry, not another widget or an agent-upload target.
     let contention_policy =
         parse_contention_policy(raw.default_contention_policy.as_deref(), path_str)?;
     let rendering_policy =
         parse_rendering_policy(raw.default_rendering_policy.as_deref(), path_str)?;
 
-    // Default geometry: full display area (100% × 100% at origin).
-    // Widget instances will override this via config.
     let default_geometry = GeometryPolicy::Relative {
         x_pct: 0.0,
         y_pct: 0.0,
@@ -441,7 +470,122 @@ fn load_bundle_inner(
     Ok(LoadedBundle {
         definition,
         svg_contents,
+        dock,
     })
+}
+
+fn load_layers(
+    raw_layers: &[crate::manifest::RawLayer],
+    read: &dyn Fn(&str) -> std::io::Result<Vec<u8>>,
+    path_str: &str,
+    context: &BindingValidationContext<'_>,
+    svg_contents: &mut HashMap<String, Vec<u8>>,
+) -> Result<Vec<WidgetSvgLayer>, BundleError> {
+    let mut layers = Vec::with_capacity(raw_layers.len());
+    for raw_layer in raw_layers {
+        let svg_file = raw_layer
+            .svg_file
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| BundleError::InvalidManifest {
+                path: path_str.to_string(),
+                detail: "a layer entry is missing required field 'svg_file'".to_string(),
+            })?;
+
+        // Step 5a/5b: Read the SVG (missing file is a distinct error).
+        let svg_bytes = read(svg_file).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                BundleError::MissingSvg {
+                    path: path_str.to_string(),
+                    svg_file: svg_file.to_string(),
+                }
+            } else {
+                BundleError::SvgParseError {
+                    path: path_str.to_string(),
+                    svg_file: svg_file.to_string(),
+                    detail: format!("cannot read file: {e}"),
+                }
+            }
+        })?;
+        // Step 5b-post/5c/5d: validate SVG + binding targets.
+        let (resolved_svg, bindings) = validate_svg_layer_and_manifest_bindings(
+            path_str,
+            svg_file,
+            &svg_bytes,
+            context.tokens,
+            &raw_layer.bindings,
+            context,
+        )?;
+
+        // Store the resolved SVG text (post-substitution) as bytes.
+        svg_contents.insert(svg_file.to_string(), resolved_svg);
+        layers.push(WidgetSvgLayer {
+            svg_file: svg_file.to_string(),
+            bindings,
+        });
+    }
+
+    Ok(layers)
+}
+
+/// Unlike the resource parser's clamped raster estimate, eligibility needs
+/// explicit, finite authored dimensions; never default an unknown height.
+fn dock_svg_extent(path: &str, file: &str, bytes: &[u8]) -> Result<(f32, f32), BundleError> {
+    use quick_xml::{Reader, events::Event};
+    let error = || BundleError::SvgParseError {
+        path: path.into(),
+        svg_file: file.into(),
+        detail: "dock SVG needs a finite positive viewBox or explicit width and height".into(),
+    };
+    let number = |text: &str| {
+        text.trim()
+            .strip_suffix("px")
+            .unwrap_or(text.trim())
+            .parse::<f32>()
+            .ok()
+            .filter(|n| n.is_finite() && *n > 0.0)
+    };
+    let mut reader = Reader::from_reader(bytes);
+    loop {
+        match reader.read_event().map_err(|_| error())? {
+            Event::Start(root) | Event::Empty(root) => {
+                let mut width = None;
+                let mut height = None;
+                let mut view_box = None;
+                for attribute in root.attributes() {
+                    let attribute = attribute.map_err(|_| error())?;
+                    let value = attribute.unescape_value().map_err(|_| error())?;
+                    match attribute.key.as_ref() {
+                        b"viewBox" => view_box = Some(value.into_owned()),
+                        b"width" => width = number(&value),
+                        b"height" => height = number(&value),
+                        _ => {}
+                    }
+                }
+                return if let Some(view_box) = view_box {
+                    let values: Vec<_> = view_box
+                        .split(|c: char| c.is_whitespace() || c == ',')
+                        .filter(|s| !s.is_empty())
+                        .map(str::parse::<f32>)
+                        .collect::<Result<_, _>>()
+                        .map_err(|_| error())?;
+                    if values.len() == 4
+                        && values.iter().all(|n| n.is_finite())
+                        && values[2] > 0.0
+                        && values[3] > 0.0
+                    {
+                        Ok((values[2], values[3]))
+                    } else {
+                        Err(error())
+                    }
+                } else {
+                    width.zip(height).ok_or_else(error)
+                };
+            }
+            Event::Eof => return Err(error()),
+            _ => {}
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]

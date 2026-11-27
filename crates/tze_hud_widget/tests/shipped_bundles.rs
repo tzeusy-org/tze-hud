@@ -114,6 +114,165 @@ fn manifest(name: &str, extra: &str) -> String {
 const LEVEL_PARAM: &str = "[[parameter_schema]]\nname = \"level\"\ntype = \"f32\"\ndefault = 0.0\n";
 
 #[test]
+fn dock_alternate_uses_the_shared_schema_without_changing_default_assets() {
+    use tze_hud_widget::loader::validate_runtime_svg_registration;
+
+    let default_manifest = manifest(
+        "alternate-test",
+        &format!(
+            "{LEVEL_PARAM}[[layers]]\nsvg_file = 'default.svg'\n\
+             [[layers.bindings]]\nparam = 'level'\ntarget_element = 'bar'\n\
+             target_attribute = 'height'\nmapping = 'linear'\nattr_max = 20\n"
+        ),
+    );
+    let default_svg = r#"<svg viewBox="0 0 360 124"><rect id="bar" height="20"/></svg>"#;
+    let alternate = "[[dock.layers]]\nsvg_file = 'dock.svg'\n\
+                     [[dock.layers.bindings]]\nparam = 'level'\ntarget_element = 'bar'\n\
+                     target_attribute = 'height'\nmapping = 'linear'\nattr_max = 20\n";
+    let dock_svg =
+        r#"<svg viewBox="0 0 160 {{token.dock.row.height}}"><rect id="bar" height="20"/></svg>"#;
+    let load = |extra: &str, svg: Option<&str>| {
+        let text = format!("{default_manifest}{extra}");
+        let mut files = vec![
+            ("widget.toml", text.as_str()),
+            ("default.svg", default_svg),
+            ("other.svg", default_svg),
+        ];
+        if let Some(svg) = svg {
+            files.push(("dock.svg", svg));
+        }
+        load_files(&files, &shipped_tokens())
+    };
+    let BundleScanResult::Ok(default) = load("", None) else {
+        panic!("default fixture failed");
+    };
+    assert!(default.dock.is_none());
+    let BundleScanResult::Ok(bundle) = load(alternate, Some(dock_svg)) else {
+        panic!("alternate fixture failed");
+    };
+    assert_eq!(bundle.definition, default.definition);
+    assert_eq!(
+        bundle.svg_contents["default.svg"],
+        default.svg_contents["default.svg"]
+    );
+    let dock = bundle.dock.as_ref().unwrap();
+    assert_eq!((dock.width, dock.height), (160.0, 52.0));
+    assert_eq!(
+        dock.layers[0].bindings,
+        bundle.definition.layers[0].bindings
+    );
+    assert!(dock.hover_behavior.is_none());
+    assert!(String::from_utf8_lossy(&bundle.svg_contents["dock.svg"]).contains("160 52"));
+    validate_runtime_svg_registration(
+        &bundle.definition,
+        "alternate-test",
+        "default.svg",
+        default_svg.as_bytes(),
+        &shipped_tokens(),
+    )
+    .unwrap();
+    assert!(matches!(
+        validate_runtime_svg_registration(
+            &bundle.definition,
+            "alternate-test",
+            "dock.svg",
+            dock_svg.as_bytes(),
+            &shipped_tokens(),
+        ),
+        Err(BundleError::BindingUnresolvable { .. })
+    ));
+
+    // These are alternate-only failures: default assets stay valid in every case.
+    for (extra, svg, code) in [
+        (alternate.to_owned(), None, "WIDGET_BUNDLE_MISSING_SVG"),
+        (
+            alternate.to_owned(),
+            Some("not SVG"),
+            "WIDGET_BUNDLE_SVG_PARSE_ERROR",
+        ),
+        (
+            alternate.to_owned(),
+            Some(r#"<svg viewBox="0 0 160 52"><rect id="other"/></svg>"#),
+            "WIDGET_BINDING_UNRESOLVABLE",
+        ),
+        (
+            alternate.replace("param = 'level'", "param = 'unknown'"),
+            Some(dock_svg),
+            "WIDGET_BINDING_UNRESOLVABLE",
+        ),
+        (
+            alternate.replace("mapping = 'linear'", "mapping = 'discrete'"),
+            Some(dock_svg),
+            "WIDGET_BINDING_UNRESOLVABLE",
+        ),
+        (
+            alternate.to_owned(),
+            Some(r#"<svg viewBox="0 0 160 {{token.missing}}"><rect id="bar"/></svg>"#),
+            "WIDGET_BUNDLE_UNRESOLVED_TOKEN",
+        ),
+        (
+            alternate.replace("dock.svg", "default.svg"),
+            Some(dock_svg),
+            "WIDGET_BUNDLE_INVALID_MANIFEST",
+        ),
+        (
+            "[dock]\nlayers = []\n".into(),
+            None,
+            "WIDGET_BUNDLE_INVALID_MANIFEST",
+        ),
+        (
+            format!("{alternate}[[dock.parameter_schema]]\nname='second-schema'\n"),
+            Some(dock_svg),
+            "WIDGET_BUNDLE_INVALID_MANIFEST",
+        ),
+        (
+            format!("{alternate}[[dock.layers]]\nsvg_file='other.svg'\n"),
+            Some(dock_svg),
+            "WIDGET_BUNDLE_INVALID_MANIFEST",
+        ),
+        (
+            format!(
+                "{alternate}[dock.hover_behavior]\nvisibility_param='unknown'\n\
+                 [dock.hover_behavior.trigger_rect]\nx_pct=0\ny_pct=0\nwidth_pct=1\nheight_pct=1\n"
+            ),
+            Some(dock_svg),
+            "WIDGET_BUNDLE_INVALID_MANIFEST",
+        ),
+    ] {
+        assert_eq!(expect_err(load(&extra, svg)).wire_code(), code);
+    }
+
+    // Eligibility sees actual authored dimensions, never the resource estimate's
+    // fallback, integer rounding or maximum-raster clamp.
+    for (dimensions, expected) in [
+        ("viewBox='-2 3 160 52.5'", Some((160.0, 52.5))),
+        ("width='160px' height='52.5px'", Some((160.0, 52.5))),
+        ("viewBox='0 0 160 100000'", Some((160.0, 100000.0))),
+        ("viewBox='0 0 160 0'", None),
+        ("viewBox='0 0 160 NaN'", None),
+        ("viewBox='0 0 160 -1' width='160' height='52'", None),
+        ("width='160' height='100%'", None),
+        ("", None),
+    ] {
+        let svg = format!("<svg {dimensions}><rect id='bar'/></svg>");
+        match (load(alternate, Some(&svg)), expected) {
+            (BundleScanResult::Ok(bundle), Some(size)) => {
+                let dock = bundle.dock.unwrap();
+                assert_eq!((dock.width, dock.height), size);
+                let errors = tze_hud_config::dock::DockConfig {
+                    accepts: vec!["alternate-test".into()],
+                    ..Default::default()
+                }
+                .validate_bundles(52.0, |_| Some(dock.height));
+                assert_eq!(errors.is_empty(), dock.height <= 52.0 * (4.0 / 3.0));
+            }
+            (BundleScanResult::Err(BundleError::SvgParseError { .. }), None) => {}
+            (result, expected) => panic!("{dimensions}: {result:?}, expected {expected:?}"),
+        }
+    }
+}
+
+#[test]
 fn parameter_audience_defaults_and_invalid_values_are_explicit() {
     use tze_hud_scene::WidgetParamAudience;
     for (name, expected) in [

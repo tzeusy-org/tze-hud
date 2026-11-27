@@ -94,6 +94,8 @@ const BUILTIN_BUNDLES: &[(&str, BundleFiles)] = &[
 ///   bundles resolve against the global token map.
 ///
 /// SVG asset from a loaded widget bundle: `(widget_type_id, svg_filename, svg_bytes)`.
+/// Includes owner-authored dock files under distinct names; default definitions
+/// still select their original layers. Alternate selection is not wired here.
 pub(crate) type WidgetSvgAsset = (String, String, Vec<u8>);
 
 /// The on-disk bundle roots `[widget_bundles].paths` names, relative to
@@ -496,6 +498,51 @@ mod tests {
             }
             std::fs::write(bundle.join(file), bytes).unwrap();
         }
+        // The selected owner's alternate uses the same schema. Loading it must
+        // neither create another widget type nor replace default gauge layers.
+        let manifest = bundle.join("widget.toml");
+        let alternate = r#"
+[[dock.layers]]
+svg_file = "dock.svg"
+[[dock.layers.bindings]]
+param = "level"
+target_element = "bar"
+target_attribute = "height"
+mapping = "linear"
+attr_max = 52
+[dock.hover_behavior]
+delay_ms = 180
+visibility_param = "tooltip_visible"
+[dock.hover_behavior.trigger_rect]
+x_pct = 0
+y_pct = 0
+width_pct = 1
+height_pct = 1
+"#;
+        std::fs::write(
+            &manifest,
+            format!("{}{alternate}", std::fs::read_to_string(&manifest).unwrap()),
+        )
+        .unwrap();
+        std::fs::write(
+            bundle.join("dock.svg"),
+            r#"<svg viewBox="0 0 160 {{token.dock.row.height}}"><rect id="bar"/></svg>"#,
+        )
+        .unwrap();
+
+        let tokens = default_tokens();
+        let catalog = scan_all_bundles(std::slice::from_ref(&root), &tokens);
+        let selected = catalog
+            .iter()
+            .find_map(|result| match result {
+                BundleScanResult::Ok(bundle) if bundle.definition.id == "gauge" => Some(bundle),
+                _ => None,
+            })
+            .unwrap();
+        let dock = selected.dock.as_ref().unwrap();
+        assert_eq!((dock.width, dock.height), (160.0, 52.0));
+        assert_eq!(dock.hover_behavior.as_ref().unwrap().delay_ms, 180);
+        assert_eq!(selected.definition.layers.len(), 2);
 
         let raw = RawConfig {
             widget_bundles: Some(RawWidgetBundles {
@@ -505,7 +552,7 @@ mod tests {
         };
         std::fs::create_dir_all(root.join("private-broken-sibling")).unwrap();
         let mut scene = SceneGraph::new(1920.0, 1080.0);
-        let (_, warnings) =
+        let (assets, warnings) =
             init_widget_registry(&mut scene, &raw, None, &HashMap::new(), &default_tokens());
         assert_eq!(warnings.items().len(), 1);
         assert_eq!(warnings.items()[0].code, "WIDGET_BUNDLE_NO_MANIFEST");
@@ -514,6 +561,28 @@ mod tests {
                 .unwrap()
                 .contains("private-broken-sibling")
         );
+        let dock_source = |assets: &[WidgetSvgAsset]| {
+            assets
+                .iter()
+                .find(|(kind, file, _)| kind == "gauge" && file == "dock.svg")
+                .map(|(_, _, bytes)| String::from_utf8(bytes.clone()).unwrap())
+                .expect("selected owner dock source is in the asset catalog")
+        };
+        assert!(dock_source(&assets).contains("160 52"));
+        let mut changed_tokens = tokens;
+        changed_tokens.insert("dock.row.height".into(), "60".into());
+        let restyled = widget_svg_assets(std::slice::from_ref(&root), &changed_tokens);
+        assert!(dock_source(&restyled).contains("160 60"));
+        for file in ["background.svg", "fill.svg"] {
+            let bytes = |assets: &[WidgetSvgAsset]| {
+                assets
+                    .iter()
+                    .find(|(kind, name, _)| kind == "gauge" && name == file)
+                    .map(|(_, _, bytes)| bytes.clone())
+                    .unwrap()
+            };
+            assert_eq!(bytes(&assets), bytes(&restyled));
+        }
         std::fs::remove_dir_all(&root).ok();
 
         assert_eq!(
