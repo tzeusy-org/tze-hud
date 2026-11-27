@@ -2198,8 +2198,10 @@ async fn compact_clipped_label_tooltip_uses_actual_draw_and_named_target() {
     let full = "WWWWWWWWWWWWWWWWWWWWWWWA";
     publish(&mut scene, "agent-a", full);
     publish(&mut scene, "agent-b", "WWWWWWWWWWWWWWWWWWWWe\u{301}");
-    let build =
-        |c: &mut Compositor, scene: &mut SceneGraph| c.build_windowed_frame(scene, 960, 360);
+    let build = |c: &mut Compositor, scene: &mut SceneGraph| {
+        c.prime_markdown_cache(scene);
+        c.build_windowed_frame(scene, 960, 360)
+    };
     let before = build(&mut gpu.compositor, &mut scene);
     let hover = before.dock_hover().unwrap();
     assert_eq!(hover.column.target, "SELECTED");
