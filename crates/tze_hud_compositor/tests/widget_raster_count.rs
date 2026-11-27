@@ -1118,7 +1118,7 @@ async fn shipped_dock_fills_both_signed_display_capacities() {
             }
         }
 
-        c.prime_markdown_cache(&mut scene);
+        c.prime_markdown_cache(&scene);
         let frame = c.build_windowed_frame(&mut scene, 512, 256);
         let drawn = &scene.overlay.widget_geometry;
         assert_eq!(
