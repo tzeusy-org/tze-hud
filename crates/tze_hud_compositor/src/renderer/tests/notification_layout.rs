@@ -41,54 +41,232 @@ fn test_notification_text_primary_color_token() {
     );
 }
 
-/// Stack notifications render a dedicated dismiss label and reserve width for it.
-#[tokio::test]
-async fn test_notification_stack_adds_dismiss_label_and_reserves_text_width() {
-    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
-    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
-
+fn notification_body_scene(
+    description: &str,
+    body: &str,
+    agent: &str,
+    (x_pct, width_pct): (f32, f32),
+    font_size_px: Option<f32>,
+    auto_clear_ms: Option<u64>,
+    urgency: u32,
+) -> SceneGraph {
     let mut scene = SceneGraph::new(1280.0, 720.0);
     scene.register_zone(ZoneDefinition {
         id: SceneId::new(),
         name: "notification-area".to_owned(),
-        description: "dismiss label test".to_owned(),
+        description: description.to_owned(),
         geometry_policy: GeometryPolicy::Relative {
-            x_pct: 0.0,
+            x_pct,
             y_pct: 0.0,
-            width_pct: 0.25,
+            width_pct,
             height_pct: 0.5,
         },
         accepted_media_types: vec![ZoneMediaType::ShortTextWithIcon],
         rendering_policy: RenderingPolicy {
             backdrop: Some(Rgba::new(0.1, 0.1, 0.1, 0.9)),
+            font_size_px,
             ..Default::default()
         },
         contention_policy: ContentionPolicy::Stack { max_depth: 5 },
         max_publishers: 8,
-        auto_clear_ms: Some(8_000),
+        auto_clear_ms,
         ephemeral: false,
         layer_attachment: LayerAttachment::Chrome,
     });
-
     scene
         .publish_to_zone(
             "notification-area",
             ZoneContent::Notification(NotificationPayload {
                 progress: None,
-                text: "Dismissible notification".to_owned(),
+                text: body.to_owned(),
                 icon: String::new(),
-                urgency: 1,
+                urgency,
                 ttl_ms: None,
                 title: String::new(),
                 actions: Vec::new(),
             }),
-            "agent-a",
+            agent,
             None,
             None,
             None,
         )
         .unwrap();
+    scene
+}
 
+fn assert_notification_body_inset(compositor: &Compositor) {
+    let scene = notification_body_scene(
+        "inset test",
+        "Test notification",
+        "agent-a",
+        (0.0, 1.0),
+        None,
+        Some(8_000),
+        1,
+    );
+    let items = compositor.collect_text_items(&scene, 1280.0, 720.0);
+    assert_eq!(items.len(), 1, "must produce one TextItem");
+
+    let item = &items[0];
+    // Zone starts at x=0, y=0. Text sits the card padding (canonical
+    // space.l, 16 dp) in from the backdrop edges, in the body role's line box.
+    let style = crate::renderer::notification_style::NotificationStyle::resolve(
+        &HashMap::new(),
+        &scene.zone_registry.zones["notification-area"].rendering_policy,
+    );
+    assert_eq!(style.padding_h, 16.0);
+    assert_eq!(
+        item.pixel_x, style.padding_h,
+        "text pixel_x is the card padding"
+    );
+    assert_eq!(
+        item.pixel_y, style.padding_v,
+        "text pixel_y is the card padding"
+    );
+    assert_eq!(item.bounds_height, style.body.line_height);
+    assert!(
+        (item.line_height_multiplier * item.font_size_px - style.body.line_height).abs() < 1e-4,
+        "the line box is type.notification.body.line_height, not a fixed multiplier"
+    );
+    // Text is left-aligned.
+    assert_eq!(
+        item.alignment,
+        TextAlign::Start,
+        "notification text must be left-aligned (TextAlign::Start)"
+    );
+    // Overflow is visible while the original content bounds stay unchanged.
+    assert_eq!(
+        item.overflow,
+        TextOverflow::Ellipsis,
+        "notification text must visibly mark overflow inside its bounded line"
+    );
+}
+
+fn assert_notification_empty_title(compositor: &Compositor) {
+    let scene = notification_body_scene(
+        "two-line backward-compat test",
+        "Body only notification",
+        "test-agent",
+        (0.75, 0.25),
+        Some(16.0),
+        None,
+        0,
+    );
+    let items = compositor.collect_text_items(&scene, 1280.0, 720.0);
+
+    assert_eq!(
+        items.len(),
+        1,
+        "single-line notification (empty title) must produce exactly 1 TextItem"
+    );
+    assert_eq!(
+        &*items[0].text, "Body only notification",
+        "single-line TextItem must contain body text"
+    );
+    assert_eq!(
+        items[0].font_weight, 400,
+        "single-line notification must use regular weight (400)"
+    );
+}
+
+fn assert_dismiss_button_typography(compositor: &mut Compositor) {
+    let mut text_renderer_initialized = false;
+
+    for (case, text, agent, x_pct, tokens, expected_dismiss) in [
+        ("body-default", "Doorbell rang", "agent-a", 0.75, None, None),
+        (
+            "dismiss-default",
+            "Default dismiss test",
+            "agent-a",
+            0.0,
+            None,
+            // The × fills the canonical type.notification.title line box (24 dp, 600).
+            Some((24.0_f32, 600_u16)),
+        ),
+        (
+            "dismiss-token-override",
+            "Token override dismiss test",
+            "agent-b",
+            0.0,
+            Some(("28", "700")),
+            Some((28.0, 700)),
+        ),
+    ] {
+        if expected_dismiss.is_some() && !text_renderer_initialized {
+            compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+            text_renderer_initialized = true;
+        }
+
+        let mut token_map = HashMap::new();
+        if let Some((line_height, weight)) = tokens {
+            token_map.insert(
+                "type.notification.title.line_height".to_string(),
+                line_height.to_string(),
+            );
+            token_map.insert(
+                "type.notification.title.weight".to_string(),
+                weight.to_string(),
+            );
+        }
+        compositor.set_token_map(token_map);
+
+        let scene = notification_body_scene(case, text, agent, (x_pct, 0.25), None, Some(8_000), 1);
+        let items = compositor.collect_text_items(&scene, 1280.0, 720.0);
+        let body_item = items
+            .iter()
+            .find(|item| &*item.text == text)
+            .unwrap_or_else(|| panic!("{case}: notification body text item must exist"));
+        assert_eq!(
+            body_item.font_size_px, 14.0,
+            "{case}: a body-only card uses the canonical type.notification.body size"
+        );
+
+        if let Some((size, weight)) = expected_dismiss {
+            let dismiss_item = items
+                .iter()
+                .find(|item| &*item.text == crate::renderer::notification_style::DISMISS_GLYPH)
+                .unwrap_or_else(|| panic!("{case}: dismiss text item must exist"));
+            assert_eq!(
+                dismiss_item.font_size_px, size,
+                "{case}: dismiss font_size_px"
+            );
+            assert_eq!(
+                dismiss_item.font_weight, weight,
+                "{case}: dismiss font_weight"
+            );
+        } else {
+            assert_eq!(
+                items.len(),
+                1,
+                "{case}: must produce one notification TextItem"
+            );
+        }
+    }
+}
+
+/// A stack lays out its body and dismiss control with or without a text renderer.
+#[tokio::test]
+async fn test_notification_stack_adds_dismiss_label_and_reserves_text_width() {
+    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
+
+    // Run the body-only paths before any case initializes the text renderer.
+    assert_notification_body_inset(&compositor);
+    assert_notification_empty_title(&compositor);
+    assert_dismiss_button_typography(&mut compositor);
+
+    // Restore default tokens and text layout before checking dismiss geometry
+    // and frame phase on a fresh publication.
+    compositor.set_token_map(HashMap::new());
+    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+    let mut scene = notification_body_scene(
+        "dismiss label test",
+        "Dismissible notification",
+        "agent-a",
+        (0.0, 0.25),
+        None,
+        Some(8_000),
+        1,
+    );
     let items = compositor.collect_text_items(&scene, 1280.0, 720.0);
     assert_eq!(items.len(), 2, "body text + dismiss label expected");
 
@@ -165,219 +343,6 @@ async fn test_notification_stack_adds_dismiss_label_and_reserves_text_width() {
     );
 }
 
-// ── Dismiss button typography token tests [, ] ─────
-//
-// The × glyph fills the `type.notification.title` line box at its weight: canonical
-// defaults without tokens, theme/owner token values otherwise.
-
-/// A body-only card uses the canonical `type.notification.body` size; the dismiss ×
-/// reads `type.notification.title.line_height` / `.weight` (defaults and overrides).
-#[tokio::test]
-async fn test_dismiss_button_respects_typography_tokens() {
-    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
-    let mut text_renderer_initialized = false;
-
-    for (case, text, agent, x_pct, tokens, expected_dismiss) in [
-        ("body-default", "Doorbell rang", "agent-a", 0.75, None, None),
-        (
-            "dismiss-default",
-            "Default dismiss test",
-            "agent-a",
-            0.0,
-            None,
-            // The × fills the canonical type.notification.title line box (24 dp, 600).
-            Some((24.0_f32, 600_u16)),
-        ),
-        (
-            "dismiss-token-override",
-            "Token override dismiss test",
-            "agent-b",
-            0.0,
-            Some(("28", "700")),
-            Some((28.0, 700)),
-        ),
-    ] {
-        if expected_dismiss.is_some() && !text_renderer_initialized {
-            compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
-            text_renderer_initialized = true;
-        }
-
-        let mut token_map = HashMap::new();
-        if let Some((line_height, weight)) = tokens {
-            token_map.insert(
-                "type.notification.title.line_height".to_string(),
-                line_height.to_string(),
-            );
-            token_map.insert(
-                "type.notification.title.weight".to_string(),
-                weight.to_string(),
-            );
-        }
-        compositor.set_token_map(token_map);
-
-        let mut scene = SceneGraph::new(1280.0, 720.0);
-        scene.register_zone(ZoneDefinition {
-            id: SceneId::new(),
-            name: "notification-area".to_owned(),
-            description: case.to_owned(),
-            geometry_policy: GeometryPolicy::Relative {
-                x_pct,
-                y_pct: 0.0,
-                width_pct: 0.25,
-                height_pct: 0.5,
-            },
-            accepted_media_types: vec![ZoneMediaType::ShortTextWithIcon],
-            rendering_policy: RenderingPolicy {
-                backdrop: Some(Rgba::new(0.1, 0.1, 0.1, 0.9)),
-                // No explicit font size: the body role's canonical 14 dp.
-                ..Default::default()
-            },
-            contention_policy: ContentionPolicy::Stack { max_depth: 5 },
-            max_publishers: 8,
-            auto_clear_ms: Some(8_000),
-            ephemeral: false,
-            layer_attachment: LayerAttachment::Chrome,
-        });
-
-        scene
-            .publish_to_zone(
-                "notification-area",
-                ZoneContent::Notification(NotificationPayload {
-                    progress: None,
-                    text: text.to_owned(),
-                    icon: String::new(),
-                    urgency: 1,
-                    ttl_ms: None,
-                    title: String::new(),
-                    actions: Vec::new(),
-                }),
-                agent,
-                None,
-                None,
-                None,
-            )
-            .unwrap();
-
-        let items = compositor.collect_text_items(&scene, 1280.0, 720.0);
-        let body_item = items
-            .iter()
-            .find(|item| &*item.text == text)
-            .unwrap_or_else(|| panic!("{case}: notification body text item must exist"));
-        assert_eq!(
-            body_item.font_size_px, 14.0,
-            "{case}: a body-only card uses the canonical type.notification.body size"
-        );
-
-        if let Some((size, weight)) = expected_dismiss {
-            let dismiss_item = items
-                .iter()
-                .find(|item| &*item.text == crate::renderer::notification_style::DISMISS_GLYPH)
-                .unwrap_or_else(|| panic!("{case}: dismiss text item must exist"));
-            assert_eq!(
-                dismiss_item.font_size_px, size,
-                "{case}: dismiss font_size_px"
-            );
-            assert_eq!(
-                dismiss_item.font_weight, weight,
-                "{case}: dismiss font_weight"
-            );
-        } else {
-            assert_eq!(
-                items.len(),
-                1,
-                "{case}: must produce one notification TextItem"
-            );
-        }
-    }
-}
-
-/// Notification text is inset by the card padding (`space.l`) from the
-/// backdrop edges, in its role's token line height.
-#[tokio::test]
-async fn test_notification_text_inset_from_backdrop_edges() {
-    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
-
-    let mut scene = SceneGraph::new(1280.0, 720.0);
-    // Zone at x=0, y=0 (x_pct=0, y_pct=0) with 100% width and 50% height.
-    scene.register_zone(ZoneDefinition {
-        id: SceneId::new(),
-        name: "notification-area".to_owned(),
-        description: "inset test".to_owned(),
-        geometry_policy: GeometryPolicy::Relative {
-            x_pct: 0.0,
-            y_pct: 0.0,
-            width_pct: 1.0,  // zx = 0
-            height_pct: 0.5, // zy = 0
-        },
-        accepted_media_types: vec![ZoneMediaType::ShortTextWithIcon],
-        rendering_policy: RenderingPolicy {
-            backdrop: Some(Rgba::new(0.1, 0.1, 0.1, 0.9)),
-            ..Default::default()
-        },
-        contention_policy: ContentionPolicy::Stack { max_depth: 5 },
-        max_publishers: 8,
-        auto_clear_ms: Some(8_000),
-        ephemeral: false,
-        layer_attachment: LayerAttachment::Chrome,
-    });
-
-    scene
-        .publish_to_zone(
-            "notification-area",
-            ZoneContent::Notification(NotificationPayload {
-                progress: None,
-                text: "Test notification".to_owned(),
-                icon: String::new(),
-                urgency: 1,
-                ttl_ms: None,
-                title: String::new(),
-                actions: Vec::new(),
-            }),
-            "agent-a",
-            None,
-            None,
-            None,
-        )
-        .unwrap();
-
-    let items = compositor.collect_text_items(&scene, 1280.0, 720.0);
-    assert_eq!(items.len(), 1, "must produce one TextItem");
-
-    let item = &items[0];
-    // Zone starts at x=0, y=0. Text sits the card padding (canonical
-    // space.l, 16 dp) in from the backdrop edges, in the body role's line box.
-    let style = crate::renderer::notification_style::NotificationStyle::resolve(
-        &HashMap::new(),
-        &scene.zone_registry.zones["notification-area"].rendering_policy,
-    );
-    assert_eq!(style.padding_h, 16.0);
-    assert_eq!(
-        item.pixel_x, style.padding_h,
-        "text pixel_x is the card padding"
-    );
-    assert_eq!(
-        item.pixel_y, style.padding_v,
-        "text pixel_y is the card padding"
-    );
-    assert_eq!(item.bounds_height, style.body.line_height);
-    assert!(
-        (item.line_height_multiplier * item.font_size_px - style.body.line_height).abs() < 1e-4,
-        "the line box is type.notification.body.line_height, not a fixed multiplier"
-    );
-    // Text is left-aligned.
-    assert_eq!(
-        item.alignment,
-        TextAlign::Start,
-        "notification text must be left-aligned (TextAlign::Start)"
-    );
-    // Overflow is visible while the original content bounds stay unchanged.
-    assert_eq!(
-        item.overflow,
-        TextOverflow::Ellipsis,
-        "notification text must visibly mark overflow inside its bounded line"
-    );
-}
-
 // ── Two-line notification rendering ──────────────────────────
 //
 // Two-line notification layout:
@@ -386,74 +351,6 @@ async fn test_notification_text_inset_from_backdrop_edges() {
 //   - Card title: type.notification.title (size scaled by an explicit policy size,
 //     weight 600); body: type.notification.body (14/16 of the title, weight 400)
 //   - Body positioned directly below the title's line box
-
-/// Two-line notification: empty `title` produces exactly 1 TextItem (backward compat).
-///
-/// AC: `collect_text_items` with `NotificationPayload { title: "" }` MUST produce
-/// the same output as before this feature was added.
-#[tokio::test]
-async fn test_two_line_notification_empty_title_produces_one_text_item() {
-    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
-
-    let mut scene = SceneGraph::new(1280.0, 720.0);
-    scene.register_zone(ZoneDefinition {
-        id: SceneId::new(),
-        name: "notification-area".to_owned(),
-        description: "two-line backward-compat test".to_owned(),
-        geometry_policy: GeometryPolicy::Relative {
-            x_pct: 0.75,
-            y_pct: 0.0,
-            width_pct: 0.25,
-            height_pct: 0.5,
-        },
-        accepted_media_types: vec![ZoneMediaType::ShortTextWithIcon],
-        rendering_policy: RenderingPolicy {
-            backdrop: Some(Rgba::new(0.1, 0.1, 0.1, 0.9)),
-            font_size_px: Some(16.0),
-            ..Default::default()
-        },
-        contention_policy: ContentionPolicy::Stack { max_depth: 5 },
-        max_publishers: 8,
-        auto_clear_ms: None,
-        ephemeral: false,
-        layer_attachment: LayerAttachment::Chrome,
-    });
-
-    scene
-        .publish_to_zone(
-            "notification-area",
-            ZoneContent::Notification(NotificationPayload {
-                progress: None,
-                text: "Body only notification".to_owned(),
-                icon: String::new(),
-                urgency: 0,
-                ttl_ms: None,
-                title: String::new(), // empty: must use single-line path
-                actions: vec![],
-            }),
-            "test-agent",
-            None,
-            None,
-            None,
-        )
-        .unwrap();
-
-    let items = compositor.collect_text_items(&scene, 1280.0, 720.0);
-
-    assert_eq!(
-        items.len(),
-        1,
-        "single-line notification (empty title) must produce exactly 1 TextItem"
-    );
-    assert_eq!(
-        &*items[0].text, "Body only notification",
-        "single-line TextItem must contain body text"
-    );
-    assert_eq!(
-        items[0].font_weight, 400,
-        "single-line notification must use regular weight (400)"
-    );
-}
 
 /// Two-line notification: non-empty `title` produces 2 TextItems with correct properties.
 ///
