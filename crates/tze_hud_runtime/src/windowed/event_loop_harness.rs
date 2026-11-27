@@ -3523,6 +3523,10 @@ mod tests {
                         "card.svg",
                         include_bytes!("../../../../assets/widget_bundles/countdown/card.svg"),
                     ),
+                    (
+                        "dock.svg",
+                        include_bytes!("../../../../assets/widget_bundles/countdown/dock.svg"),
+                    ),
                 ],
                 &tokens,
             ) else {

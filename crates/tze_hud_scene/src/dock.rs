@@ -29,6 +29,7 @@ pub struct DockPresentation {
     pub height: f32,
     pub hover_behavior: Option<WidgetHoverBehavior>,
     sources: HashMap<String, blake3::Hash>,
+    builtin_countdown_layout: bool,
 }
 
 impl DockPresentation {
@@ -54,7 +55,19 @@ impl DockPresentation {
             height,
             hover_behavior,
             sources,
+            builtin_countdown_layout: false,
         }
+    }
+
+    /// Only runtime-selected embedded countdown artwork uses the compact text
+    /// layout. Custom bundles keep their authored SVG layout unchanged.
+    pub fn with_builtin_countdown_layout(mut self) -> Self {
+        self.builtin_countdown_layout = true;
+        self
+    }
+
+    pub fn uses_builtin_countdown_layout(&self) -> bool {
+        self.builtin_countdown_layout
     }
 
     /// SVG registration may be denied by the renderer's resident budget.

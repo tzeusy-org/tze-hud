@@ -663,7 +663,7 @@ fn shipped_bundles_have_no_hardcoded_colors_or_restyled_opacity() {
             &["track.svg", "fill.svg", "widget.toml"][..],
         ),
         ("status-indicator", &["indicator.svg", "widget.toml"][..]),
-        ("countdown", &["card.svg", "widget.toml"][..]),
+        ("countdown", &["card.svg", "dock.svg", "widget.toml"][..]),
         ("elapsed", &["card.svg", "widget.toml"][..]),
         ("kpi", &["card.svg", "widget.toml"][..]),
         ("stepper", &["card.svg", "widget.toml"][..]),

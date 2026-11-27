@@ -330,6 +330,191 @@ async fn dock_presentation_selects_and_retires_its_own_raster() {
     assert_widget_work(&mut gpu.compositor, 0, 0);
 }
 
+/// The actual embedded compact source shares the standalone timer and keeps
+/// steady frames and neighbouring instances free of raster/upload work.
+#[tokio::test]
+async fn builtin_compact_countdown_keeps_standalone_pixels_and_timer_cadence() {
+    use std::num::NonZeroU64;
+    use tze_hud_scene::dock::{DockLayout, DockMetrics, DockPresentation, WidgetBundleOrigin};
+    use tze_hud_scene::types::Rect;
+
+    let Some(mut gpu) = Gpu::with_widgets(640, 248).await else {
+        return;
+    };
+    let clock = Arc::new(TestClock::new(1_000));
+    let mut scene = SceneGraph::new_with_clock(640.0, 248.0, clock.clone());
+    let tab = scene.create_tab("Main", 0).unwrap();
+    let BundleScanResult::Ok(bundle) = bundle!("countdown", ["card.svg", "dock.svg"]) else {
+        panic!("countdown");
+    };
+    let alternate = bundle.dock.as_ref().unwrap();
+    let presentation = DockPresentation::new(
+        alternate.layers.clone(),
+        alternate.width,
+        alternate.height,
+        alternate.hover_behavior.clone(),
+        &bundle.svg_contents,
+    )
+    .with_builtin_countdown_layout();
+    let kind = register_bundle(
+        &mut gpu.compositor,
+        &mut scene,
+        BundleScanResult::Ok(bundle),
+    );
+    scene.widget_registry.set_dock_presentation(
+        &kind,
+        WidgetBundleOrigin::embedded("builtin:countdown"),
+        Some(presentation),
+    );
+    register_instance(
+        &mut scene,
+        tab,
+        &kind,
+        "standalone",
+        Some(relative(0.0, 0.0, 360.0 / 640.0, 0.5)),
+        true,
+    );
+    let values = |label: &str, ms| {
+        HashMap::from([
+            ("label".into(), string(label)),
+            ("severity".into(), enumeration("error")),
+            (
+                "ends_in_ms".into(),
+                Value::Deadline(WidgetDeadline::relative(ms)),
+            ),
+        ])
+    };
+    publish_params(
+        &mut scene,
+        "standalone",
+        "configured",
+        0,
+        values("Cutover", 120_000),
+    );
+    let standalone = gpu.render_pixels(&mut scene);
+    #[cfg(feature = "dev-mode")]
+    assert_widget_work(&mut gpu.compositor, 1, 1);
+    scene.configure_dock(
+        vec![kind.clone()],
+        DockLayout::new(
+            Rect::new(0.0, 0.0, 640.0, 248.0),
+            2,
+            DockMetrics {
+                row_height: 52.0,
+                caption_width: 96.0,
+                gap: 8.0,
+            },
+            [160.0 / 52.0],
+        ),
+        NonZeroU64::new(10_000).unwrap(),
+    );
+    for (scope, label, ms, y) in [
+        ("agent-a", "Cutover", 120_000, 24.0),
+        ("agent-b", "Peer", 300_000, 120.0),
+    ] {
+        scene
+            .publish_to_dock(&kind, values(label, ms), scope, None, 0, 0)
+            .unwrap();
+        let name = scene
+            .dock_instance(scope, &kind)
+            .unwrap()
+            .instance_name
+            .clone();
+        assert!(scene.set_widget_geometry(
+            &name,
+            relative(400.0 / 640.0, y / 248.0, 160.0 / 640.0, 52.0 / 248.0)
+        ));
+    }
+    let a = scene
+        .dock_instance("agent-a", &kind)
+        .unwrap()
+        .instance_name
+        .clone();
+    let b = scene
+        .dock_instance("agent-b", &kind)
+        .unwrap()
+        .instance_name
+        .clone();
+    let combined = gpu.render_pixels(&mut scene);
+    assert_eq!(
+        widget_region(&standalone, 640, (0, 0), (0, 0, 360, 124)),
+        widget_region(&combined, 640, (0, 0), (0, 0, 360, 124)),
+        "adding dock artwork must preserve every standalone pixel"
+    );
+    assert_color(
+        pixel_at(&combined, 640, 542, 60),
+        token_rgb("color.error"),
+        4,
+        "compact filled error diamond",
+    );
+    assert_eq!(
+        rendered_timer_value(&gpu.compositor, "standalone", "ends_in_ms"),
+        string("2 min")
+    );
+    assert_eq!(
+        rendered_timer_value(&gpu.compositor, &a, "ends_in_ms"),
+        string("2 min")
+    );
+    #[cfg(feature = "dev-mode")]
+    assert_widget_work(&mut gpu.compositor, 2, 2);
+    assert_eq!(
+        [
+            raster_count(&gpu.compositor, "standalone"),
+            raster_count(&gpu.compositor, &a),
+            raster_count(&gpu.compositor, &b)
+        ],
+        [1, 1, 1]
+    );
+    assert!(
+        gpu.draw(&mut scene).widget_rasterized.is_empty(),
+        "identical steady frame"
+    );
+    #[cfg(feature = "dev-mode")]
+    assert_widget_work(&mut gpu.compositor, 0, 0);
+    clock.advance(1_000);
+    assert!(gpu.compositor.widget_deadline_needs_render(&scene));
+    gpu.draw(&mut scene);
+    for name in ["standalone", a.as_str()] {
+        assert_eq!(
+            rendered_timer_value(&gpu.compositor, name, "ends_in_ms"),
+            string("1:59")
+        );
+        assert_eq!(raster_count(&gpu.compositor, name), 2);
+    }
+    assert_eq!(raster_count(&gpu.compositor, &b), 1);
+    #[cfg(feature = "dev-mode")]
+    assert_widget_work(&mut gpu.compositor, 2, 2);
+    scene
+        .publish_to_dock(&kind, values("Release", 119_000), "agent-a", None, 0, 0)
+        .unwrap();
+    gpu.draw(&mut scene);
+    assert_eq!(raster_count(&gpu.compositor, &a), 3);
+    assert_eq!(raster_count(&gpu.compositor, &b), 1);
+    assert_eq!(raster_count(&gpu.compositor, "standalone"), 2);
+    assert_eq!(
+        scene.widget_registry.instances[&a].current_params["label"],
+        string("Release")
+    );
+    #[cfg(feature = "dev-mode")]
+    assert_widget_work(&mut gpu.compositor, 1, 1);
+    scene.release_scope("agent-a");
+    gpu.draw(&mut scene);
+    assert!(
+        gpu.compositor
+            .widget_renderer()
+            .unwrap()
+            .texture_entry(&a)
+            .is_none()
+    );
+    assert!(
+        gpu.compositor
+            .widget_renderer()
+            .unwrap()
+            .texture_entry(&b)
+            .is_some()
+    );
+}
+
 #[tokio::test]
 async fn widget_param_update_rasterizes_only_that_instance() {
     let Some(mut gpu) = Gpu::with_widgets(512, 256).await else {
@@ -930,7 +1115,7 @@ fn draw_deadline_frame(gpu: &mut Gpu, scene: &mut SceneGraph, due: bool) -> Fram
 fn assert_countdown_kpi_and_stepper_contracts(gpu: &mut Gpu) {
     let (mut scene, clock, tab) = timer_scene();
     for loaded in [
-        bundle!("countdown", ["card.svg"]),
+        bundle!("countdown", ["card.svg", "dock.svg"]),
         bundle!("kpi", ["card.svg"]),
         bundle!("stepper", ["card.svg"]),
     ] {

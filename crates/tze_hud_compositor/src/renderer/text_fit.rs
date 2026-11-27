@@ -298,7 +298,11 @@ impl tze_hud_scene::TextFit for TextFitMeasurer {
                 })
             })
             .collect();
-        crate::widget::clipped_text_params(&layers, &constraints, params)
+        if dock.is_some_and(|dock| dock.uses_builtin_countdown_layout()) {
+            crate::widget::compact_countdown_clipped(&layers, &constraints, params)
+        } else {
+            crate::widget::clipped_text_params(&layers, &constraints, params)
+        }
     }
 
     fn status_bar(

@@ -30,6 +30,8 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex, OnceLock};
 
+mod compact_countdown;
+
 use ab_glyph::{Font, ScaleFont};
 use tze_hud_scene::DegradationLevel;
 use tze_hud_scene::dock::DockPresentation;
@@ -49,6 +51,7 @@ use tze_hud_scene::types::{
 /// `resvg` fallback.
 pub struct WidgetRenderPlan {
     layers: Vec<WidgetRenderPlanLayer>,
+    builtin_countdown_layout: bool,
 }
 
 struct WidgetRenderPlanLayer {
@@ -70,7 +73,10 @@ impl WidgetRenderPlan {
                 primitive_plan: PrimitiveSvgLayerPlan::parse(svg_text),
             })
             .collect();
-        Self { layers }
+        Self {
+            layers,
+            builtin_countdown_layout: false,
+        }
     }
 }
 
@@ -2450,6 +2456,21 @@ fn composed_widget_cache_key(
     }
 }
 
+/// The built-in compact label's actual grapheme-safe displayed prefix.
+pub(crate) fn compact_countdown_clipped(
+    svg_layers: &[(&str, &[WidgetBinding])],
+    constraints: &HashMap<String, (f32, f32)>,
+    params: &HashMap<String, WidgetParameterValue>,
+) -> Vec<(String, usize)> {
+    let [(svg, bindings)] = svg_layers else {
+        return Vec::new();
+    };
+    compact_countdown::prepare(svg, bindings, constraints, params)
+        .filter(|prepared| prepared.clipped)
+        .map(|prepared| vec![("label".into(), prepared.prefix_chars)])
+        .unwrap_or_default()
+}
+
 /// String params whose bound text would run past the widget canvas,
 /// laid out by the same usvg text engine and widget font set that draw it,
 /// each with the number of its characters that fit (the smallest across
@@ -2508,6 +2529,19 @@ fn bound_widget_tree(
     param_constraints: &HashMap<String, (f32, f32)>,
     params: &HashMap<String, WidgetParameterValue>,
 ) -> Option<resvg::usvg::Tree> {
+    resvg::usvg::Tree::from_str(
+        &bound_widget_svg(svg, bindings, param_constraints, params),
+        &widget_usvg_options(),
+    )
+    .ok()
+}
+
+fn bound_widget_svg(
+    svg: &str,
+    bindings: &[WidgetBinding],
+    param_constraints: &HashMap<String, (f32, f32)>,
+    params: &HashMap<String, WidgetParameterValue>,
+) -> String {
     let mut bound = svg.to_owned();
     for binding in bindings {
         if let Some(value) = resolve_binding_value(binding, params, param_constraints) {
@@ -2524,7 +2558,7 @@ fn bound_widget_tree(
             );
         }
     }
-    resvg::usvg::Tree::from_str(&bound, &widget_usvg_options()).ok()
+    bound
 }
 
 /// Whether text element `element` runs past the canvas edges.
@@ -2732,6 +2766,23 @@ pub fn rasterize_widget_render_plan(
     pixel_width: u32,
     pixel_height: u32,
 ) -> Option<tiny_skia::Pixmap> {
+    if plan.builtin_countdown_layout {
+        let [layer] = plan.layers.as_slice() else {
+            return None;
+        };
+        let prepared = compact_countdown::prepare(
+            &layer.svg_text,
+            &layer.bindings,
+            param_constraints,
+            params,
+        )?;
+        let mut raster = None;
+        composite_layer(
+            &mut raster,
+            rasterize_static_svg_layer(&prepared.svg, pixel_width, pixel_height)?,
+        );
+        return raster;
+    }
     let resolved_layers: Vec<ResolvedLayerBindings> = plan
         .layers
         .iter()
@@ -3345,7 +3396,9 @@ impl WidgetRenderer {
                 }
             }
 
-            let compiled = WidgetRenderPlan::compile(&svg_layers);
+            let mut compiled = WidgetRenderPlan::compile(&svg_layers);
+            compiled.builtin_countdown_layout =
+                dock.is_some_and(|dock| dock.uses_builtin_countdown_layout());
             match dock {
                 Some(dock) => plans.dock = Some((Arc::clone(dock), compiled)),
                 None => plans.default = Some(compiled),

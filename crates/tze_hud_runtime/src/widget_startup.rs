@@ -59,7 +59,7 @@ const BUILTIN_BUNDLES: &[(&str, BundleFiles)] = &[
     builtin_bundle!("gauge", ["background.svg", "fill.svg"]),
     builtin_bundle!("progress-bar", ["track.svg", "fill.svg"]),
     builtin_bundle!("status-indicator", ["indicator.svg"]),
-    builtin_bundle!("countdown", ["card.svg"]),
+    builtin_bundle!("countdown", ["card.svg", "dock.svg"]),
     builtin_bundle!("elapsed", ["card.svg"]),
     builtin_bundle!("kpi", ["card.svg"]),
     builtin_bundle!("stepper", ["card.svg"]),
@@ -171,15 +171,21 @@ pub(crate) fn reload_widget_bundles(
 
 fn dock_presentation(
     loaded: LoadedDockPresentation,
+    origin: &tze_hud_scene::dock::WidgetBundleOrigin,
     svg_contents: &HashMap<String, Vec<u8>>,
 ) -> DockPresentation {
-    DockPresentation::new(
+    let presentation = DockPresentation::new(
         loaded.layers,
         loaded.width,
         loaded.height,
         loaded.hover_behavior,
         svg_contents,
-    )
+    );
+    if *origin == tze_hud_scene::dock::WidgetBundleOrigin::embedded("builtin:countdown") {
+        presentation.with_builtin_countdown_layout()
+    } else {
+        presentation
+    }
 }
 
 pub(crate) fn apply_widget_restyle(scene: &mut SceneGraph, bundles: Vec<LoadedBundle>) {
@@ -210,8 +216,12 @@ pub(crate) fn apply_widget_restyle(scene: &mut SceneGraph, bundles: Vec<LoadedBu
         if let Some(dock) = incoming_dock {
             registry.set_dock_presentation(
                 widget_type,
-                bundle.origin,
-                Some(dock_presentation(dock, &bundle.svg_contents)),
+                bundle.origin.clone(),
+                Some(dock_presentation(
+                    dock,
+                    &bundle.origin,
+                    &bundle.svg_contents,
+                )),
             );
         }
         for (file, bytes) in bundle.svg_contents {
@@ -295,10 +305,10 @@ pub(crate) fn init_widget_registry(
                 );
                 scene.widget_registry.set_dock_presentation(
                     &name,
-                    bundle.origin,
-                    bundle
-                        .dock
-                        .map(|loaded| dock_presentation(loaded, &bundle.svg_contents)),
+                    bundle.origin.clone(),
+                    bundle.dock.map(|loaded| {
+                        dock_presentation(loaded, &bundle.origin, &bundle.svg_contents)
+                    }),
                 );
                 scene.widget_registry.register_definition(bundle.definition);
             }
@@ -488,6 +498,13 @@ mod tests {
                 assert_eq!(warnings.items()[0].subject.as_deref(), Some("root:0"));
             }
             assert_eq!(registered_types(&scene), expected);
+            let compact = scene
+                .widget_registry
+                .dock_presentation("countdown")
+                .unwrap();
+            assert!(compact.uses_builtin_countdown_layout());
+            assert_eq!((compact.width, compact.height), (160.0, 52.0));
+            assert_eq!(compact.layers[0].svg_file, "dock.svg");
         }
         let mut raw: RawConfig = toml::from_str(
             r#"
@@ -543,6 +560,65 @@ mod tests {
             crate::operator::diagnostics::render(None, None, Some(&startup)).1,
             complete
         );
+    }
+
+    #[test]
+    fn owner_countdown_alternate_keeps_its_authored_layout() {
+        let root = tempfile::tempdir().unwrap();
+        let custom = root.path().join("countdown");
+        std::fs::create_dir(&custom).unwrap();
+        for (file, bytes) in BUILTIN_BUNDLES
+            .iter()
+            .find(|(name, _)| *name == "countdown")
+            .unwrap()
+            .1
+        {
+            let bytes = if *file == "dock.svg" {
+                String::from_utf8(bytes.to_vec())
+                    .unwrap()
+                    .replace(
+                        "id=\"label\" x=\"0\" y=\"0\"",
+                        "id=\"label\" x=\"11\" y=\"19\"",
+                    )
+                    .replace(
+                        "id=\"value\" x=\"0\" y=\"0\"",
+                        "id=\"value\" x=\"11\" y=\"39\"",
+                    )
+                    .into_bytes()
+            } else {
+                bytes.to_vec()
+            };
+            std::fs::write(custom.join(file), bytes).unwrap();
+        }
+        let raw = RawConfig {
+            widget_bundles: Some(RawWidgetBundles {
+                paths: vec![root.path().to_string_lossy().into_owned()],
+            }),
+            ..RawConfig::default()
+        };
+        let mut scene = SceneGraph::new(800.0, 600.0);
+        let (assets, warnings) =
+            init_widget_registry(&mut scene, &raw, None, &HashMap::new(), &default_tokens());
+        assert!(warnings.items().is_empty());
+        let dock = scene
+            .widget_registry
+            .dock_presentation("countdown")
+            .unwrap();
+        assert!(
+            !dock.uses_builtin_countdown_layout(),
+            "type and filename alone must not select built-in layout"
+        );
+        let bytes = &assets
+            .iter()
+            .find(|(kind, file, _)| kind == "countdown" && file == "dock.svg")
+            .unwrap()
+            .2;
+        assert!(
+            std::str::from_utf8(bytes)
+                .unwrap()
+                .contains("id=\"label\" x=\"11\" y=\"19\"")
+        );
+        assert!(dock.matches_source("dock.svg", bytes));
     }
 
     /// WHEN an on-disk bundle has the same type name as a built-in THEN the
@@ -644,6 +720,7 @@ height_pct = 1
         assert!(dock_source(&assets).contains("160 52"));
         let startup_dock = scene.widget_registry.dock_presentation("gauge").unwrap();
         assert_eq!(startup_dock.height, 52.0);
+        assert!(!startup_dock.uses_builtin_countdown_layout());
         assert!(startup_dock.matches_source("dock.svg", dock_source(&assets).as_bytes()));
         let fallback_root = root.join("fallback");
         let scene = Arc::new(tokio::sync::Mutex::new(scene));
