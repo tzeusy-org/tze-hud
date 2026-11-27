@@ -10,13 +10,17 @@ import hashlib
 import importlib.util
 import io
 import json
+import socket
 import tempfile
+import time
+import tomllib
 import unittest
 from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import hud_gestures as g  # noqa: E402
+import hud_x11_capture as x11  # noqa: E402
 import windows_overlay_gestures as overlay  # noqa: E402
 from windows_smoke import wait_until  # noqa: E402
 
@@ -48,6 +52,123 @@ STATUS["widgets"] = [{"s": "widget:main-status", "rect": {"x": 10, "y": 500, "w"
                       "hover_target": {"x": 290, "y": 500, "w": 40, "h": 32}, "tooltip_visible": False}]
 OWNED = dict(started_display=":91", target_display=":91", owned_pid=4242, status_pid=4242,
              url="http://127.0.0.1:5555/mcp")
+
+
+class DockTooltipWitnessTests(unittest.TestCase):
+    def test_scope_and_scratch_configuration(self) -> None:
+        self.assertNotIn(g.DOCK_TOOLTIP_SCENARIO, g.SCENARIOS)
+        self.assertEqual(list(g.EXPLICIT_SCENARIOS), [g.DOCK_TOOLTIP_SCENARIO])
+        self.assertEqual(g.OVERLAY_SCENARIOS, ("tray", "go-to-session", "overlay-pointer", "tray-answer"))
+        original = g.CONFIG.read_text(encoding="utf-8")
+        scratch = tomllib.loads(g.dock_tooltip_config(original))
+        self.assertNotIn("dock", tomllib.loads(original))
+        self.assertEqual(scratch["dock"], {"accepts": ["countdown"], "max_rows": 2})
+        self.assertEqual(scratch["design_tokens"]["opacity.surface"], "1")
+        self.assertEqual(scratch["design_tokens"]["color.surface.container.high"], "#FFD000")
+        with self.assertRaises(g.Refused):
+            g.dock_tooltip_config(g.dock_tooltip_config(original))
+
+    def test_refuses_missing_binding_mixed_suite_empty_gate_and_nonlinux_before_start(self) -> None:
+        scenario = g.DOCK_TOOLTIP_SCENARIO
+        identity = ["--expected-dock-build-sha", "a" * 40]
+        cases = [
+            ("linux", [scenario]),
+            ("linux", [*identity, scenario, "portal-reading"]),
+            ("linux", [*identity, "--required=", scenario]),
+            ("linux", [*identity, "--window-mode", "overlay", scenario]),
+            ("linux", [*identity, "--mouse-receipt-diagnostics", scenario]),
+            ("linux", identity),
+            ("win32", [*identity, scenario]),
+        ]
+        for platform, args in cases:
+            with (self.subTest(platform=platform, args=args), mock.patch.object(g.sys, "platform", platform),
+                  mock.patch.object(g.Run, "start") as start, contextlib.redirect_stderr(io.StringIO())):
+                with self.assertRaises(SystemExit) as err:
+                    g.main(["--exe", "fake-hud", *args])
+                self.assertEqual(err.exception.code, 2)
+                start.assert_not_called()
+
+    def test_x11_reply_binds_fresh_request_and_live_processes(self) -> None:
+        capture = x11.Capture.__new__(x11.Capture)
+        capture.seq = 0
+        capture.pipe = mock.Mock()
+        capture.xvfb = mock.Mock()
+        capture.proc = mock.Mock()
+        capture.xvfb.poll.return_value = capture.proc.poll.return_value = None
+        rect, point = (0, 0, 1, 1), (10, 10)
+        reply = {"id": 1, "rect": list(rect), "pointer": list(point), "bytes": 4,
+                 "pointer_ns": [101, 102], "acquisition_ns": [103, 104]}
+        capture.receive = mock.Mock(return_value=(reply, b"1234"))
+        with (mock.patch.object(x11, "send") as send,
+              mock.patch.object(x11.time, "monotonic_ns", side_effect=[100, 105])):
+            self.assertEqual(capture.sample(rect, point, 120), (reply, b"1234"))
+            send.assert_called_once_with(capture.pipe, {"id": 1, "rect": rect, "point": point}, 120)
+        capture.receive.return_value = ({**reply, "id": 2}, b"1234")
+        with (mock.patch.object(x11, "send"), mock.patch.object(x11.time, "monotonic_ns", return_value=107)):
+            with self.assertRaisesRegex(x11.CaptureError, "timestamps"):
+                capture.sample(rect, point, 120)
+        capture.xvfb.poll.return_value = 1
+        with mock.patch.object(x11, "send") as send, self.assertRaisesRegex(x11.CaptureError, "owner"):
+            capture.sample(rect, point, 120)
+        send.assert_not_called()
+
+    def test_x11_readback_discards_padding_and_requires_complete_rows(self) -> None:
+        raw = bytes([3, 2, 1, 0, 9, 8, 7, 6, 123, 45, 67, 89])
+        self.assertEqual(x11.bgrx_to_rgba(raw, 2, 1, 12), bytes([1, 2, 3, 255, 7, 8, 9, 255]))
+        with self.assertRaises(x11.CaptureError):
+            x11.bgrx_to_rgba(raw, 2, 2, 12)
+        with self.assertRaises(x11.CaptureError):
+            x11.bgrx_to_rgba(raw, 2, 1, 6)
+
+    def test_x11_packet_deadline_and_malformed_length(self) -> None:
+        one, two = socket.socketpair()
+        with one, two:
+            now = time.monotonic_ns()
+            x11.send(one, {"id": 1}, now + x11.NS, b"test")
+            self.assertEqual(x11.packet(two, now + x11.NS), ({"id": 1}, b"test"))
+            with self.assertRaises(TimeoutError):
+                x11.packet(two, now)
+            one.sendall(x11.HEADER.pack(1, x11.MAX_PIXELS + 1))
+            with self.assertRaisesRegex(x11.CaptureError, "packet lengths"):
+                x11.packet(two, now + x11.NS)
+
+    def test_early_sample_requires_owned_arrival_clear_pixels_and_distinct_deadline(self) -> None:
+        move = (1_000_000_000, 1_030_000_000)
+        image = {"pointer_ns": [1_031_000_000, 1_032_000_000],
+                 "acquisition_ns": [1_034_000_000, 1_149_000_000], "popup": [True, False]}
+        self.assertTrue(g.dock_early_observation(image, move, 1))
+        self.assertFalse(g.dock_early_observation(image, move, 0))
+        self.assertFalse(g.dock_early_observation({**image, "popup": [True, None]}, move, 1))
+        self.assertFalse(g.dock_early_observation({**image, "pointer_ns": [1_029_000_000, 1_032_000_000]}, move, 1))
+        self.assertFalse(g.dock_early_observation({**image, "acquisition_ns": [1_034_000_000, 1_151_000_000]}, move, 1))
+
+    def test_joint_read_separates_real_popup_from_single_pixels_or_another_row(self) -> None:
+        fill = bytes((*g.DOCK_POPUP_RGB, 255))
+        ink = bytes((*g.DOCK_INK_RGB, 255))
+        width, height = 80, 48
+        frame = (20, 30, width, height)
+        pixels = bytearray(b"\x21\x29\x30\xff" * width * height)
+        one = (20, 30, width, 24)
+        two = (20, 54, width, 24)
+
+        def measure():
+            return [g.dock_popup_pixels(g.dock_crop(pixels, frame, roi), width)[0] for roi in (one, two)]
+
+        self.assertEqual(measure(), [False, False])
+        pixels[:4] = fill
+        self.assertEqual(measure(), [None, False])
+        for y in range(26, 45):
+            start = 4 * (y * width + 8)
+            pixels[start:start + 4 * 64] = fill * 64
+        self.assertEqual(measure(), [None, None])
+        for y in range(33, 37):
+            start = 4 * (y * width + 29)
+            pixels[start:start + 4 * 14] = ink * 14
+        self.assertEqual(measure(), [None, True])
+        verdict, evidence = g.dock_popup_pixels(g.dock_crop(pixels, frame, two), width)
+        self.assertIs(verdict, True)
+        self.assertEqual(evidence["ink"], 56)
+        self.assertEqual(len(evidence["ink_mask_sha256"]), 64)
 
 
 class GuardTests(unittest.TestCase):

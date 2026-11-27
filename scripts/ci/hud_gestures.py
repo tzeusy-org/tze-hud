@@ -73,6 +73,9 @@ LAVAPIPE = next((p for p in (Path("/usr/share/vulkan/icd.d/lvp_icd.x86_64.json")
                              Path("/usr/share/vulkan/icd.d/lvp_icd.json")) if p.exists()),
                 Path("/usr/share/vulkan/icd.d/lvp_icd.json"))
 SCREEN = (1280, 800)
+DOCK_TOOLTIP_SCENARIO = "dock-countdown-tooltip"
+DOCK_POPUP_RGB = (255, 208, 0)
+DOCK_INK_RGB = (16, 24, 48)
 SETTLE_S = 5.0  # bound on any one observed transition
 # A focused composer's caret blink presents about every 530 ms, so the HUD
 # counts as settled once nothing has presented for this long (docs/api.md).
@@ -245,15 +248,20 @@ class XTest:
 
     name = "xtest"
 
-    def __init__(self, display: str, guard: Callable[[], None]) -> None:
+    def __init__(self, display: str, guard: Callable[[], None], authority: Path | None = None) -> None:
         self.display = display
         self.guard = guard
+        self.authority = authority
         self.calls = 0
 
     def _run(self, *args: object) -> None:
         self.guard()
         env = dict(os.environ, DISPLAY=self.display)
-        subprocess.run(["xdotool", *map(str, args)], env=env, check=True, capture_output=True)
+        opts = {}
+        if self.authority is not None:
+            env["XAUTHORITY"] = str(self.authority)
+            opts["timeout"] = 2
+        subprocess.run(["xdotool", *map(str, args)], env=env, check=True, capture_output=True, **opts)
         self.calls += 1  # logged, never an assertion
 
     def move_abs(self, x: int, y: int) -> None:
@@ -275,7 +283,8 @@ class XTest:
 # ── Owned processes ──────────────────────────────────────────────────────────
 
 
-def start_xvfb(first: int = 90, last: int = 199) -> tuple[subprocess.Popen, str]:
+def start_xvfb(first: int = 90, last: int = 199, *,
+               authority_dir: Path | None = None) -> tuple[subprocess.Popen, str]:
     """Start Xvfb on the first free display number; return it once it is ready.
 
     Xvfb's own `-displayfd` search fails where the socket directory is
@@ -286,13 +295,25 @@ def start_xvfb(first: int = 90, last: int = 199) -> tuple[subprocess.Popen, str]
     for number in range(first, last + 1):
         if Path(f"/tmp/.X{number}-lock").exists():
             continue
+        auth_args = []
+        if authority_dir is not None:
+            from hud_x11_capture import write_authority
+
+            authority = authority_dir / f"Xauthority-{number}"
+            write_authority(authority, number)
+            auth_args = ["-auth", str(authority), "-noreset"]
         read_fd, write_fd = os.pipe()
-        proc = subprocess.Popen(
-            ["Xvfb", f":{number}", "-displayfd", str(write_fd), "-screen", "0",
-             f"{SCREEN[0]}x{SCREEN[1]}x24", "-nolisten", "tcp"],
-            pass_fds=(write_fd,), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        )
-        os.close(write_fd)
+        try:
+            proc = subprocess.Popen(
+                ["Xvfb", f":{number}", "-displayfd", str(write_fd), "-screen", "0",
+                 f"{SCREEN[0]}x{SCREEN[1]}x24", "-nolisten", "tcp", *auth_args],
+                pass_fds=(write_fd,), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+        except OSError:
+            os.close(read_fd)
+            raise
+        finally:
+            os.close(write_fd)
         with os.fdopen(read_fd) as pipe:
             ready, _, _ = select.select([pipe], [], [], 15)
             reported = pipe.readline().strip() if ready else ""  # empty when Xvfb exits (display taken)
@@ -455,6 +476,17 @@ class MouseReceiptCapture:
         return evidence
 
 
+def dock_tooltip_config(config: str) -> str:
+    """Set distinct pixel colors and enable only the dock in this scratch copy."""
+    marker = "[design_tokens]\n"
+    if config.count(marker) != 1 or re.search(r"^\s*\[dock\]", config, re.M):
+        raise Refused("unexpected source configuration for the dock witness")
+    tokens = ('"color.surface.container.high" = "#FFD000"\n'
+              '"color.on_surface" = "#101830"\n'
+              '"opacity.surface" = "1"\n')
+    return config.replace(marker, marker + tokens, 1) + '\n[dock]\naccepts = ["countdown"]\nmax_rows = 2\n'
+
+
 @dataclass
 class Run:
     exe: Path
@@ -482,6 +514,8 @@ class Run:
     publications: set[tuple[str, str | None]] = field(default_factory=set)
     grpc_port: int = field(default=0, init=False)
     mouse_receipts: MouseReceiptCapture | None = None
+    dock_build_sha: str | None = None
+    xauthority: Path | None = field(default=None, init=False)
 
     @property
     def pid(self) -> int | None:
@@ -490,6 +524,11 @@ class Run:
     # Lifecycle ───────────────────────────────────────────────────────────
 
     def start(self, *, resident_raster: bool = False) -> None:
+        if self.dock_build_sha and (
+            sys.platform != "linux" or self.injector != "xtest" or self.window_mode != "fullscreen"
+            or resident_raster or not LAVAPIPE.is_file()
+        ):
+            raise Refused("dock witness needs Linux, private fullscreen XTEST and llvmpipe")
         if self.injector == "sendinput":
             if os.environ.get("GITHUB_ACTIONS") != "true":
                 raise Refused("tier W drives the real desktop; it runs only on a CI VM (GITHUB_ACTIONS=true)")
@@ -498,12 +537,21 @@ class Run:
                 raise Refused(f"tze_hud.exe is already running (pid {running}); this harness owns its HUD")
         self.home = Path(tempfile.mkdtemp(prefix="hud_gestures_home_"))
         if self.injector == "xtest":
-            self.xvfb, self.display = start_xvfb()
+            if self.dock_build_sha:
+                self.xvfb, self.display = start_xvfb(authority_dir=self.home)
+                self.xauthority = self.home / f"Xauthority-{self.display[1:]}"
+            else:
+                self.xvfb, self.display = start_xvfb()
             (self.home / ".config").mkdir()
             env = dict(os.environ, DISPLAY=self.display, WAYLAND_DISPLAY="", HOME=str(self.home),
                        XDG_CONFIG_HOME=str(self.home / ".config"))
             if LAVAPIPE.exists():
                 env["VK_ICD_FILENAMES"] = str(LAVAPIPE)
+            if self.xauthority:
+                env.update(XAUTHORITY=str(self.xauthority), VK_DRIVER_FILES=str(LAVAPIPE),
+                           WINIT_X11_SCALE_FACTOR="1", TZE_HUD_LOG_DIR=str(self.home))
+                for key in ("WAYLAND_DISPLAY", "WAYLAND_SOCKET", "TZE_HUD_FILE_LOG"):
+                    env.pop(key, None)
         else:
             for name in ("LocalAppData", "AppData"):
                 (self.home / name).mkdir()
@@ -524,6 +572,8 @@ class Run:
             self.port = free_port()
         config = seed_config(CONFIG, self.psk)
         self.config_dir = config.parent
+        if self.dock_build_sha:
+            config.write_text(dock_tooltip_config(config.read_text(encoding="utf-8")), encoding="utf-8")
         if self.go_to_probe:
             seeded = config.read_text(encoding="utf-8")
             config.write_text(seeded.replace("[runtime]\n",
@@ -534,7 +584,7 @@ class Run:
         with open(config.parent / "agents.toml", "a", encoding="utf-8") as agents:
             agents.write(f'\n[agents.{FOREIGN_AGENT}]\npsk_sha256 = "{digest}"\nallow = ["*"]\n')
         self.config = config
-        self.log = self.out / "hud.log"
+        self.log = (self.home if self.dock_build_sha else self.out) / "hud.log"
         dimensions = (["--width", str(SCREEN[0]), "--height", str(SCREEN[1])]
                       if self.window_mode == "fullscreen" else [])
         if self.mouse_receipts:
@@ -556,7 +606,8 @@ class Run:
                     or (self.injector == "xtest" and (not self.xvfb or self.xvfb.poll() is not None))):
                 raise Refused("raster witness did not reach its owned HUD and display")
             return
-        self.inj = XTest(self.display, self.guard) if self.injector == "xtest" else WIN.SendInput(self.guard)
+        self.inj = (XTest(self.display, self.guard, self.xauthority) if self.injector == "xtest"
+                    else WIN.SendInput(self.guard))
         if self.injector == "sendinput":
             self._check_identity_mapping()
         if self.window_mode == "fullscreen":
@@ -629,7 +680,13 @@ class Run:
                 self.xvfb.wait(10)
             except subprocess.TimeoutExpired:
                 self.xvfb.kill()
-                survivors.append(f"Xvfb pid {self.xvfb.pid}")
+                if self.dock_build_sha:
+                    try:
+                        self.xvfb.wait(2)
+                    except subprocess.TimeoutExpired:
+                        survivors.append(f"Xvfb pid {self.xvfb.pid}")
+                else:
+                    survivors.append(f"Xvfb pid {self.xvfb.pid}")
         for path in (self.home, self.config_dir):
             if path:
                 shutil.rmtree(path, ignore_errors=True)
@@ -1314,6 +1371,296 @@ class SessionSmoke(Smoke):
                 return resp.status
         except urllib.error.HTTPError as err:
             return err.code
+
+
+def dock_rect(entry: dict) -> tuple[int, int, int, int]:
+    rect = entry["rect"]
+    return tuple(round(rect[key]) for key in ("x", "y", "w", "h"))
+
+
+def dock_crop(rgba: bytes, frame: tuple[int, ...], roi: tuple[int, ...]) -> bytes:
+    x, y, w, h = roi
+    fx, fy, fw, fh = frame
+    if not (fx <= x < x + w <= fx + fw and fy <= y < y + h <= fy + fh):
+        raise ValueError("dock crop lies outside the native frame")
+    first = 4 * ((y - fy) * fw + x - fx)
+    return b"".join(rgba[offset:offset + 4 * w]
+                    for offset in range(first, first + 4 * fw * h, 4 * fw))
+
+
+def dock_popup_pixels(pixels: bytes, width: int) -> tuple[bool | None, dict]:
+    """Absent, complete rectangle plus interior ink, or ambiguous."""
+    if width <= 0:
+        raise ValueError("invalid popup ROI width")
+    height = len(pixels) // (4 * width)
+    if height == 0 or len(pixels) != 4 * width * height:
+        raise ValueError("invalid popup ROI dimensions")
+    fill = bytes(DOCK_POPUP_RGB) + b"\xff"
+    matches = [i // 4 for i in range(0, len(pixels), 4) if pixels.startswith(fill, i)]
+    count = len(matches)
+    if not count:
+        return False, {"fill": 0, "ink": 0}
+    left, right = min(i % width for i in matches), max(i % width for i in matches)
+    top, bottom = matches[0] // width, matches[-1] // width
+    ink_mask = bytearray()
+    for y in range(top + 3, bottom - 2):
+        for x in range(left + 3, right - 2):
+            offset = 4 * (y * width + x)
+            pixel = pixels[offset:offset + 3]
+            ink_mask.append(all(abs(a - b) <= 16 for a, b in zip(pixel, DOCK_INK_RGB)))
+    ink = sum(ink_mask)
+    continuous = count >= (right - left + 1) * (bottom - top + 1) * 0.5
+    complete = right - left >= 50 and bottom - top >= 12 and continuous and ink >= 16
+    return True if complete else None, {
+        "fill": count, "ink": ink, "bounds": [left, top, right, bottom],
+        "ink_mask_sha256": hashlib.sha256(ink_mask).hexdigest(),
+    }
+
+
+def dock_early_observation(image: dict, move: tuple[int, int], hovered: int) -> bool:
+    return (image["pointer_ns"][0] >= move[1]
+            and image["acquisition_ns"][1] <= move[0] + 150_000_000
+            and image["popup"][hovered] is False)
+
+
+def dock_build_evidence(run: Run) -> dict:
+    """Project only stable identity and the actual GPU adapter from private logs."""
+    with run.log.open("rb") as log:
+        lines = log.read(65_536).splitlines()
+    adapter = None
+    for line in lines:
+        try:
+            fields = json.loads(line).get("fields", {})
+        except (UnicodeError, ValueError):
+            continue
+        if fields.get("message") == "windowed: GPU adapter selected":
+            adapter = fields
+            break
+    if (not adapter or adapter.get("backend") != "Vulkan"
+            or not str(adapter.get("device_name", "")).lower().startswith("llvmpipe")):
+        raise Refused("dock witness did not establish actual Vulkan llvmpipe")
+    checkout, tree = subprocess.run(
+        ["git", "rev-parse", "HEAD", "HEAD^{tree}"], cwd=REPO, check=True, capture_output=True, text=True, timeout=3
+    ).stdout.splitlines()
+    with run.exe.open("rb") as binary:
+        digest = hashlib.file_digest(binary, "sha256").hexdigest()
+    return {"harness_commit": checkout, "harness_tree": tree, "expected_build": run.dock_build_sha,
+            "exe_sha256": digest, "config_sha256": hashlib.sha256(run.config.read_bytes()).hexdigest(),
+            "backend": "Vulkan", "software_device": "llvmpipe", "hud_pid": run.pid}
+
+
+def scenario_dock_countdown_tooltip(run: Run) -> None:
+    """Tier L opt-in: observe two independent dock countdown visits in native root pixels."""
+    from hud_x11_capture import Capture, CaptureError, NS, inside
+
+    surface = "dock:countdown"
+    captions = ("dock-tooltip-a", "dock-tooltip-b")
+    labels = ("WWWWWWWWWWWWWWWWWWWW-A", "MMMMMMMMMMMMMMMMMMe\u0301B")
+    outside = (10, 10)
+    samples, moves, publishes = [], {}, []
+    report = {"schema": 1, "samples": samples, "moves": moves, "publishes": publishes}
+    sessions, images = [], {}
+    capture = None
+    stage = "owned startup"
+    failure = None
+
+    def require(condition, message):
+        if not condition:
+            raise ScenarioFailed(message, {"stage": stage})
+
+    def project_status(status):
+        displays = status.get("displays") or []
+        require(status.get("pid") == run.pid and status.get("sha") == run.dock_build_sha,
+                "the executable build and owned status PID must match")
+        require(len(displays) == 1 and displays[0].get("primary") is True
+                and tuple(displays[0].get(k) for k in ("x", "y", "width", "height")) == (0, 0, *SCREEN),
+                "the status display must be the full private root at origin zero")
+        dock = status.get("dock") or {}
+        require(dock.get("capacity", 0) == 2 and dock.get("scale") == 1,
+                "the scratch dock must admit two full-size rows")
+        return status
+
+    def move(phase, point):
+        # The lower bound precedes the incumbent authenticated pre-motion guard.
+        before = time.monotonic_ns()
+        run.glide(*point)
+        interval = before, time.monotonic_ns()
+        moves[phase] = {"point": point, "interval_ns": interval}
+        return interval
+
+    def cards(status):
+        entries = []
+        for caption in captions:
+            matches = [entry for entry in status.get("widgets") or [] if entry.get("session") == caption]
+            require(len(matches) == 1 and matches[0].get("display") == 0
+                    and isinstance(matches[0].get("s"), str),
+                    "scope must resolve to exactly one drawn primary widget")
+            entries.append(matches[0])
+        return entries
+
+    def publish(index, label, clipped):
+        is_error, reply = sessions[index].call(
+            "hud_publish", {"surface": surface, "ttl_ms": 60_000,
+                            "params": {"label": label, "ends_in_ms": 60_000}}, timeout_s=3
+        )
+        cut = (reply.get("clipped") or {}).get("label")
+        expires = reply.get("expires_in_ms")
+        accepted = not is_error and reply.get("ok") is True
+        publishes.append({"card": "AB"[index], "label": label, "accepted": accepted,
+                          "label_characters_drawn": cut if type(cut) is int else None,
+                          "expires_in_ms": expires if type(expires) is int else None})
+        require(accepted and type(expires) is int and 0 < expires <= 60_000,
+                "scoped countdown publish must be accepted with a finite TTL")
+        require((type(cut) is int and 0 <= cut < len(label)) if clipped else "clipped" not in reply,
+                "publication must establish the expected label fit")
+
+    def sample(point, deadline):
+        require(run.hud.poll() is None, "owned HUD disappeared during root sampling")
+        meta, rgba = capture.sample(frame, point, deadline)
+        pixels = [dock_popup_pixels(dock_crop(rgba, frame, roi), roi[2]) for roi in rois]
+        entry = {**meta, "stage": stage, "popup": [state for state, _ in pixels],
+                 "roi_pixels": [counts for _, counts in pixels], "rgba_sha256": hashlib.sha256(rgba).hexdigest()}
+        samples.append(entry)
+        images["last"] = (entry, rgba)
+        return entry, rgba
+
+    def observe(point, expected, *, minimum=0, limit, label):
+        while time.monotonic_ns() < limit:
+            entry, rgba = sample(point, limit)
+            require(entry["popup"] != [True, True], "both dock popups appeared in the same root image")
+            start, end = entry["acquisition_ns"]
+            if minimum and any(value is True for value, want in zip(entry["popup"], expected) if want):
+                require(end >= minimum, "a complete popup appeared before 180 ms")
+                require(start >= minimum, "the first positive XGetImage bracket overlaps 180 ms")
+            if entry["popup"] == expected and start >= minimum:
+                images[label] = (entry, rgba)
+                return rgba
+            time.sleep(0.020)
+        raise ScenarioFailed("bounded native observation did not reach expected pixels", {"stage": stage})
+
+    def visit(point, hovered, label):
+        interval = move(label, point)
+        # Capture once after proven arrival. A late or partial early frame
+        # cannot be used as evidence of absence.
+        entry, rgba = sample(point, interval[0] + 150_000_000)
+        images[f"{label}-early"] = (entry, rgba)
+        require(not entry["popup"][hovered], "a complete popup appeared before 180 ms")
+        require(dock_early_observation(entry, interval, hovered),
+                "no unambiguous early negative by move-start plus 150 ms")
+        return observe(point, [hovered == 0, hovered == 1], minimum=interval[0] + 180_000_000,
+                       limit=interval[0] + 1_500_000_000, label=f"{label}-shown")
+
+    try:
+        run.expect("dock startup reports full capacity", lambda st: (st.get("dock") or {}).get("capacity") == 2)
+        project_status(run.status())
+        report.update(dock_build_evidence(run))
+        capture = Capture(run.xvfb, run.display, run.xauthority)
+        report["x11"] = {"display": run.display, **capture.ready}
+        stage = "publish and identify the two scoped cards"
+        move("outside", outside)
+        for index, caption in enumerate(captions):
+            sessions.append(SessionSmoke(run.smoke.url, run.psk, caption))
+            run.mark()
+            publish(index, labels[index], clipped=True)
+        initial = project_status(run.settle())
+        entries = cards(initial)
+        require((initial["dock"]["rows"], initial["dock"]["overflow"]) == (2, []),
+                "both independently published rows must be visible")
+        require(entries[0]["s"] != entries[1]["s"], "two scopes must have different actual card identities")
+        bounds = [dock_rect(entry) for entry in entries]
+        require(all(inside(rect) and rect[2:] == (160, 52) for rect in bounds),
+                "the root must contain both actual compact card bounds")
+        a, b = bounds
+        require(a[0] == b[0] and a[0] < SCREEN[0] // 4 and a[1] + a[3] <= b[1],
+                "the two ordered, nonoverlapping narrow cards must be at the left edge")
+        points = [(x + w // 2, y + h // 2) for x, y, w, h in bounds]
+        roi_x, division = max(x + w for x, y, w, h in bounds) + 1, (points[0][1] + points[1][1]) // 2
+        capture_right = min(SCREEN[0], roi_x + 512)
+        frame = a[0], a[1], capture_right - a[0], b[1] + b[3] - a[1]
+        rois = [(roi_x, a[1], capture_right - roi_x, division - a[1]),
+                (roi_x, division, capture_right - roi_x, b[1] + b[3] - division)]
+        title_areas = [(x + 8, y + 4, w - 16, 20) for x, y, w, _ in bounds]
+        report.update(cards=bounds, regions=rois, title_areas=title_areas)
+        stage = "settled native card pixels, no popup"
+        baseline = observe(outside, [False, False], limit=time.monotonic_ns() + NS, label="baseline")
+        require(all(dock_crop(baseline, frame, rect).count(bytes(DOCK_POPUP_RGB) + b"\xff") >= 100
+                    for rect in bounds), "both compact cards must have real root pixels")
+
+        stage = "first hover A"
+        shown_a = visit(points[0], 0, "a")
+        stage = "leave A"
+        move("leave", outside)
+        observe(outside, [False, False], limit=time.monotonic_ns() + NS, label="left")
+        stage = "fresh reentry A"
+        shown_a_again = visit(points[0], 0, "a-reentry")
+        require(dock_crop(shown_a, frame, rois[0]) == dock_crop(shown_a_again, frame, rois[0]),
+                "A reentry must restore the same full native popup pixels")
+        stage = "direct transfer A to B"
+        shown_b = visit(points[1], 1, "b-transfer")
+        a_ink = images["a-shown"][0]["roi_pixels"][0]["ink_mask_sha256"]
+        b_ink = images["b-transfer-shown"][0]["roi_pixels"][1]["ink_mask_sha256"]
+        require(a_ink != b_ink, "the two scoped labels must produce distinct native popup ink")
+
+        stage = "fit B while stationary and keep A"
+        publish(1, "Fit", clipped=False)
+        report["fit_reply_ns"] = time.monotonic_ns()
+        observe(points[1], [False, False], limit=report["fit_reply_ns"] + NS, label="b-fit-dismissed")
+        time.sleep(0.220)
+        check, fitted = sample(points[1], time.monotonic_ns() + NS)
+        images["b-fit-settled"] = (check, fitted)
+        require(check["popup"] == [False, False], "fitting label must stay hidden while pointer is stationary")
+        prior_titles = [dock_crop(shown_b, frame, roi) for roi in title_areas]
+        final_titles = [dock_crop(fitted, frame, roi) for roi in title_areas]
+        report["title_sha256"] = [[hashlib.sha256(pixels).hexdigest() for pixels in pair]
+                                  for pair in zip(prior_titles, final_titles)]
+        require(prior_titles[0] == final_titles[0] and prior_titles[1] != final_titles[1],
+                "A's title must stay unchanged while B's fitting title visibly updates")
+        final = project_status(run.status())
+        require([(entry["s"], dock_rect(entry)) for entry in cards(final)]
+                == [(entry["s"], dock_rect(entry)) for entry in entries],
+                "both scoped identities and card bounds must survive the fitting update")
+        with run.exe.open("rb") as binary:
+            require(hashlib.file_digest(binary, "sha256").hexdigest() == report["exe_sha256"],
+                    "the executable digest changed during the run")
+        window_activations = [status.get("window_activations") for status in (initial, final)]
+        require(window_activations[0] == window_activations[1], "passive movement raised the HUD activation count")
+        report["window_activations"] = window_activations
+        require(run.inj.calls == 5, "expected exactly five guarded XTEST moves and no other input")
+        report["xtest_moves"] = run.inj.calls
+        report["final_build"] = final["sha"]
+    except ScenarioFailed as err:
+        # The generic expectation/settle last-status values are never archived here.
+        failure = ScenarioFailed(err.step, {"stage": stage})
+    except Exception as err:  # A third-party response or environment string is not evidence.
+        detail = str(err) if isinstance(err, CaptureError) else type(err).__name__
+        failure = ScenarioFailed(f"{stage}: {detail}", {"stage": stage})
+    finally:
+        cleanup = {"sessions": []}
+        if capture:
+            try:
+                cleanup["capture"] = capture.close()
+            except Exception as err:
+                cleanup["capture"] = {"error": type(err).__name__}
+        for session in reversed(sessions):
+            try:
+                cleanup["sessions"].append(session.end())
+            except Exception as err:
+                cleanup["sessions"].append(type(err).__name__)
+        report["cleanup"] = cleanup
+        capture_clean = cleanup.get("capture") == {"returncode": 0, "forced": False, "reaped": True}
+        if failure is None and (cleanup["sessions"] != [202, 202] or not capture_clean):
+            failure = ScenarioFailed("capture or scoped cleanup was incomplete", {"stage": "cleanup"})
+        report["verdict"] = "FAIL" if failure else "PASS"
+        report["failure"] = failure.step if failure else None
+        for name, (entry, rgba) in images.items():
+            png = encode_png_rgba(*entry["rect"][2:], rgba)
+            path = run.out / f"{DOCK_TOOLTIP_SCENARIO}.{name}.png"
+            path.write_bytes(png)
+            entry.setdefault("images", []).append({"name": path.name, "bytes": len(png),
+                                                    "sha256": hashlib.sha256(png).hexdigest()})
+        (run.out / f"{DOCK_TOOLTIP_SCENARIO}.json").write_text(json.dumps(report, indent=1), encoding="utf-8")
+    if failure:
+        raise failure
 
 
 def entry_held(surfaces: dict, surface: str) -> bool:
@@ -3161,15 +3508,21 @@ def git_sha() -> str:
         return "unknown"
 
 
+EXPLICIT_SCENARIOS = {DOCK_TOOLTIP_SCENARIO: scenario_dock_countdown_tooltip}
+
+
 def run_scenarios(run: Run, names: list[str]) -> list[dict]:
     results = []
     for name in names:
         run.step(f"begin {name}")
         started = time.monotonic()
-        run.snapshot(f"{name}.before")
-        result = {"scenario": name, "doc": (SCENARIOS[name].__doc__ or "").strip()}
+        explicit = name in EXPLICIT_SCENARIOS
+        scenario = EXPLICIT_SCENARIOS[name] if explicit else SCENARIOS[name]
+        if not explicit:
+            run.snapshot(f"{name}.before")
+        result = {"scenario": name, "doc": (scenario.__doc__ or "").strip()}
         try:
-            SCENARIOS[name](run)
+            scenario(run)
             result["outcome"] = "PASS"
         except ScenarioFailed as failure:
             result.update(outcome="FAIL", step=failure.step, last=failure.last)
@@ -3182,29 +3535,31 @@ def run_scenarios(run: Run, names: list[str]) -> list[dict]:
             err.results = results
             raise
         except subprocess.CalledProcessError as err:
-            stderr = err.stderr or ""
+            stderr = "" if explicit else err.stderr or ""
             if isinstance(stderr, bytes):
                 stderr = stderr.decode("utf-8", errors="replace")
             program = err.cmd[0] if isinstance(err.cmd, (list, tuple)) else "command"
             result.update(outcome="FAIL", step=f"CalledProcessError: {program} exited {err.returncode}",
                           last={"exit_code": err.returncode, "stderr": stderr[-4096:]})
         except Exception as err:  # noqa: BLE001 - every scenario reports, the run continues
-            result.update(outcome="FAIL", step=f"{type(err).__name__}: {err}", last=None)
+            step = type(err).__name__ if explicit else f"{type(err).__name__}: {err}"
+            result.update(outcome="FAIL", step=step, last=None)
         result["seconds"] = round(time.monotonic() - started, 2)
-        if result["outcome"] == "FAIL":
+        if not explicit and result["outcome"] == "FAIL":
             try:
                 run.screen_grab(f"{name}.after")
             except Exception as err:  # noqa: BLE001 - retain the original scenario failure
                 result["diagnostic_error"] = f"{type(err).__name__}: {err}"
-        try:
-            run.snapshot(f"{name}.after")
-            stray = run.clear_publications()
-            if stray and result["outcome"] == "PASS":
-                result.update(outcome="FAIL", step="input nobody took (duplicate or stray submit)",
-                              last={"items": [i.get("text") for i in stray]})
-        except (AssertionError, RequestFailure) as err:
-            result.setdefault("cleanup", str(err))
-        result["artifacts"] = str(run.out / name) + ".*"
+        if not explicit:
+            try:
+                run.snapshot(f"{name}.after")
+                stray = run.clear_publications()
+                if stray and result["outcome"] == "PASS":
+                    result.update(outcome="FAIL", step="input nobody took (duplicate or stray submit)",
+                                  last={"items": [i.get("text") for i in stray]})
+            except (AssertionError, RequestFailure) as err:
+                result.setdefault("cleanup", str(err))
+        result["artifacts"] = f"{name}.*" if explicit else str(run.out / name) + ".*"
         results.append(result)
         line = f"{result['outcome']}  {name} ({result['seconds']}s)"
         if result["outcome"] == "FAIL":
@@ -3227,13 +3582,28 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--required", type=required_names, metavar="NAMES",
                         help="comma-separated scenarios whose failure fails the run; the rest become "
                              "informational (listed, exit 0). Without it every scenario is required.")
-    parser.add_argument("scenarios", nargs="*", help="scenario names (default: all)")
+    parser.add_argument("--expected-dock-build-sha", metavar="SHA",
+                        help="required full executable source commit for the opt-in Linux dock witness")
+    parser.add_argument("scenarios", nargs="*", help="scenario names (default: standard scenarios)")
     args = parser.parse_args(argv)
     if args.list:
-        for name, fn in SCENARIOS.items():
+        available = SCENARIOS | EXPLICIT_SCENARIOS if sys.platform == "linux" else SCENARIOS
+        for name, fn in available.items():
             print(f"{name:20} {(fn.__doc__ or '').strip().splitlines()[0]}")
         return 0
-    unknown = [n for n in args.scenarios + (args.required or []) if n not in SCENARIOS]
+    named = args.scenarios + (args.required or [])
+    dock_witness = DOCK_TOOLTIP_SCENARIO in named
+    if dock_witness and (
+        sys.platform != "linux" or args.injector != "xtest" or args.window_mode != "fullscreen"
+        or args.scenarios != [DOCK_TOOLTIP_SCENARIO] or args.mouse_receipt_diagnostics
+        or args.required not in (None, [DOCK_TOOLTIP_SCENARIO])
+        or not re.fullmatch(r"[0-9a-f]{40}", args.expected_dock_build_sha or "")
+    ):
+        parser.error("dock-countdown-tooltip must run alone and required on Linux XTEST fullscreen "
+                     "with --expected-dock-build-sha")
+    if args.expected_dock_build_sha and not dock_witness:
+        parser.error("--expected-dock-build-sha is only for dock-countdown-tooltip")
+    unknown = [n for n in named if n not in SCENARIOS and n not in EXPLICIT_SCENARIOS]
     if unknown:
         parser.error(f"unknown scenario(s): {', '.join(unknown)}; see --list")
     if (args.injector == "sendinput") != WINDOWS:
@@ -3264,9 +3634,9 @@ def main(argv: list[str] | None = None) -> int:
     sha = git_sha()
     # The pid keeps parallel runs started in the same second apart.
     out = args.out or REPO / "test_results/gestures" / sha / f"{time.strftime('%Y%m%dT%H%M%S')}-{os.getpid()}"
-    out.mkdir(parents=True, exist_ok=True)
+    out.mkdir(parents=True, exist_ok=not dock_witness)
     run = Run(exe=args.exe.resolve(), out=out, injector=args.injector, window_mode=args.window_mode,
-              go_to_probe="go-to-session" in names)
+              go_to_probe="go-to-session" in names, dock_build_sha=args.expected_dock_build_sha)
     if args.mouse_receipt_diagnostics:
         run.mouse_receipts = MouseReceiptCapture(out)
     started = time.monotonic()
@@ -3284,15 +3654,16 @@ def main(argv: list[str] | None = None) -> int:
             raise Refused("Hide from screen capture is on; gesture scenarios read desktop pixels")
         run.step(f"owned HUD pid {run.pid} on display {run.display or 'primary'} via {args.injector}")
         results = run_scenarios(run, names)
-        unacked = run.smoke.ok("hud_input", {"max_items": 0}).get("remaining", 0)
+        unacked = 0 if dock_witness else run.smoke.ok("hud_input", {"max_items": 0}).get("remaining", 0)
         if unacked:
             failure = f"{unacked} un-acked hud_input item(s) at exit"
     except Refused as err:
-        failure = f"refused: {err}"
+        failure = "private dock guard refused" if dock_witness else f"refused: {err}"
         partial_button_batch = isinstance(err, PartialButtonBatch)
         results = getattr(err, "results", results)
     except Exception as err:  # noqa: BLE001
-        failure = f"harness: {type(err).__name__}: {err}"
+        failure = (f"harness: {type(err).__name__}" if dock_witness
+                   else f"harness: {type(err).__name__}: {err}")
     finally:
         if args.mouse_receipt_diagnostics:
             run.mouse_receipts.end_interval()
@@ -3301,7 +3672,8 @@ def main(argv: list[str] | None = None) -> int:
             failure = (failure + "; " if failure else "") + "left running: " + ", ".join(survivors)
         timeline = {
             "sha": sha, "profile": run.exe.parent.name,
-            "exe": str(run.exe), "injector": args.injector, "window_mode": args.window_mode, "screen": SCREEN,
+            "exe": run.exe.name if dock_witness else str(run.exe),
+            "injector": args.injector, "window_mode": args.window_mode, "screen": SCREEN,
             "display": run.display, "mcp_port": run.port,
             "geometry": (status.get("displays") if "status" in locals() else None),
             "theme_scale": ({k: status.get(k) for k in ("theme", "ui_scale") if k in status} if "status" in locals() else None),
@@ -3312,8 +3684,19 @@ def main(argv: list[str] | None = None) -> int:
         }
         if args.mouse_receipt_diagnostics:
             timeline["mouse_receipts"] = run.mouse_receipts.finish(run.owned_pids, survivors)
+        if dock_witness:
+            cleanup = {"hud_reaped": run.hud is None or run.hud.poll() is not None,
+                       "xvfb_reaped": run.xvfb is None or run.xvfb.poll() is not None,
+                       "scratch_removed": all(p is None or not p.exists() for p in (run.home, run.config_dir))}
+            timeline["dock_cleanup"] = cleanup
+            if not all(cleanup.values()) or survivors:
+                failure = failure or "private dock process or scratch cleanup failed"
+                timeline["failure"] = failure
+                for result in results:
+                    if result["outcome"] == "PASS":
+                        result.update(outcome="FAIL", step=failure, last=None)
         (out / "timeline.json").write_text(json.dumps(timeline, indent=1))
-        if run.log and run.log.exists():
+        if not dock_witness and run.log and run.log.exists():
             tail = run.log.read_text(errors="replace").splitlines()[-200:]
             (out / "hud.log.tail").write_text("\n".join(tail))
     for result in results:
