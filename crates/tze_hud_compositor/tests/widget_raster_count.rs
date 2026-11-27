@@ -466,6 +466,10 @@ async fn builtin_compact_countdown_keeps_standalone_pixels_and_timer_cadence() {
         [1, 1, 1]
     );
     assert!(
+        !gpu.compositor.widget_deadline_needs_render(&scene),
+        "identical projected timer values have no frame debt"
+    );
+    assert!(
         gpu.draw(&mut scene).widget_rasterized.is_empty(),
         "identical steady frame"
     );
@@ -513,6 +517,21 @@ async fn builtin_compact_countdown_keeps_standalone_pixels_and_timer_cadence() {
             .texture_entry(&b)
             .is_some()
     );
+    #[cfg(feature = "dev-mode")]
+    assert_widget_work(&mut gpu.compositor, 0, 0);
+    scene.set_owner_hidden(SurfaceClasses {
+        widgets: true,
+        ..SurfaceClasses::NONE
+    });
+    clock.advance(5_000);
+    assert!(!gpu.compositor.widget_deadline_needs_render(&scene));
+    assert_eq!(gpu.compositor.next_widget_deadline_wall_us(&scene), None);
+    assert_eq!(scene.next_widget_deadline_wall_us(), None);
+    assert!(gpu.draw(&mut scene).widget_rasterized.is_empty());
+    assert_eq!(raster_count(&gpu.compositor, "standalone"), 2);
+    assert_eq!(raster_count(&gpu.compositor, &b), 1);
+    #[cfg(feature = "dev-mode")]
+    assert_widget_work(&mut gpu.compositor, 0, 0);
 }
 
 #[tokio::test]

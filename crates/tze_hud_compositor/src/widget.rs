@@ -2779,7 +2779,11 @@ pub fn rasterize_widget_render_plan(
         let mut raster = None;
         composite_layer(
             &mut raster,
-            rasterize_static_svg_layer(&prepared.svg, pixel_width, pixel_height)?,
+            RasterizedSvgLayer::Shared(rasterize_cached_text_svg(
+                &prepared.svg,
+                pixel_width,
+                pixel_height,
+            )?),
         );
         return raster;
     }

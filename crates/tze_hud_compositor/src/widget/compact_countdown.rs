@@ -45,7 +45,9 @@ fn ink_bounds(svg: &str, id: &str) -> Option<Rect> {
 }
 
 fn fits_label(svg: &str, label: &str, inset: f32, right: f32, line: Line) -> bool {
-    if label.is_empty() {
+    // XML/CSS collapses these characters to spaces, then drops an empty text
+    // run. No glyph node is expected; absence must not invent an ellipsis.
+    if label.chars().all(|c| matches!(c, ' ' | '\t' | '\r' | '\n')) {
         return true;
     }
     let probe = apply_svg_attribute(svg, "label", "text-content", &escape_text(label));
@@ -88,7 +90,12 @@ pub(super) fn prepare(
         top: top + body_height,
         height: readout_height,
     };
-    let mut displayed = bound_widget_svg(svg, bindings, constraints, params);
+    // Free-form label text may itself contain an ordinary id='value' or
+    // id='error' substring. Complete all raw authored-ID rewrites before
+    // inserting that text; shaping probes use parsed XML IDs afterwards.
+    let mut non_label_params = params.clone();
+    non_label_params.remove("label");
+    let mut displayed = bound_widget_svg(svg, bindings, constraints, &non_label_params);
     for (id, line) in [("label", body), ("value", readout)] {
         let y = baseline(&displayed, id, line)?;
         displayed = apply_svg_attribute(&displayed, id, "x", &inset.to_string());
@@ -219,13 +226,24 @@ mod tests {
 
     fn isolate(svg: &str, visible: Option<&str>) -> String {
         let mut isolated = svg.to_owned();
-        for id in ["card", "label", "value", "warning", "error"] {
-            isolated = apply_svg_attribute(
-                &isolated,
-                id,
-                "opacity",
-                if visible == Some(id) { "1" } else { "0" },
-            );
+        for (tag, id) in [
+            ("rect", "card"),
+            ("text", "label"),
+            ("text", "value"),
+            ("path", "warning"),
+            ("path", "error"),
+        ] {
+            if visible == Some(id) {
+                continue;
+            }
+            // Match only an actual authored start tag, never ID-like prose in
+            // label text. Hide the whole nonselected element, including stroke;
+            // the selected element's fill-opacity/opacity stays byte-exact.
+            let start = isolated
+                .find(&format!("<{tag} id=\"{id}\""))
+                .expect("authored element");
+            let end = start + super::super::find_tag_end(&isolated[start..]).unwrap();
+            isolated.insert_str(end, " display=\"none\"");
         }
         isolated
     }
@@ -590,6 +608,104 @@ mod tests {
                 eprintln!("[DOCK-COUNTDOWN-MAXIMUM] {audit}");
                 capture_json(&context, audit);
             }
+        }
+    }
+    #[test]
+    fn compact_reference_isolation_preserves_authored_alpha_and_excludes_border() {
+        let bundle = bundle("tonal-glass", &[]);
+        let prepared = prepare_bundle(&bundle, &params("Cutover", "error", 24));
+        let actual = rasterize_single_svg_layer(&prepared.svg, 160, 52).unwrap();
+        let clean = rasterize_single_svg_layer(&backdrop(&prepared.svg), 160, 52).unwrap();
+        // The glyph-free interior retains the authored translucent surface,
+        // while its real outline remains present in the clean reference.
+        let interior = (24 * 160 + 80) as usize;
+        assert_eq!(clean.pixels()[interior], actual.pixels()[interior]);
+        assert_eq!(
+            clean.pixels()[interior].alpha(),
+            (0.92_f32 * 255.0).round() as u8
+        );
+        assert!(clean.pixels()[interior].alpha() < 255);
+        for id in ["label", "value", "error"] {
+            let mask =
+                rasterize_single_svg_layer(&isolate(&prepared.svg, Some(id)), 160, 52).unwrap();
+            assert!(text_mask_alpha_bounds(mask.as_ref()).is_some());
+            for (x, y) in [(80, 0), (0, 24), (159, 24), (80, 51), (80, 24)] {
+                assert_eq!(
+                    mask.pixels()[(y * 160 + x) as usize].alpha(),
+                    0,
+                    "{id}: background/border leaked at{x},{y}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn compact_identifier_like_labels_cannot_rewrite_readout_or_marks() {
+        let bundle = bundle("tonal-glass", &[]);
+        for severity in ["warning", "error"] {
+            let plain = prepare_bundle(&bundle, &params("Cutover", severity, 24));
+            for label in ["id='value'", "id='warning'", "id='error'"] {
+                assert!(label.len() <= 24);
+                let values = params(label, severity, 24);
+                let original = values.clone();
+                let prepared = prepare_bundle(&bundle, &values);
+                assert_eq!(values, original);
+                assert_eq!(text(&prepared.svg, "value"), "24 h 00");
+                assert_eq!(text(&prepared.svg, "label"), label);
+                assert!(!prepared.clipped);
+                for id in ["value", severity] {
+                    let expected =
+                        rasterize_single_svg_layer(&isolate(&plain.svg, Some(id)), 160, 52)
+                            .unwrap();
+                    let actual =
+                        rasterize_single_svg_layer(&isolate(&prepared.svg, Some(id)), 160, 52)
+                            .unwrap();
+                    assert_eq!(
+                        actual.data(),
+                        expected.data(),
+                        "{label}: {id} must retain its actual geometry/pixels"
+                    );
+                    assert!(text_mask_alpha_bounds(actual.as_ref()).is_some());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn compact_css_collapsed_blank_labels_have_no_false_clipped_result() {
+        let bundle = bundle("tonal-glass", &[]);
+        let empty = prepare_bundle(&bundle, &params("", "error", 24));
+        let reference = rasterize_single_svg_layer(&empty.svg, 160, 52).unwrap();
+        let dock = bundle.dock.as_ref().unwrap();
+        let layer = &dock.layers[0];
+        let source = std::str::from_utf8(&bundle.svg_contents[&layer.svg_file]).unwrap();
+        for label in ["", " ", " \t\r\n "] {
+            let values = params(label, "error", 24);
+            let original = values.clone();
+            let prepared = prepare_bundle(&bundle, &values);
+            assert_eq!(
+                values, original,
+                "full semantic whitespace value remains unchanged"
+            );
+            assert!(!prepared.clipped);
+            assert_eq!(prepared.prefix_chars, label.chars().count());
+            assert!(
+                crate::widget::compact_countdown_clipped(
+                    &[(source, &layer.bindings)],
+                    &HashMap::new(),
+                    &values
+                )
+                .is_empty()
+            );
+            let rendered = rasterize_single_svg_layer(&prepared.svg, 160, 52).unwrap();
+            assert_eq!(
+                rendered.data(),
+                reference.data(),
+                "whitespace paints no ellipsis or glyph"
+            );
+            let mask = rasterize_single_svg_layer(&isolate(&prepared.svg, Some("label")), 160, 52)
+                .unwrap();
+            assert!(text_mask_alpha_bounds(mask.as_ref()).is_none());
         }
     }
 }
