@@ -545,6 +545,350 @@ async fn builtin_compact_countdown_keeps_standalone_pixels_and_timer_cadence() {
 }
 
 #[tokio::test]
+async fn dock_draws_only_on_its_accepted_display_and_parks_overflow() {
+    use std::num::NonZeroU64;
+    use tze_hud_compositor::renderer::frame::WindowedFrameBuild;
+    use tze_hud_compositor::{DisplayLayout, DisplayRect, FrameTarget};
+    use tze_hud_scene::Rect;
+    use tze_hud_scene::dock::{DockLayout, DockMetrics, DockProjection};
+
+    let Some(mut gpu) = Gpu::with_widgets(512, 256).await else {
+        return;
+    };
+    let clock = Arc::new(TestClock::new(1_000));
+    let mut scene = SceneGraph::new_with_clock(512.0, 256.0, clock.clone());
+    let tab = scene.create_tab("Main", 0).unwrap();
+    let gauge = register_bundle(
+        &mut gpu.compositor,
+        &mut scene,
+        bundle!("gauge", ["background.svg", "fill.svg"]),
+    );
+    let card_svg = |color: &str| {
+        format!(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="160" height="52" viewBox="0 0 160 52">
+                <rect width="160" height="52" fill="{color}"/>
+                <text id="value" x="22" y="34" font-family="sans-serif" font-size="24">0:00</text>
+                <g id="tooltip" opacity="0"><rect x="140" y="10" width="10" height="10"/></g>
+            </svg>"#,
+        )
+        .into_bytes()
+    };
+    let BundleScanResult::Ok(mut bundle) = bundle!("countdown", ["card.svg", "dock.svg"]) else {
+        panic!("countdown fixture");
+    };
+    // Exercise same-size default-layer updates while hidden, independent of
+    // alternate descriptor changes. The adjacent fixture covers compact art.
+    bundle.svg_contents = HashMap::from([("card.svg".into(), card_svg("red"))]);
+    let countdown = register_bundle(
+        &mut gpu.compositor,
+        &mut scene,
+        BundleScanResult::Ok(bundle),
+    );
+    register_instance(
+        &mut scene,
+        tab,
+        &gauge,
+        "standalone",
+        Some(relative(0.125, 0.125, 0.25, 0.25)),
+        true,
+    );
+    publish(&mut scene, "standalone", "level", 0.25);
+    let primary = DisplayRect {
+        name: "PRIMARY".into(),
+        rect: Rect::new(0.0, 0.0, 512.0, 256.0),
+        primary: true,
+    };
+    let secondary = DisplayRect {
+        name: "DOCK DISPLAY".into(),
+        rect: Rect::new(-960.0, 83.0, 960.0, 600.0),
+        primary: false,
+    };
+    let apply_displays = |compositor: &mut Compositor, display: DisplayRect| {
+        compositor.set_display_layout(DisplayLayout::new(
+            vec![
+                primary.clone(),
+                DisplayRect {
+                    name: "MIRROR".into(),
+                    ..display.clone()
+                },
+                display,
+            ],
+            &Default::default(),
+        ));
+    };
+    apply_displays(&mut gpu.compositor, secondary.clone());
+    let primary_target = FrameTarget::primary(512, 256);
+    let secondary_target = FrameTarget {
+        x: secondary.rect.x,
+        y: secondary.rect.y,
+        width: 960,
+        height: 600,
+        primary: false,
+    };
+    let accepts = [gauge.clone(), countdown.clone()];
+    let project = |scene: &mut SceneGraph, display: &DisplayRect, rows| {
+        let aspect_ratios = vec![(gauge.clone(), 2.0), (countdown.clone(), 160.0 / 52.0)];
+        assert!(scene.set_dock_projection(
+            &accepts,
+            Some(DockProjection {
+                target: Some(display.name.clone()),
+                layout: DockLayout::new(
+                    display.rect,
+                    rows,
+                    DockMetrics {
+                        row_height: 52.0,
+                        caption_width: 32.0,
+                        gap: 8.0
+                    },
+                    aspect_ratios.iter().map(|(_, ratio)| *ratio),
+                ),
+                aspect_ratios,
+            }),
+            NonZeroU64::new(10_000).unwrap(),
+        ));
+    };
+    let build = |c: &mut Compositor, scene: &mut SceneGraph| {
+        c.prime_markdown_cache(scene);
+        c.build_windowed_frame(scene, 512, 256)
+    };
+    let capture = |c: &mut Compositor,
+                   frame: &WindowedFrameBuild,
+                   target: &FrameTarget,
+                   display: Option<&str>| {
+        c.capture_windowed_display(frame, target, display, wgpu::TextureFormat::Rgba8UnormSrgb)
+            .unwrap()
+            .rgba
+    };
+    let signature = |c: &Compositor, frame: &WindowedFrameBuild| {
+        c.display_frame_signature(frame, &secondary_target, Some(&secondary.name))
+    };
+    let first = build(&mut gpu.compositor, &mut scene);
+    let primary_before = capture(&mut gpu.compositor, &first, &primary_target, None);
+
+    project(&mut scene, &secondary, 2);
+    scene
+        .publish_to_dock(&gauge, HashMap::new(), "first", None, 0, 0)
+        .unwrap();
+    scene
+        .publish_to_dock(
+            &countdown,
+            HashMap::from([(
+                "ends_in_ms".into(),
+                Value::Deadline(WidgetDeadline::relative(120_000)),
+            )]),
+            "overflow",
+            None,
+            2_000,
+            0,
+        )
+        .unwrap();
+    let bottom = scene
+        .dock_instance("overflow", &countdown)
+        .unwrap()
+        .instance_name
+        .clone();
+    let bounds = |scene: &SceneGraph| {
+        scene
+            .overlay
+            .widget_geometry
+            .iter()
+            .find(|item| item.instance_name == bottom)
+            .map(|item| item.bounds)
+    };
+    let original_expiry = scene.widget_registry.active_publishes[&bottom][0].expires_at_wall_us;
+    let initial = build(&mut gpu.compositor, &mut scene);
+    assert_eq!(bounds(&scene), Some(Rect::new(-872.0, 215.0, 160.0, 52.0)));
+    let entry = gpu
+        .compositor
+        .widget_renderer()
+        .unwrap()
+        .texture_entry(&bottom)
+        .unwrap();
+    assert_eq!((entry.width, entry.height), (160, 52));
+    assert_eq!(
+        capture(&mut gpu.compositor, &initial, &primary_target, None),
+        primary_before
+    );
+    let mirrored = capture(
+        &mut gpu.compositor,
+        &initial,
+        &secondary_target,
+        Some("MIRROR"),
+    );
+    assert_eq!(
+        mirrored,
+        capture(&mut gpu.compositor, &initial, &secondary_target, None)
+    );
+    let selected = |c: &mut Compositor, frame: &WindowedFrameBuild| {
+        capture(c, frame, &secondary_target, Some(&secondary.name))
+    };
+    let initial_pixels = selected(&mut gpu.compositor, &initial);
+    assert_color(
+        pixel_at(&initial_pixels, 960, 90, 134),
+        [255, 0, 0],
+        2,
+        "dock card",
+    );
+    assert_ne!(initial_pixels, mirrored);
+    let smaller = FrameTarget {
+        width: 950,
+        ..secondary_target
+    };
+    assert_eq!(
+        gpu.compositor
+            .display_frame_signature(&initial, &smaller, Some(&secondary.name)),
+        gpu.compositor.frame_signature(&initial, &smaller),
+    );
+    let initial_signature = signature(&gpu.compositor, &initial);
+    let surface = tze_hud_compositor::HeadlessSurface::new(&gpu.compositor.device, 960, 600);
+    let present = gpu.compositor.present_windowed_display(
+        &initial,
+        &secondary_target,
+        Some(&secondary.name),
+        &surface,
+    );
+    assert!(present.gpu_submitted && present.signature_current);
+
+    publish(&mut scene, "standalone", "level", 0.75);
+    let ordinary_change = build(&mut gpu.compositor, &mut scene);
+    assert_ne!(
+        capture(&mut gpu.compositor, &ordinary_change, &primary_target, None),
+        primary_before
+    );
+    assert_eq!(
+        signature(&gpu.compositor, &ordinary_change),
+        initial_signature
+    );
+    let mut equivalent_svg = card_svg("red");
+    equivalent_svg.extend_from_slice(b"<!-- equivalent raster -->");
+    gpu.compositor.widget_renderer_mut().unwrap().register_svg(
+        &countdown,
+        "card.svg",
+        equivalent_svg,
+    );
+    let same_pixels = build(&mut gpu.compositor, &mut scene);
+    assert_eq!(raster_count(&gpu.compositor, &bottom), 2);
+    assert_eq!(signature(&gpu.compositor, &same_pixels), initial_signature);
+    assert_eq!(selected(&mut gpu.compositor, &same_pixels), initial_pixels);
+
+    clock.advance(1_000);
+    assert!(gpu.compositor.widget_deadline_needs_render(&scene));
+    let due = build(&mut gpu.compositor, &mut scene);
+    let due_pixels = selected(&mut gpu.compositor, &due);
+    assert_eq!(
+        rendered_timer_value(&gpu.compositor, &bottom, "ends_in_ms"),
+        string("1:59")
+    );
+    assert_ne!(signature(&gpu.compositor, &due), initial_signature);
+    assert_ne!(
+        widget_region(&due_pixels, 960, (88, 132), (20, 8, 112, 35)),
+        widget_region(&initial_pixels, 960, (88, 132), (20, 8, 112, 35)),
+    );
+    let due_signature = signature(&gpu.compositor, &due);
+    let steady = build(&mut gpu.compositor, &mut scene);
+    assert_eq!(raster_count(&gpu.compositor, &bottom), 3);
+    assert_eq!(signature(&gpu.compositor, &steady), due_signature);
+
+    scene
+        .set_widget_param_local(&bottom, "tooltip_visible", Value::F32(1.0))
+        .unwrap();
+    build(&mut gpu.compositor, &mut scene);
+    assert!(
+        gpu.compositor
+            .widget_renderer()
+            .unwrap()
+            .has_active_transition()
+    );
+    let before_overflow = raster_count(&gpu.compositor, &bottom);
+
+    project(&mut scene, &secondary, 1);
+    let overflow = build(&mut gpu.compositor, &mut scene);
+    let renderer = gpu.compositor.widget_renderer().unwrap();
+    assert!(renderer.texture_entry(&bottom).is_none());
+    assert!(!renderer.has_active_transition());
+    assert_eq!(bounds(&scene), None);
+    assert_eq!(scene.next_widget_deadline_wall_us(), None);
+    assert!(!gpu.compositor.widget_deadline_needs_render(&scene));
+    assert_eq!(
+        scene.widget_registry.active_publishes[&bottom][0].expires_at_wall_us,
+        original_expiry
+    );
+    let parked_pixels = selected(&mut gpu.compositor, &overflow);
+    assert_eq!(
+        pixel_at(&parked_pixels, 960, 90, 134),
+        pixel_at(&mirrored, 960, 90, 134)
+    );
+
+    clock.advance(1_000);
+    gpu.compositor.widget_renderer_mut().unwrap().register_svg(
+        &countdown,
+        "card.svg",
+        card_svg("blue"),
+    );
+    let restyled_hidden = build(&mut gpu.compositor, &mut scene);
+    assert_eq!(raster_count(&gpu.compositor, &bottom), before_overflow);
+    assert_eq!(
+        selected(&mut gpu.compositor, &restyled_hidden),
+        parked_pixels
+    );
+
+    project(&mut scene, &secondary, 2);
+    let returned = build(&mut gpu.compositor, &mut scene);
+    assert_eq!(raster_count(&gpu.compositor, &bottom), before_overflow + 1);
+    assert_eq!(bounds(&scene), Some(Rect::new(-872.0, 215.0, 160.0, 52.0)));
+    assert_color(
+        pixel_at(&selected(&mut gpu.compositor, &returned), 960, 90, 134),
+        [0, 0, 255],
+        2,
+        "restored card reflects current art",
+    );
+    assert_eq!(
+        rendered_timer_value(&gpu.compositor, &bottom, "ends_in_ms"),
+        string("1:58")
+    );
+
+    let mut moved = secondary.clone();
+    moved.rect.y += 40.0;
+    apply_displays(&mut gpu.compositor, moved.clone());
+    let stale = build(&mut gpu.compositor, &mut scene);
+    assert_eq!(bounds(&scene), None);
+    assert!(!gpu.compositor.widget_deadline_needs_render(&scene));
+    assert_eq!(gpu.compositor.next_widget_deadline_wall_us(&scene), None);
+    assert_eq!(raster_count(&gpu.compositor, &bottom), before_overflow + 1);
+    let moved_target = FrameTarget {
+        y: moved.rect.y,
+        ..secondary_target
+    };
+    assert_eq!(
+        gpu.compositor
+            .display_frame_signature(&stale, &moved_target, Some(&moved.name)),
+        gpu.compositor.frame_signature(&stale, &moved_target),
+    );
+
+    project(&mut scene, &primary, 2);
+    let direct = gpu.render(&mut scene);
+    #[cfg(feature = "dev-mode")]
+    assert_widget_work(&mut gpu.compositor, 2, 2);
+    let bounds = bounds(&scene).unwrap();
+    assert!(bounds.x >= 0.0 && bounds.y > 0.0);
+    direct.expect(
+        bounds.x as u32 + 3,
+        bounds.y as u32 + 3,
+        [0, 0, 255, 255],
+        2,
+        "direct primary dock",
+    );
+    assert!(gpu.draw(&mut scene).widget_rasterized.is_empty());
+    #[cfg(feature = "dev-mode")]
+    assert_widget_work(&mut gpu.compositor, 0, 0);
+
+    clock.advance(8_000);
+    assert_eq!(scene.drain_expired_widget_publications(), 2);
+    assert!(scene.dock_instance("overflow", &countdown).is_none());
+    assert!(gpu.draw(&mut scene).widget_rasterized.is_empty());
+}
+
+#[tokio::test]
 async fn widget_param_update_rasterizes_only_that_instance() {
     let Some(mut gpu) = Gpu::with_widgets(512, 256).await else {
         return;

@@ -1,11 +1,89 @@
 //! Widget renderer methods for the compositor.
 
-use tze_hud_scene::DegradationLevel;
 use tze_hud_scene::WidgetParameterValue;
+use tze_hud_scene::dock::DockWidgetSlot;
 use tze_hud_scene::graph::SceneGraph;
 use tze_hud_scene::widget_deadline::widget_params_at;
+use tze_hud_scene::{DegradationLevel, Rect};
 
-use crate::widget::{WidgetRenderer, same_dock_presentation};
+use crate::display::{DisplayRect, FrameTarget};
+use crate::widget::{
+    WidgetDrawGeometry, WidgetDrawQuad, WidgetRenderer, same_dock_presentation, snap_composite_rect,
+};
+
+#[derive(Default)]
+pub(super) struct WidgetDraws {
+    primary: Vec<WidgetDrawQuad>,
+    dock: Option<DockDraws>,
+}
+
+struct DockDraws {
+    display: DisplayRect,
+    quads: Vec<WidgetDrawQuad>,
+}
+
+fn target_rect(target: &FrameTarget) -> Rect {
+    Rect::new(
+        target.x,
+        target.y,
+        target.width as f32,
+        target.height as f32,
+    )
+}
+
+impl WidgetDraws {
+    pub(super) fn for_target(
+        &self,
+        target: &FrameTarget,
+        display: Option<&str>,
+    ) -> [&[WidgetDrawQuad]; 2] {
+        let primary = if target.primary {
+            self.primary.as_slice()
+        } else {
+            &[]
+        };
+        let dock = self.dock.as_ref().filter(|dock| {
+            dock.display.rect == target_rect(target)
+                && dock.display.primary == target.primary
+                && match display {
+                    Some(name) => name == dock.display.name,
+                    None => target.primary,
+                }
+        });
+        [primary, dock.map_or(&[], |dock| dock.quads.as_slice())]
+    }
+
+    pub(super) fn publish_geometry(
+        &self,
+        wr: Option<&WidgetRenderer>,
+        scene: &mut SceneGraph,
+        windowed_primary: Option<FrameTarget>,
+    ) {
+        let geometry = &mut scene.overlay.widget_geometry;
+        geometry.clear();
+        let Some(wr) = wr else { return };
+        let mut publish = |quads: &[WidgetDrawQuad], display: Rect| {
+            geometry.extend(quads.iter().filter_map(|quad| {
+                let (_, mut bounds) = wr.drawable_widget(quad, display.width, display.height)?;
+                bounds.x += display.x;
+                bounds.y += display.y;
+                Some(tze_hud_scene::graph::overlay::WidgetGeometry {
+                    instance_name: quad.instance_name.clone(),
+                    bounds,
+                })
+            }));
+        };
+        if let Some(primary) = windowed_primary {
+            publish(&self.primary, target_rect(&primary));
+        }
+        // Direct headless only submits its primary surface.
+        if let Some(dock) = &self.dock
+            && (windowed_primary.is_some() || dock.display.primary)
+        {
+            publish(&dock.quads, dock.display.rect);
+        }
+    }
+}
 
 impl super::Compositor {
     /// Countdowns are a one-shot display deadline, never a frame-rate animation.
@@ -13,7 +91,10 @@ impl super::Compositor {
         if self.safe_mode_overlay {
             None
         } else {
-            scene.next_widget_deadline_wall_us()
+            let dock_missing = self.named_dock_target_missing(scene);
+            scene.next_widget_deadline_wall_us_where(|instance| {
+                !dock_missing || !scene.is_dock_widget(&instance.instance_name)
+            })
         }
     }
 
@@ -26,9 +107,11 @@ impl super::Compositor {
         let Some(renderer) = self.widget_renderer.as_ref() else {
             return false;
         };
+        let dock_missing = self.named_dock_target_missing(scene);
         let now = scene.now_wall_us();
         scene.widget_registry.instances.values().any(|instance| {
-            scene.widget_visible(instance)
+            (!dock_missing || !scene.is_dock_widget(&instance.instance_name))
+                && scene.widget_visible(instance)
                 && instance.current_params.iter().any(|(name, value)| {
                     let WidgetParameterValue::Deadline(deadline) = value else {
                         return false;
@@ -79,28 +162,38 @@ impl super::Compositor {
         self.widget_renderer.as_ref()
     }
 
-    /// Ensure widget instances have up-to-date cached textures for all widget
-    /// instances in the registry.
-    ///
-    /// For each widget instance:
-    /// - If no texture entry exists (first frame), rasterizes with default params.
-    /// - If the instance has a `dirty` flag set, re-rasterizes with current params.
-    /// - If an animation is active, resolves interpolated params and re-rasterizes.
-    ///
-    /// Under degradation level [`DegradationLevel::Simplified`] or higher, active
-    /// transitions are snapped to their final values immediately, reducing
-    /// re-rasterization to at most once per parameter change during transitions.
-    ///
-    /// This should be called once per frame before `render_frame`.
-    pub(crate) fn sync_widget_textures(
+    fn dock_draw_display(&self, scene: &SceneGraph, primary: &FrameTarget) -> Option<&DisplayRect> {
+        let projection = scene.dock_projection()?;
+        let target = projection.target.as_deref()?;
+        self.display_layout.displays().iter().find(|display| {
+            display.name == target
+                && display.rect == projection.layout.display
+                && (!display.primary || display.rect == target_rect(primary))
+        })
+    }
+
+    fn named_dock_target_missing(&self, scene: &SceneGraph) -> bool {
+        scene.dock_projection().is_some_and(|p| p.target.is_some())
+            && self
+                .dock_draw_display(scene, &FrameTarget::primary(self.width, self.height))
+                .is_none()
+    }
+
+    /// Update visible textures and prepare scene-free draw geometry in the
+    /// same pass, using the accepted dock slots for both work and placement.
+    pub(super) fn prepare_widget_draws(
         &mut self,
         scene: &SceneGraph,
         degradation_level: DegradationLevel,
-    ) {
+        width: u32,
+        height: u32,
+    ) -> WidgetDraws {
+        let primary_target = FrameTarget::primary(width, height);
+        let dock_display = self.dock_draw_display(scene, &primary_target).cloned();
         let countdowns_paused = self.safe_mode_overlay || scene.widget_time_paused();
         let wr = match &mut self.widget_renderer {
             Some(r) => r,
-            None => return,
+            None => return WidgetDraws::default(),
         };
         wr.begin_sync();
         let registry = &scene.widget_registry;
@@ -110,81 +203,109 @@ impl super::Compositor {
         // nobody sees, and the first shown sync snaps to the newest values.
         if !scene.widgets_shown() {
             wr.hide();
-            return;
+            return WidgetDraws::default();
         }
         let snap = wr.take_snap_on_show();
 
         let now_us = scene.now_monotonic_us();
 
-        // Collect instances that need texture updates. Widgets without active
-        // publications are not visible; clear their cached texture so clear/TTL
-        // removal takes effect on the next frame instead of rendering defaults.
-        let instance_names: Vec<String> = registry.instances.keys().cloned().collect();
-
-        // Reclaim every safely inactive texture before admitting any new or
-        // replacement raster for this frame. Active publications form the
-        // current-frame guard set and are never evicted by this pass.
-        for instance_name in &instance_names {
-            let has_active_publication = registry
+        // Retire inactive and out-of-capacity textures before admitting
+        // replacement rasters. Overflow keeps the scene publication alive.
+        let mut visible = Vec::with_capacity(registry.instances.len());
+        for (name, instance) in &registry.instances {
+            if registry
                 .active_publishes
-                .get(instance_name)
-                .is_some_and(|publishes| !publishes.is_empty());
-            if !has_active_publication {
-                wr.remove_texture(instance_name);
-            }
-        }
-
-        for instance_name in instance_names {
-            let has_active_publication = registry
-                .active_publishes
-                .get(&instance_name)
-                .is_some_and(|publishes| !publishes.is_empty());
-            if !has_active_publication {
+                .get(name)
+                .is_none_or(Vec::is_empty)
+            {
+                wr.remove_texture(name);
                 continue;
             }
+            let dock_bounds = match (scene.dock_widget_slot(name), dock_display.as_ref()) {
+                (DockWidgetSlot::Registry, _) => None,
+                (DockWidgetSlot::Placed(bounds), Some(display)) => {
+                    let (x, y, w, h) = snap_composite_rect(
+                        bounds.x - display.rect.x,
+                        bounds.y - display.rect.y,
+                        bounds.width,
+                        bounds.height,
+                        display.rect.width,
+                        display.rect.height,
+                    );
+                    Some(Rect::new(x, y, w, h))
+                }
+                _ => {
+                    wr.remove_texture(name);
+                    continue;
+                }
+            };
+            visible.push((instance, dock_bounds));
+        }
 
-            let instance = match registry.instances.get(&instance_name) {
-                Some(i) => i.clone(),
-                None => continue,
+        let mut draws = WidgetDraws {
+            dock: dock_display.map(|display| DockDraws {
+                display,
+                quads: Vec::new(),
+            }),
+            ..Default::default()
+        };
+        let mut registry_names = Vec::new();
+        for (instance, dock_bounds) in visible {
+            let instance_name = &instance.instance_name;
+            if let Some(bounds) = dock_bounds {
+                draws
+                    .dock
+                    .as_mut()
+                    .expect("placed dock display")
+                    .quads
+                    .push(WidgetDrawQuad {
+                        instance_name: instance_name.clone(),
+                        geometry: WidgetDrawGeometry::Dock(bounds),
+                    });
+            } else {
+                registry_names.push(instance_name.as_str());
+            }
+            let Some(def) = registry.definitions.get(&instance.widget_type_name) else {
+                continue;
             };
-            let def = match registry.definitions.get(&instance.widget_type_name) {
-                Some(d) => d.clone(),
-                None => continue,
-            };
-            let dock = scene.widget_dock_presentation(&instance);
-            if wr.texture_entry(&instance_name).is_some_and(|entry| {
+            let dock = scene.widget_dock_presentation(instance);
+            if wr.texture_entry(instance_name).is_some_and(|entry| {
                 !same_dock_presentation(entry.dock_presentation.as_ref(), dock)
             }) {
                 // A denied source or texture admission must not draw the old
                 // presentation in place of the selected one.
-                wr.remove_texture(&instance_name);
+                wr.remove_texture(instance_name);
             }
 
-            // Raster at the size the widget is drawn: its box at the zoom.
-            let Some(geometry) = registry.drawn_geometry(&instance) else {
-                continue;
+            // Dock slots are already scaled and snapped to physical pixels.
+            let (pw, ph) = if let Some(bounds) = dock_bounds {
+                (bounds.width as u32, bounds.height as u32)
+            } else {
+                let Some(geometry) = registry.drawn_geometry(instance) else {
+                    continue;
+                };
+                super::resolve_widget_pixel_size(&geometry, self.width, self.height)
             };
-            let (pw, ph) = super::resolve_widget_pixel_size(&geometry, self.width, self.height);
             if pw == 0 || ph == 0 {
                 continue;
             }
 
             // Check if this instance needs an initial texture (no entry yet).
-            let needs_initial = wr.texture_entry(&instance_name).is_none();
+            let needs_initial = wr.texture_entry(instance_name).is_none();
 
             // Resolve animated or static params, applying degradation-aware snapping.
             let has_deadline = instance
                 .current_params
                 .values()
                 .any(|v| matches!(v, WidgetParameterValue::Deadline(_)));
-            if has_deadline && !scene.widget_visible(&instance) {
-                wr.remove_texture(&instance_name);
+            if has_deadline && dock_bounds.is_none() && !scene.widget_visible(instance) {
+                wr.remove_texture(instance_name);
                 continue;
             }
             if has_deadline && countdowns_paused {
                 // Leave the last pixels in place. Resume is an existing render
                 // event; no timer or repeated overdue repaint is needed.
-                if let Some(entry) = wr.texture_entry_mut(&instance_name) {
+                if let Some(entry) = wr.texture_entry_mut(instance_name) {
                     entry.animation = None;
                 }
                 continue;
@@ -200,14 +321,14 @@ impl super::Compositor {
             // transition before resolving params, even if its target is unchanged.
             let transition_ms = registry
                 .active_publishes
-                .get(&instance_name)
+                .get(instance_name)
                 .and_then(|p| p.iter().max_by_key(|r| r.published_at_wall_us))
                 .map_or(0, |r| r.transition_ms);
             if transition_ms == 0 || snap {
-                if let Some(entry) = wr.texture_entry_mut(&instance_name) {
+                if let Some(entry) = wr.texture_entry_mut(instance_name) {
                     entry.animation = None;
                 }
-            } else if let Some(entry) = wr.texture_entry(&instance_name) {
+            } else if let Some(entry) = wr.texture_entry(instance_name) {
                 let target = entry
                     .animation
                     .as_ref()
@@ -221,14 +342,14 @@ impl super::Compositor {
                 if interpolated_change {
                     let from = entry.last_rendered_params.clone();
                     wr.start_transition(
-                        &instance_name,
+                        instance_name,
                         from,
                         current_params.clone(),
                         transition_ms,
                         now_us,
                     );
                 } else if let Some(animation) = wr
-                    .texture_entry_mut(&instance_name)
+                    .texture_entry_mut(instance_name)
                     .and_then(|e| e.animation.as_mut())
                 {
                     // Text and enums snap even during a running numeric
@@ -237,20 +358,20 @@ impl super::Compositor {
                 }
             }
             let (effective_params, still_animating) = wr.resolve_animated_params(
-                &instance_name,
+                instance_name,
                 current_params,
                 degradation_level,
                 now_us,
             );
 
             let params_changed = wr
-                .texture_entry(&instance_name)
+                .texture_entry(instance_name)
                 .map(|e| e.last_rendered_params != effective_params)
                 .unwrap_or(false);
 
             // The owner moved or resized it (control panel layout).
             let resized = wr
-                .texture_entry(&instance_name)
+                .texture_entry(instance_name)
                 .is_some_and(|e| (e.width, e.height) != (pw, ph));
 
             let dirty = needs_initial
@@ -262,7 +383,7 @@ impl super::Compositor {
                     dock.map_or(def.layers.as_slice(), |dock| &dock.layers),
                 )
                 || wr
-                    .texture_entry(&instance_name)
+                    .texture_entry(instance_name)
                     .map(|e| e.dirty)
                     .unwrap_or(false);
 
@@ -270,16 +391,16 @@ impl super::Compositor {
                 let uploaded = wr.rasterize_and_upload(
                     &self.device,
                     &self.queue,
-                    &instance_name,
-                    &def,
-                    dock.is_some() || scene.is_dock_widget(&instance_name),
+                    instance_name,
+                    def,
+                    dock_bounds.is_some() || dock.is_some() || scene.is_dock_widget(instance_name),
                     dock,
                     &effective_params,
                     pw,
                     ph,
                 );
                 // Record what params were rendered so we can detect future changes.
-                if let Some(entry) = wr.texture_entry_mut(&instance_name) {
+                if let Some(entry) = wr.texture_entry_mut(instance_name) {
                     if uploaded {
                         entry.dock_presentation = dock.cloned();
                     }
@@ -289,5 +410,16 @@ impl super::Compositor {
             }
         }
         wr.end_sync();
+        draws.primary =
+            wr.collect_registry_widget_quads(registry, width as f32, height as f32, registry_names);
+        if let Some(dock) = &mut draws.dock {
+            dock.quads.retain(|quad| {
+                wr.drawable_widget(quad, dock.display.rect.width, dock.display.rect.height)
+                    .is_some()
+            });
+            dock.quads
+                .sort_unstable_by(|a, b| a.instance_name.cmp(&b.instance_name));
+        }
+        draws
     }
 }

@@ -560,7 +560,8 @@ pub(super) fn present_to_secondaries(
     let mut any_submitted = false;
     for target in secondaries {
         let frame_target = target.frame_target();
-        let signature = compositor.frame_signature(build, &frame_target);
+        let signature =
+            compositor.display_frame_signature(build, &frame_target, Some(&target.name));
         if !target.ledger.needs_present(signature) {
             // Already on screen (content returned to what was presented).
             target.ledger.settle();
@@ -569,8 +570,12 @@ pub(super) fn present_to_secondaries(
         if !target.ledger.ready(Instant::now()) {
             continue;
         }
-        let outcome =
-            compositor.present_windowed_frame_to(build, &frame_target, target.surface.as_ref());
+        let outcome = compositor.present_windowed_display(
+            build,
+            &frame_target,
+            Some(&target.name),
+            target.surface.as_ref(),
+        );
         if outcome.surface_acquired {
             counters.record_surface_acquisition();
         }

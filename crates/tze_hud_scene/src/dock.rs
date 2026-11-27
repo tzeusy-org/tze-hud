@@ -113,6 +113,7 @@ pub(crate) struct DockPresentationEntry {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DockLayout {
+    pub display: Rect,
     pub column: Rect,
     pub capacity: usize,
     pub scale: f32,
@@ -161,6 +162,7 @@ impl DockLayout {
             0
         };
         Self {
+            display,
             column,
             capacity,
             scale: scale as f32,
@@ -219,6 +221,14 @@ pub struct DockProjection {
     pub layout: DockLayout,
     /// Committed fit inputs in owner roster order, shared by draw and hit consumers.
     pub aspect_ratios: Vec<(String, f64)>,
+}
+
+/// The placement of an instance relative to the accepted dock projection.
+pub enum DockWidgetSlot {
+    /// Standalone instances and layout-only callers use registry geometry.
+    Registry,
+    Hidden,
+    Placed(Rect),
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -341,6 +351,63 @@ impl SceneGraph {
             .iter()
             .flat_map(|row| &row.widgets)
             .any(|widget| widget.instance_name == instance_name)
+    }
+
+    pub fn dock_widget_slot(&self, instance_name: &str) -> DockWidgetSlot {
+        use DockWidgetSlot::{Hidden, Placed, Registry};
+
+        let Some((index, row, widget_index)) =
+            self.dock_rows()
+                .iter()
+                .enumerate()
+                .find_map(|(index, row)| {
+                    row.widgets
+                        .iter()
+                        .position(|widget| widget.instance_name == instance_name)
+                        .map(|widget_index| (index, row, widget_index))
+                })
+        else {
+            return Registry;
+        };
+        let Some(projection) = self.dock_projection() else {
+            return Hidden;
+        };
+        if index >= projection.layout.capacity {
+            return Hidden;
+        }
+        if projection.target.is_none() {
+            return Registry;
+        }
+
+        let aspect = |widget: &DockWidget| {
+            projection
+                .aspect_ratios
+                .iter()
+                .find(|(name, _)| *name == widget.widget_type)
+                .map(|(_, ratio)| *ratio)
+        };
+        let Some(ratio) = aspect(&row.widgets[widget_index]) else {
+            return Hidden;
+        };
+        // An absent committed predecessor would put this widget in the wrong
+        // slot. Check before advancing across any of the row's widths.
+        let preceding = &row.widgets[..widget_index];
+        if preceding.iter().any(|widget| aspect(widget).is_none()) {
+            return Hidden;
+        }
+        let slot = projection
+            .layout
+            .widget(index, preceding.iter().filter_map(aspect), ratio);
+        if slot.width > 0.0
+            && slot.height > 0.0
+            && [slot.x, slot.y, slot.width, slot.height]
+                .into_iter()
+                .all(f32::is_finite)
+        {
+            Placed(slot)
+        } else {
+            Hidden
+        }
     }
 
     /// A configured widget always uses its default artwork, even when its

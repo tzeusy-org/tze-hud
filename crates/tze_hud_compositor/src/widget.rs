@@ -33,12 +33,12 @@ use std::sync::{Arc, Mutex, OnceLock};
 mod compact_countdown;
 
 use ab_glyph::{Font, ScaleFont};
-use tze_hud_scene::DegradationLevel;
 use tze_hud_scene::dock::DockPresentation;
 use tze_hud_scene::types::{
     GeometryPolicy, Rgba, WidgetBinding, WidgetBindingMapping, WidgetDefinition,
     WidgetParameterValue, WidgetRegistry, WidgetSvgLayer,
 };
+use tze_hud_scene::{DegradationLevel, Rect};
 
 // ─── SVG render plans ────────────────────────────────────────────────────────
 
@@ -1845,6 +1845,8 @@ pub struct WidgetTextureEntry {
     pub last_rendered_params: HashMap<String, WidgetParameterValue>,
     /// The alternate whose pixels were successfully uploaded.
     pub(crate) dock_presentation: Option<Arc<DockPresentation>>,
+    /// Fingerprint of the last successful RGBA upload for a dock-owned instance.
+    pub(crate) dock_pixels: Option<blake3::Hash>,
     /// Animation state: start time, duration, starting params, target params.
     pub(crate) animation: Option<WidgetAnimationState>,
 }
@@ -2903,19 +2905,16 @@ pub fn rasterize_widget_render_plan(
 
 // ─── WidgetRenderer (GPU state) ───────────────────────────────────────────────
 
-/// Precomputed, scene-free draw geometry for a single widget instance.
-///
-/// Produced by [`WidgetRenderer::collect_widget_draw_quads`] under the scene lock
-/// and consumed by [`WidgetRenderer::composite_prepared`] after the lock drops.
-/// Carries only the resolved pixel origin plus the instance name used to look up
-/// the (compositor-owned) cached texture at draw time.
+/// Scene-free widget geometry, in the target window's pixels.
 pub(crate) struct WidgetDrawQuad {
-    /// Widget instance name — the key into `WidgetRenderer::textures`.
     pub(crate) instance_name: String,
-    /// Resolved (pre-snap) pixel x origin.
-    pub(crate) raw_x: f32,
-    /// Resolved (pre-snap) pixel y origin.
-    pub(crate) raw_y: f32,
+    pub(crate) geometry: WidgetDrawGeometry,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum WidgetDrawGeometry {
+    Registry { x: f32, y: f32 },
+    Dock(Rect),
 }
 
 /// The compositor-owned widget rendering state.
@@ -3442,6 +3441,12 @@ impl WidgetRenderer {
         );
 
         if uploaded {
+            if dock_owned {
+                self.textures
+                    .get_mut(instance_name)
+                    .expect("uploaded texture")
+                    .dock_pixels = Some(blake3::hash(pixmap.data()));
+            }
             tracing::trace!(
                 widget = instance_name,
                 width = pixel_width,
@@ -3557,6 +3562,7 @@ impl WidgetRenderer {
                 dirty: false,
                 last_rendered_params: HashMap::new(),
                 dock_presentation: None,
+                dock_pixels: None,
                 animation,
             },
         );
@@ -3569,164 +3575,87 @@ impl WidgetRenderer {
         true
     }
 
-    /// Composite widget textures into the current render pass.
-    ///
-    /// Called from the compositor's frame render path. Widget tiles use
-    /// z_order >= WIDGET_TILE_Z_MIN (0x9000_0000) so they appear above zone
-    /// tiles when they overlap.
-    ///
-    /// # Arguments
-    ///
-    /// - `render_pass` — the active render pass to draw into
-    /// - `registry` — the widget registry (instances + definitions)
-    /// - `surf_w` / `surf_h` — surface dimensions for NDC conversion
-    pub(crate) fn composite_widgets<'rp>(
-        &'rp self,
-        render_pass: &mut wgpu::RenderPass<'rp>,
-        registry: &WidgetRegistry,
-        surf_w: f32,
-        surf_h: f32,
-        device: &wgpu::Device,
-    ) {
-        use wgpu::util::DeviceExt;
-
-        // Every widget shares WIDGET_TILE_Z_MIN, so overlapping widgets draw
-        // in instance-name order: stable across frames, unlike HashMap order.
-        let mut instances: Vec<&tze_hud_scene::types::WidgetInstance> = registry
-            .instances
-            .values()
-            .filter(|instance| {
-                registry
-                    .active_publishes
-                    .get(&instance.instance_name)
-                    .is_some_and(|publishes| !publishes.is_empty())
-            })
-            .collect();
-        instances.sort_unstable_by(|a, b| a.instance_name.cmp(&b.instance_name));
-
-        render_pass.set_pipeline(&self.texture_pipeline);
-
-        for instance in instances {
-            let entry = match self.textures.get(&instance.instance_name) {
-                Some(e) => e,
-                None => continue,
-            };
-
-            // Resolve pixel geometry from the instance's geometry policy.
-            let (raw_x, raw_y, _pw, _ph) =
-                resolve_pixel_geometry(&registry.drawn_geometry(instance), surf_w, surf_h)
-                    .unwrap_or((0.0, 0.0, surf_w, surf_h));
-            // Pixel-snap widget quads so text-heavy SVGs remain crisp on screen.
-            let (px, py, pw, ph) = snap_composite_rect(
-                raw_x,
-                raw_y,
-                entry.width as f32,
-                entry.height as f32,
-                surf_w,
-                surf_h,
-            );
-
-            // Build NDC quad vertices with UV coordinates.
-            let vertices = widget_quad_vertices(px, py, pw, ph, surf_w, surf_h);
-            let vertex_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("widget_quad_buf"),
-                contents: bytemuck::cast_slice(&vertices),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
-
-            render_pass.set_bind_group(0, &entry.bind_group, &[]);
-            render_pass.set_vertex_buffer(0, vertex_buf.slice(..));
-            render_pass.draw(0..6, 0..1);
-        }
-    }
-
-    /// Precompute the per-instance draw geometry for the widget pass.
-    ///
-    /// This is the scene-reading half of [`Self::composite_widgets`]: it resolves
-    /// each drawable instance's pixel origin from the registry (instance geometry
-    /// override, with a definition-default / full-screen fallback) into an owned
-    /// [`WidgetDrawQuad`]. Only instances that have an active publish AND a cached
-    /// texture are emitted — matching the `continue` / `any_textured` gating of
-    /// the original single-pass compositing.
-    ///
-    /// The matching draw half is [`Self::composite_prepared`], which needs only
-    /// these owned quads (no `&WidgetRegistry`) and so runs after the scene lock
-    /// is dropped.
-    pub(crate) fn collect_widget_draw_quads(
+    pub(crate) fn collect_registry_widget_quads(
         &self,
         registry: &WidgetRegistry,
         surf_w: f32,
         surf_h: f32,
+        names: Vec<&str>,
     ) -> Vec<WidgetDrawQuad> {
-        let mut instances: Vec<&tze_hud_scene::types::WidgetInstance> = registry
-            .instances
-            .values()
-            .filter(|instance| {
-                registry
-                    .active_publishes
-                    .get(&instance.instance_name)
-                    .is_some_and(|publishes| !publishes.is_empty())
+        let mut quads: Vec<_> = names
+            .into_iter()
+            .filter_map(|instance_name| {
+                self.textures.get(instance_name)?;
+                let instance = registry.instances.get(instance_name)?;
+                let (x, y, _, _) =
+                    resolve_pixel_geometry(&registry.drawn_geometry(instance), surf_w, surf_h)
+                        .unwrap_or((0.0, 0.0, surf_w, surf_h));
+                Some(WidgetDrawQuad {
+                    instance_name: instance_name.to_owned(),
+                    geometry: WidgetDrawGeometry::Registry { x, y },
+                })
             })
             .collect();
-        instances.sort_unstable_by(|a, b| a.instance_name.cmp(&b.instance_name));
-
-        let mut quads = Vec::new();
-        for instance in instances {
-            // Only instances with a cached texture are drawable (composite_widgets
-            // `continue`s otherwise); skip them here so the draw half never needs
-            // to consult the registry.
-            if !self.textures.contains_key(&instance.instance_name) {
-                continue;
-            }
-            let (raw_x, raw_y, _pw, _ph) =
-                resolve_pixel_geometry(&registry.drawn_geometry(instance), surf_w, surf_h)
-                    .unwrap_or((0.0, 0.0, surf_w, surf_h));
-            quads.push(WidgetDrawQuad {
-                instance_name: instance.instance_name.clone(),
-                raw_x,
-                raw_y,
-            });
-        }
+        // All widgets share a z-order; preserve instance-name order when they overlap.
+        quads.sort_unstable_by(|a, b| a.instance_name.cmp(&b.instance_name));
         quads
     }
 
-    /// Draw precomputed widget quads into an already-open render pass.
-    ///
-    /// The scene-free counterpart to [`Self::composite_widgets`]: it looks up each
-    /// quad's cached texture entry (compositor-owned, not scene state), pixel-snaps
-    /// against the texture dimensions, and draws. Geometry was resolved earlier by
-    /// [`Self::collect_widget_draw_quads`].
+    /// Use the same current cache entry for drawing, geometry and signatures.
+    pub(crate) fn drawable_widget(
+        &self,
+        quad: &WidgetDrawQuad,
+        surf_w: f32,
+        surf_h: f32,
+    ) -> Option<(&WidgetTextureEntry, Rect)> {
+        let entry = self.textures.get(&quad.instance_name)?;
+        let bounds = match quad.geometry {
+            WidgetDrawGeometry::Registry { x, y } => {
+                let (x, y, w, h) = snap_composite_rect(
+                    x,
+                    y,
+                    entry.width as f32,
+                    entry.height as f32,
+                    surf_w,
+                    surf_h,
+                );
+                Rect::new(x, y, w, h)
+            }
+            WidgetDrawGeometry::Dock(bounds)
+                if (entry.width, entry.height) == (bounds.width as u32, bounds.height as u32)
+                    && entry.dock_pixels.is_some() =>
+            {
+                bounds
+            }
+            WidgetDrawGeometry::Dock(_) => return None,
+        };
+        Some((entry, bounds))
+    }
+
+    /// Draw the owned widget quads after the scene lock is released.
     pub(crate) fn composite_prepared<'rp>(
         &'rp self,
         render_pass: &mut wgpu::RenderPass<'rp>,
-        quads: &[WidgetDrawQuad],
+        quads: [&[WidgetDrawQuad]; 2],
         surf_w: f32,
         surf_h: f32,
         device: &wgpu::Device,
     ) {
         use wgpu::util::DeviceExt;
 
-        if quads.is_empty() {
-            return;
-        }
         render_pass.set_pipeline(&self.texture_pipeline);
-
-        for quad in quads {
-            let entry = match self.textures.get(&quad.instance_name) {
-                Some(e) => e,
-                None => continue,
+        for quad in quads.into_iter().flatten() {
+            let Some((entry, bounds)) = self.drawable_widget(quad, surf_w, surf_h) else {
+                continue;
             };
-            // Pixel-snap widget quads so text-heavy SVGs remain crisp on screen.
-            let (px, py, pw, ph) = snap_composite_rect(
-                quad.raw_x,
-                quad.raw_y,
-                entry.width as f32,
-                entry.height as f32,
+            let vertices = widget_quad_vertices(
+                bounds.x,
+                bounds.y,
+                bounds.width,
+                bounds.height,
                 surf_w,
                 surf_h,
             );
-
-            let vertices = widget_quad_vertices(px, py, pw, ph, surf_w, surf_h);
             let vertex_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("widget_quad_buf"),
                 contents: bytemuck::cast_slice(&vertices),

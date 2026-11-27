@@ -252,10 +252,18 @@ impl HeadlessRuntime {
                     )?;
                     if let Some(dock) = &startup_result.dock {
                         let display = crate::scene_startup::DockDisplay {
-                            target: "headless".into(),
+                            target: "HEADLESS".into(),
                             rect: scene.display_area,
                             scale: 1.0,
                         };
+                        compositor.set_display_layout(tze_hud_compositor::DisplayLayout::new(
+                            vec![tze_hud_compositor::DisplayRect {
+                                name: display.target.clone(),
+                                rect: display.rect,
+                                primary: true,
+                            }],
+                            &Default::default(),
+                        ));
                         dock.project(&mut scene, &startup_result.global_tokens, Some(&display));
                     }
                     // Register widget SVG assets with the headless widget renderer,

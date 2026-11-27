@@ -2172,16 +2172,19 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                             capture.finish_with(|build, display| {
                                 let (w, h) = build.size();
                                 let target = match display {
-                                    None => Some(tze_hud_compositor::FrameTarget::primary(w, h)),
+                                    None => {
+                                        Some((tze_hud_compositor::FrameTarget::primary(w, h), None))
+                                    }
                                     Some(name) => secondaries
                                         .iter()
                                         .find(|t| t.name == name)
-                                        .map(|t| t.frame_target()),
+                                        .map(|t| (t.frame_target(), Some(t.name.as_str()))),
                                 };
                                 match target {
-                                    Some(target) => compositor.capture_windowed_frame(
+                                    Some((target, name)) => compositor.capture_windowed_display(
                                         build,
                                         &target,
+                                        name,
                                         surface_for_compositor.format(),
                                     ),
                                     None => Err(tze_hud_compositor::CaptureError::NoSuchDisplay(
