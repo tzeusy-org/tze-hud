@@ -473,39 +473,53 @@ async fn capture_windowed_frame_reads_back_the_built_frame() {
     ));
 }
 
-/// Verify that HEADLESS_FORCE_SOFTWARE env-var path is exercised in the
-/// adapter-selection code and only a CPU software adapter is selected.
-// await_holding_lock: intentional — the guard must stay held across the
-// await so no parallel test mutates HEADLESS_FORCE_SOFTWARE mid-construction.
-#[allow(clippy::await_holding_lock)]
+/// Verify that forced software adapter selection uses a CPU and downlevel limits.
 #[tokio::test]
 async fn test_new_headless_with_force_software_env_var() {
     if should_skip_gpu_tests() {
         eprintln!("skipping GPU test: TZE_HUD_SKIP_GPU_TESTS=1");
         return;
     }
-
-    // Serialize all env-var-mutating tests via a process-wide mutex.
-    // Rust tests run in parallel by default; without serialization,
-    // a concurrent test could observe or overwrite HEADLESS_FORCE_SOFTWARE.
-    let _guard = ENV_VAR_MUTEX.lock().unwrap();
-
-    // Safety: single-threaded within the mutex guard; no other test
-    // touches HEADLESS_FORCE_SOFTWARE while _guard is held.
-    unsafe {
-        std::env::set_var("HEADLESS_FORCE_SOFTWARE", "1");
+    const SOFTWARE: &str = "HEADLESS_FORCE_SOFTWARE";
+    const PROOF: &str = "headless-software-proof: ";
+    let _gpu = GPU_INIT_MUTEX.lock().await;
+    if !std::env::var(SOFTWARE).is_ok_and(|value| value.trim() == "1") {
+        use tokio::io::AsyncReadExt;
+        let mut child = tokio::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "--nocapture"])
+            .arg("renderer::tests::surface::test_new_headless_with_force_software_env_var")
+            .env(SOFTWARE, "1")
+            .stdout(std::process::Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .expect("spawn software adapter test child");
+        let mut stdout = String::new();
+        let wait = async {
+            let mut pipe = child.stdout.take().unwrap();
+            pipe.read_to_string(&mut stdout).await?;
+            child.wait().await
+        };
+        let finished = tokio::time::timeout(std::time::Duration::from_secs(60), wait).await;
+        let Ok(Ok(status)) = finished else {
+            let killed = child.start_kill();
+            let reaped = child.wait().await;
+            panic!("software test child incomplete: {finished:?}, {killed:?}, {reaped:?}");
+        };
+        let mut proofs = stdout.lines().filter_map(|line| line.strip_prefix(PROOF));
+        match (status.success(), proofs.next(), proofs.next()) {
+            (true, Some("direct Cpu"), None) => println!("\n{PROOF}child Cpu"),
+            (true, Some("direct NoAdapter"), None) => println!("\n{PROOF}child NoAdapter"),
+            evidence => panic!("invalid child adapter proof ({status}): {evidence:?}"),
+        }
+        return;
     }
-    let result = {
-        let _gpu = GPU_INIT_MUTEX.lock().await;
-        let result = Compositor::new_headless(64, 64).await;
-        if let Ok(compositor) = &result {
-            let mut limits = compositor.device.limits();
+    let outcome = match Compositor::new_headless(64, 64).await {
+        Ok(compositor) => {
+            let limits = compositor.device.limits();
             let max_dimension = limits.max_texture_dimension_2d;
-            // Raising only the texture bound must preserve every other
-            // downlevel compatibility limit on the actual requested device.
-            limits.max_texture_dimension_2d =
-                wgpu::Limits::downlevel_defaults().max_texture_dimension_2d;
-            assert_eq!(limits, wgpu::Limits::downlevel_defaults());
+            let mut expected = wgpu::Limits::downlevel_defaults();
+            expected.max_texture_dimension_2d = max_dimension;
+            assert_eq!(limits, expected);
             for (width, height) in [(max_dimension + 1, 1), (1, max_dimension + 1)] {
                 let rejected = Compositor::new_headless(width, height).await;
                 let Err(CompositorError::DeviceCreation(message)) = rejected else {
@@ -514,21 +528,13 @@ async fn test_new_headless_with_force_software_env_var() {
                 assert!(message.contains(&format!("{width}x{height}")));
                 assert!(message.contains(&format!("<= {max_dimension}")));
             }
+            assert_eq!(compositor.adapter_info().device_type, "Cpu");
+            "Cpu"
         }
-        result
-    };
-    unsafe {
-        std::env::remove_var("HEADLESS_FORCE_SOFTWARE");
-    }
-    drop(_guard);
-
-    // Either Ok (software GPU found) or Err(NoAdapter) (no software GPU
-    // installed in this CI environment) are acceptable.  A panic would not be.
-    match result {
-        Ok(compositor) => assert_eq!(compositor.adapter_info().device_type, "Cpu"),
-        Err(CompositorError::NoAdapter) => {}
+        Err(CompositorError::NoAdapter) => "NoAdapter",
         Err(e) => panic!("unexpected error with HEADLESS_FORCE_SOFTWARE=1: {e}"),
-    }
+    };
+    println!("\n{PROOF}direct {outcome}");
 }
 
 // ── Multi-display targets (hud-1pt5h) ──────────────────────────────────────
