@@ -649,7 +649,7 @@ class Run:
                 raise Refused("could not configure the owned X11 HUD client") from None
 
         try:
-            capture = Capture(self.xvfb, self.display, self.xauthority)
+            capture = Capture(self.xvfb, self.display, self.xauthority, configure=True)
         except (CaptureError, OSError, EOFError, TimeoutError):
             raise Refused("could not verify the private X11 root for window setup") from None
         expected = (0, 0, *SCREEN)
@@ -662,16 +662,18 @@ class Run:
                 return private_x11_geometry(xdo("getwindowgeometry", "--shell", window), window)
 
             geometry = client_geometry()
-            if geometry != expected:
+            if geometry[2:] != SCREEN:
                 # Bare Xvfb has no WM to honor winit's borderless fullscreen
-                # request. A move after resize makes winit republish the real
-                # display bounds before we admit rows or inject any pointer.
-                if geometry[2:] != SCREEN:
-                    xdo("windowsize", "--sync", window, *map(str, SCREEN))
+                # request. Resize the actual window before notifying the client.
+                xdo("windowsize", "--sync", window, *map(str, SCREEN))
+            # Real moves invalidate winit's cached root-relative position. A
+            # verified synthetic ConfigureNotify then supplies the WM position.
+            if geometry[:2] != (1, 1):
                 xdo("windowmove", "--sync", window, "1", "1")
-                xdo("windowmove", "--sync", window, "0", "0")
-                if client_geometry() != expected:
-                    raise Refused("actual private HUD client does not fill the owned root")
+            xdo("windowmove", "--sync", window, "0", "0")
+            if client_geometry() != expected:
+                raise Refused("actual private HUD client does not fill the owned root")
+            capture.publish_client_geometry(int(window), self.pid)
         finally:
             if capture.close() != {"returncode": 0, "forced": False, "reaped": True}:
                 raise Refused("private X11 window setup probe did not exit cleanly")

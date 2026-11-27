@@ -199,7 +199,8 @@ class PrivateDockClientTests(unittest.TestCase):
             capture.return_value.close.return_value = {"returncode": 0, "forced": False, "reaped": True}
             run.fit_private_dock_client()
 
-        capture.assert_called_once_with(run.xvfb, run.display, run.xauthority)
+        capture.assert_called_once_with(run.xvfb, run.display, run.xauthority, configure=True)
+        capture.return_value.publish_client_geometry.assert_called_once_with(int(self.WINDOW), 4242)
         capture.return_value.close.assert_called_once_with()
         self.assertEqual([call.args[0] for call in command.call_args_list], [
             ["xdotool", "search", "--onlyvisible", "--pid", "4242"],
@@ -230,8 +231,45 @@ class PrivateDockClientTests(unittest.TestCase):
             with self.assertRaisesRegex(g.Refused, "one visible X11 window"):
                 run.fit_private_dock_client()
         command.assert_called_once()
+        capture.return_value.publish_client_geometry.assert_not_called()
         capture.return_value.close.assert_called_once_with()
         run.expect.assert_not_called()
+
+    def test_synthetic_geometry_targets_only_the_verified_client(self):
+        import hud_x11_capture as x11
+
+        client, root, pid, display = int(self.WINDOW), 1293, 4242, 123
+        item = ctypes.c_ulong(pid)
+        lib = mock.Mock()
+        lib.XInternAtom.return_value = 205
+
+        def property_reply(*args):
+            for field, value in zip(args[-5:], (6, 32, 1, 0, ctypes.addressof(item))):
+                field._obj.value = value
+            return 0
+
+        def geometry_reply(*args):
+            for field, value in zip(args[-7:], (root, 0, 0, 1280, 800, 0, 24)):
+                field._obj.value = value
+            return 1
+
+        lib.XGetWindowProperty.side_effect = property_reply
+        lib.XGetGeometry.side_effect = geometry_reply
+        lib.XTranslateCoordinates.return_value = 1
+        lib.XSendEvent.return_value = 1
+        x11.notify_client_geometry(lib, display, root, client, pid)
+
+        sent_display, window, propagate, mask, event = lib.XSendEvent.call_args.args
+        self.assertEqual((sent_display, window, propagate, mask), (display, client, 0, 1 << 17))
+        configure = event._obj.configure
+        self.assertEqual((configure.type, configure.send_event, configure.event, configure.window,
+                          configure.x, configure.y, configure.width, configure.height),
+                         (22, 1, client, client, 0, 0, 1280, 800))
+        lib.XSync.assert_called_once_with(display, 0)
+        lib.XSendEvent.reset_mock()
+        with self.assertRaisesRegex(x11.CaptureError, "matching client PID"):
+            x11.notify_client_geometry(lib, display, root, client, pid + 1)
+        lib.XSendEvent.assert_not_called()
 
 
 class GuardTests(unittest.TestCase):

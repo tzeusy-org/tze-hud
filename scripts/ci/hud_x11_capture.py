@@ -104,6 +104,18 @@ class XImage(c.Structure):
     ]
 
 
+class XConfigureEvent(c.Structure):
+    _fields_ = [
+        ("type", I), ("serial", UL), ("send_event", I), ("display", P),
+        ("event", UL), ("window", UL), ("x", I), ("y", I), ("width", I),
+        ("height", I), ("border_width", I), ("above", UL), ("override_redirect", I),
+    ]
+
+
+class XEvent(c.Union):
+    _fields_ = [("configure", XConfigureEvent), ("pad", c.c_long * 24)]
+
+
 def bind_xlib():
     lib = c.CDLL("libX11.so.6")
     image = c.POINTER(XImage)
@@ -116,6 +128,15 @@ def bind_xlib():
         "XDisplayWidth": (I, [P, I]),
         "XDisplayHeight": (I, [P, I]),
         "XDefaultDepth": (I, [P, I]),
+        "XInternAtom": (UL, [P, c.c_char_p, I]),
+        "XGetWindowProperty": (I, [P, UL, UL, c.c_long, c.c_long, I, UL, c.POINTER(UL),
+                                   c.POINTER(I), c.POINTER(UL), c.POINTER(UL), c.POINTER(P)]),
+        "XFree": (I, [P]),
+        "XGetGeometry": (I, [P, UL, c.POINTER(UL), c.POINTER(I), c.POINTER(I), c.POINTER(U),
+                             c.POINTER(U), c.POINTER(U), c.POINTER(U)]),
+        "XTranslateCoordinates": (I, [P, UL, UL, I, I, c.POINTER(I), c.POINTER(I), c.POINTER(UL)]),
+        "XSendEvent": (I, [P, UL, I, c.c_long, c.POINTER(XEvent)]),
+        "XSync": (I, [P, I]),
         "XGetImage": (image, [P, UL, I, I, U, U, UL, I]),
         "XDestroyImage": (I, [image]),
         "XQueryPointer": (I, [P, UL, c.POINTER(UL), c.POINTER(UL),
@@ -125,6 +146,39 @@ def bind_xlib():
         func = getattr(lib, name)
         func.restype, func.argtypes = result, args
     return lib
+
+
+def notify_client_geometry(lib, display, root: int, window: int, pid: int) -> None:
+    """Supply the root-relative ConfigureNotify a WM sends after a real resize."""
+    if (type(window) is not int or not 0 < window <= 0xffffffff or window == root
+            or type(pid) is not int or pid <= 0):
+        raise CaptureError("invalid private HUD client identity")
+    prop = lib.XInternAtom(display, b"_NET_WM_PID", 1)
+    kind, bits, count, extra, data = UL(), I(), UL(), UL(), P()
+    try:
+        if (not prop or lib.XGetWindowProperty(display, window, prop, 0, 1, 0, 6, c.byref(kind),
+                                               c.byref(bits), c.byref(count), c.byref(extra), c.byref(data)) != 0
+                or (kind.value, bits.value, count.value, extra.value) != (6, 32, 1, 0)
+                or not data or c.cast(data, c.POINTER(UL)).contents.value != pid):
+            raise CaptureError("private HUD X11 window has no matching client PID")
+    finally:
+        if data:
+            lib.XFree(data)
+    found, x, y, width, height, border, depth = UL(), I(), I(), U(), U(), U(), U()
+    if (not lib.XGetGeometry(display, window, c.byref(found), c.byref(x), c.byref(y), c.byref(width),
+                             c.byref(height), c.byref(border), c.byref(depth))
+            or (found.value, x.value, y.value, width.value, height.value, border.value) != (root, 0, 0, *SCREEN, 0)):
+        raise CaptureError("private fullscreen window has not reached the verified root geometry")
+    child = UL()
+    if (not lib.XTranslateCoordinates(display, window, root, 0, 0, c.byref(x), c.byref(y), c.byref(child))
+            or (x.value, y.value) != (0, 0)):
+        raise CaptureError("private fullscreen window does not start at the X11 root origin")
+    event = XEvent()
+    event.configure = XConfigureEvent(type=22, send_event=1, display=display, event=window,
+                                       window=window, width=width.value, height=height.value)
+    if not lib.XSendEvent(display, window, 0, 1 << 17, c.byref(event)):
+        raise CaptureError("could not notify the owned HUD of verified fullscreen geometry")
+    lib.XSync(display, 0)
 
 
 def owned_peer(fd: int, owner: int) -> dict:
@@ -176,7 +230,7 @@ def root_sample(lib, display, root: int, rect: Rect, expected: Point) -> tuple[d
         lib.XDestroyImage(image)
 
 
-def capture_child(pipe: socket.socket, owner: int, name: str) -> None:
+def capture_child(pipe: socket.socket, owner: int, name: str, configure: bool = False) -> None:
     if (not re.fullmatch(r":\d+", name) or os.environ.get("DISPLAY") != name
             or not os.environ.get("XAUTHORITY")):
         raise CaptureError("capture child was not given an explicit private display and authority")
@@ -191,12 +245,18 @@ def capture_child(pipe: socket.socket, owner: int, name: str) -> None:
         if screen != 0 or not root or size != SCREEN or lib.XDefaultDepth(display, screen) != 24:
             raise CaptureError("private display is not the expected 1280x800x24 root")
         send(pipe, {"peer": peer, "root": root, "screen": size, "depth": 24}, time.monotonic_ns() + NS)
+        configured = False
         while True:
             request, payload = packet(pipe, time.monotonic_ns() + 60 * NS)
             if request == {"stop": True} and not payload:
                 return
-            if payload or request.keys() != {"id", "rect", "point"}:
-                raise CaptureError("invalid read-only capture command")
+            if configure and not configured and not payload and request.keys() == {"hud_window", "hud_pid"}:
+                notify_client_geometry(lib, display, root, request["hud_window"], request["hud_pid"])
+                send(pipe, {"geometry_notified": True}, time.monotonic_ns() + NS)
+                configured = True
+                continue
+            if configure or payload or request.keys() != {"id", "rect", "point"}:
+                raise CaptureError("invalid request for the private X11 helper mode")
             meta, rgba = root_sample(lib, display, root, tuple(request["rect"]), tuple(request["point"]))
             send(pipe, {"id": request["id"], **meta}, time.monotonic_ns() + NS, rgba)
     finally:
@@ -204,16 +264,19 @@ def capture_child(pipe: socket.socket, owner: int, name: str) -> None:
 
 
 class Capture:
-    """One read-only child, one request at a time, and an absolute reply deadline."""
+    """One authenticated child, one request at a time, and an absolute reply deadline."""
 
-    def __init__(self, xvfb: subprocess.Popen, display: str, authority: Path):
+    def __init__(self, xvfb: subprocess.Popen, display: str, authority: Path, *, configure: bool = False):
         self.xvfb = xvfb
         self.seq = 0
         self.pipe, remote = socket.socketpair()
         with remote:
             try:
+                command = [sys.executable, str(Path(__file__).resolve()), str(remote.fileno()), str(xvfb.pid), display]
+                if configure:
+                    command.append("configure")
                 self.proc = subprocess.Popen(
-                    [sys.executable, str(Path(__file__).resolve()), str(remote.fileno()), str(xvfb.pid), display],
+                    command,
                     env={"DISPLAY": display, "XAUTHORITY": str(authority), "HOME": str(authority.parent)},
                     pass_fds=(remote.fileno(),), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 )
@@ -262,6 +325,13 @@ class Capture:
             raise CaptureError("capture reply timestamps are absent or out of order")
         return meta, rgba
 
+    def publish_client_geometry(self, window: int, pid: int) -> None:
+        deadline = time.monotonic_ns() + 2 * NS
+        send(self.pipe, {"hud_window": window, "hud_pid": pid}, deadline)
+        reply, payload = self.receive(deadline)
+        if payload or reply != {"geometry_notified": True}:
+            raise CaptureError("could not verify private fullscreen geometry notification")
+
     def close(self) -> dict:
         try:
             send(self.pipe, {"stop": True}, time.monotonic_ns() + NS // 4)
@@ -286,7 +356,7 @@ class Capture:
 if __name__ == "__main__":
     with socket.socket(fileno=int(sys.argv[1])) as pipe:
         try:
-            capture_child(pipe, int(sys.argv[2]), sys.argv[3])
+            capture_child(pipe, int(sys.argv[2]), sys.argv[3], sys.argv[4:] == ["configure"])
         except (CaptureError, OSError, EOFError) as err:
             message = str(err) if isinstance(err, CaptureError) else type(err).__name__
             try:
