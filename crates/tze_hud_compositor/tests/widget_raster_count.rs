@@ -578,7 +578,7 @@ async fn dock_draws_only_on_its_accepted_display_and_parks_overflow() {
     };
     // Exercise same-size default-layer updates while hidden, independent of
     // alternate descriptor changes. The adjacent fixture covers compact art.
-    bundle.svg_contents = HashMap::from([("card.svg".into(), card_svg("red"))]);
+    bundle.svg_contents = HashMap::from([("card.svg".into(), card_svg("#ff0000"))]);
     let countdown = register_bundle(
         &mut gpu.compositor,
         &mut scene,
@@ -759,7 +759,7 @@ async fn dock_draws_only_on_its_accepted_display_and_parks_overflow() {
         signature(&gpu.compositor, &ordinary_change),
         initial_signature
     );
-    let mut equivalent_svg = card_svg("red");
+    let mut equivalent_svg = card_svg("#ff0000");
     equivalent_svg.extend_from_slice(b"<!-- equivalent raster -->");
     gpu.compositor.widget_renderer_mut().unwrap().register_svg(
         &countdown,
@@ -823,7 +823,7 @@ async fn dock_draws_only_on_its_accepted_display_and_parks_overflow() {
     gpu.compositor.widget_renderer_mut().unwrap().register_svg(
         &countdown,
         "card.svg",
-        card_svg("blue"),
+        card_svg("#0000ff"),
     );
     let restyled_hidden = build(&mut gpu.compositor, &mut scene);
     assert_eq!(raster_count(&gpu.compositor, &bottom), before_overflow);
