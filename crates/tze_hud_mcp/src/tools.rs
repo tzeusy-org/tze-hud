@@ -275,8 +275,10 @@ fn dock_expiry(scene: &SceneGraph, kind: &str, owner: &str) -> Option<u64> {
     let instance = scene.dock_instance(owner, kind)?;
     scene
         .widget_registry
-        .active_for_widget(&instance.instance_name)
-        .iter()
+        .active_publishes
+        .get(&instance.instance_name)
+        .into_iter()
+        .flatten()
         .filter(|record| record.publisher_namespace == owner)
         .filter_map(|record| scene.widget_expiry(record))
         .max()
