@@ -57,7 +57,7 @@ OWNED = dict(started_display=":91", target_display=":91", owned_pid=4242, status
 class DockTooltipWitnessTests(unittest.TestCase):
     def test_scope_and_scratch_configuration(self) -> None:
         self.assertNotIn(g.DOCK_TOOLTIP_SCENARIO, g.SCENARIOS)
-        self.assertEqual(list(g.EXPLICIT_SCENARIOS), [g.DOCK_TOOLTIP_SCENARIO])
+        self.assertEqual(list(g.EXPLICIT_SCENARIOS), [g.DOCK_TOOLTIP_SCENARIO, g.DOCK_PROGRESS_SCENARIO])
         self.assertEqual(g.OVERLAY_SCENARIOS, ("tray", "go-to-session", "overlay-pointer", "tray-answer"))
         original = g.CONFIG.read_text(encoding="utf-8")
         scratch = tomllib.loads(g.dock_tooltip_config(original))
@@ -270,6 +270,174 @@ class PrivateDockClientTests(unittest.TestCase):
         with self.assertRaisesRegex(x11.CaptureError, "matching client PID"):
             x11.notify_client_geometry(lib, display, root, client, pid + 1)
         lib.XSendEvent.assert_not_called()
+
+
+class DockProgressWitnessTests(unittest.TestCase):
+    def test_config_preserves_the_shipped_theme_and_other_tables(self) -> None:
+        original = g.CONFIG.read_text(encoding="utf-8")
+        changed = g.dock_progress_config(original)
+        self.assertTrue(changed.startswith(original))
+        scratch = tomllib.loads(changed)
+        self.assertEqual(scratch.pop("dock"), {"accepts": ["progress-bar"], "max_rows": 2})
+        self.assertEqual(scratch, tomllib.loads(original))
+        self.assertNotIn(g.DOCK_PROGRESS_SCENARIO, g.SCENARIOS)
+        with self.assertRaises(g.Refused):
+            g.dock_progress_config(changed)
+
+    def test_requires_explicit_linux_binding_and_dispatches_only_the_selected_witness(self) -> None:
+        progress, tooltip = g.DOCK_PROGRESS_SCENARIO, g.DOCK_TOOLTIP_SCENARIO
+        identity = ["--expected-dock-build-sha", "c" * 40]
+        cases = [
+            ("linux", [progress]),
+            ("linux", [*identity, progress, tooltip]),
+            ("linux", [*identity, "--required", tooltip, progress]),
+            ("linux", [*identity, "--required=", progress]),
+            ("linux", [*identity, "--injector", "sendinput", progress]),
+            ("linux", [*identity, "--window-mode", "overlay", progress]),
+            ("linux", [*identity, "--mouse-receipt-diagnostics", progress]),
+            ("win32", [*identity, progress]),
+        ]
+        for platform, args in cases:
+            with (self.subTest(platform=platform, args=args), mock.patch.object(g.sys, "platform", platform),
+                  mock.patch.object(g.Run, "start") as start, contextlib.redirect_stderr(io.StringIO())):
+                with self.assertRaises(SystemExit) as err:
+                    g.main(["--exe", "fake-hud", *args])
+                self.assertEqual(err.exception.code, 2)
+                start.assert_not_called()
+
+        for name in (progress, tooltip):
+            with (self.subTest(name=name), tempfile.TemporaryDirectory() as temp,
+                  mock.patch.object(g.sys, "platform", "linux"), mock.patch.object(g, "WINDOWS", False),
+                  mock.patch.object(g, "git_sha", return_value="c" * 12), mock.patch.object(g.Run, "start"),
+                  mock.patch.object(g.Run, "status", return_value={}),
+                  mock.patch.object(g, "run_scenarios", return_value=[{"scenario": name, "outcome": "PASS"}]) as play,
+                  contextlib.redirect_stdout(io.StringIO())):
+                out = Path(temp) / "absent"
+                argv = ["--exe", "fake-hud", "--out", str(out), *identity, name]
+                self.assertEqual(g.main(argv), 0)
+                run, selected = play.call_args.args
+                self.assertEqual(selected, [name])
+                self.assertEqual((run.dock_scenario, run.dock_build_sha), (name, "c" * 40))
+                self.assertEqual(json.loads((out / "verdict.json").read_text())["required"], [name])
+
+    def test_tint_requires_paired_rgb_direction(self) -> None:
+        dark = bytes([22, 26, 32, 255])
+        bright = bytes([36, 40, 45, 255])
+        red_only = bytes([45, 26, 32, 255])
+        alpha_only = bytes([22, 26, 32, 240])
+        self.assertEqual(g.dock_progress_tint(dark * 4, bright + red_only + alpha_only + dark), (1, 4))
+        self.assertEqual(g.dock_progress_tint(dark * 4, bright * 4), (4, 4))
+        with self.assertRaises(ValueError):
+            g.dock_progress_tint(dark, bright[:3])
+
+    def test_real_scenario_oracles_with_mocked_native_and_transport_boundaries(self) -> None:
+        screen = (400, 300)
+        frame = (50, 60, 128, 48)
+        blank, card, tint = (bytes(rgb) for rgb in ([63, 63, 89, 255], [22, 26, 32, 255], [39, 43, 49, 255]))
+        background = blank * 128 * 8
+        baseline = card * 128 * 20 + background + card * 128 * 20
+        hovered = tint * 128 * 20 + background + card * 128 * 20
+        removed = blank * 128 * 20 + background + card * 128 * 20
+        sha = "c" * 40
+
+        def status(rows, *, lit=False, b_identity="widget:b"):
+            b = {"session": "dock-progress-b", "s": b_identity, "display": 0,
+                 "rect": {"x": 50, "y": 88, "w": 128, "h": 20}, "tooltip_visible": False}
+            a = {"session": "dock-progress-a", "s": "widget:a", "display": 0,
+                 "rect": {"x": 50, "y": 60, "w": 128, "h": 20}, "tooltip_visible": lit}
+            return {"pid": 4242, "sha": sha, "displays": [{"primary": True, "x": 0, "y": 0,
+                    "width": screen[0], "height": screen[1]}], "window_activations": 0,
+                    "dock": {"rows": rows, "capacity": 2, "overflow": [], "scale": 1},
+                    "widgets": {0: [], 1: [b], 2: [a, b]}[rows]}
+
+        faults = {
+            "pass": None,
+            "early": "early sample was late or changed",
+            "premature": "changed before its authored dwell",
+            "peer_pixels": "changed the peer B card pixels",
+            "slow_delete": "DELETE did not complete within one second",
+            "peer_identity": "preserve B's exact drawn identity",
+        }
+        for fault, expected_failure in faults.items():
+            with self.subTest(fault=fault), tempfile.TemporaryDirectory() as temp:
+                out = Path(temp)
+                run = mock.Mock()
+                run.out, run.pid, run.dock_build_sha, run.display = out, 4242, sha, ":91"
+                run.exe = out / "fake-hud"
+                run.exe.write_bytes(b"pure synthetic binary identity")
+                binary_hash = hashlib.sha256(run.exe.read_bytes()).hexdigest()
+                run.hud.poll.return_value = None
+                run.settle.side_effect = [status(0), status(2)]
+                run.status.side_effect = [status(2, lit=True),
+                                          status(1, b_identity="widget:new" if fault == "peer_identity" else "widget:b")]
+                run.inj.calls = 2
+                clock = 1_000_000_000
+                motion = 0
+
+                def monotonic_ns():
+                    nonlocal clock
+                    clock += 1_000_000
+                    return clock
+
+                def move(x, y):
+                    nonlocal motion
+                    if (x, y) != (10, 10):
+                        motion = clock
+
+                def release_a():
+                    nonlocal clock
+                    if fault == "slow_delete":
+                        clock += x11.NS
+                    return 202
+
+                run.glide.side_effect = move
+                a, b = mock.Mock(session="temporary-auth-a"), mock.Mock(session="temporary-auth-b")
+                a.call.return_value = b.call.return_value = False, {"ok": True, "expires_in_ms": 60_000}
+                a.end.side_effect = release_a
+                b.end.return_value = 202
+                capture = mock.Mock(ready={"peer": {"pid": 2479}, "root": 3})
+                capture.close.return_value = {"returncode": 0, "forced": False, "reaped": True}
+                images = iter(("blank", "baseline", "early", "due", "released"))
+
+                def sample(rect, point, _deadline):
+                    nonlocal clock
+                    phase = next(images)
+                    points = {"blank": (10, 10), "baseline": (10, 10)}
+                    self.assertEqual(point, points.get(phase, (114, 70)))
+                    self.assertEqual(rect, (0, 0, *screen) if phase == "blank" else frame)
+                    if phase == "due":
+                        clock = motion + (160_000_000 if fault == "premature" else 220_000_000)
+                    pixels = {"blank": blank * screen[0] * screen[1], "baseline": baseline,
+                              "early": hovered if fault == "early" else baseline,
+                              "due": hovered[:-4] + tint if fault == "peer_pixels" else hovered,
+                              "released": removed}[phase]
+                    pointer_at = monotonic_ns()
+                    return {"pointer_ns": [pointer_at, pointer_at + 10],
+                            "acquisition_ns": [pointer_at + 20, pointer_at + 30]}, pixels
+
+                capture.sample.side_effect = sample
+                with (mock.patch.object(g, "SCREEN", screen), mock.patch.object(g.time, "monotonic_ns", monotonic_ns),
+                      mock.patch.object(g, "dock_build_evidence", return_value={"exe_sha256": binary_hash}),
+                      mock.patch.object(g, "SessionSmoke", side_effect=[a, b]),
+                      mock.patch.object(x11, "Capture", return_value=capture)):
+                    if expected_failure is None:
+                        g.scenario_dock_progress_hover(run)
+                        self.assertEqual(run.glide.call_args_list, [mock.call(10, 10), mock.call(114, 70)])
+                    else:
+                        with self.assertRaisesRegex(g.ScenarioFailed, expected_failure):
+                            g.scenario_dock_progress_hover(run)
+                a.end.assert_called_once_with()
+                b.end.assert_called_once_with()
+                capture.close.assert_called_once_with()
+                raw = (out / f"{g.DOCK_PROGRESS_SCENARIO}.json").read_text()
+                self.assertNotIn("temporary-auth", raw)
+                self.assertNotIn("widget:b", raw)
+                report = json.loads(raw)
+                self.assertEqual(report["verdict"], "PASS" if expected_failure is None else "FAIL")
+                if expected_failure is None:
+                    self.assertTrue(report["same_b_instance_and_rect"])
+                    self.assertEqual(report["cleanup"]["sessions"], [202, 202])
+                    self.assertIn("a-exit", report["images"])
 
 
 class GuardTests(unittest.TestCase):

@@ -74,6 +74,7 @@ LAVAPIPE = next((p for p in (Path("/usr/share/vulkan/icd.d/lvp_icd.x86_64.json")
                 Path("/usr/share/vulkan/icd.d/lvp_icd.json"))
 SCREEN = (1280, 800)
 DOCK_TOOLTIP_SCENARIO = "dock-countdown-tooltip"
+DOCK_PROGRESS_SCENARIO = "dock-progress-hover"
 DOCK_POPUP_RGB = (255, 208, 0)
 DOCK_INK_RGB = (16, 24, 48)
 SETTLE_S = 5.0  # bound on any one observed transition
@@ -497,6 +498,14 @@ def dock_tooltip_config(config: str) -> str:
     return config.replace(marker, marker + tokens, 1) + '\n[dock]\naccepts = ["countdown"]\nmax_rows = 2\n'
 
 
+def dock_progress_config(config: str) -> str:
+    """Enable only the dock and leave the shipped theme and artwork intact."""
+    stock_theme = '[design_tokens]\ntheme = "tonal-glass"\n'
+    if config.count(stock_theme) != 1 or re.search(r"^\s*\[dock\]", config, re.M):
+        raise Refused("unexpected source configuration for the progress witness")
+    return config + '\n[dock]\naccepts = ["progress-bar"]\nmax_rows = 2\n'
+
+
 @dataclass
 class Run:
     exe: Path
@@ -525,6 +534,7 @@ class Run:
     grpc_port: int = field(default=0, init=False)
     mouse_receipts: MouseReceiptCapture | None = None
     dock_build_sha: str | None = None
+    dock_scenario: str = DOCK_TOOLTIP_SCENARIO
     xauthority: Path | None = field(default=None, init=False)
 
     @property
@@ -583,7 +593,8 @@ class Run:
         config = seed_config(CONFIG, self.psk)
         self.config_dir = config.parent
         if self.dock_build_sha:
-            config.write_text(dock_tooltip_config(config.read_text(encoding="utf-8")), encoding="utf-8")
+            configure = dock_progress_config if self.dock_scenario == DOCK_PROGRESS_SCENARIO else dock_tooltip_config
+            config.write_text(configure(config.read_text(encoding="utf-8")), encoding="utf-8")
         if self.go_to_probe:
             seeded = config.read_text(encoding="utf-8")
             config.write_text(seeded.replace("[runtime]\n",
@@ -1727,6 +1738,218 @@ def scenario_dock_countdown_tooltip(run: Run) -> None:
             entry.setdefault("images", []).append({"name": path.name, "bytes": len(png),
                                                     "sha256": hashlib.sha256(png).hexdigest()})
         (run.out / f"{DOCK_TOOLTIP_SCENARIO}.json").write_text(json.dumps(report, indent=1), encoding="utf-8")
+    if failure:
+        raise failure
+
+
+def dock_progress_entry(status: dict, caption: str) -> tuple[str, tuple[int, int, int, int], bool] | None:
+    entries = status.get("widgets")
+    if not isinstance(entries, list):
+        raise ScenarioFailed("drawn widget entries unavailable", None)
+    matches = [entry for entry in entries if entry.get("session") == caption]
+    if not matches:
+        return None
+    entry = matches[0]
+    identity, visible = entry.get("s"), entry.get("tooltip_visible")
+    if (len(matches) != 1 or entry.get("display") != 0 or not isinstance(identity, str)
+            or not identity.startswith("widget:") or type(visible) is not bool):
+        raise ScenarioFailed("scoped progress did not identify one primary widget", None)
+    return identity, dock_rect(entry), visible
+
+
+def dock_progress_tint(before: bytes, after: bytes) -> tuple[int, int]:
+    """Count pixels that brighten coherently in the stock on-surface layer."""
+    if not before or len(before) != len(after) or len(before) % 4:
+        raise ValueError("progress pixel pairs have different bounds")
+    brighter = sum(all(after[i + c] - before[i + c] >= 4 for c in range(3))
+                   for i in range(0, len(before), 4))
+    return brighter, len(before) // 4
+
+
+def scenario_dock_progress_hover(run: Run) -> None:
+    """Tier L opt-in: hover one's shipped progress layer, then release only that scope."""
+    from hud_x11_capture import Capture, CaptureError, NS, inside
+
+    captions = ("dock-progress-a", "dock-progress-b")
+    outside = (10, 10)
+    sessions: dict[int, SessionSmoke] = {}
+    replies: list[int | str | None] = [None, None]
+    images: dict[str, tuple[dict, bytes]] = {}
+    report: dict = {"schema": 1, "captions": captions, "publishes": []}
+    capture = None
+    stage = "owned startup"
+    failure = None
+
+    def require(condition, message):
+        if not condition:
+            raise ScenarioFailed(message, {"stage": stage})
+
+    def entries(status, rows):
+        displays = status.get("displays") or []
+        require(status.get("pid") == run.pid and status.get("sha") == run.dock_build_sha
+                and len(displays) == 1 and displays[0].get("primary") is True
+                and tuple(displays[0].get(k) for k in ("x", "y", "width", "height")) == (0, 0, *SCREEN),
+                "owned progress build must match the private primary root")
+        require(status.get("dock") == {"rows": rows, "capacity": 2, "overflow": [], "scale": 1},
+                "the scratch dock must draw the expected rows at full scale")
+        return tuple(dock_progress_entry(status, caption) for caption in captions)
+
+    def sample(point, deadline):
+        require(run.hud.poll() is None, "owned HUD disappeared during progress root sampling")
+        meta, rgba = capture.sample(frame, point, deadline)
+        images["last"] = (meta, rgba)
+        return meta, rgba
+
+    def crops(rgba):
+        return tuple(dock_crop(rgba, frame, card) for card in bounds)
+
+    try:
+        run.expect("dock startup reports progress capacity", lambda st: (st.get("dock") or {}).get("capacity") == 2)
+        require(entries(run.settle(), 0) == (None, None), "progress fixture must begin empty")
+        report.update(dock_build_evidence(run))
+        run.glide(*outside)
+        capture = Capture(run.xvfb, run.display, run.xauthority)
+        report["x11"] = {"display": run.display, **capture.ready}
+        root = (0, 0, *SCREEN)
+        blank_meta, blank_root = capture.sample(root, outside, time.monotonic_ns() + NS)
+
+        stage = "publish two independent progress rows"
+        for index, (caption, progress) in enumerate(zip(captions, (0.25, 0.75))):
+            sessions[index] = SessionSmoke(run.smoke.url, run.psk, caption)
+            run.mark()
+            is_error, reply = sessions[index].call("hud_publish", {
+                "surface": "dock:progress-bar", "ttl_ms": 60_000,
+                "params": {"label": ("Alpha", "Beta")[index], "progress": progress},
+            }, timeout_s=3)
+            expires = reply.get("expires_in_ms")
+            accepted = not is_error and reply.get("ok") is True
+            report["publishes"].append({"card": "AB"[index], "progress": progress, "accepted": accepted,
+                                        "expires_in_ms": expires if type(expires) is int else None})
+            require(accepted and type(expires) is int and 0 < expires <= 60_000,
+                    "scoped progress publish must have finite accepted lifetime")
+        require(sessions[0].session != sessions[1].session, "progress publishes must use two real scopes")
+        initial = run.settle()
+        a, b = entries(initial, 2)
+        require(a is not None and b is not None and a[0] != b[0] and not (a[2] or b[2]),
+                "both scopes need distinct inactive drawn instances")
+        card_a, card_b = bounds = (a[1], b[1])
+        x, y, w, h = card_a
+        require(all(inside(card) and abs(card[2] - 6.4 * card[3]) <= 7 for card in bounds)
+                and x == card_b[0] and card_a[2:] == card_b[2:] and y + h <= card_b[1],
+                "drawn progress rows must be separate, ordered, and preserve shipped geometry")
+        frame = (x, y, w, card_b[1] + h - y)
+        # Stay within the authored state layer, below the stock track and away from corners.
+        patch = (x + w // 5, y + round(h * 0.82), w // 4, max(2, h // 12))
+        pointer = (x + w // 2, y + h // 2)
+        report.update(cards=bounds, tint_patch=patch, distinct_instances=True, distinct_scopes=True)
+
+        stage = "establish settled baseline pixels"
+        blank = dock_crop(blank_root, root, frame)
+        images["blank"] = (blank_meta, blank)
+        del blank_root
+        blank_cards = crops(blank)
+        baseline_meta, baseline = sample(outside, time.monotonic_ns() + NS)
+        images["baseline"] = (baseline_meta, baseline)
+        source_a, source_b = crops(baseline)
+        for source, empty in zip((source_a, source_b), blank_cards):
+            require(sum(max(abs(source[i + c] - empty[i + c]) for c in range(3)) >= 8
+                        for i in range(0, len(source), 4)) >= w * h // 2,
+                    "an admitted progress card did not establish substantial root pixels")
+        reference = dock_crop(baseline, frame, patch)
+
+        stage = "hover only the first shipped progress state layer"
+        start = time.monotonic_ns()
+        run.glide(*pointer)
+        arrived = time.monotonic_ns()
+        report["hover_motion"] = {"point": pointer, "interval_ns": [start, arrived]}
+        early, pixels = sample(pointer, start + 150_000_000)
+        images["a-early"] = (early, pixels)
+        require(early["pointer_ns"][0] >= arrived and early["acquisition_ns"][1] <= start + 150_000_000
+                and crops(pixels) == (source_a, source_b), "progress early sample was late or changed")
+        due, limit = start + 180_000_000, start + 1_500_000_000
+        while time.monotonic_ns() < limit:
+            meta, pixels = sample(pointer, limit)
+            current_a, current_b = crops(pixels)
+            require(current_b == source_b, "hovering A changed the peer B card pixels")
+            require(current_a == source_a or meta["acquisition_ns"][0] >= due,
+                    "progress card changed before its authored dwell was proven")
+            latest = dock_crop(pixels, frame, patch)
+            brighter, total = dock_progress_tint(reference, latest)
+            report["tint"] = {"brightened": brighter, "pixels": total,
+                              "first_pair_rgba": [list(reference[:4]), list(latest[:4])]}
+            if brighter * 10 >= total * 9:
+                require(due <= meta["acquisition_ns"][0] <= meta["acquisition_ns"][1] <= limit,
+                        "authored progress tint appeared outside its proven dwell bracket")
+                images["a-due"] = (meta, pixels)
+                break
+            time.sleep(0.020)
+        require("a-due" in images, "did not observe A's authored progress tint")
+        require(entries(run.status(), 2) == ((*a[:2], True), b),
+                "only A's original live progress state may become active")
+        report["hover_flags"] = [True, False]
+
+        stage = "release A through its real scoped transport"
+        session_a = sessions.pop(0)
+        start = time.monotonic_ns()
+        try:
+            replies[0] = session_a.end()
+        finally:
+            report["a_delete"] = {"status": replies[0], "interval_ns": [start, time.monotonic_ns()]}
+        limit = start + NS
+        require(replies[0] == 202 and report["a_delete"]["interval_ns"][1] <= limit,
+                "A's scoped DELETE did not complete within one second")
+        while time.monotonic_ns() < limit:
+            meta, pixels = sample(pointer, limit)
+            current_a, current_b = crops(pixels)
+            require(current_b == source_b, "A's exit moved or repainted the surviving peer card")
+            if current_a == blank_cards[0]:
+                images["a-exit"] = (meta, pixels)
+                break
+            time.sleep(0.020)
+        require("a-exit" in images, "A's exited row did not clear the original root slot")
+        final = run.status()
+        report["exit_status_ns"] = time.monotonic_ns()
+        require(report["exit_status_ns"] <= limit and entries(final, 1) == (None, b),
+                "A must disappear and preserve B's exact drawn identity and slot within one second")
+        report["same_b_instance_and_rect"] = True
+        activations = [status.get("window_activations") for status in (initial, final)]
+        require(type(activations[0]) is int and activations[0] == activations[1] and run.inj.calls == 2,
+                "progress proof must use two guarded passive moves and no activation")
+        with run.exe.open("rb") as binary:
+            require(hashlib.file_digest(binary, "sha256").hexdigest() == report["exe_sha256"],
+                    "the executable digest changed during the run")
+        report.update(window_activations=activations, xtest_moves=run.inj.calls, final_build=final["sha"])
+    except ScenarioFailed as err:
+        failure = ScenarioFailed(err.step, {"stage": stage})
+    except Exception as err:
+        detail = str(err) if isinstance(err, CaptureError) else type(err).__name__
+        failure = ScenarioFailed(f"{stage}: {detail}", {"stage": stage})
+    finally:
+        cleanup: dict = {"sessions": replies}
+        if capture is not None:
+            try:
+                cleanup["capture"] = capture.close()
+            except Exception as err:
+                cleanup["capture"] = {"error": type(err).__name__}
+        for index, session in reversed(list(sessions.items())):
+            try:
+                replies[index] = session.end()
+            except Exception as err:
+                replies[index] = type(err).__name__
+        if failure is None and (replies != [202, 202]
+                or cleanup.get("capture") != {"returncode": 0, "forced": False, "reaped": True}):
+            failure = ScenarioFailed("capture or scoped cleanup was incomplete", {"stage": "cleanup"})
+        report.update(cleanup=cleanup, verdict="FAIL" if failure else "PASS",
+                      failure=failure.step if failure else None)
+        report["images"] = {}
+        for name, (meta, rgba) in images.items():
+            png = encode_png_rgba(*frame[2:], rgba)
+            path = run.out / f"{DOCK_PROGRESS_SCENARIO}.{name}.png"
+            path.write_bytes(png)
+            report["images"][name] = {"capture": meta, "crop": frame, "name": path.name, "bytes": len(png),
+                                      "png_sha256": hashlib.sha256(png).hexdigest(),
+                                      "rgba_sha256": hashlib.sha256(rgba).hexdigest()}
+        (run.out / f"{DOCK_PROGRESS_SCENARIO}.json").write_text(json.dumps(report, indent=1), encoding="utf-8")
     if failure:
         raise failure
 
@@ -3576,7 +3799,10 @@ def git_sha() -> str:
         return "unknown"
 
 
-EXPLICIT_SCENARIOS = {DOCK_TOOLTIP_SCENARIO: scenario_dock_countdown_tooltip}
+EXPLICIT_SCENARIOS = {
+    DOCK_TOOLTIP_SCENARIO: scenario_dock_countdown_tooltip,
+    DOCK_PROGRESS_SCENARIO: scenario_dock_progress_hover,
+}
 
 
 def run_scenarios(run: Run, names: list[str]) -> list[dict]:
@@ -3660,17 +3886,18 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{name:20} {(fn.__doc__ or '').strip().splitlines()[0]}")
         return 0
     named = args.scenarios + (args.required or [])
-    dock_witness = DOCK_TOOLTIP_SCENARIO in named
+    dock_scenario = next((name for name in named if name in EXPLICIT_SCENARIOS), None)
+    dock_witness = dock_scenario is not None
     if dock_witness and (
         sys.platform != "linux" or args.injector != "xtest" or args.window_mode != "fullscreen"
-        or args.scenarios != [DOCK_TOOLTIP_SCENARIO] or args.mouse_receipt_diagnostics
-        or args.required not in (None, [DOCK_TOOLTIP_SCENARIO])
+        or args.scenarios != [dock_scenario] or args.mouse_receipt_diagnostics
+        or args.required not in (None, [dock_scenario])
         or not re.fullmatch(r"[0-9a-f]{40}", args.expected_dock_build_sha or "")
     ):
-        parser.error("dock-countdown-tooltip must run alone and required on Linux XTEST fullscreen "
+        parser.error(f"{dock_scenario} must run alone and required on Linux XTEST fullscreen "
                      "with --expected-dock-build-sha")
     if args.expected_dock_build_sha and not dock_witness:
-        parser.error("--expected-dock-build-sha is only for dock-countdown-tooltip")
+        parser.error("--expected-dock-build-sha requires an explicit dock witness")
     unknown = [n for n in named if n not in SCENARIOS and n not in EXPLICIT_SCENARIOS]
     if unknown:
         parser.error(f"unknown scenario(s): {', '.join(unknown)}; see --list")
@@ -3704,7 +3931,8 @@ def main(argv: list[str] | None = None) -> int:
     out = args.out or REPO / "test_results/gestures" / sha / f"{time.strftime('%Y%m%dT%H%M%S')}-{os.getpid()}"
     out.mkdir(parents=True, exist_ok=not dock_witness)
     run = Run(exe=args.exe.resolve(), out=out, injector=args.injector, window_mode=args.window_mode,
-              go_to_probe="go-to-session" in names, dock_build_sha=args.expected_dock_build_sha)
+              go_to_probe="go-to-session" in names, dock_build_sha=args.expected_dock_build_sha,
+              dock_scenario=dock_scenario or DOCK_TOOLTIP_SCENARIO)
     if args.mouse_receipt_diagnostics:
         run.mouse_receipts = MouseReceiptCapture(out)
     started = time.monotonic()
