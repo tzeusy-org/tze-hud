@@ -41,7 +41,55 @@ async fn icon_texture_retries_missing_tokens_and_rasterizes_at_the_current_token
 async fn scroll_viewports_and_truncation_cache_select_the_same_edge() {
     use crate::overflow::TruncationViewport::{HeadAnchored, TailAnchored};
 
-    let (mut compositor, _surface) = require_gpu!(make_text_compositor(720, 360).await);
+    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(720, 360).await);
+    let tile_bounds = Rect::new(100.0, 50.0, 400.0, 200.0);
+    let node_bounds = Rect::new(10.0, 20.0, 300.0, 24.0);
+    let mut scene = SceneGraph::new(720.0, 360.0);
+    let tab = scene.create_tab("test", 0).unwrap();
+    let lease = scene.grant_lease("scroll-test", 120_000);
+    let tile = scene
+        .create_tile(tab, "scroll-test", lease, tile_bounds, 1)
+        .unwrap();
+    let content = "scroll test line";
+    scene
+        .set_tile_root(tile, scroll_text(content, node_bounds, TextOverflow::Clip))
+        .unwrap();
+
+    let original = compositor.collect_text_items(&scene, 720.0, 360.0);
+    let [original] = original.as_slice() else {
+        panic!("one unscrolled text item")
+    };
+    assert_eq!(original.text.as_ref(), content);
+    assert!(original.pixel_y >= tile_bounds.y + node_bounds.y);
+    assert!(!compositor.scroll_smoothing_enabled);
+
+    scene
+        .register_tile_scroll_config(
+            tile,
+            TileScrollConfig {
+                content_height: Some(600.0),
+                ..TileScrollConfig::vertical()
+            },
+        )
+        .unwrap();
+    scene.set_tile_scroll_offset_local(tile, 0.0, 80.0).unwrap();
+    assert_eq!(
+        compositor.display_tile_scroll_offset(&scene, tile),
+        (0.0, 80.0)
+    );
+    let scrolled = compositor.collect_text_items(&scene, 720.0, 360.0);
+    let [scrolled] = scrolled.as_slice() else {
+        panic!("one scrolled text item")
+    };
+    assert_eq!(scrolled.text.as_ref(), content);
+    assert_eq!(scrolled.pixel_x, original.pixel_x);
+    assert!((original.pixel_y - scrolled.pixel_y - 80.0).abs() < 0.01);
+    assert_eq!(
+        (scrolled.clip_pixel_y, scrolled.clip_bounds_height),
+        (original.clip_pixel_y, original.clip_bounds_height)
+    );
+
+    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
     let content = "FIRST\nbbbb\ncccc\ndddd\neeee\nffff\ngggg\nLAST";
     let mut observed = Vec::new();
     for (zone, overflow, opt_in, viewport) in [
@@ -107,57 +155,6 @@ async fn scroll_viewports_and_truncation_cache_select_the_same_edge() {
             "{owner}: head and tail cache keys"
         );
     }
-}
-
-#[tokio::test]
-async fn scrolling_moves_text_origin_without_moving_its_clip() {
-    let (compositor, _) = require_gpu!(make_compositor_and_surface(720, 360).await);
-    let tile_bounds = Rect::new(100.0, 50.0, 400.0, 200.0);
-    let node_bounds = Rect::new(10.0, 20.0, 300.0, 24.0);
-    let mut scene = SceneGraph::new(720.0, 360.0);
-    let tab = scene.create_tab("test", 0).unwrap();
-    let lease = scene.grant_lease("scroll-test", 120_000);
-    let tile = scene
-        .create_tile(tab, "scroll-test", lease, tile_bounds, 1)
-        .unwrap();
-    let content = "scroll test line";
-    scene
-        .set_tile_root(tile, scroll_text(content, node_bounds, TextOverflow::Clip))
-        .unwrap();
-
-    let original = compositor.collect_text_items(&scene, 720.0, 360.0);
-    let [original] = original.as_slice() else {
-        panic!("one unscrolled text item")
-    };
-    assert_eq!(original.text.as_ref(), content);
-    assert!(original.pixel_y >= tile_bounds.y + node_bounds.y);
-    assert!(!compositor.scroll_smoothing_enabled);
-
-    scene
-        .register_tile_scroll_config(
-            tile,
-            TileScrollConfig {
-                content_height: Some(600.0),
-                ..TileScrollConfig::vertical()
-            },
-        )
-        .unwrap();
-    scene.set_tile_scroll_offset_local(tile, 0.0, 80.0).unwrap();
-    assert_eq!(
-        compositor.display_tile_scroll_offset(&scene, tile),
-        (0.0, 80.0)
-    );
-    let scrolled = compositor.collect_text_items(&scene, 720.0, 360.0);
-    let [scrolled] = scrolled.as_slice() else {
-        panic!("one scrolled text item")
-    };
-    assert_eq!(scrolled.text.as_ref(), content);
-    assert_eq!(scrolled.pixel_x, original.pixel_x);
-    assert!((original.pixel_y - scrolled.pixel_y - 80.0).abs() < 0.01);
-    assert_eq!(
-        (scrolled.clip_pixel_y, scrolled.clip_bounds_height),
-        (original.clip_pixel_y, original.clip_bounds_height)
-    );
 }
 
 #[tokio::test]
