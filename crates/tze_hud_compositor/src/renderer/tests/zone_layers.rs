@@ -88,74 +88,40 @@ async fn test_static_image_zone_emits_warm_gray_placeholder() {
 // vertices are emitted.  rect_vertices emits 6 vertices per quad; the color
 // fields let us identify which zone's vertices are which.
 
-/// Background zones emit vertices only when the Background layer filter is used.
-/// Content zones emit no vertices when filtered to Background only.
+/// Background and Chrome filters exclude Content zones; Content remains separate.
 #[tokio::test]
 async fn test_layer_filter_background_only_emits_background_vertices() {
     let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
-    let mut scene = SceneGraph::new(1280.0, 720.0);
+    let layer_scene = |zones: [(&str, &str, GeometryPolicy, LayerAttachment, Rgba); 2]| {
+        let mut scene = SceneGraph::new(1280.0, 720.0);
+        // Register both zones before publishing, preserving each case's order.
+        for (name, description, geometry, layer, _) in &zones {
+            let mut zone = zone_fixture(name, geometry.clone(), ZoneMediaType::SolidColor, *layer);
+            zone.description = (*description).into();
+            scene.register_zone(zone);
+        }
+        for (name, _, _, _, color) in zones {
+            publish_zone(&mut scene, name, "agent", ZoneContent::SolidColor(color));
+        }
+        scene
+    };
 
-    // Background zone: solid dark blue (r=0.0, g=0.0, b=1.0).
-    scene.register_zone(ZoneDefinition {
-        id: SceneId::new(),
-        name: "bg-zone".to_owned(),
-        description: "background layer".to_owned(),
-        geometry_policy: GeometryPolicy::Relative {
-            x_pct: 0.0,
-            y_pct: 0.0,
-            width_pct: 1.0,
-            height_pct: 1.0,
-        },
-        accepted_media_types: vec![ZoneMediaType::SolidColor],
-        rendering_policy: RenderingPolicy::default(),
-        contention_policy: ContentionPolicy::LatestWins,
-        max_publishers: 1,
-        auto_clear_ms: None,
-        ephemeral: false,
-        layer_attachment: LayerAttachment::Background,
-    });
-
-    // Content zone: solid red (r=1.0, g=0.0, b=0.0).
-    scene.register_zone(ZoneDefinition {
-        id: SceneId::new(),
-        name: "content-zone".to_owned(),
-        description: "content layer".to_owned(),
-        geometry_policy: GeometryPolicy::Relative {
-            x_pct: 0.1,
-            y_pct: 0.1,
-            width_pct: 0.5,
-            height_pct: 0.5,
-        },
-        accepted_media_types: vec![ZoneMediaType::SolidColor],
-        rendering_policy: RenderingPolicy::default(),
-        contention_policy: ContentionPolicy::LatestWins,
-        max_publishers: 1,
-        auto_clear_ms: None,
-        ephemeral: false,
-        layer_attachment: LayerAttachment::Content,
-    });
-
-    scene
-        .publish_to_zone(
+    let scene = layer_scene([
+        (
             "bg-zone",
-            ZoneContent::SolidColor(Rgba::new(0.0, 0.0, 1.0, 1.0)),
-            "agent",
-            None,
-            None,
-            None,
-        )
-        .unwrap();
-    scene
-        .publish_to_zone(
+            "background layer",
+            relative(0.0, 0.0, 1.0, 1.0),
+            LayerAttachment::Background,
+            Rgba::new(0.0, 0.0, 1.0, 1.0),
+        ),
+        (
             "content-zone",
-            ZoneContent::SolidColor(Rgba::new(1.0, 0.0, 0.0, 1.0)),
-            "agent",
-            None,
-            None,
-            None,
-        )
-        .unwrap();
-
+            "content layer",
+            relative(0.1, 0.1, 0.5, 0.5),
+            LayerAttachment::Content,
+            Rgba::new(1.0, 0.0, 0.0, 1.0),
+        ),
+    ]);
     // Filter: Background only — should emit bg-zone quads (6 verts), not content-zone quads.
     let mut bg_only: Vec<crate::pipeline::RectVertex> = Vec::new();
     compositor.render_zone_content(
@@ -208,76 +174,25 @@ async fn test_layer_filter_background_only_emits_background_vertices() {
         content_color[2] < 0.1,
         "Content zone vertex B must be near 0.0 (red); got {content_color:?}"
     );
-}
+    drop(scene);
 
-/// Chrome zones emit vertices only when the Chrome layer filter is used.
-/// Using Chrome filter emits no Content zone vertices.
-#[tokio::test]
-async fn test_layer_filter_chrome_only_emits_chrome_vertices() {
-    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
-    let mut scene = SceneGraph::new(1280.0, 720.0);
-
-    // Content zone: solid green (r=0.0, g=1.0, b=0.0).
-    scene.register_zone(ZoneDefinition {
-        id: SceneId::new(),
-        name: "content-zone".to_owned(),
-        description: "content layer".to_owned(),
-        geometry_policy: GeometryPolicy::Relative {
-            x_pct: 0.1,
-            y_pct: 0.1,
-            width_pct: 0.5,
-            height_pct: 0.5,
-        },
-        accepted_media_types: vec![ZoneMediaType::SolidColor],
-        rendering_policy: RenderingPolicy::default(),
-        contention_policy: ContentionPolicy::LatestWins,
-        max_publishers: 1,
-        auto_clear_ms: None,
-        ephemeral: false,
-        layer_attachment: LayerAttachment::Content,
-    });
-
-    // Chrome zone: solid yellow (r=1.0, g=1.0, b=0.0).
-    scene.register_zone(ZoneDefinition {
-        id: SceneId::new(),
-        name: "chrome-zone".to_owned(),
-        description: "chrome layer".to_owned(),
-        geometry_policy: GeometryPolicy::Relative {
-            x_pct: 0.0,
-            y_pct: 0.0,
-            width_pct: 0.3,
-            height_pct: 0.1,
-        },
-        accepted_media_types: vec![ZoneMediaType::SolidColor],
-        rendering_policy: RenderingPolicy::default(),
-        contention_policy: ContentionPolicy::LatestWins,
-        max_publishers: 1,
-        auto_clear_ms: None,
-        ephemeral: false,
-        layer_attachment: LayerAttachment::Chrome,
-    });
-
-    scene
-        .publish_to_zone(
+    // Chrome counterpart: use a fresh scene, with Content registered first.
+    let scene = layer_scene([
+        (
             "content-zone",
-            ZoneContent::SolidColor(Rgba::new(0.0, 1.0, 0.0, 1.0)),
-            "agent",
-            None,
-            None,
-            None,
-        )
-        .unwrap();
-    scene
-        .publish_to_zone(
+            "content layer",
+            relative(0.1, 0.1, 0.5, 0.5),
+            LayerAttachment::Content,
+            Rgba::new(0.0, 1.0, 0.0, 1.0),
+        ),
+        (
             "chrome-zone",
-            ZoneContent::SolidColor(Rgba::new(1.0, 1.0, 0.0, 1.0)),
-            "agent",
-            None,
-            None,
-            None,
-        )
-        .unwrap();
-
+            "chrome layer",
+            relative(0.0, 0.0, 0.3, 0.1),
+            LayerAttachment::Chrome,
+            Rgba::new(1.0, 1.0, 0.0, 1.0),
+        ),
+    ]);
     // Chrome filter: must emit only chrome-zone vertices.
     let mut chrome_only: Vec<crate::pipeline::RectVertex> = Vec::new();
     compositor.render_zone_content(
