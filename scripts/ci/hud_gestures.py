@@ -544,11 +544,16 @@ class Run:
     # Lifecycle ───────────────────────────────────────────────────────────
 
     def start(self, *, resident_raster: bool = False) -> None:
-        if self.dock_build_sha and (
-            sys.platform != "linux" or self.injector != "xtest" or self.window_mode != "fullscreen"
-            or resident_raster or not LAVAPIPE.is_file()
-        ):
-            raise Refused("dock witness needs Linux, private fullscreen XTEST and llvmpipe")
+        if self.dock_build_sha:
+            if self.injector == "sendinput":
+                if (not WINDOWS or self.dock_scenario != DOCK_PROGRESS_SCENARIO
+                        or self.window_mode != "fullscreen" or resident_raster
+                        or os.environ.get("GITHUB_ACTIONS") != "true"
+                        or os.environ.get("RUNNER_ENVIRONMENT") != "github-hosted"):
+                    raise Refused("Windows dock progress needs private fullscreen SendInput on a GitHub-hosted VM")
+            elif (sys.platform != "linux" or self.injector != "xtest" or self.window_mode != "fullscreen"
+                  or resident_raster or not LAVAPIPE.is_file()):
+                raise Refused("dock witness needs Linux, private fullscreen XTEST and llvmpipe")
         if self.injector == "sendinput":
             if os.environ.get("GITHUB_ACTIONS") != "true":
                 raise Refused("tier W drives the real desktop; it runs only on a CI VM (GITHUB_ACTIONS=true)")
@@ -633,7 +638,7 @@ class Run:
             self._check_identity_mapping()
         if self.window_mode == "fullscreen":
             self.guard()
-            if self.dock_build_sha:
+            if self.dock_build_sha and self.injector == "xtest":
                 self.fit_private_dock_client()
         else:
             # An overlay may start without activation. No input is sent until
@@ -732,25 +737,40 @@ class Run:
     def stop(self) -> list[str]:
         """Terminate everything this run started; return what survived."""
         survivors = []
+        windows_dock = self.dock_build_sha and self.injector == "sendinput"
         if self.hud and self.hud.poll() is None:
             self.hud.terminate()
             try:
                 self.hud.wait(15)
             except subprocess.TimeoutExpired:
                 self.hud.kill()
-        for pid in self.owned_pids + self.helper_pids:
+                if windows_dock:
+                    try:
+                        self.hud.wait(2)
+                    except subprocess.TimeoutExpired:
+                        pass
+        tracked = [] if windows_dock else self.owned_pids + self.helper_pids
+        for pid in tracked:
             if pid_alive(pid):
                 kill_pid(pid)
         deadline = time.monotonic() + 10
-        while time.monotonic() < deadline and any(pid_alive(p) for p in self.owned_pids + self.helper_pids):
+        while time.monotonic() < deadline and any(pid_alive(p) for p in tracked):
             time.sleep(0.1)
         if self.hud:
             self.hud.poll()  # reap our direct child
-        survivors += [f"hud pid {p}" for p in self.owned_pids if pid_alive(p) and not self._zombie(p)]
-        survivors += [f"helper pid {p}" for p in self.helper_pids if pid_alive(p)]
+        if windows_dock:
+            if self.hud and self.hud.poll() is None:
+                survivors.append("owned Windows dock HUD")
+        else:
+            survivors += [f"hud pid {p}" for p in self.owned_pids if pid_alive(p) and not self._zombie(p)]
+            survivors += [f"helper pid {p}" for p in self.helper_pids if pid_alive(p)]
         # A replacement HUD that never answered was never recorded; find it by
         # this run's private HOME, which nothing else uses.
         for pid in self._strays():
+            if windows_dock:
+                # This witness cannot restart the HUD. Its only process is the owned handle above.
+                survivors.append("unexpected unowned HUD")
+                break
             kill_pid(pid)
             survivors.append(f"unrecorded hud pid {pid}")
         if self.xvfb:
@@ -1961,6 +1981,172 @@ def scenario_dock_progress_hover(run: Run) -> None:
         (run.out / f"{DOCK_PROGRESS_SCENARIO}.json").write_text(json.dumps(report, indent=1), encoding="utf-8")
     if failure:
         raise failure
+
+
+def scenario_windows_dock_progress_hover(run: Run) -> None:
+    """Tier W opt-in: observe scoped progress hover and exit on the owned desktop."""
+    captions = ("dock-progress-a", "dock-progress-b")
+    second = 1_000_000_000
+    sessions: dict[int, SessionSmoke] = {}
+    deletes: list[int | None] = [None, None]
+    report: dict = {"schema": 1, "captions": captions, "moves": [], "publishes": []}
+    failure = None
+
+    def require(condition: bool, step: str) -> None:
+        if not condition:
+            raise ScenarioFailed(step, None)
+
+    def entries(status: dict, rows: int) -> tuple:
+        displays = status.get("displays") or []
+        require(run.hud.poll() is None and status.get("pid") == run.pid
+                and status.get("sha") == run.dock_build_sha and WIN.screen_size() == screen
+                and len(displays) == 1 and displays[0].get("primary") is True
+                and tuple(displays[0].get(k) for k in ("x", "y", "width", "height")) == (0, 0, *screen),
+                "owned Windows dock PID, build or display changed")
+        dock = status.get("dock") or {}
+        scale = dock.get("scale")
+        require(dock.get("rows") == rows and dock.get("capacity") == 2 and dock.get("overflow") == []
+                and type(scale) in (float, int) and abs(scale - fit) <= 0.001,
+                "Windows progress dock did not keep its measured capacity and fit")
+        return tuple(dock_progress_entry(status, caption) for caption in captions)
+
+    def owns(point: tuple[int, int]) -> bool:
+        return (run.hud.poll() is None and WIN.screen_size() == screen and WIN.system_dpi() == 96
+                and WIN.fullscreen_window(run.pid) == owner["hwnd"]
+                and WIN.foreground_identity() == owner and WIN.window_at(point) == owner)
+
+    def at(point: tuple[int, int]) -> bool:
+        x, y = WIN.cursor_position()
+        return abs(x - point[0]) <= 1 and abs(y - point[1]) <= 1 and WIN.window_at((x, y)) == owner
+
+    def move(point: tuple[int, int], origin: tuple[int, int] | None = None) -> int:
+        started = None
+
+        def before_send() -> None:
+            nonlocal started
+            require(owns(point) and (origin is None or at(origin)),
+                    "Windows dock did not own the physical move before SendInput")
+            started = time.monotonic_ns()
+
+        prior = len(run.inj.calls)
+        run.inj.move_abs(*point, before_send=before_send)
+        receipts = run.inj.calls[prior:]
+        require(started is not None and len(receipts) == 1
+                and receipts[0]["what"] == f"move {point[0]},{point[1]}"
+                and receipts[0]["requested"] == receipts[0]["sent"] == 1,
+                "Windows dock move was not submitted once in full")
+        deadline = started + 150_000_000
+        while not at(point) and time.monotonic_ns() < deadline:
+            require(owns(point), "Windows dock lost physical ownership before cursor arrival")
+            time.sleep(0.005)
+        arrived = time.monotonic_ns()
+        require(owns(point) and at(point) and arrived <= deadline,
+                "Windows dock did not own the verified physical cursor arrival")
+        report["moves"].append({"point": point, "interval_ns": [started, arrived], "receipt": receipts[0]})
+        return started
+
+    try:
+        screen = WIN.screen_size()
+        hwnd = WIN.fullscreen_window(run.pid)
+        require(hwnd is not None and WIN.system_dpi() == 96 and min(screen) > 20,
+                "Windows dock requires an owned fullscreen primary with identity scale")
+        owner = {"hwnd": hwnd, "pid": run.pid}
+        # Shipped 320×50 progress art, 52dp row, 96dp caption, 8dp gap.
+        fit = min(1.0, 0.35 * screen[0] / (96 + 8 + 52 * 6.4))
+        require(entries(run.settle(), 0) == (None, None), "Windows dock must start with no scoped rows")
+        with run.exe.open("rb") as binary:
+            digest = hashlib.file_digest(binary, "sha256").hexdigest()
+        report.update(pid=run.pid, screen=screen, dock_scale=fit, exe_sha256=digest, build=run.dock_build_sha)
+        outside = (10, 10)
+        move(outside)
+
+        for index, (caption, progress) in enumerate(zip(captions, (0.25, 0.75))):
+            sessions[index] = SessionSmoke(run.smoke.url, run.psk, caption)
+            run.mark()
+            sent_ns = time.monotonic_ns()
+            error, payload = sessions[index].call("hud_publish", {
+                "surface": "dock:progress-bar", "ttl_ms": 60_000,
+                "params": {"label": ("Alpha", "Beta")[index], "progress": progress},
+            }, timeout_s=3)
+            ttl = payload.get("expires_in_ms")
+            require(not error and payload.get("ok") is True and type(ttl) is int and 0 < ttl <= 60_000,
+                    "Windows progress publish did not return finite accepted lifetime")
+            report["publishes"].append({"sent_ns": sent_ns, "expires_in_ms": ttl})
+        require(sessions[0].session != sessions[1].session, "Windows progress publishes shared a scope")
+
+        initial = run.settle()
+        a, b = entries(initial, 2)
+        presented = initial.get("frames_presented")
+        require(a is not None and b is not None and a[0] != b[0] and not (a[2] or b[2]),
+                "Windows progress did not draw two independently scoped, inactive instances")
+        require(type(presented) is int and presented > 0, "Windows progress baseline has no presentation")
+        x, y, w, h = a[1]
+        bx, by, bw, bh = b[1]
+        require(x == bx and (w, h) == (bw, bh) and 0 <= y < y + h <= by < by + bh <= screen[1]
+                and 0 <= x < x + w <= screen[0] and abs(h - 52 * fit) <= 1 and abs(w - 52 * fit * 6.4) <= 1
+                and not (x <= outside[0] < x + w and y <= outside[1] < by + bh),
+                "Windows progress quads do not match separate rows in the live primary")
+        report.update(rects=[a[1], b[1]], distinct_scopes=True, distinct_instances=True)
+        target = (x + w // 2, y + h // 2)
+        start = move(target, outside)
+        deadline = start + 1_500_000_000
+        while time.monotonic_ns() < deadline:
+            status = run.status()
+            current_a, current_b = entries(status, 2)
+            observed = time.monotonic_ns()
+            require(owns(target) and at(target) and current_a is not None and current_a[:2] == a[:2]
+                    and current_b == b, "Windows progress hover lost its target or changed B")
+            if current_a[2] and status.get("frames_presented", 0) > presented:
+                require(observed <= deadline, "Windows progress hovered frame missed its observation deadline")
+                presented = status["frames_presented"]
+                report.update(hover_flags=[True, False], hover_observed_ns=observed, hover_presented=presented)
+                break
+            time.sleep(0.020)
+        require("hover_flags" in report, "Windows progress never presented an A-only hover")
+
+        expiry_floor = min(item["sent_ns"] + item["expires_in_ms"] * 1_000_000 for item in report["publishes"])
+        start = time.monotonic_ns()
+        deadline = start + second
+        report.update(exit_deadline_ns=deadline, earliest_expiry_bound_ns=expiry_floor)
+        require(deadline < expiry_floor, "natural expiry could overlap the Windows scoped exit witness")
+        deletes[0] = sessions.pop(0).end()
+        closed = time.monotonic_ns()
+        report["a_delete"] = {"status": deletes[0], "interval_ns": [start, closed]}
+        require(deletes[0] == 202 and closed <= deadline, "Windows A did not complete scoped DELETE in one second")
+        while time.monotonic_ns() < deadline:
+            status = run.status()
+            rows = (status.get("dock") or {}).get("rows")
+            require(rows in (1, 2), "Windows scoped exit changed the dock unexpectedly")
+            current_a, current_b = entries(status, rows)
+            observed = time.monotonic_ns()
+            require(owns(target) and at(target) and current_b == b, "Windows scoped exit changed the peer or cursor")
+            if rows == 1 and current_a is None and status.get("frames_presented", 0) > presented:
+                require(observed <= deadline, "Windows A did not leave its drawn slot in one second")
+                report.update(exit_observed_ns=observed, exit_presented=status["frames_presented"],
+                              same_b_instance_and_rect=True)
+                break
+            time.sleep(0.020)
+        require("exit_observed_ns" in report, "Windows scoped exit left A drawn")
+        require(type(initial.get("window_activations")) is int
+                and initial["window_activations"] == status.get("window_activations") and len(run.inj.calls) == 2,
+                "Windows dock witness exceeded passive input custody")
+        with run.exe.open("rb") as binary:
+            require(hashlib.file_digest(binary, "sha256").hexdigest() == digest,
+                    "Windows dock witness executable changed")
+    except Exception as error:
+        failure = error.step if isinstance(error, ScenarioFailed) else type(error).__name__
+    finally:
+        for index, session in reversed(list(sessions.items())):
+            try:
+                deletes[index] = session.end()
+            except (OSError, RequestFailure):
+                pass
+        if deletes != [202, 202]:
+            failure = failure or "Windows progress scoped cleanup was incomplete"
+        report.update(deletes=deletes, verdict="FAIL" if failure else "PASS", failure=failure)
+        (run.out / f"{DOCK_PROGRESS_SCENARIO}.json").write_text(json.dumps(report, indent=1), encoding="utf-8")
+    if failure:
+        raise ScenarioFailed(failure, None)
 
 
 def entry_held(surfaces: dict, surface: str) -> bool:
@@ -3821,6 +4007,8 @@ def run_scenarios(run: Run, names: list[str]) -> list[dict]:
         started = time.monotonic()
         explicit = name in EXPLICIT_SCENARIOS
         scenario = EXPLICIT_SCENARIOS[name] if explicit else SCENARIOS[name]
+        if name == DOCK_PROGRESS_SCENARIO and run.injector == "sendinput":
+            scenario = scenario_windows_dock_progress_hover
         if not explicit:
             run.snapshot(f"{name}.before")
         result = {"scenario": name, "doc": (scenario.__doc__ or "").strip()}
@@ -3886,7 +4074,7 @@ def main(argv: list[str] | None = None) -> int:
                         help="comma-separated scenarios whose failure fails the run; the rest become "
                              "informational (listed, exit 0). Without it every scenario is required.")
     parser.add_argument("--expected-dock-build-sha", metavar="SHA",
-                        help="required full executable source commit for the opt-in Linux dock witness")
+                        help="required full executable source commit for an opt-in dock witness")
     parser.add_argument("scenarios", nargs="*", help="scenario names (default: standard scenarios)")
     args = parser.parse_args(argv)
     if args.list:
@@ -3897,14 +4085,16 @@ def main(argv: list[str] | None = None) -> int:
     named = args.scenarios + (args.required or [])
     dock_scenario = next((name for name in named if name in EXPLICIT_SCENARIOS), None)
     dock_witness = dock_scenario is not None
+    windows_dock = (dock_scenario == DOCK_PROGRESS_SCENARIO and WINDOWS and args.injector == "sendinput")
+    linux_dock = sys.platform == "linux" and args.injector == "xtest"
     if dock_witness and (
-        sys.platform != "linux" or args.injector != "xtest" or args.window_mode != "fullscreen"
+        not (linux_dock or windows_dock) or args.window_mode != "fullscreen"
         or args.scenarios != [dock_scenario] or args.mouse_receipt_diagnostics
         or args.required not in (None, [dock_scenario])
         or not re.fullmatch(r"[0-9a-f]{40}", args.expected_dock_build_sha or "")
     ):
-        parser.error(f"{dock_scenario} must run alone and required on Linux XTEST fullscreen "
-                     "with --expected-dock-build-sha")
+        parser.error(f"{dock_scenario} must run alone and required, in fullscreen with --expected-dock-build-sha "
+                     "(Linux XTEST or Windows SendInput for dock progress)")
     if args.expected_dock_build_sha and not dock_witness:
         parser.error("--expected-dock-build-sha requires an explicit dock witness")
     unknown = [n for n in named if n not in SCENARIOS and n not in EXPLICIT_SCENARIOS]
@@ -3948,9 +4138,12 @@ def main(argv: list[str] | None = None) -> int:
     results: list[dict] = []
     failure = None
     partial_button_batch = False
+    screen = None if windows_dock else SCREEN
     try:
         run.start()
         status = run.status()
+        if windows_dock:
+            screen = WIN.screen_size()
         if args.mouse_receipt_diagnostics:
             run.mouse_receipts.observe(status, run.pid)
         # Gesture scenarios read desktop pixels: a HUD excluded from capture
@@ -3978,7 +4171,7 @@ def main(argv: list[str] | None = None) -> int:
         timeline = {
             "sha": sha, "profile": run.exe.parent.name,
             "exe": run.exe.name if dock_witness else str(run.exe),
-            "injector": args.injector, "window_mode": args.window_mode, "screen": SCREEN,
+            "injector": args.injector, "window_mode": args.window_mode, "screen": screen,
             "display": run.display, "mcp_port": run.port,
             "geometry": (status.get("displays") if "status" in locals() else None),
             "theme_scale": ({k: status.get(k) for k in ("theme", "ui_scale") if k in status} if "status" in locals() else None),
