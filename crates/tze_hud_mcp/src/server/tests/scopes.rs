@@ -584,6 +584,84 @@ async fn the_session_table_is_bounded_per_agent() {
     assert_eq!(card_count(&server).await, 1);
 }
 
+#[tokio::test]
+async fn the_65th_session_reclaims_the_least_recently_called_dock_row_when_all_hold_content() {
+    use crate::scopes::MAX_SCOPES_PER_AGENT;
+
+    let (server, _) = server();
+    configure_dock_fixture(&server, 240.0, 3).await;
+    {
+        let mut scene = server.scene.lock().await;
+        let zone = scene
+            .zone_registry
+            .zones
+            .get_mut("notification-area")
+            .unwrap();
+        zone.contention_policy = ContentionPolicy::Stack {
+            max_depth: u8::try_from(MAX_SCOPES_PER_AGENT).unwrap(),
+        };
+        zone.max_publishers = u32::try_from(MAX_SCOPES_PER_AGENT).unwrap();
+    }
+    // B opened first. Publishing from A first makes A the least recently
+    // called scope by the time the 65th initialize arrives.
+    let b = session(&server, "dock-b").await;
+    let a = session(&server, "dock-a").await;
+    let a_ns = scope_of(&server, &a).namespace.clone();
+    let b_ns = scope_of(&server, &b).namespace.clone();
+    let publish = |level| json!({"surface": "dock:progress-bar", "params": {"level": level}});
+    ok(&server, &a, "hud_publish", publish(0.25)).await;
+    ok(&server, &b, "hud_publish", publish(0.75)).await;
+
+    for index in 2..MAX_SCOPES_PER_AGENT {
+        let filler = session(&server, &format!("filler-{index}")).await;
+        ok(&server, &filler, "hud_publish", question("holding")).await;
+    }
+    let (a_name, b_id, b_name, b_record) = {
+        let scene = server.scene.lock().await;
+        let live = server.scopes.list();
+        let held = scene.holding_namespaces();
+        assert_eq!(live.len(), MAX_SCOPES_PER_AGENT);
+        assert_eq!(held.len(), MAX_SCOPES_PER_AGENT);
+        assert!(live.iter().all(|scope| held.contains(&scope.namespace)));
+        assert_eq!(scene.dock_rows().len(), 2);
+        assert_eq!(scene.dock_caption(&a_ns), Some("dock-a"));
+        let a = scene.dock_instance(&a_ns, "progress-bar").unwrap();
+        let b = scene.dock_instance(&b_ns, "progress-bar").unwrap();
+        (
+            a.instance_name.clone(),
+            b.id,
+            b.instance_name.clone(),
+            scene.widget_registry.active_for_widget(&b.instance_name)[0].clone(),
+        )
+    };
+    assert_eq!(card_count(&server).await, MAX_SCOPES_PER_AGENT - 2);
+
+    let newest = session(&server, "newest").await;
+    let ping = json!({"jsonrpc": "2.0", "id": 9, "method": "ping"}).to_string();
+    assert_eq!(
+        server.dispatch_session(&ping, &a).await,
+        SessionReply::UnknownSession
+    );
+    for survivor in [&b, &newest] {
+        assert!(matches!(
+            server.dispatch_session(&ping, survivor).await,
+            SessionReply::Body { .. }
+        ));
+    }
+    assert_eq!(server.scopes.list().len(), MAX_SCOPES_PER_AGENT);
+    assert_eq!(card_count(&server).await, MAX_SCOPES_PER_AGENT - 2);
+    let scene = server.scene.lock().await;
+    assert_eq!(scene.dock_rows().len(), 1);
+    assert_eq!(scene.dock_rows()[0].namespace, b_ns);
+    assert!(scene.dock_instance(&a_ns, "progress-bar").is_none());
+    assert!(scene.dock_caption(&a_ns).is_none());
+    assert!(!scene.widget_registry.instances.contains_key(&a_name));
+    assert!(scene.widget_registry.active_for_widget(&a_name).is_empty());
+    let b = scene.dock_instance(&b_ns, "progress-bar").unwrap();
+    assert_eq!((b.id, &b.instance_name), (b_id, &b_name));
+    assert_eq!(scene.widget_registry.active_for_widget(&b_name), [b_record]);
+}
+
 /// Native unread is per session: each session's discovery lists only its
 /// own portals with their unread counts, and its publish replies report its
 /// own portal's unread; another session's output never adds to them.
