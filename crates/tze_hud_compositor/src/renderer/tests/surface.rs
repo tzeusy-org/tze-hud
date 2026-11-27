@@ -603,14 +603,14 @@ async fn offset_display_target_shows_scene_translated() {
         "nothing at the target's upper left: {:?}",
         px(50, 50)
     );
+
+    frame_signature_ignores_content_outside_the_target(&mut compositor);
+    zone_assigned_to_secondary_display_renders_there(&mut compositor);
 }
 
 /// A window's signature only reflects content inside it: changing a tile on
 /// the primary leaves a window that does not overlap it unchanged.
-#[tokio::test]
-async fn frame_signature_ignores_content_outside_the_target() {
-    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);
-    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+fn frame_signature_ignores_content_outside_the_target(compositor: &mut Compositor) {
     let away = crate::FrameTarget {
         x: 1000.0,
         y: 0.0,
@@ -767,10 +767,7 @@ async fn frame_signature_ignores_content_outside_the_target() {
 
 /// A zone assigned to a secondary display renders in that display's window
 /// and its hit regions move with it; the primary no longer shows it.
-#[tokio::test]
-async fn zone_assigned_to_secondary_display_renders_there() {
-    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);
-    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+fn zone_assigned_to_secondary_display_renders_there(compositor: &mut Compositor) {
     compositor.set_display_layout(crate::DisplayLayout::new(
         vec![
             crate::DisplayRect {
