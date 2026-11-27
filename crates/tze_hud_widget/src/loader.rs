@@ -531,7 +531,7 @@ fn load_layers(
 /// Unlike the resource parser's clamped raster estimate, eligibility needs
 /// explicit, finite authored dimensions; never default an unknown height.
 fn dock_svg_extent(path: &str, file: &str, bytes: &[u8]) -> Result<(f32, f32), BundleError> {
-    use quick_xml::{Reader, events::Event};
+    use quick_xml::{Reader, XmlVersion, events::Event};
     let error = || BundleError::SvgParseError {
         path: path.into(),
         svg_file: file.into(),
@@ -546,15 +546,19 @@ fn dock_svg_extent(path: &str, file: &str, bytes: &[u8]) -> Result<(f32, f32), B
             .filter(|n| n.is_finite() && *n > 0.0)
     };
     let mut reader = Reader::from_reader(bytes);
+    let mut version = XmlVersion::Implicit1_0;
     loop {
         match reader.read_event().map_err(|_| error())? {
+            Event::Decl(declaration) => version = declaration.xml_version().map_err(|_| error())?,
             Event::Start(root) | Event::Empty(root) => {
                 let mut width = None;
                 let mut height = None;
                 let mut view_box = None;
                 for attribute in root.attributes() {
                     let attribute = attribute.map_err(|_| error())?;
-                    let value = attribute.unescape_value().map_err(|_| error())?;
+                    let value = attribute
+                        .decoded_and_normalized_value(version, reader.decoder())
+                        .map_err(|_| error())?;
                     match attribute.key.as_ref() {
                         b"viewBox" => view_box = Some(value.into_owned()),
                         b"width" => width = number(&value),
