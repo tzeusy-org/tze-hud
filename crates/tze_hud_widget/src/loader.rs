@@ -560,7 +560,7 @@ fn load_layers(
 
 /// Unlike the resource parser's clamped raster estimate, eligibility needs
 /// explicit, finite authored dimensions; never default an unknown height.
-fn authored_svg_extent(bytes: &[u8]) -> Option<(f32, f32)> {
+pub fn authored_svg_extent(bytes: &[u8]) -> Option<(f32, f32)> {
     use quick_xml::{Reader, XmlVersion, events::Event};
     let number = |text: &str| {
         text.trim()

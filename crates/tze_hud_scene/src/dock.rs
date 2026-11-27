@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::graph::SceneGraph;
 use crate::types::{
     ContentionPolicy, Rect, SceneId, WidgetHoverBehavior, WidgetInstance, WidgetParamAudience,
-    WidgetParameterValue, WidgetPublishRecord, WidgetSvgLayer,
+    WidgetParameterValue, WidgetPublishRecord, WidgetSvgLayer, ZoneRegistry, resolve_zone_geometry,
 };
 use crate::validation::ValidationError;
 
@@ -126,32 +126,36 @@ impl DockLayout {
         display: Rect,
         max_rows: usize,
         metrics: DockMetrics,
-        aspect_ratios: impl IntoIterator<Item = f32>,
+        aspect_ratios: impl IntoIterator<Item = f64>,
     ) -> Self {
         let widest_row = aspect_ratios
             .into_iter()
-            .fold(metrics.caption_width, |width, aspect| {
-                width + metrics.gap + metrics.row_height * aspect
+            .fold(f64::from(metrics.caption_width), |width, aspect| {
+                width + f64::from(metrics.gap) + f64::from(metrics.row_height) * aspect
             });
-        let width_limit = display.width * 0.35;
-        let scale = if widest_row > width_limit {
-            width_limit / widest_row
+        let (x, y, width_limit, height) = resolve_zone_geometry(
+            &ZoneRegistry::dock_aperture(),
+            display.width,
+            display.height,
+        );
+        let scale = if widest_row > f64::from(width_limit) {
+            f64::from(width_limit) / widest_row
         } else {
             1.0
         };
         let metrics = DockMetrics {
-            row_height: metrics.row_height * scale,
-            caption_width: metrics.caption_width * scale,
-            gap: metrics.gap * scale,
+            row_height: (f64::from(metrics.row_height) * scale) as f32,
+            caption_width: (f64::from(metrics.caption_width) * scale) as f32,
+            gap: (f64::from(metrics.gap) * scale) as f32,
         };
         let column = Rect::new(
-            display.x + display.width * 0.05,
-            display.y + display.height * 0.12,
-            widest_row * scale,
-            display.height * 0.73,
+            display.x + x,
+            display.y + y,
+            (widest_row * scale) as f32,
+            height,
         );
         let pitch = metrics.row_height + metrics.gap;
-        let capacity = if pitch > 0.0 {
+        let capacity = if metrics.row_height > 0.0 {
             max_rows.min(((column.height + metrics.gap) / pitch).floor() as usize)
         } else {
             0
@@ -159,7 +163,7 @@ impl DockLayout {
         Self {
             column,
             capacity,
-            scale,
+            scale: scale as f32,
             metrics,
         }
     }
@@ -177,19 +181,19 @@ impl DockLayout {
     pub fn widget(
         &self,
         row: usize,
-        preceding: impl IntoIterator<Item = f32>,
-        aspect_ratio: f32,
+        preceding: impl IntoIterator<Item = f64>,
+        aspect_ratio: f64,
     ) -> Rect {
         let caption = self.caption(row);
-        let x = preceding
-            .into_iter()
-            .fold(caption.x + caption.width + self.metrics.gap, |x, aspect| {
-                x + self.metrics.row_height * aspect + self.metrics.gap
-            });
+        let row_height = f64::from(self.metrics.row_height);
+        let x = preceding.into_iter().fold(
+            f64::from(caption.x + caption.width + self.metrics.gap),
+            |x, aspect| x + row_height * aspect + f64::from(self.metrics.gap),
+        );
         Rect::new(
-            x,
+            x as f32,
             caption.y,
-            self.metrics.row_height * aspect_ratio,
+            (row_height * aspect_ratio) as f32,
             self.metrics.row_height,
         )
     }
@@ -209,12 +213,23 @@ pub struct DockRow {
     pub widgets: Vec<DockWidget>,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct DockProjection {
+    pub target: Option<String>,
+    pub layout: DockLayout,
+    /// Committed fit inputs in owner roster order, shared by draw and hit consumers.
+    pub aspect_ratios: Vec<(String, f64)>,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) struct DockState {
     accepts: Vec<String>,
     capacity: usize,
     auto_clear_ms: NonZeroU64,
     rows: Vec<DockRow>,
+    /// A restored scene must wait for the current runtime's actual display.
+    #[serde(skip)]
+    projection: Option<DockProjection>,
 }
 
 impl DockState {
@@ -253,25 +268,53 @@ impl SceneGraph {
         layout: DockLayout,
         auto_clear_ms: NonZeroU64,
     ) {
+        self.set_dock_projection(
+            &accepts,
+            Some(DockProjection {
+                target: None,
+                layout,
+                aspect_ratios: Vec::new(),
+            }),
+            auto_clear_ms,
+        );
+    }
+
+    /// Update the runtime projection without dropping rows or retiming publications.
+    pub fn set_dock_projection(
+        &mut self,
+        accepts: &[String],
+        projection: Option<DockProjection>,
+        auto_clear_ms: NonZeroU64,
+    ) -> bool {
+        let capacity = projection.as_ref().map_or(0, |p| p.layout.capacity);
         if let Some(dock) = &mut self.dock {
             if dock.accepts == accepts
-                && dock.capacity == layout.capacity
+                && dock.projection == projection
                 && dock.auto_clear_ms == auto_clear_ms
             {
-                return;
+                return false;
             }
-            dock.accepts = accepts;
-            dock.capacity = layout.capacity;
+            dock.accepts = accepts.to_vec();
+            dock.capacity = capacity;
             dock.auto_clear_ms = auto_clear_ms;
-        } else {
+            dock.projection = projection;
+        } else if projection.is_some() {
             self.dock = Some(DockState {
-                accepts,
-                capacity: layout.capacity,
+                accepts: accepts.to_vec(),
+                capacity,
                 auto_clear_ms,
                 rows: Vec::new(),
+                projection,
             });
+        } else {
+            return false;
         }
         self.version += 1;
+        true
+    }
+
+    pub fn dock_projection(&self) -> Option<&DockProjection> {
+        self.dock.as_ref()?.projection.as_ref()
     }
 
     pub fn dock_rows(&self) -> &[DockRow] {
@@ -342,7 +385,7 @@ impl SceneGraph {
             .ok_or_else(not_found)?;
         let params = Self::validate_widget_params_for_definition(widget_type, definition, &params)?;
         let row_index = dock.rows.iter().position(|row| row.namespace == namespace);
-        if row_index.is_none() && dock.rows.len() >= dock.capacity {
+        if row_index.is_none() && (dock.projection.is_none() || dock.rows.len() >= dock.capacity) {
             return Err(DockPublishError::Full);
         }
         let auto_clear_ms = dock.auto_clear_ms.get();
@@ -500,5 +543,10 @@ mod tests {
         assert!(countdown.x > progress.x + progress.width);
         assert!(next.y > progress.y + progress.height);
         assert_eq!(next.x, progress.x);
+
+        let extreme_aspect = f64::from(f32::MAX) / f64::from(f32::MIN_POSITIVE);
+        let too_thin = DockLayout::new(monitor, 32, metrics(1.0), [extreme_aspect]);
+        assert!(too_thin.column.width.is_finite());
+        assert_eq!(too_thin.capacity, 0, "no representable row height");
     }
 }

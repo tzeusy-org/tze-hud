@@ -28,12 +28,12 @@ use std::path::Path;
 use tze_hud_config::dock::{DockValidationErrors, ROW_HEIGHT_TOKEN};
 use tze_hud_config::raw::RawConfig;
 use tze_hud_config::widgets::{LoadedWidgetType, build_widget_instance, resolve_bundle_path};
-use tze_hud_scene::dock::DockPresentation;
+use tze_hud_scene::dock::{DockPresentation, WidgetBundleOrigin};
 use tze_hud_scene::graph::SceneGraph;
 use tze_hud_scene::types::SceneId;
 use tze_hud_widget::loader::{
-    BundleScanResult, LoadedBundle, LoadedDockPresentation, load_bundle_from_files,
-    scan_bundle_dirs_with_diagnostics,
+    BundleScanResult, LoadedBundle, LoadedDockPresentation, authored_svg_extent,
+    load_bundle_from_files, scan_bundle_dirs_with_diagnostics,
 };
 
 // ─── Built-in bundles ─────────────────────────────────────────────────────────
@@ -187,10 +187,39 @@ fn dock_presentation(
     }
 }
 
-pub(crate) fn apply_widget_restyle(scene: &mut SceneGraph, bundles: Vec<LoadedBundle>) {
+pub(crate) type DockExtents = HashMap<String, Option<(f32, f32)>>;
+
+pub(crate) struct WidgetRestyle {
+    assets: Vec<WidgetSvgAsset>,
+    alternates: Vec<(String, WidgetBundleOrigin, DockPresentation)>,
+    pub(crate) dock_extents: DockExtents,
+}
+
+impl WidgetRestyle {
+    pub(crate) fn apply(self, scene: &mut SceneGraph) {
+        for (kind, origin, presentation) in self.alternates {
+            scene
+                .widget_registry
+                .set_dock_presentation(&kind, origin, Some(presentation));
+        }
+        for (kind, file, bytes) in self.assets {
+            scene.enqueue_widget_svg_asset(&kind, &file, bytes);
+        }
+    }
+}
+
+/// Decide which bytes and alternate descriptors will be committed. Eligibility
+/// checks must use the same selection before any live asset or token changes.
+pub(crate) fn prepare_widget_restyle(
+    scene: &SceneGraph,
+    bundles: Vec<LoadedBundle>,
+    mut dock_extents: DockExtents,
+) -> WidgetRestyle {
+    let mut assets = Vec::new();
+    let mut alternates = Vec::new();
     for bundle in bundles {
         let widget_type = &bundle.definition.id;
-        let registry = &mut scene.widget_registry;
+        let registry = &scene.widget_registry;
         let incoming_dock = bundle.dock.filter(|dock| {
             registry.dock_presentation_origin(widget_type) == Some(&bundle.origin)
                 && registry.get_definition(widget_type).is_some_and(|live| {
@@ -211,36 +240,60 @@ pub(crate) fn apply_widget_restyle(scene: &mut SceneGraph, bundles: Vec<LoadedBu
                 })
         });
         let refresh_dock = incoming_dock.is_some();
-        let retained_dock = registry.dock_presentation(widget_type).cloned();
-        if let Some(dock) = incoming_dock {
-            registry.set_dock_presentation(
-                widget_type,
-                bundle.origin.clone(),
-                Some(dock_presentation(
-                    dock,
-                    &bundle.origin,
-                    &bundle.svg_contents,
-                )),
-            );
-        }
-        for (file, bytes) in bundle.svg_contents {
-            // Continue default-layer restyles while shielding live alternate
-            // files from a fallback or incompatible manifest.
-            if !refresh_dock
-                && (!bundle
+        let retained_dock = registry.dock_presentation(widget_type);
+        let selected_dock = if let Some(dock) = incoming_dock {
+            let presentation = dock_presentation(dock, &bundle.origin, &bundle.svg_contents);
+            let extent = Some((presentation.width, presentation.height));
+            alternates.push((widget_type.clone(), bundle.origin, presentation));
+            extent
+        } else {
+            retained_dock.map(|dock| (dock.width, dock.height))
+        };
+        let mut available = bundle.svg_contents;
+        // Continue default-layer restyles while shielding live alternate
+        // files from a fallback or incompatible manifest.
+        if !refresh_dock {
+            available.retain(|file, _| {
+                bundle
                     .definition
                     .layers
                     .iter()
-                    .any(|layer| layer.svg_file == file)
-                    || retained_dock
-                        .as_ref()
-                        .is_some_and(|dock| dock.layers.iter().any(|layer| layer.svg_file == file)))
-            {
-                continue;
-            }
-            scene.enqueue_widget_svg_asset(widget_type, &file, bytes);
+                    .any(|layer| &layer.svg_file == file)
+                    && !retained_dock
+                        .is_some_and(|dock| dock.layers.iter().any(|layer| &layer.svg_file == file))
+            });
         }
+        if let Some(current) = dock_extents.get_mut(widget_type) {
+            *current = selected_dock.or_else(|| {
+                // The renderer keeps the live definition even when a fallback
+                // supplies bytes. Unreplaced layers retain their common extent.
+                let live = registry.get_definition(widget_type)?;
+                let mut extents = live.layers.iter().map(|layer| {
+                    available
+                        .get(&layer.svg_file)
+                        .map_or(*current, |bytes| authored_svg_extent(bytes))
+                });
+                let extent = extents.next()??;
+                extents.all(|next| next == Some(extent)).then_some(extent)
+            });
+        }
+        assets.extend(
+            available
+                .into_iter()
+                .map(|(file, bytes)| (widget_type.clone(), file, bytes)),
+        );
     }
+    WidgetRestyle {
+        assets,
+        alternates,
+        dock_extents,
+    }
+}
+
+pub(crate) struct WidgetStartup {
+    pub(crate) assets: Vec<WidgetSvgAsset>,
+    pub(crate) warnings: tze_hud_scene::startup_diagnostics::StartupWarnings,
+    pub(crate) dock: Option<crate::scene_startup::DockPolicy>,
 }
 
 pub(crate) fn init_widget_registry(
@@ -249,13 +302,7 @@ pub(crate) fn init_widget_registry(
     config_parent: Option<&Path>,
     tab_name_to_id: &HashMap<String, SceneId>,
     token_map: &HashMap<String, String>,
-) -> Result<
-    (
-        Vec<WidgetSvgAsset>,
-        tze_hud_scene::startup_diagnostics::StartupWarnings,
-    ),
-    DockValidationErrors,
-> {
+) -> Result<WidgetStartup, DockValidationErrors> {
     // Steps 1-2: on-disk bundles, then the built-ins they do not override.
     let (scan_results, mut warnings) =
         scan_all_bundles_with_diagnostics(&bundle_roots(raw, config_parent), token_map);
@@ -460,7 +507,17 @@ pub(crate) fn init_widget_registry(
         "widget_startup: widget instance creation complete"
     );
 
-    Ok((svg_assets, warnings))
+    Ok(WidgetStartup {
+        assets: svg_assets,
+        warnings,
+        dock: raw
+            .dock
+            .clone()
+            .map(|config| crate::scene_startup::DockPolicy {
+                config,
+                extents: dock_extents,
+            }),
+    })
 }
 
 // ─── Unit tests ───────────────────────────────────────────────────────────────
@@ -505,9 +562,10 @@ mod tests {
             },
         ] {
             let mut scene = SceneGraph::new(1920.0, 1080.0);
-            let (_, warnings) =
+            let warnings =
                 init_widget_registry(&mut scene, &raw, None, &HashMap::new(), &default_tokens())
-                    .unwrap();
+                    .unwrap()
+                    .warnings;
             assert_eq!(
                 warnings.items().len(),
                 usize::from(raw.widget_bundles.is_some())
@@ -549,9 +607,10 @@ mod tests {
                 .collect(),
         });
         let mut scene = SceneGraph::new(1920.0, 1080.0);
-        let (_, warnings) =
+        let warnings =
             init_widget_registry(&mut scene, &raw, None, &HashMap::new(), &default_tokens())
-                .unwrap();
+                .unwrap()
+                .warnings;
         assert_eq!(warnings.items().len(), 64);
         assert_eq!(warnings.omitted_events(), 38); // 100 real roots + two rejected declarations
         assert!(
@@ -573,9 +632,10 @@ mod tests {
         assert_eq!(complete["state"], "complete");
         assert_eq!(complete["omitted_events"], 38);
         assert!(serde_json::to_vec(&complete).unwrap().len() <= 16_000);
-        let (_, again) =
+        let again =
             init_widget_registry(&mut scene, &raw, None, &HashMap::new(), &default_tokens())
-                .unwrap();
+                .unwrap()
+                .warnings;
         startup.finish_fonts(again);
         assert_eq!(
             crate::operator::diagnostics::render(None, None, Some(&startup)).1,
@@ -671,6 +731,61 @@ mod tests {
         assert_eq!(errors[0].got, "countdown (64.125 dp, limit 64.000 dp)");
     }
 
+    #[test]
+    fn dock_default_restyle_measures_only_effective_live_layers() {
+        let raw = RawConfig {
+            dock: Some(tze_hud_config::dock::DockConfig {
+                accepts: vec!["progress-bar".into()],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let tokens = default_tokens();
+        let mut scene = SceneGraph::new(1920.0, 1080.0);
+        let startup = init_widget_registry(&mut scene, &raw, None, &HashMap::new(), &tokens)
+            .unwrap()
+            .dock
+            .unwrap();
+        let mut fallback = reload_widget_bundles(&[], &tokens)
+            .into_iter()
+            .find(|bundle| bundle.definition.id == "progress-bar")
+            .unwrap();
+        assert_eq!(startup.extents["progress-bar"], Some((320.0, 50.0)));
+        assert_eq!(fallback.definition.layers.len(), 2);
+        let file = fallback.definition.layers[0].svg_file.clone();
+        let replaced = &mut fallback.definition.layers[1].svg_file;
+        *replaced = "other.svg".into();
+        let change = br#"<svg viewBox="0 0 480 50"/>"#.to_vec();
+        fallback
+            .svg_contents
+            .insert(replaced.clone(), change.clone());
+        assert_eq!(
+            fallback.dock_authored_extent(),
+            None,
+            "incoming manifest differs"
+        );
+        let proposal =
+            prepare_widget_restyle(&scene, vec![fallback.clone()], startup.extents.clone());
+        assert_eq!(proposal.dock_extents, startup.extents);
+
+        // Now one actually refreshed live file has a new extent. The second
+        // live filename remains installed at its old extent and must agree.
+        fallback.svg_contents.insert(file, change);
+        assert_eq!(fallback.dock_authored_extent(), Some((480.0, 50.0)));
+        let proposal = prepare_widget_restyle(&scene, vec![fallback], startup.extents);
+        assert_eq!(proposal.dock_extents["progress-bar"], None);
+        assert!(
+            startup
+                .config
+                .validate_bundles(Some("52"), &proposal.dock_extents)
+                .is_err()
+        );
+        assert!(
+            scene.drain_pending_widget_svg_assets().is_empty(),
+            "preflight is read-only"
+        );
+    }
+
     /// WHEN an on-disk bundle has the same type name as a built-in THEN the
     /// on-disk bundle wins and the type is registered once.
     #[tokio::test]
@@ -744,6 +859,10 @@ height_pct = 1
         assert_eq!(selected.definition.layers.len(), 2);
 
         let raw = RawConfig {
+            dock: Some(tze_hud_config::dock::DockConfig {
+                accepts: vec!["gauge".into()],
+                ..Default::default()
+            }),
             widget_bundles: Some(RawWidgetBundles {
                 paths: vec![root.to_string_lossy().into_owned()],
             }),
@@ -751,9 +870,12 @@ height_pct = 1
         };
         std::fs::create_dir_all(root.join("private-broken-sibling")).unwrap();
         let mut scene = SceneGraph::new(1920.0, 1080.0);
-        let (assets, warnings) =
-            init_widget_registry(&mut scene, &raw, None, &HashMap::new(), &default_tokens())
-                .unwrap();
+        let WidgetStartup {
+            assets,
+            warnings,
+            dock,
+        } = init_widget_registry(&mut scene, &raw, None, &HashMap::new(), &default_tokens())
+            .unwrap();
         assert_eq!(warnings.items().len(), 1);
         assert_eq!(warnings.items()[0].code, "WIDGET_BUNDLE_NO_MANIFEST");
         assert!(
@@ -786,7 +908,17 @@ height_pct = 1
             None,
             vec![root.clone(), fallback_root.clone()],
             OsPreferences::default,
-        );
+        )
+        .with_dock_policy(dock);
+        appearance.queue_display_report(crate::appearance::DisplayReport {
+            dock: Some(crate::scene_startup::DockDisplay {
+                target: "DISPLAY-MOCK".into(),
+                rect: tze_hud_scene::Rect::new(0.0, 0.0, 1920.0, 1080.0),
+                scale: 1.0,
+            }),
+            ..Default::default()
+        });
+        assert!(appearance.apply_display_report().await);
         let height = |value: &str| DesignTokenMap::from([("dock.row.height".into(), value.into())]);
         assert_eq!(appearance.apply(height("60")).await, Ok(true));
         let (restyled, owner_dock) = {
@@ -819,9 +951,9 @@ height_pct = 1
         for file in ["widget.toml", "background.svg", "fill.svg"] {
             std::fs::copy(bundle.join(file), fallback.join(file)).unwrap();
         }
-        // Match the old alternate filename and extent with distinct artwork;
-        // the incoming disjoint defaults still follow the normal reload path.
-        let fallback_dock = br#"<svg viewBox="0 0 160 60"><rect id="bar" fill="orange"/></svg>"#;
+        // The incoming alternate must not change accepted fit. Its disjoint
+        // default files still follow the normal reload path.
+        let fallback_dock = br#"<svg viewBox="0 0 160 200"><rect id="bar" fill="orange"/></svg>"#;
         std::fs::write(fallback.join("dock.svg"), fallback_dock).unwrap();
         assert!(!owner_dock.matches_source("dock.svg", fallback_dock));
         let mut fallback_fill = std::fs::read_to_string(fallback.join("fill.svg")).unwrap();
@@ -831,6 +963,10 @@ height_pct = 1
         assert_eq!(appearance.apply(height("66")).await, Ok(true));
         let mut scene = scene.lock().await;
         let restyled = scene.drain_pending_widget_svg_assets();
+        assert_eq!(
+            scene.dock_projection().unwrap().aspect_ratios[0].1,
+            160.0 / 60.0
+        );
         assert!(bytes(&restyled, "dock.svg").is_none());
         assert!(
             std::str::from_utf8(&bytes(&restyled, "fill.svg").unwrap())

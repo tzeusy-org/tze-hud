@@ -42,6 +42,8 @@ pub(super) struct MonitorSpec {
     /// Windows scale factor (1.5 at 150%): physical px per logical dp
     /// before `ui.scale`.
     pub scale: f64,
+    /// Observed monitor bounds, or a realized primary-only drawable.
+    pub dock_bounds_observed: bool,
 }
 
 impl MonitorSpec {
@@ -68,6 +70,7 @@ impl MonitorSpec {
             width: size.width,
             height: size.height,
             scale: monitor.scale_factor(),
+            dock_bounds_observed: true,
         })
     }
 
@@ -300,6 +303,7 @@ pub(super) fn display_scales(
 ) -> crate::appearance::DisplayScales {
     let zones = zone_displays
         .iter()
+        .filter(|(zone, _)| zone.as_str() != tze_hud_scene::types::ZoneRegistry::DOCK_PLACEMENT)
         .filter_map(|(zone, display)| {
             let display = tze_hud_compositor::normalize_display_name(display);
             secondaries
@@ -992,8 +996,9 @@ impl super::WinitApp {
         let multi = self.state.effective_mode == crate::window::WindowMode::Overlay
             && self.state.config.overlay_auto_size;
         let size = primary_window.inner_size();
-        let name = primary_window
-            .current_monitor()
+        let current_monitor = primary_window.current_monitor();
+        let name = current_monitor
+            .as_ref()
             .and_then(|m| m.name())
             .map(|n| tze_hud_compositor::normalize_display_name(&n))
             .unwrap_or_else(|| "PRIMARY".into());
@@ -1004,6 +1009,13 @@ impl super::WinitApp {
             width: size.width.max(1),
             height: size.height.max(1),
             scale: primary_window.scale_factor(),
+            dock_bounds_observed: !multi
+                && size.width > 0
+                && size.height > 0
+                && current_monitor.is_some_and(|monitor| {
+                    let full = monitor.size();
+                    full.width > 0 && full.height > 0
+                }),
         };
         let MonitorPlan {
             primary,
@@ -1042,7 +1054,15 @@ impl super::WinitApp {
         let primary_moved = multi && previous.as_ref().is_some_and(|p| !p.same_place(&primary));
         // A DPI change is a change in any mode: sizes follow the scale.
         let primary_rescaled = previous.as_ref().map(|p| p.scale) != Some(primary.scale);
-        let primary_changed = primary_moved || (multi && previous.is_none()) || primary_rescaled;
+        let dock_bounds_changed = self.state.appearance.as_ref().is_some_and(|a| a.has_dock())
+            && previous.as_ref().is_none_or(|p| {
+                p.dock_bounds_observed != primary.dock_bounds_observed
+                    || (primary.dock_bounds_observed && !p.same_place(&primary))
+            });
+        let primary_changed = primary_moved
+            || (multi && previous.is_none())
+            || primary_rescaled
+            || dock_bounds_changed;
         if !first_sync {
             if primary_moved {
                 tracing::info!(primary = %primary.name, "primary monitor changed; moving the primary overlay");
@@ -1423,21 +1443,37 @@ impl super::WinitApp {
         })
     }
 
-    /// Hand the current windows to the compositor thread and `/admin/status`.
-    /// Tell appearance each monitor's scale, so sizes are dp on every
-    /// monitor. Applied on the network runtime; the restyle arrives like any
-    /// live token change.
-    fn publish_display_scales(&self, primary: &MonitorSpec, secondaries: &[MonitorSpec]) {
-        let (Some(appearance), Some(rt)) = (&self.state.appearance, &self.state.network_rt) else {
+    fn publish_display_report(&self, primary: &MonitorSpec, secondaries: &[MonitorSpec]) {
+        let Some(appearance) = &self.state.appearance else {
             return;
         };
         let scales = display_scales(primary, secondaries, &self.state.zone_targets);
-        let appearance = Arc::clone(appearance);
-        rt.rt.spawn(async move {
-            if let Err(error) = appearance.set_display_scales(scales).await {
-                tracing::warn!(%error, "appearance: display scale not applied");
-            }
-        });
+        let dock = if appearance.has_dock() {
+            let target = self
+                .state
+                .zone_targets
+                .get(tze_hud_scene::types::ZoneRegistry::DOCK_PLACEMENT);
+            let selected = secondaries
+                .iter()
+                .find(|m| m.dock_bounds_observed && target == Some(&m.name))
+                .unwrap_or(primary);
+            selected
+                .dock_bounds_observed
+                .then(|| crate::scene_startup::DockDisplay {
+                    target: selected.name.clone(),
+                    rect: selected.scene_rect(primary),
+                    scale: selected.scale,
+                })
+        } else {
+            None
+        };
+        appearance.queue_display_report(crate::appearance::DisplayReport { scales, dock });
+        if let Some(rt) = &self.state.network_rt {
+            let appearance = Arc::clone(appearance);
+            rt.rt.spawn(async move {
+                appearance.apply_display_report().await;
+            });
+        }
     }
 
     /// Apply the panel's latest assignment edit on the main thread. The
@@ -1652,7 +1688,6 @@ impl super::WinitApp {
             );
         }
         crate::operator::status::set_displays(status, unplaced);
-        self.publish_display_scales(primary, specs);
         {
             let mut targets = self
                 .state
@@ -1674,6 +1709,7 @@ impl super::WinitApp {
                 })
                 .collect();
         }
+        self.publish_display_report(primary, specs);
         self.state
             .wake
             .notify_compositor(crate::idle_efficiency::RuntimeWakeupSource::Resize);
@@ -1935,6 +1971,7 @@ mod tests {
             width: 3840,
             height: 2160,
             scale: 1.5,
+            dock_bounds_observed: true,
         }
     }
 

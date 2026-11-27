@@ -1329,6 +1329,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                             width: cfg_width,
                             height: cfg_height,
                             scale: 1.0,
+                            dock_bounds_observed: false,
                         }
                     }
                 };
@@ -2766,6 +2767,7 @@ impl WindowedRuntime {
         let (
             shared_scene,
             startup_compositor_tokens,
+            dock_policy,
             runtime_widget_store,
             startup_element_store,
             startup_element_store_path,
@@ -2799,7 +2801,7 @@ impl WindowedRuntime {
 
             // Scene startup: design tokens, config tabs, widget bundles, and
             // token-derived zone rendering policies.
-            let compositor_tokens = if let Some(raw) = &raw_config_for_startup {
+            let (compositor_tokens, dock) = if let Some(raw) = &raw_config_for_startup {
                 let startup_result = run_scene_startup(
                     raw,
                     config_parent_buf.as_deref(),
@@ -2811,11 +2813,11 @@ impl WindowedRuntime {
                 startup_diagnostics = Some(crate::operator::diagnostics::StartupDiagnostics::new(
                     startup_result.startup_warnings,
                 ));
-                startup_result.global_tokens
+                (startup_result.global_tokens, startup_result.dock)
             } else {
                 // No config provided — bootstrap with canonical zone defaults (no token derivation).
                 scene.zone_registry = tze_hud_scene::types::ZoneRegistry::with_defaults();
-                std::collections::HashMap::new()
+                (std::collections::HashMap::new(), None)
             };
 
             if std::env::var("TZE_HUD_SIM_SUBTITLES").as_deref() == Ok("1") {
@@ -2841,6 +2843,7 @@ impl WindowedRuntime {
             (
                 Arc::new(Mutex::new(scene)),
                 compositor_tokens,
+                dock,
                 runtime_widget_store,
                 element_store_bootstrap.store,
                 element_store_bootstrap.path,
@@ -2883,15 +2886,18 @@ impl WindowedRuntime {
             Arc::clone(&placement_layout),
             Arc::clone(&display_probe),
         );
-        let appearance = Arc::new(crate::appearance::Appearance::for_startup(
-            raw_config_for_startup.as_ref(),
-            cfg.config_file_path.as_deref().map(std::path::Path::new),
-            startup_compositor_tokens.clone(),
-            Arc::clone(&shared_scene),
-            render_wake.clone(),
-            wake.main_work_notifier(),
-            crate::os_prefs::read,
-        ));
+        let appearance = Arc::new(
+            crate::appearance::Appearance::for_startup(
+                raw_config_for_startup.as_ref(),
+                cfg.config_file_path.as_deref().map(std::path::Path::new),
+                startup_compositor_tokens.clone(),
+                Arc::clone(&shared_scene),
+                render_wake.clone(),
+                wake.main_work_notifier(),
+                crate::os_prefs::read,
+            )
+            .with_dock_policy(dock_policy),
+        );
         let cfg_agents_empty = cfg.agents.load().is_empty();
         let agent_store = Arc::new(
             crate::agent_store::AgentStore::open(

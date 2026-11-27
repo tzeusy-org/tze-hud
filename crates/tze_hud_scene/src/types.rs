@@ -3303,6 +3303,18 @@ pub struct ZoneRegistry {
 }
 
 impl ZoneRegistry {
+    pub const DOCK_PLACEMENT: &str = "dock";
+
+    /// The built-in dock is placeable on a display without being a publishable zone.
+    pub fn dock_aperture() -> GeometryPolicy {
+        GeometryPolicy::Relative {
+            x_pct: 0.05,
+            y_pct: 0.12,
+            width_pct: 0.35,
+            height_pct: 0.73,
+        }
+    }
+
     pub fn new() -> Self {
         Self {
             zones: HashMap::new(),

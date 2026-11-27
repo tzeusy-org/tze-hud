@@ -16,10 +16,16 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use tze_hud_config::dock::DockValidationErrors;
+use tze_hud_config::dock::{
+    CAPTION_WIDTH_TOKEN, DEFAULT_CAPTION_WIDTH_DP, DEFAULT_ROW_HEIGHT_DP, DockConfig,
+    DockValidationErrors, ROW_HEIGHT_TOKEN,
+};
 use tze_hud_config::raw::RawConfig;
 use tze_hud_config::themes::resolve_config_tokens;
 use tze_hud_config::tokens::{DesignTokenMap, OsPreferences};
+use tze_hud_scene::Rect;
+use tze_hud_scene::dock::{DockLayout, DockMetrics, DockProjection};
+use tze_hud_scene::graph::SceneGraph;
 use tze_hud_scene::types::ZoneRegistry;
 
 use crate::widget_startup::init_widget_registry;
@@ -34,6 +40,90 @@ pub struct SceneStartupResult {
     pub widget_svg_assets: Vec<crate::widget_startup::WidgetSvgAsset>,
     /// Nonfatal diagnostics from the same widget loading pass, without paths/content.
     pub startup_warnings: tze_hud_scene::startup_diagnostics::StartupWarnings,
+    pub(crate) dock: Option<DockPolicy>,
+}
+
+/// Startup eligibility paired with the exact catalog used to validate it.
+pub(crate) struct DockPolicy {
+    pub(crate) config: DockConfig,
+    pub(crate) extents: crate::widget_startup::DockExtents,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct DockDisplay {
+    pub(crate) target: String,
+    pub(crate) rect: Rect,
+    pub(crate) scale: f64,
+}
+
+impl DockPolicy {
+    pub(crate) fn project(
+        &self,
+        scene: &mut SceneGraph,
+        tokens: &DesignTokenMap,
+        display: Option<&DockDisplay>,
+    ) -> bool {
+        let Some(auto_clear) = std::num::NonZeroU64::new(self.config.auto_clear_ms) else {
+            return false;
+        };
+        let projection = display.and_then(|display| {
+            let px = display.scale as f32 * tze_hud_config::tokens::effective_scale(tokens);
+            if !px.is_finite()
+                || px <= 0.0
+                || display.rect.width <= 0.0
+                || display.rect.height <= 0.0
+            {
+                return None;
+            }
+            let number = |name| {
+                tokens
+                    .get(name)
+                    .and_then(|value| tze_hud_config::tokens::parse_numeric(value))
+            };
+            let height = number(ROW_HEIGHT_TOKEN)
+                .filter(|value| *value > 0.0)
+                .unwrap_or(DEFAULT_ROW_HEIGHT_DP)
+                * px;
+            let spacing = |name, default| {
+                number(name)
+                    .filter(|value| *value >= 0.0)
+                    .map(|value| value * px)
+                    .filter(|value| value.is_finite())
+                    .unwrap_or(default * px)
+            };
+            let metrics = DockMetrics {
+                row_height: height,
+                caption_width: spacing(CAPTION_WIDTH_TOKEN, DEFAULT_CAPTION_WIDTH_DP),
+                gap: spacing("space.s", 8.0),
+            };
+            if !height.is_finite() || !metrics.caption_width.is_finite() || !metrics.gap.is_finite()
+            {
+                return None;
+            }
+            let aspect_ratios: Vec<_> = self
+                .config
+                .accepts
+                .iter()
+                .enumerate()
+                .filter(|(i, name)| !self.config.accepts[..*i].contains(name))
+                .filter_map(|(_, name)| {
+                    self.extents[name].map(|(w, h)| (name.clone(), f64::from(w) / f64::from(h)))
+                })
+                .collect();
+            let layout = DockLayout::new(
+                display.rect,
+                self.config.max_rows,
+                metrics,
+                aspect_ratios.iter().map(|(_, ratio)| *ratio),
+            );
+            Some(DockProjection {
+                target: Some(display.target.clone()),
+                layout,
+                aspect_ratios,
+            })
+        });
+        scene.set_dock_projection(&self.config.accepts, projection, auto_clear)
+    }
 }
 
 /// Run scene startup against `scene`.
@@ -68,7 +158,7 @@ pub fn run_scene_startup(
     tze_hud_config::tokens::apply_os_preferences(&mut global_tokens, &config_tokens, &os);
     resolve_font_dir(&mut global_tokens, config_parent);
     // Monitor scale is not known yet: the effective zoom alone until the windows
-    // report theirs (`Appearance::set_display_scales`).
+    // report theirs through Appearance.
     tze_hud_config::tokens::set_px_scale(&mut global_tokens, 1.0);
     tracing::info!(
         token_count = global_tokens.len(),
@@ -79,8 +169,7 @@ pub fn run_scene_startup(
     // and tile-creating mutations have an active tab from the start.
     let tab_map = bootstrap_config_tabs(scene, raw);
 
-    let (widget_svg_assets, startup_warnings) =
-        init_widget_registry(scene, raw, config_parent, &tab_map, &global_tokens)?;
+    let widgets = init_widget_registry(scene, raw, config_parent, &tab_map, &global_tokens)?;
 
     let mut zone_registry = ZoneRegistry::with_defaults();
     crate::appearance::restyle_zones(&mut zone_registry, &global_tokens);
@@ -95,8 +184,9 @@ pub fn run_scene_startup(
 
     Ok(SceneStartupResult {
         global_tokens,
-        widget_svg_assets,
-        startup_warnings,
+        widget_svg_assets: widgets.assets,
+        startup_warnings: widgets.warnings,
+        dock: widgets.dock,
     })
 }
 
@@ -338,13 +428,15 @@ mod tests {
             .unwrap();
             raw.dock = None;
             let mut scene = make_scene();
-            run_scene_startup(
+            let startup = run_scene_startup(
                 &raw,
                 Some(root.path()),
                 &mut scene,
                 OsPreferences::default(),
             )
             .unwrap();
+            assert!(startup.dock.is_none());
+            assert!(scene.dock_projection().is_none());
             assert!(scene.widget_registry.get_definition("layered").is_some());
 
             raw.dock = Some(tze_hud_config::dock::DockConfig {

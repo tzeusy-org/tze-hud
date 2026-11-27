@@ -323,7 +323,7 @@ impl HeadlessEventLoopHarness {
             .as_ref()
             .map(tze_hud_config::displays::zone_display_assignments)
             .unwrap_or_default();
-        let global_tokens = match &raw {
+        let (global_tokens, dock_policy) = match &raw {
             Some(raw) => {
                 let config_parent = cfg
                     .config_file_path
@@ -341,11 +341,11 @@ impl HeadlessEventLoopHarness {
                         .register_widget_svg(widget_type, svg_file, svg);
                 }
                 state.pending_widget_svgs.extend(startup.widget_svg_assets);
-                startup.global_tokens
+                (startup.global_tokens, startup.dock)
             }
             None => {
                 scene.zone_registry = tze_hud_scene::types::ZoneRegistry::with_defaults();
-                std::collections::HashMap::new()
+                (std::collections::HashMap::new(), None)
             }
         };
         let scene_handle = {
@@ -446,16 +446,19 @@ impl HeadlessEventLoopHarness {
         );
 
         let panel_scene = Arc::clone(&state.shared_state.lock().await.scene);
-        let appearance = Arc::new(crate::appearance::Appearance::for_startup(
-            raw.as_ref(),
-            cfg.config_file_path.as_deref().map(std::path::Path::new),
-            global_tokens.clone(),
-            Arc::clone(&panel_scene),
-            render_wake.clone(),
-            state.wake.main_work_notifier(),
-            // Harnesses never depend on the host's Windows preferences.
-            tze_hud_config::tokens::OsPreferences::default,
-        ));
+        let appearance = Arc::new(
+            crate::appearance::Appearance::for_startup(
+                raw.as_ref(),
+                cfg.config_file_path.as_deref().map(std::path::Path::new),
+                global_tokens.clone(),
+                Arc::clone(&panel_scene),
+                render_wake.clone(),
+                state.wake.main_work_notifier(),
+                // Harnesses never depend on the host's Windows preferences.
+                tze_hud_config::tokens::OsPreferences::default,
+            )
+            .with_dock_policy(dock_policy),
+        );
         state.appearance = Some(Arc::clone(&appearance));
         let clipboard: Arc<std::sync::Mutex<Vec<String>>> = Arc::default();
         let effects: Arc<std::sync::Mutex<Vec<String>>> = Arc::default();
@@ -690,20 +693,33 @@ impl HeadlessEventLoopHarness {
         &mut self,
         monitors: Vec<(tze_hud_compositor::DisplayRect, String)>,
     ) {
+        self.set_display_topology_with_scales(
+            monitors
+                .into_iter()
+                .map(|(rect, key)| (rect, key, 1.0))
+                .collect(),
+        );
+    }
+
+    fn set_display_topology_with_scales(
+        &mut self,
+        monitors: Vec<(tze_hud_compositor::DisplayRect, String, f64)>,
+    ) {
         use super::displays::{KeyedMonitor, MonitorSpec};
         use super::monitor_identity::DisplayKey;
-        assert_eq!(monitors.iter().filter(|(m, _)| m.primary).count(), 1);
+        assert_eq!(monitors.iter().filter(|(m, _, _)| m.primary).count(), 1);
         let mut keyed = Vec::new();
         let mut primary = None;
         let mut secondaries = Vec::new();
-        for (monitor, key) in monitors {
+        for (monitor, key, scale) in monitors {
             let spec = MonitorSpec {
                 name: monitor.name.clone(),
                 x: monitor.rect.x as i32,
                 y: monitor.rect.y as i32,
                 width: monitor.rect.width as u32,
                 height: monitor.rect.height as u32,
-                scale: 1.0,
+                scale,
+                dock_bounds_observed: true,
             };
             keyed.push(KeyedMonitor {
                 name: monitor.name,
@@ -1361,6 +1377,7 @@ impl HeadlessEventLoopHarness {
             width: 1920,
             height: 1080,
             scale: 1.0,
+            dock_bounds_observed: true,
         };
         self.app.state.zone_displays = configured;
         self.app
@@ -1574,6 +1591,212 @@ mod tests {
                 assert_eq!(error.got, got);
             }
         }
+    }
+
+    #[tokio::test]
+    async fn dock_admission_follows_the_accepted_monitor_and_committed_appearance() {
+        use tze_hud_compositor::DisplayRect;
+        use tze_hud_scene::dock::DockPublishError;
+        use tze_hud_scene::validation::ValidationError;
+
+        let cfg = super::super::WindowedConfig {
+            config_toml: Some(
+                r#"
+                [dock]
+                accepts = ["progress-bar", "countdown"]
+                max_rows = 32
+                [displays."SCREEN@LEFT"]
+                zones = ["dock"]
+                [[tabs]]
+                name = "Main"
+            "#
+                .into(),
+            ),
+            ..Default::default()
+        };
+        let mut hud = HeadlessEventLoopHarness::with_network(
+            cfg,
+            Arc::new(tze_hud_scene::TestClock::new(1_000)),
+        )
+        .await
+        .unwrap();
+        let appearance = hud.app.state.appearance.as_ref().unwrap().clone();
+        let publish = |scene: &mut SceneGraph, index, kind| {
+            scene.publish_to_dock(
+                kind,
+                Default::default(),
+                &format!("owner-{index}"),
+                None,
+                0,
+                1_000,
+            )
+        };
+        assert!(hud.scene().dock_projection().is_none());
+        assert!(publish(&mut hud.scene(), 0, "progress-bar").is_err());
+
+        let placeholder = super::super::displays::MonitorSpec {
+            name: "PRIMARY".into(),
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 1080,
+            scale: 1.0,
+            dock_bounds_observed: false,
+        };
+        hud.app.publish_displays_for(&placeholder, &[]);
+        assert!(!appearance.apply_display_report().await);
+        assert!(hud.scene().dock_projection().is_none());
+
+        let rect = |name: &str, x, y, width, height, primary| DisplayRect {
+            name: name.into(),
+            rect: tze_hud_scene::Rect::new(x, y, width, height),
+            primary,
+        };
+        let primary = || {
+            (
+                rect("PRIMARY", 0.0, 0.0, 1920.0, 1080.0, true),
+                "RIGHT".into(),
+                1.0,
+            )
+        };
+        let secondary = |y| {
+            (
+                rect("LEFT", -3840.0, y, 3840.0, 2160.0, false),
+                "SCREEN@LEFT".into(),
+                1.5,
+            )
+        };
+        hud.set_display_topology_with_scales(vec![primary()]);
+        assert!(appearance.apply_display_report().await);
+        {
+            let mut scene = hud.scene();
+            let projected = scene.dock_projection().unwrap();
+            assert_eq!(projected.target.as_deref(), Some("PRIMARY"));
+            assert_eq!(projected.layout.capacity, 13);
+            assert!(!scene.zone_registry.zones.contains_key("dock"));
+            assert!(matches!(
+                scene.publish_to_zone(
+                    "dock",
+                    tze_hud_scene::types::ZoneContent::StreamText("x".into()),
+                    "owner",
+                    None,
+                    None,
+                    None
+                ),
+                Err(ValidationError::ZoneNotFound { .. })
+            ));
+            publish(&mut scene, 0, "progress-bar").unwrap();
+            let serialized = serde_json::to_value(&*scene).unwrap();
+            assert_eq!(serialized["dock"]["capacity"], 13);
+            assert!(serialized["dock"].get("projection").is_none());
+            let mut restored: SceneGraph = serde_json::from_value(serialized).unwrap();
+            assert_eq!(restored.dock_rows().len(), 1);
+            assert_eq!(
+                publish(&mut restored, 1, "progress-bar"),
+                Err(DockPublishError::Full)
+            );
+            for index in 1..13 {
+                publish(&mut scene, index, "progress-bar").unwrap();
+            }
+            let before = scene.version;
+            assert_eq!(
+                publish(&mut scene, 13, "progress-bar"),
+                Err(DockPublishError::Full)
+            );
+            assert_eq!(scene.version, before);
+        }
+
+        hud.set_display_topology_with_scales(vec![primary(), secondary(240.0)]);
+        assert!(appearance.apply_display_report().await);
+        let layout = {
+            let mut scene = hud.scene();
+            let projected = scene.dock_projection().unwrap();
+            assert_eq!(projected.target.as_deref(), Some("LEFT"));
+            assert_eq!(projected.layout.capacity, 17);
+            assert_eq!(projected.layout.caption(0).height, 78.0);
+            assert_eq!(projected.aspect_ratios[0].0, "progress-bar");
+            assert_eq!(projected.aspect_ratios[0].1, 320.0 / 50.0);
+            let layout = projected.layout;
+            for index in 13..17 {
+                publish(&mut scene, index, "progress-bar").unwrap();
+            }
+            let before = scene.version;
+            assert_eq!(
+                publish(&mut scene, 17, "progress-bar"),
+                Err(DockPublishError::Full)
+            );
+            assert_eq!(scene.version, before);
+            layout
+        };
+        hud.set_display_topology_with_scales(vec![primary(), secondary(340.0)]);
+        assert!(appearance.apply_display_report().await);
+        assert_eq!(
+            hud.scene().dock_projection().unwrap().layout.column.y,
+            layout.column.y + 100.0
+        );
+        let version = hud.scene().version;
+        hud.set_display_topology_with_scales(vec![primary(), secondary(340.0)]);
+        assert!(!appearance.apply_display_report().await);
+        assert_eq!(hud.scene().version, version);
+
+        let publications = hud.scene().widget_registry.active_publishes.clone();
+        let last_table = appearance.live.table();
+        hud.retain_display_overlays(&[]);
+        let rejected = std::collections::HashMap::from([("dock.row.height".into(), "20".into())]);
+        assert!(
+            appearance
+                .apply(rejected)
+                .await
+                .unwrap_err()
+                .contains("progress-bar")
+        );
+        assert_eq!(appearance.live.table(), last_table);
+        assert!(
+            !appearance.apply_display_report().await,
+            "the pending report was committed"
+        );
+        {
+            let mut scene = hud.scene();
+            let projected = scene.dock_projection().unwrap();
+            assert_eq!(projected.target.as_deref(), Some("PRIMARY"));
+            assert_eq!(projected.layout.capacity, 13);
+            assert_eq!(scene.dock_rows().len(), 17);
+            assert_eq!(scene.widget_registry.active_publishes, publications);
+            assert!(
+                scene.drain_pending_widget_svg_assets().is_empty(),
+                "no refused art was queued"
+            );
+            assert_eq!(
+                publish(&mut scene, 17, "progress-bar"),
+                Err(DockPublishError::Full)
+            );
+            let original = scene.dock_instance("owner-0", "progress-bar").unwrap().id;
+            assert_eq!(publish(&mut scene, 0, "progress-bar"), Ok(original));
+            publish(&mut scene, 0, "countdown").unwrap();
+        }
+        hud.app.publish_displays_for(&placeholder, &[]);
+        assert!(appearance.apply_display_report().await);
+        {
+            let mut scene = hud.scene();
+            assert!(scene.dock_projection().is_none());
+            assert_eq!(scene.dock_rows().len(), 17);
+            assert_eq!(
+                publish(&mut scene, 17, "progress-bar"),
+                Err(DockPublishError::Full)
+            );
+        }
+        hud.set_display_topology_with_scales(vec![primary(), secondary(340.0)]);
+        assert!(appearance.apply_display_report().await);
+        assert_eq!(hud.scene().dock_projection().unwrap().layout.capacity, 17);
+        assert_eq!(hud.scene().dock_rows().len(), 17);
+
+        let wider = std::collections::HashMap::from([("dock.caption.width".into(), "1000".into())]);
+        assert_eq!(appearance.apply(wider).await, Ok(true));
+        let scene = hud.scene();
+        let projected = scene.dock_projection().unwrap();
+        assert!(projected.layout.scale < 1.0);
+        assert!((projected.layout.column.width - 3840.0 * 0.35).abs() < 0.01);
+        assert_eq!(scene.dock_rows().len(), 17);
     }
 
     #[tokio::test]
