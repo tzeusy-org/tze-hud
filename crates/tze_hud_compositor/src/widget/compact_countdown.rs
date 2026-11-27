@@ -644,7 +644,14 @@ mod tests {
         let bundle = bundle("tonal-glass", &[]);
         for severity in ["warning", "error"] {
             let plain = prepare_bundle(&bundle, &params("Cutover", severity, 24));
-            for label in ["id='value'", "id='warning'", "id='error'"] {
+            for label in [
+                "id='value'",
+                "id='warning'",
+                "id='error'",
+                "id=\"value\"",
+                "id=\"warning\"",
+                "id=\"error\"",
+            ] {
                 assert!(label.len() <= 24);
                 let values = params(label, severity, 24);
                 let original = values.clone();
