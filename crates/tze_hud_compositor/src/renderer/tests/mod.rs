@@ -29,12 +29,6 @@ fn empty_portal_view(id: &str, name: &str) -> tze_hud_portal::PortalView {
     }
 }
 
-/// Mutex to serialize tests that mutate `HEADLESS_FORCE_SOFTWARE`, a
-/// global environment variable.  Rust tests run in parallel by default,
-/// so concurrent mutations would cause races.  This is an in-process lock;
-/// it does not protect against separate test binary runs.
-static ENV_VAR_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
 /// Serializes headless device creation: concurrent wgpu/Vulkan construction
 /// from the parallel libtest harness can wedge the driver (see `just test-gpu`).
 static GPU_INIT_MUTEX: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
