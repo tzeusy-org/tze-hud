@@ -1002,8 +1002,21 @@ impl Compositor {
         target: &FrameTarget,
         display: Option<&str>,
     ) -> TargetView<'a> {
-        let widget_quads = build.widgets.for_target(target, display);
+        let (widget_quads, dock_captions) = build.widgets.for_target(target, display);
         if target.primary && target.is_canvas(build.surf_w, build.surf_h) {
+            let text_items = if dock_captions.is_empty() {
+                Cow::Borrowed(build.encode_sources.text_items.as_slice())
+            } else {
+                Cow::Owned(
+                    build
+                        .encode_sources
+                        .text_items
+                        .iter()
+                        .chain(dock_captions)
+                        .cloned()
+                        .collect(),
+                )
+            };
             return TargetView {
                 width: build.surf_w,
                 height: build.surf_h,
@@ -1012,7 +1025,7 @@ impl Compositor {
                 rr_background: Cow::Borrowed(&build.encode_sources.rr_background),
                 rr_content: Cow::Borrowed(&build.encode_sources.rr_content),
                 rr_post: Cow::Borrowed(&build.encode_sources.rr_post),
-                text_items: Cow::Borrowed(&build.encode_sources.text_items),
+                text_items,
                 affordance_items: Cow::Borrowed(&build.encode_sources.affordance_items),
                 affordance_rects: Cow::Borrowed(&build.encode_sources.affordance_rects),
                 card_items: &build.encode_sources.card_items,
@@ -1076,7 +1089,9 @@ impl Compositor {
                 })
                 .collect()
         };
-        let text_items = shift_text(&build.encode_sources.text_items);
+        let mut text_items = shift_text(&build.encode_sources.text_items);
+        // Dock captions are already local to the matched display.
+        text_items.extend_from_slice(dock_captions);
         let textured_cmds = build
             .textured_cmds
             .iter()
@@ -1486,6 +1501,8 @@ impl Compositor {
         let (context_menu_vertices, context_menu_text) = self.collect_context_menu(scene, sw, sh);
         let render_menu_text = self.prepare_menu_text(&context_menu_text, surf_w, surf_h);
 
+        let (widget_quads, dock_captions) =
+            widgets.for_target(&FrameTarget::primary(surf_w, surf_h), None);
         // Headless never uses overlay mode — pass false for the pipeline selector.
         let (mut encoder, encode_us, encode_inputs, _) = self.encode_frame(
             &vertices,
@@ -1497,6 +1514,7 @@ impl Compositor {
             false,
             bg_vertex_count,
             chrome_vertex_start,
+            dock_captions,
         );
         telemetry.stage6_render_encode_us = encode_us;
 
@@ -1505,13 +1523,7 @@ impl Compositor {
 
         // ── Widget pass: composite pre-synced textures above zone content ────
         widgets.publish_geometry(self.widget_renderer.as_ref(), scene, None);
-        self.encode_widget_pass_prepared(
-            &mut encoder,
-            &frame.view,
-            widgets.for_target(&FrameTarget::primary(surf_w, surf_h), None),
-            sw,
-            sh,
-        );
+        self.encode_widget_pass_prepared(&mut encoder, &frame.view, widget_quads, sw, sh);
         self.encode_rounded_rect_pass(&mut encoder, &frame.view, &drag_highlight_cmds, sw, sh);
         self.encode_drag_handle_pass(&mut encoder, &frame.view, &drag_handle_vertices);
 

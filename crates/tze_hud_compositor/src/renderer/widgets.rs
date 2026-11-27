@@ -3,13 +3,17 @@
 use tze_hud_scene::WidgetParameterValue;
 use tze_hud_scene::dock::DockWidgetSlot;
 use tze_hud_scene::graph::SceneGraph;
+use tze_hud_scene::types::{FontFamily, RenderingPolicy, TextOverflow};
 use tze_hud_scene::widget_deadline::widget_params_at;
 use tze_hud_scene::{DegradationLevel, Rect};
 
 use crate::display::{DisplayRect, FrameTarget};
+use crate::text::TextItem;
 use crate::widget::{
     WidgetDrawGeometry, WidgetDrawQuad, WidgetRenderer, same_dock_presentation, snap_composite_rect,
 };
+
+use super::token_colors::{canonical_color, canonical_number, resolve_token_color};
 
 #[derive(Default)]
 pub(super) struct WidgetDraws {
@@ -20,6 +24,7 @@ pub(super) struct WidgetDraws {
 struct DockDraws {
     display: DisplayRect,
     quads: Vec<WidgetDrawQuad>,
+    captions: Vec<TextItem>,
 }
 
 fn target_rect(target: &FrameTarget) -> Rect {
@@ -36,7 +41,7 @@ impl WidgetDraws {
         &self,
         target: &FrameTarget,
         display: Option<&str>,
-    ) -> [&[WidgetDrawQuad]; 2] {
+    ) -> ([&[WidgetDrawQuad]; 2], &[TextItem]) {
         let primary = if target.primary {
             self.primary.as_slice()
         } else {
@@ -50,7 +55,10 @@ impl WidgetDraws {
                     None => target.primary,
                 }
         });
-        [primary, dock.map_or(&[], |dock| dock.quads.as_slice())]
+        match dock {
+            Some(dock) => ([primary, &dock.quads], &dock.captions),
+            None => ([primary, &[]], &[]),
+        }
     }
 
     pub(super) fn publish_geometry(
@@ -162,7 +170,11 @@ impl super::Compositor {
         self.widget_renderer.as_ref()
     }
 
-    fn dock_draw_display(&self, scene: &SceneGraph, primary: &FrameTarget) -> Option<&DisplayRect> {
+    pub(super) fn dock_draw_display(
+        &self,
+        scene: &SceneGraph,
+        primary: &FrameTarget,
+    ) -> Option<&DisplayRect> {
         let projection = scene.dock_projection()?;
         let target = projection.target.as_deref()?;
         self.display_layout.displays().iter().find(|display| {
@@ -179,6 +191,82 @@ impl super::Compositor {
                 .is_none()
     }
 
+    pub(super) fn dock_caption_items(
+        &self,
+        scene: &SceneGraph,
+        display: &DisplayRect,
+    ) -> Vec<TextItem> {
+        let Some(projection) = scene.dock_projection() else {
+            return Vec::new();
+        };
+        if !scene.widgets_shown()
+            || scene.dock_rows().is_empty()
+            || self.widget_renderer.is_none()
+            || self.text_rasterizer.is_none()
+        {
+            return Vec::new();
+        }
+        let tokens = &self.token_map;
+        let number = |key| {
+            tokens
+                .get(key)
+                .and_then(|value| tze_hud_config::tokens::parse_numeric(value))
+                .filter(|value| *value > 0.0)
+                .unwrap_or_else(|| canonical_number(key))
+        };
+        let scale = projection.pixels_per_dp * projection.layout.scale;
+        let size = number("type.label.m.size") * scale;
+        let line = number("type.label.m.line_height") * scale;
+        if !size.is_finite() || !line.is_finite() || size <= 0.0 || line < 1.0 {
+            return Vec::new();
+        }
+        let font = match tokens.get("type.label.m.family").map(String::as_str) {
+            Some("monospace") => FontFamily::SystemMonospace,
+            Some("serif") => FontFamily::SystemSerif,
+            _ => FontFamily::SystemSansSerif,
+        };
+        let color = "color.on_surface.variant";
+        let policy = RenderingPolicy {
+            font_family: Some(font),
+            font_size_px: Some(size),
+            font_weight: Some(number("type.label.m.weight") as u16),
+            text_color: resolve_token_color(tokens, color).or_else(|| canonical_color(color)),
+            overflow: Some(TextOverflow::Ellipsis),
+            margin_px: Some(0.0),
+            ..Default::default()
+        };
+        scene
+            .dock_rows()
+            .iter()
+            .take(projection.layout.capacity)
+            .enumerate()
+            .filter_map(|(index, row)| {
+                let caption = scene.dock_caption(&row.namespace)?;
+                let bounds = projection.layout.caption(index);
+                if bounds.width < 1.0 {
+                    return None;
+                }
+                let x = bounds.x - display.rect.x;
+                let top = bounds.y - display.rect.y;
+                let y = top + (bounds.height - line) * 0.5;
+                let mut item = TextItem::from_zone_policy(
+                    caption,
+                    x,
+                    y,
+                    bounds.width,
+                    line,
+                    &policy,
+                    1.0,
+                    1.0,
+                );
+                item.line_height_multiplier = line / item.font_size_px;
+                item.clip_pixel_y = top.max(y);
+                item.clip_bounds_height = (top + bounds.height - item.clip_pixel_y).min(line);
+                Some(item)
+            })
+            .collect()
+    }
+
     /// Update visible textures and prepare scene-free draw geometry in the
     /// same pass, using the accepted dock slots for both work and placement.
     pub(super) fn prepare_widget_draws(
@@ -189,7 +277,13 @@ impl super::Compositor {
         height: u32,
     ) -> WidgetDraws {
         let primary_target = FrameTarget::primary(width, height);
-        let dock_display = self.dock_draw_display(scene, &primary_target).cloned();
+        let dock = self
+            .dock_draw_display(scene, &primary_target)
+            .map(|display| DockDraws {
+                display: display.clone(),
+                quads: Vec::new(),
+                captions: self.dock_caption_items(scene, display),
+            });
         let countdowns_paused = self.safe_mode_overlay || scene.widget_time_paused();
         let wr = match &mut self.widget_renderer {
             Some(r) => r,
@@ -221,9 +315,10 @@ impl super::Compositor {
                 wr.remove_texture(name);
                 continue;
             }
-            let dock_bounds = match (scene.dock_widget_slot(name), dock_display.as_ref()) {
+            let dock_bounds = match (scene.dock_widget_slot(name), dock.as_ref()) {
                 (DockWidgetSlot::Registry, _) => None,
-                (DockWidgetSlot::Placed(bounds), Some(display)) => {
+                (DockWidgetSlot::Placed(bounds), Some(dock)) => {
+                    let display = &dock.display;
                     let (x, y, w, h) = snap_composite_rect(
                         bounds.x - display.rect.x,
                         bounds.y - display.rect.y,
@@ -243,10 +338,7 @@ impl super::Compositor {
         }
 
         let mut draws = WidgetDraws {
-            dock: dock_display.map(|display| DockDraws {
-                display,
-                quads: Vec::new(),
-            }),
+            dock,
             ..Default::default()
         };
         let mut registry_names = Vec::new();

@@ -119,6 +119,7 @@ impl DockPolicy {
             Some(DockProjection {
                 target: Some(display.target.clone()),
                 layout,
+                pixels_per_dp: px,
                 aspect_ratios,
             })
         });

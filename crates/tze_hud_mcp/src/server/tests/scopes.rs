@@ -636,11 +636,24 @@ async fn portal_unread_is_per_session() {
     assert_eq!(next["unread"], 1, "{next}");
 }
 
-/// A display_name publish the scene refuses (here the agent's publisher cap)
-/// changes neither the session label nor the caption of its later cards.
+/// A refused relabel leaves the session label alone. An accepted delayed
+/// relabel changes the live dock caption without renaming earlier cards.
 #[tokio::test]
 async fn a_refused_relabel_leaves_the_caption_alone() {
+    use std::num::NonZeroU64;
+    use std::sync::atomic::AtomicUsize;
+    use tze_hud_scene::Rect;
+    use tze_hud_scene::dock::{DockLayout, DockMetrics, DockProjection};
+
     let (server, _) = server();
+    let wakes = Arc::new(AtomicUsize::new(0));
+    let server = server.with_render_wake_notifier(RenderWakeNotifier::new({
+        let wakes = Arc::clone(&wakes);
+        move || {
+            wakes.fetch_add(1, Ordering::Relaxed);
+        }
+    }));
+    let _first = session(&server, "tze-hud").await;
     let a = session(&server, "tze-hud").await;
     let caption_of = |scene: &tze_hud_scene::graph::SceneGraph, ns: &str| {
         scene
@@ -654,25 +667,64 @@ async fn a_refused_relabel_leaves_the_caption_alone() {
     let ns = scope_of(&server, &a).namespace.clone();
     // The agent's one allowed card is already up.
     ok(&server, &a, "hud_publish", question("first")).await;
-    server
-        .scene
-        .lock()
-        .await
-        .zone_registry
-        .zones
-        .get_mut("notification-area")
-        .unwrap()
-        .max_publishers = 1;
+    let (instance, expiry) = {
+        let mut scene = server.scene.lock().await;
+        scene
+            .zone_registry
+            .zones
+            .get_mut("notification-area")
+            .unwrap()
+            .max_publishers = 1;
+        scene.set_dock_projection(
+            &["gauge".into()],
+            Some(DockProjection {
+                target: Some("main".into()),
+                layout: DockLayout::new(
+                    Rect::new(0.0, 0.0, 1920.0, 1080.0),
+                    4,
+                    DockMetrics {
+                        row_height: 52.0,
+                        caption_width: 96.0,
+                        gap: 8.0,
+                    },
+                    [2.0],
+                ),
+                pixels_per_dp: 1.0,
+                aspect_ratios: vec![("gauge".into(), 2.0)],
+            }),
+            NonZeroU64::new(10_000).unwrap(),
+        );
+        scene
+            .publish_to_dock("gauge", HashMap::new(), &ns, None, 0, 0)
+            .unwrap();
+        assert_eq!(scene.dock_caption(&ns), Some("tze-hud (2)"));
+        let instance = scene
+            .dock_instance(&ns, "gauge")
+            .unwrap()
+            .instance_name
+            .clone();
+        let expiry = scene.widget_registry.active_publishes[&instance][0].expires_at_wall_us;
+        (instance, expiry)
+    };
+    let before_refusal = wakes.load(Ordering::Relaxed);
     let mut named = question("named");
     named["display_name"] = json!("release bot");
     named["key"] = json!("another"); // a keyed replacement is never capped
-    let (err, is_error) = call_as(&server, &a, "hud_publish", named).await;
+    let (err, is_error) = call_as(&server, &a, "hud_publish", named.clone()).await;
     assert!(is_error, "{err}");
     assert_ne!(
         err["code"], "INVALID_ARGUMENT",
         "refused by the scene: {err}"
     );
-    assert_eq!(scope_of(&server, &a).label().as_deref(), Some("tze-hud"));
+    assert_eq!(
+        scope_of(&server, &a).label().as_deref(),
+        Some("tze-hud (2)")
+    );
+    assert_eq!(
+        server.scene.lock().await.dock_caption(&ns),
+        Some("tze-hud (2)")
+    );
+    assert_eq!(wakes.load(Ordering::Relaxed), before_refusal);
 
     // With room again, an ordinary card carries the previous label.
     {
@@ -685,6 +737,32 @@ async fn a_refused_relabel_leaves_the_caption_alone() {
             .max_publishers = 8;
     }
     ok(&server, &a, "hud_publish", question("plain")).await;
+    let (version, geometry) = {
+        let scene = server.scene.lock().await;
+        assert_eq!(caption_of(&scene, &ns).as_deref(), Some("tze-hud (2)"));
+        (scene.version, scene.geometry_epoch)
+    };
+    let before_delay = wakes.load(Ordering::Relaxed);
+    named["delay_ms"] = json!(5_000);
+    ok(&server, &a, "hud_publish", named.clone()).await;
+    {
+        let scene = server.scene.lock().await;
+        assert_eq!(scene.dock_caption(&ns), Some("release bot"));
+        assert_eq!(caption_of(&scene, &ns).as_deref(), Some("tze-hud (2)"));
+        assert!(
+            scene.version > version,
+            "existing lease touch invalidates rendering"
+        );
+        assert_eq!(scene.geometry_epoch, geometry);
+    }
+    assert_eq!(wakes.load(Ordering::Relaxed), before_delay + 1);
+    ok(&server, &a, "hud_publish", named).await;
     let scene = server.scene.lock().await;
-    assert_eq!(caption_of(&scene, &ns).as_deref(), Some("tze-hud"));
+    assert_eq!(scene.dock_caption(&ns), Some("release bot"));
+    assert_eq!(caption_of(&scene, &ns).as_deref(), Some("tze-hud (2)"));
+    assert_eq!(
+        scene.widget_registry.active_publishes[&instance][0].expires_at_wall_us,
+        expiry
+    );
+    assert_eq!(scene.geometry_epoch, geometry);
 }

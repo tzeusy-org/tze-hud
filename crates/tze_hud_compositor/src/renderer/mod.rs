@@ -2392,6 +2392,12 @@ impl Compositor {
         // brand-new `SceneGraph` handed to a reused `Compositor` must never be
         // treated as "mid-drag on the same scene" just because its version
         // number happens to fall inside the debounce window.
+        let dock_captions = self
+            .dock_draw_display(
+                scene,
+                &crate::display::FrameTarget::primary(self.width, self.height),
+            )
+            .map_or_else(Vec::new, |display| self.dock_caption_items(scene, display));
         let forced_prime = self.truncation_cache_scene_version == u64::MAX || !same_instance;
         let interval_ms = adaptive_reprime_interval_ms(self.resize_reprime_content_bytes);
         if !forced_prime
@@ -2406,6 +2412,13 @@ impl Compositor {
                 content_bytes = self.resize_reprime_content_bytes,
                 "prime_truncation_cache: mid-drag cadence defer (within adaptive interval)"
             );
+            // A short session rename can have only one render wake. Prime its
+            // caption with the current bounds even while portal resize work waits.
+            if !dock_captions.is_empty()
+                && let Some(rasterizer) = self.text_rasterizer.as_mut()
+            {
+                rasterizer.prime_truncation_cache(&dock_captions);
+            }
             return;
         }
 
@@ -2544,6 +2557,7 @@ impl Compositor {
         // this only runs when a prime is allowed (not on every deferred frame),
         // so it stays within the prime-time O(n) budget.
         self.resize_reprime_content_bytes = live_items.iter().map(|item| item.text.len()).sum();
+        live_items.extend(dock_captions);
 
         let mut live_keys = rasterizer.prime_truncation_cache(&live_items);
 
@@ -3244,8 +3258,15 @@ impl Compositor {
         use_overlay_pipeline: bool,
         bg_vertex_count: usize,
         chrome_vertex_start: usize,
+        dock_captions: &[TextItem],
     ) -> (wgpu::CommandEncoder, u64, EncodeInputs, bool) {
-        let inputs = self.collect_encode_inputs(scene, surf_w, surf_h);
+        let inputs = if dock_captions.is_empty() {
+            self.collect_encode_inputs(scene, surf_w, surf_h)
+        } else {
+            let mut sources = self.collect_encode_sources(scene, surf_w, surf_h, true);
+            sources.text_items.extend_from_slice(dock_captions);
+            self.prepare_encode_inputs(sources, (surf_w, surf_h))
+        };
         let (encoder, encode_us, signature_current) = self.encode_from_inputs(
             vertices,
             frame_view,

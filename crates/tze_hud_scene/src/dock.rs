@@ -219,6 +219,8 @@ pub struct DockRow {
 pub struct DockProjection {
     pub target: Option<String>,
     pub layout: DockLayout,
+    /// Physical pixels per logical pixel on the selected display, before fitting the row.
+    pub pixels_per_dp: f32,
     /// Committed fit inputs in owner roster order, shared by draw and hit consumers.
     pub aspect_ratios: Vec<(String, f64)>,
 }
@@ -283,6 +285,7 @@ impl SceneGraph {
             Some(DockProjection {
                 target: None,
                 layout,
+                pixels_per_dp: 1.0,
                 aspect_ratios: Vec::new(),
             }),
             auto_clear_ms,

@@ -339,6 +339,15 @@ impl SceneGraph {
         };
     }
 
+    /// Current scoped session caption. Unscoped dock rows reserve the same space without text.
+    pub fn dock_caption(&self, namespace: &str) -> Option<&str> {
+        if !namespace.contains(crate::scope::SCOPE_SEPARATOR) {
+            return None;
+        }
+        let caption = &self.session_labels.get(namespace)?.caption;
+        (!caption.trim().is_empty()).then_some(caption.as_str())
+    }
+
     /// Register input readiness for a publisher before checking its pending queue.
     pub fn register_action_notifier(&mut self, namespace: &str, notifier: RenderWakeNotifier) {
         self.pending_action_notifiers

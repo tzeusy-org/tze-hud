@@ -642,6 +642,7 @@ async fn dock_draws_only_on_its_accepted_display_and_parks_overflow() {
                     },
                     aspect_ratios.iter().map(|(_, ratio)| *ratio),
                 ),
+                pixels_per_dp: 1.0,
                 aspect_ratios,
             }),
             NonZeroU64::new(10_000).unwrap(),
@@ -1738,5 +1739,228 @@ async fn elapsed_rasterizes_once_per_display_change_and_fits_its_longest_strings
     assert!(
         right - left > 40,
         "the whole string is drawn: {left}..={right}"
+    );
+}
+
+#[tokio::test]
+async fn dock_session_caption_follows_only_its_accepted_display() {
+    use std::num::NonZeroU64;
+    use std::sync::Arc;
+    use tze_hud_compositor::renderer::frame::WindowedFrameBuild;
+    use tze_hud_compositor::{DisplayLayout, DisplayRect, FrameTarget, HeadlessSurface};
+    use tze_hud_scene::dock::{DockLayout, DockMetrics, DockProjection};
+    use tze_hud_scene::scope::scoped_namespace;
+    use tze_hud_scene::{Rect, TestClock};
+
+    let Some(mut gpu) = Gpu::with_widgets(480, 256).await else {
+        return;
+    };
+    let format = wgpu::TextureFormat::Rgba8UnormSrgb;
+    let mut caption_tokens = tokens();
+    caption_tokens.insert("type.label.m.family".into(), "monospace".into());
+    caption_tokens.insert("font.mono".into(), "IBM Plex Mono".into());
+    caption_tokens.insert("color.on_surface.variant".into(), "#00FF00".into());
+    gpu.compositor.set_token_map(caption_tokens);
+    gpu.compositor.init_text_renderer(format);
+    let mut scene = SceneGraph::new_with_clock(480.0, 256.0, Arc::new(TestClock::new(1_000)));
+    scene.create_tab("Main", 0).unwrap();
+    let gauge = register_bundle(
+        &mut gpu.compositor,
+        &mut scene,
+        bundle!("gauge", ["background.svg", "fill.svg"]),
+    );
+    let primary_target = FrameTarget::primary(480, 256);
+    let primary = DisplayRect {
+        name: "PRIMARY".into(),
+        rect: Rect::new(0.0, 0.0, 480.0, 256.0),
+        primary: true,
+    };
+    let selected = DisplayRect {
+        name: "DOCK DISPLAY".into(),
+        rect: Rect::new(-480.0, 83.0, 480.0, 256.0),
+        primary: false,
+    };
+    let selected_target = FrameTarget {
+        x: -480.0,
+        y: 83.0,
+        primary: false,
+        ..primary_target
+    };
+    gpu.compositor.set_display_layout(DisplayLayout::new(
+        vec![
+            primary.clone(),
+            DisplayRect {
+                name: "MIRROR".into(),
+                ..selected.clone()
+            },
+            selected.clone(),
+        ],
+        &Default::default(),
+    ));
+    let project = |scene: &mut SceneGraph, display: &DisplayRect| {
+        let layout = DockLayout::new(
+            display.rect,
+            2,
+            DockMetrics {
+                row_height: 52.0,
+                caption_width: 112.0,
+                gap: 8.0,
+            },
+            [2.0],
+        );
+        assert_eq!(layout.scale, 0.75);
+        assert_eq!(layout.caption(0).width, 84.0);
+        assert!(scene.set_dock_projection(
+            std::slice::from_ref(&gauge),
+            Some(DockProjection {
+                target: Some(display.name.clone()),
+                layout,
+                pixels_per_dp: 1.5,
+                aspect_ratios: vec![(gauge.clone(), 2.0)],
+            }),
+            NonZeroU64::new(10_000).unwrap(),
+        ));
+    };
+    project(&mut scene, &selected);
+    let scoped = scoped_namespace("agent", "session");
+    let lease = scene.grant_lease(&scoped, 10_000);
+    for namespace in [scoped.as_str(), "agent"] {
+        scene
+            .publish_to_dock(&gauge, HashMap::new(), namespace, None, 0, 0)
+            .unwrap();
+    }
+    scene.set_session_label("agent", Some("Unscoped".into()));
+    assert_eq!(scene.dock_caption("agent"), None);
+    let instance = scene
+        .dock_instance(&scoped, &gauge)
+        .unwrap()
+        .instance_name
+        .clone();
+    let build = |compositor: &mut Compositor, scene: &mut SceneGraph| {
+        compositor.prime_markdown_cache(scene);
+        compositor.prime_truncation_cache(scene);
+        compositor.build_windowed_frame(scene, 480, 256)
+    };
+    let capture = |compositor: &mut Compositor,
+                   frame: &WindowedFrameBuild,
+                   target: &FrameTarget,
+                   display: Option<&str>| {
+        compositor
+            .capture_windowed_display(frame, target, display, format)
+            .unwrap()
+            .rgba
+    };
+    let named = |compositor: &mut Compositor, frame: &WindowedFrameBuild| {
+        capture(compositor, frame, &selected_target, Some(&selected.name))
+    };
+    // Use the same Scene commit as MCP notification relabel before the frame.
+    let caption = |scene: &mut SceneGraph, label: String| {
+        scene.renew_lease(lease, 10_000).unwrap();
+        scene.set_session_label(&scoped, Some(label));
+    };
+    let blank = build(&mut gpu.compositor, &mut scene);
+    let blank_pixels = named(&mut gpu.compositor, &blank);
+    let mirror_pixels = capture(
+        &mut gpu.compositor,
+        &blank,
+        &selected_target,
+        Some("MIRROR"),
+    );
+    let headless_without_caption = gpu.render_pixels(&mut scene);
+
+    caption(&mut scene, "hud".into());
+    let short = build(&mut gpu.compositor, &mut scene);
+    let short_pixels = named(&mut gpu.compositor, &short);
+    caption(&mut scene, "hud (2)".into());
+    let suffixed = build(&mut gpu.compositor, &mut scene);
+    let suffixed_pixels = named(&mut gpu.compositor, &suffixed);
+    assert_eq!(scene.dock_caption(&scoped), Some("hud (2)"));
+    assert_ne!(short_pixels, suffixed_pixels, "the suffix draws");
+    let diff: Vec<_> = suffixed_pixels
+        .chunks_exact(4)
+        .zip(blank_pixels.chunks_exact(4))
+        .enumerate()
+        .filter(|(_, (label, blank))| label != blank)
+        .collect();
+    assert!(diff.len() >= 20);
+    for (index, (pixel, _)) in diff {
+        assert!((24..108).contains(&(index % 480)) && (30..70).contains(&(index / 480)));
+        assert!(
+            pixel[1] > pixel[0] && pixel[1] > pixel[2],
+            "secondary foreground role"
+        );
+    }
+    assert_ne!(
+        gpu.compositor
+            .display_frame_signature(&blank, &selected_target, Some(&selected.name)),
+        gpu.compositor
+            .display_frame_signature(&suffixed, &selected_target, Some(&selected.name)),
+        "caption-only frame identity"
+    );
+    assert_eq!(
+        gpu.compositor
+            .display_frame_signature(&blank, &selected_target, Some("MIRROR")),
+        gpu.compositor
+            .display_frame_signature(&suffixed, &selected_target, Some("MIRROR"))
+    );
+    assert_eq!(
+        capture(
+            &mut gpu.compositor,
+            &suffixed,
+            &selected_target,
+            Some("MIRROR")
+        ),
+        mirror_pixels
+    );
+    assert_eq!(
+        capture(
+            &mut gpu.compositor,
+            &suffixed,
+            &primary_target,
+            Some("PRIMARY")
+        ),
+        capture(
+            &mut gpu.compositor,
+            &blank,
+            &primary_target,
+            Some("PRIMARY")
+        )
+    );
+    assert_eq!(gpu.render_pixels(&mut scene), headless_without_caption);
+
+    let long = format!("{}B", "A\u{0301}".repeat(10));
+    caption(&mut scene, long.clone());
+    let overflow = build(&mut gpu.compositor, &mut scene);
+    let overflow_pixels = named(&mut gpu.compositor, &overflow);
+    assert_eq!(scene.dock_caption(&scoped), Some(long.as_str()));
+    let surface = HeadlessSurface::new(&gpu.compositor.device, 480, 256);
+    let present = gpu.compositor.present_windowed_display(
+        &overflow,
+        &selected_target,
+        Some(&selected.name),
+        &surface,
+    );
+    assert!(present.gpu_submitted && present.signature_current);
+    assert!(present.telemetry.widget_rasterized.is_empty());
+    assert_eq!(surface.read_pixels(&gpu.compositor.device), overflow_pixels);
+    assert_eq!(raster_count(&gpu.compositor, &instance), 1);
+
+    // The bundled monospace face advances 0.6 em per accented grapheme or
+    // ellipsis. At 12 dp * 1.5 * 0.75, ten cells fit 84 px and eleven do not.
+    caption(&mut scene, format!("{}…", "A\u{0301}".repeat(9)));
+    let explicit = build(&mut gpu.compositor, &mut scene);
+    assert_eq!(named(&mut gpu.compositor, &explicit), overflow_pixels);
+    assert_ne!(overflow_pixels, suffixed_pixels);
+
+    project(&mut scene, &primary);
+    assert_eq!(
+        widget_region(
+            &gpu.render_pixels(&mut scene),
+            480,
+            (0, 0),
+            (24, 30, 84, 40)
+        ),
+        widget_region(&overflow_pixels, 480, (0, 0), (24, 30, 84, 40)),
+        "the direct headless path draws the same local caption when it owns the dock"
     );
 }
