@@ -334,7 +334,7 @@ impl HeadlessEventLoopHarness {
                     config_parent,
                     &mut scene,
                     tze_hud_config::tokens::OsPreferences::default(),
-                );
+                )?;
                 for (widget_type, svg_file, svg) in &startup.widget_svg_assets {
                     state
                         .text_fit
@@ -1529,6 +1529,52 @@ mod tests {
     mod question_displays;
     use tze_hud_input::{KeyboardModifiers, RawCharacterEvent, RawKeyDownEvent, RawKeyUpEvent};
     use tze_hud_scene::MonoUs;
+
+    #[tokio::test]
+    async fn network_startup_rejects_dock_types_that_cannot_fit() {
+        use tze_hud_config::dock::DockValidationErrors;
+        use tze_hud_scene::config::ConfigErrorCode;
+
+        let config = r#"
+            [runtime]
+            profile = "overlay"
+            [dock]
+            accepts = ["gauge", "status-indicator", "unloaded-type"]
+            [[tabs]]
+            name = "Main"
+        "#;
+        for (overrides, gauge_height) in [
+            ("", 132),
+            (
+                "[design_tokens]\n\"gauge.width\" = '72'\n\"gauge.height\" = '224'\n",
+                224,
+            ),
+        ] {
+            let cfg = super::super::WindowedConfig {
+                config_toml: Some(format!("{config}{overrides}")),
+                ..Default::default()
+            };
+            let Err(error) = HeadlessEventLoopHarness::with_network(
+                cfg,
+                Arc::new(tze_hud_scene::TestClock::new(1_000)),
+            )
+            .await
+            else {
+                panic!("invalid dock selection reached network startup");
+            };
+            let errors = &error.downcast_ref::<DockValidationErrors>().unwrap().0;
+            assert_eq!(errors.len(), 3);
+            assert_eq!(errors[2].code, ConfigErrorCode::UnknownWidgetType);
+            for (error, got) in errors.iter().zip([
+                format!("gauge ({gauge_height} dp, limit 69.333 dp)"),
+                "status-indicator (124 dp, limit 69.333 dp)".into(),
+                "unloaded-type".into(),
+            ]) {
+                assert_eq!(error.field_path, "dock.accepts");
+                assert_eq!(error.got, got);
+            }
+        }
+    }
 
     #[tokio::test]
     async fn production_turn_skips_idle_and_renders_scene_changes_and_animation() {

@@ -2805,7 +2805,7 @@ impl WindowedRuntime {
                     config_parent_buf.as_deref(),
                     &mut scene,
                     crate::os_prefs::read(),
-                );
+                )?;
                 // Stash SVG assets for compositor registration after init_widget_renderer.
                 pending_widget_svgs = startup_result.widget_svg_assets;
                 startup_diagnostics = Some(crate::operator::diagnostics::StartupDiagnostics::new(

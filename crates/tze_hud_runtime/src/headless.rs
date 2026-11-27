@@ -249,7 +249,7 @@ impl HeadlessRuntime {
                         None,
                         &mut scene,
                         tze_hud_config::tokens::OsPreferences::default(),
-                    );
+                    )?;
                     // Register widget SVG assets with the headless widget renderer,
                     // mirroring the windowed runtime so bundled SVG-based widgets render correctly.
                     process_pending_widget_svgs(

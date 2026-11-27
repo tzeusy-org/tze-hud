@@ -18,15 +18,14 @@
 //!
 //! ## Bundle errors
 //!
-//! "A rejected bundle
-//! MUST NOT prevent other valid bundles from loading; the runtime SHALL log
-//! the error and continue."  Bundle load errors are logged at WARN level and
-//! do not abort startup.
+//! A rejected bundle does not prevent other valid bundles from loading. Once
+//! the winners are known, a configured dock type must have an eligible viewport.
 //!
 
 use std::collections::HashMap;
 use std::path::Path;
 
+use tze_hud_config::dock::{DockValidationErrors, ROW_HEIGHT_TOKEN};
 use tze_hud_config::raw::RawConfig;
 use tze_hud_config::widgets::{LoadedWidgetType, build_widget_instance, resolve_bundle_path};
 use tze_hud_scene::dock::DockPresentation;
@@ -78,8 +77,8 @@ const BUILTIN_BUNDLES: &[(&str, BundleFiles)] = &[
 ///    (needed to bind widget instances to tab IDs).
 /// 5. Creates `WidgetInstance` records for each `[[tabs.widgets]]` entry.
 ///
-/// Errors are logged at WARN level but never abort startup (Widget
-/// Asset Bundle Format).
+/// Individual bundle load errors are logged. Invalid dock selections abort
+/// startup according to the selected bundles that actually loaded.
 ///
 /// # Arguments
 ///
@@ -250,10 +249,13 @@ pub(crate) fn init_widget_registry(
     config_parent: Option<&Path>,
     tab_name_to_id: &HashMap<String, SceneId>,
     token_map: &HashMap<String, String>,
-) -> (
-    Vec<WidgetSvgAsset>,
-    tze_hud_scene::startup_diagnostics::StartupWarnings,
-) {
+) -> Result<
+    (
+        Vec<WidgetSvgAsset>,
+        tze_hud_scene::startup_diagnostics::StartupWarnings,
+    ),
+    DockValidationErrors,
+> {
     // Steps 1-2: on-disk bundles, then the built-ins they do not override.
     let (scan_results, mut warnings) =
         scan_all_bundles_with_diagnostics(&bundle_roots(raw, config_parent), token_map);
@@ -264,6 +266,7 @@ pub(crate) fn init_widget_registry(
     let mut registered_names: HashMap<String, ()> = HashMap::new();
     let mut type_map: HashMap<String, LoadedWidgetType> = HashMap::new();
     let mut svg_assets: Vec<WidgetSvgAsset> = Vec::new();
+    let mut dock_extents = HashMap::new();
 
     for (bundle_index, result) in scan_results.into_iter().enumerate() {
         match result {
@@ -282,6 +285,14 @@ pub(crate) fn init_widget_registry(
                     continue;
                 }
                 registered_names.insert(name.clone(), ());
+
+                if raw
+                    .dock
+                    .as_ref()
+                    .is_some_and(|dock| dock.accepts.contains(&name))
+                {
+                    dock_extents.insert(name.clone(), bundle.dock_authored_extent());
+                }
 
                 // Build the LoadedWidgetType entry for instance creation.
                 let loaded = LoadedWidgetType {
@@ -321,6 +332,13 @@ pub(crate) fn init_widget_registry(
                 );
             }
         }
+    }
+
+    if let Some(dock) = &raw.dock {
+        dock.validate_bundles(
+            token_map.get(ROW_HEIGHT_TOKEN).map(String::as_str),
+            &dock_extents,
+        )?;
     }
 
     tracing::info!(
@@ -442,7 +460,7 @@ pub(crate) fn init_widget_registry(
         "widget_startup: widget instance creation complete"
     );
 
-    (svg_assets, warnings)
+    Ok((svg_assets, warnings))
 }
 
 // ─── Unit tests ───────────────────────────────────────────────────────────────
@@ -488,7 +506,8 @@ mod tests {
         ] {
             let mut scene = SceneGraph::new(1920.0, 1080.0);
             let (_, warnings) =
-                init_widget_registry(&mut scene, &raw, None, &HashMap::new(), &default_tokens());
+                init_widget_registry(&mut scene, &raw, None, &HashMap::new(), &default_tokens())
+                    .unwrap();
             assert_eq!(
                 warnings.items().len(),
                 usize::from(raw.widget_bundles.is_some())
@@ -531,7 +550,8 @@ mod tests {
         });
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let (_, warnings) =
-            init_widget_registry(&mut scene, &raw, None, &HashMap::new(), &default_tokens());
+            init_widget_registry(&mut scene, &raw, None, &HashMap::new(), &default_tokens())
+                .unwrap();
         assert_eq!(warnings.items().len(), 64);
         assert_eq!(warnings.omitted_events(), 38); // 100 real roots + two rejected declarations
         assert!(
@@ -554,7 +574,8 @@ mod tests {
         assert_eq!(complete["omitted_events"], 38);
         assert!(serde_json::to_vec(&complete).unwrap().len() <= 16_000);
         let (_, again) =
-            init_widget_registry(&mut scene, &raw, None, &HashMap::new(), &default_tokens());
+            init_widget_registry(&mut scene, &raw, None, &HashMap::new(), &default_tokens())
+                .unwrap();
         startup.finish_fonts(again);
         assert_eq!(
             crate::operator::diagnostics::render(None, None, Some(&startup)).1,
@@ -576,6 +597,7 @@ mod tests {
             let bytes = if *file == "dock.svg" {
                 String::from_utf8(bytes.to_vec())
                     .unwrap()
+                    .replace("160 52", "160 64")
                     .replace(
                         "id=\"label\" x=\"0\" y=\"0\"",
                         "id=\"label\" x=\"11\" y=\"19\"",
@@ -594,21 +616,32 @@ mod tests {
             widget_bundles: Some(RawWidgetBundles {
                 paths: vec![root.path().to_string_lossy().into_owned()],
             }),
+            dock: Some(tze_hud_config::dock::DockConfig {
+                accepts: vec!["countdown".into()],
+                ..Default::default()
+            }),
+            design_tokens: Some(tze_hud_config::raw::RawDesignTokens(HashMap::from([
+                (ROW_HEIGHT_TOKEN.into(), "48".into()),
+                ("ui.scale".into(), "1.25".into()),
+            ]))),
             ..RawConfig::default()
         };
         let mut scene = SceneGraph::new(800.0, 600.0);
-        let (assets, warnings) =
-            init_widget_registry(&mut scene, &raw, None, &HashMap::new(), &default_tokens());
-        assert!(warnings.items().is_empty());
+        let startup =
+            crate::scene_startup::run_scene_startup(&raw, None, &mut scene, Default::default())
+                .unwrap();
+        assert!(startup.startup_warnings.items().is_empty());
         let dock = scene
             .widget_registry
             .dock_presentation("countdown")
             .unwrap();
+        assert_eq!((dock.width, dock.height), (160.0, 64.0));
         assert!(
             !dock.uses_builtin_countdown_layout(),
             "type and filename alone must not select built-in layout"
         );
-        let bytes = &assets
+        let bytes = &startup
+            .widget_svg_assets
             .iter()
             .find(|(kind, file, _)| kind == "countdown" && file == "dock.svg")
             .unwrap()
@@ -619,6 +652,23 @@ mod tests {
                 .contains("id=\"label\" x=\"11\" y=\"19\"")
         );
         assert!(dock.matches_source("dock.svg", bytes));
+
+        let dock_file = custom.join("dock.svg");
+        let too_tall = std::fs::read_to_string(&dock_file)
+            .unwrap()
+            .replace("160 64", "160 64.125");
+        std::fs::write(dock_file, too_tall).unwrap();
+        let Err(DockValidationErrors(errors)) = crate::scene_startup::run_scene_startup(
+            &raw,
+            None,
+            &mut SceneGraph::new(800.0, 600.0),
+            Default::default(),
+        ) else {
+            panic!("the winning owner alternate exceeds the logical 75% row fit");
+        };
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].field_path, "dock.accepts");
+        assert_eq!(errors[0].got, "countdown (64.125 dp, limit 64.000 dp)");
     }
 
     /// WHEN an on-disk bundle has the same type name as a built-in THEN the
@@ -702,7 +752,8 @@ height_pct = 1
         std::fs::create_dir_all(root.join("private-broken-sibling")).unwrap();
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let (assets, warnings) =
-            init_widget_registry(&mut scene, &raw, None, &HashMap::new(), &default_tokens());
+            init_widget_registry(&mut scene, &raw, None, &HashMap::new(), &default_tokens())
+                .unwrap();
         assert_eq!(warnings.items().len(), 1);
         assert_eq!(warnings.items()[0].code, "WIDGET_BUNDLE_NO_MANIFEST");
         assert!(

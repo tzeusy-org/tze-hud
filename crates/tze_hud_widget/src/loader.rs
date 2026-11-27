@@ -51,6 +51,24 @@ pub struct LoadedBundle {
     pub origin: WidgetBundleOrigin,
 }
 
+impl LoadedBundle {
+    /// Authored viewport for the dock presentation of this selected bundle.
+    /// A standalone bundle can load even if its default layers have no common extent.
+    pub fn dock_authored_extent(&self) -> Option<(f32, f32)> {
+        if let Some(dock) = &self.dock {
+            return Some((dock.width, dock.height));
+        }
+
+        let mut extents = self
+            .definition
+            .layers
+            .iter()
+            .map(|layer| authored_svg_extent(self.svg_contents.get(&layer.svg_file)?));
+        let extent = extents.next()??;
+        extents.all(|other| other == Some(extent)).then_some(extent)
+    }
+}
+
 /// Loaded dock sources and their authored extent, before any display scaling.
 #[derive(Clone, Debug)]
 pub struct LoadedDockPresentation {
@@ -411,8 +429,15 @@ fn load_bundle_inner(
             )?;
             let mut extent = None;
             for layer in &dock_layers {
-                let size =
-                    dock_svg_extent(path_str, &layer.svg_file, &svg_contents[&layer.svg_file])?;
+                let Some(size) = authored_svg_extent(&svg_contents[&layer.svg_file]) else {
+                    return Err(BundleError::SvgParseError {
+                        path: path_str.into(),
+                        svg_file: layer.svg_file.clone(),
+                        detail:
+                            "dock SVG needs a finite positive viewBox or explicit width and height"
+                                .into(),
+                    });
+                };
                 if extent.is_some_and(|previous| previous != size) {
                     return Err(BundleError::InvalidManifest {
                         path: path_str.to_string(),
@@ -535,13 +560,8 @@ fn load_layers(
 
 /// Unlike the resource parser's clamped raster estimate, eligibility needs
 /// explicit, finite authored dimensions; never default an unknown height.
-fn dock_svg_extent(path: &str, file: &str, bytes: &[u8]) -> Result<(f32, f32), BundleError> {
+fn authored_svg_extent(bytes: &[u8]) -> Option<(f32, f32)> {
     use quick_xml::{Reader, XmlVersion, events::Event};
-    let error = || BundleError::SvgParseError {
-        path: path.into(),
-        svg_file: file.into(),
-        detail: "dock SVG needs a finite positive viewBox or explicit width and height".into(),
-    };
     let number = |text: &str| {
         text.trim()
             .strip_suffix("px")
@@ -553,17 +573,17 @@ fn dock_svg_extent(path: &str, file: &str, bytes: &[u8]) -> Result<(f32, f32), B
     let mut reader = Reader::from_reader(bytes);
     let mut version = XmlVersion::Implicit1_0;
     loop {
-        match reader.read_event().map_err(|_| error())? {
-            Event::Decl(declaration) => version = declaration.xml_version().map_err(|_| error())?,
+        match reader.read_event().ok()? {
+            Event::Decl(declaration) => version = declaration.xml_version().ok()?,
             Event::Start(root) | Event::Empty(root) => {
                 let mut width = None;
                 let mut height = None;
                 let mut view_box = None;
                 for attribute in root.attributes() {
-                    let attribute = attribute.map_err(|_| error())?;
+                    let attribute = attribute.ok()?;
                     let value = attribute
                         .decoded_and_normalized_value(version, reader.decoder())
-                        .map_err(|_| error())?;
+                        .ok()?;
                     match attribute.key.as_ref() {
                         b"viewBox" => view_box = Some(value.into_owned()),
                         b"width" => width = number(&value),
@@ -577,21 +597,21 @@ fn dock_svg_extent(path: &str, file: &str, bytes: &[u8]) -> Result<(f32, f32), B
                         .filter(|s| !s.is_empty())
                         .map(str::parse::<f32>)
                         .collect::<Result<_, _>>()
-                        .map_err(|_| error())?;
+                        .ok()?;
                     if values.len() == 4
                         && values.iter().all(|n| n.is_finite())
                         && values[2] > 0.0
                         && values[3] > 0.0
                     {
-                        Ok((values[2], values[3]))
+                        Some((values[2], values[3]))
                     } else {
-                        Err(error())
+                        None
                     }
                 } else {
-                    width.zip(height).ok_or_else(error)
+                    width.zip(height)
                 };
             }
-            Event::Eof => return Err(error()),
+            Event::Eof => return None,
             _ => {}
         }
     }

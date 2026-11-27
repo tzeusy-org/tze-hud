@@ -6,7 +6,8 @@
 //!    overrides → global token map.
 //! 2. Materialize every `[[tabs]]` entry as a scene tab.
 //! 3. Load widget bundles (SVG `{{token.key}}` placeholders resolved against
-//!    the global token map) and register widget definitions and instances.
+//!    the global token map), validate the dock against the winning bundles,
+//!    and register widget definitions and instances.
 //! 4. Fill each built-in zone's `RenderingPolicy` from the global tokens and
 //!    install the resulting zone registry in the scene.
 //!
@@ -15,6 +16,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use tze_hud_config::dock::DockValidationErrors;
 use tze_hud_config::raw::RawConfig;
 use tze_hud_config::themes::resolve_config_tokens;
 use tze_hud_config::tokens::{DesignTokenMap, OsPreferences};
@@ -45,12 +47,15 @@ pub struct SceneStartupResult {
 /// passes `os_prefs::read()`; headless runs, harnesses and tests pin
 /// [`OsPreferences::default`] so the resolved tokens never depend on the
 /// build host.
+///
+/// Returns the structured dock errors if a configured type is missing or
+/// cannot use the resolved row height with its selected presentation.
 pub fn run_scene_startup(
     raw: &RawConfig,
     config_parent: Option<&Path>,
     scene: &mut tze_hud_scene::graph::SceneGraph,
     os: OsPreferences,
-) -> SceneStartupResult {
+) -> Result<SceneStartupResult, DockValidationErrors> {
     let config_tokens: DesignTokenMap = raw
         .design_tokens
         .as_ref()
@@ -75,7 +80,7 @@ pub fn run_scene_startup(
     let tab_map = bootstrap_config_tabs(scene, raw);
 
     let (widget_svg_assets, startup_warnings) =
-        init_widget_registry(scene, raw, config_parent, &tab_map, &global_tokens);
+        init_widget_registry(scene, raw, config_parent, &tab_map, &global_tokens)?;
 
     let mut zone_registry = ZoneRegistry::with_defaults();
     crate::appearance::restyle_zones(&mut zone_registry, &global_tokens);
@@ -88,11 +93,11 @@ pub fn run_scene_startup(
         "scene_startup: zone registry installed"
     );
 
-    SceneStartupResult {
+    Ok(SceneStartupResult {
         global_tokens,
         widget_svg_assets,
         startup_warnings,
-    }
+    })
 }
 
 // ─── Fonts directory ──────────────────────────────────────────────────────────
@@ -251,6 +256,117 @@ mod tests {
         SceneGraph::new(1920.0, 1080.0)
     }
 
+    #[test]
+    fn dock_startup_accepts_shipped_countdown_and_progress_viewports() {
+        let mut raw: RawConfig = toml::from_str(
+            r#"
+            [dock]
+            accepts = ["countdown", "progress-bar"]
+            [[tabs]]
+            name = "Main"
+            [[tabs.widgets]]
+            instance_id = "standalone-countdown"
+            widget_type = "countdown"
+            "#,
+        )
+        .unwrap();
+        let mut scene = make_scene();
+        let startup = run_scene_startup(&raw, None, &mut scene, OsPreferences::default()).unwrap();
+        let countdown = scene
+            .widget_registry
+            .dock_presentation("countdown")
+            .unwrap();
+        assert_eq!((countdown.width, countdown.height), (160.0, 52.0));
+        assert!(countdown.uses_builtin_countdown_layout());
+        assert_eq!(
+            scene.widget_registry.instances["standalone-countdown"].widget_type_name,
+            "countdown"
+        );
+        for (kind, file, view_box) in [
+            ("countdown", "card.svg", "0 0 360 124"),
+            ("progress-bar", "track.svg", "0 0 320 50"),
+            ("progress-bar", "fill.svg", "0 0 320 50"),
+        ] {
+            let (_, _, svg) = startup
+                .widget_svg_assets
+                .iter()
+                .find(|(asset_kind, asset_file, _)| asset_kind == kind && asset_file == file)
+                .unwrap();
+            assert!(std::str::from_utf8(svg).unwrap().contains(view_box));
+        }
+        assert!(
+            scene
+                .publish_to_dock("countdown", Default::default(), "before-layout", None, 0, 0)
+                .is_err(),
+            "startup validation does not enable dock admission"
+        );
+        raw.design_tokens = Some(RawDesignTokens(HashMap::from([
+            ("progress.width".into(), "360".into()),
+            ("progress.height".into(), "52".into()),
+        ])));
+        let signed_sizes =
+            run_scene_startup(&raw, None, &mut make_scene(), OsPreferences::default()).unwrap();
+        for file in ["track.svg", "fill.svg"] {
+            let (_, _, svg) = signed_sizes
+                .widget_svg_assets
+                .iter()
+                .find(|(kind, asset, _)| kind == "progress-bar" && asset == file)
+                .unwrap();
+            assert!(std::str::from_utf8(svg).unwrap().contains("0 0 360 52"));
+        }
+    }
+
+    #[test]
+    fn dock_startup_rejects_known_default_layers_without_a_common_viewport() {
+        use std::fs;
+
+        let root = tempfile::tempdir().unwrap();
+        let bundle = root.path().join("layered");
+        fs::create_dir(&bundle).unwrap();
+        fs::write(
+            bundle.join("widget.toml"),
+            "name = 'layered'\nversion = '1.0.0'\n[[layers]]\nsvg_file = 'base.svg'\n[[layers]]\nsvg_file = 'top.svg'\n",
+        )
+        .unwrap();
+        fs::write(bundle.join("base.svg"), "<svg viewBox='0 0 160 52'/>").unwrap();
+        let mut raw = toml::from_str::<RawConfig>("[widget_bundles]\npaths = ['.']").unwrap();
+        for size in ["160 51", "0 52"] {
+            fs::write(
+                bundle.join("top.svg"),
+                format!("<svg viewBox='0 0 {size}'/>"),
+            )
+            .unwrap();
+            raw.dock = None;
+            let mut scene = make_scene();
+            run_scene_startup(
+                &raw,
+                Some(root.path()),
+                &mut scene,
+                OsPreferences::default(),
+            )
+            .unwrap();
+            assert!(scene.widget_registry.get_definition("layered").is_some());
+
+            raw.dock = Some(tze_hud_config::dock::DockConfig {
+                accepts: vec!["layered".into()],
+                ..Default::default()
+            });
+            let Err(DockValidationErrors(errors)) = run_scene_startup(
+                &raw,
+                Some(root.path()),
+                &mut make_scene(),
+                OsPreferences::default(),
+            ) else {
+                panic!("bad selected extent {size} passed startup");
+            };
+            assert_eq!(errors.len(), 1);
+            let error = &errors[0];
+            assert_eq!(error.field_path, "dock.accepts");
+            assert_eq!(error.got, "layered");
+            assert!(error.expected.contains("authored width and height"));
+        }
+    }
+
     // ── Step 2: Design token loading ──────────────────────────────────────────
 
     /// WHEN [design_tokens] is absent THEN global tokens are the canonical
@@ -259,7 +375,7 @@ mod tests {
     fn absent_design_tokens_uses_default_theme() {
         let raw = RawConfig::default();
         let mut scene = make_scene();
-        let result = run_scene_startup(&raw, None, &mut scene, OsPreferences::default());
+        let result = run_scene_startup(&raw, None, &mut scene, OsPreferences::default()).unwrap();
 
         let mut expected = tze_hud_config::themes::resolve_config_tokens(&DesignTokenMap::new());
         tze_hud_config::tokens::set_px_scale(&mut expected, 1.0);
@@ -286,7 +402,7 @@ mod tests {
         raw.design_tokens = Some(RawDesignTokens(dt_map));
 
         let mut scene = make_scene();
-        let result = run_scene_startup(&raw, None, &mut scene, OsPreferences::default());
+        let result = run_scene_startup(&raw, None, &mut scene, OsPreferences::default()).unwrap();
 
         assert_eq!(
             result
@@ -309,7 +425,7 @@ mod tests {
         raw.design_tokens = Some(RawDesignTokens(dt_map));
 
         let mut scene = make_scene();
-        run_scene_startup(&raw, None, &mut scene, OsPreferences::default());
+        run_scene_startup(&raw, None, &mut scene, OsPreferences::default()).unwrap();
 
         let subtitle_zone = scene
             .zone_registry
@@ -345,7 +461,7 @@ mod tests {
     fn zone_registry_applied_to_scene() {
         let raw = RawConfig::default();
         let mut scene = make_scene();
-        run_scene_startup(&raw, None, &mut scene, OsPreferences::default());
+        run_scene_startup(&raw, None, &mut scene, OsPreferences::default()).unwrap();
 
         // All 6 default zones must be present
         for zone_name in &[
@@ -375,7 +491,7 @@ mod tests {
         raw.design_tokens = Some(RawDesignTokens(dt_map));
 
         let mut scene = make_scene();
-        run_scene_startup(&raw, None, &mut scene, OsPreferences::default());
+        run_scene_startup(&raw, None, &mut scene, OsPreferences::default()).unwrap();
 
         // subtitle should get text_color from tokens
         let subtitle = scene.zone_registry.zones.get("subtitle").unwrap();
@@ -439,7 +555,7 @@ default_tab = true
 
         let raw: RawConfig = toml::from_str(toml_str).expect("TOML parse should succeed");
         let mut scene = SceneGraph::new(1920.0, 1080.0);
-        let result = run_scene_startup(&raw, None, &mut scene, OsPreferences::default());
+        let result = run_scene_startup(&raw, None, &mut scene, OsPreferences::default()).unwrap();
 
         // Global token map should include the overrides
         assert_eq!(
@@ -494,7 +610,8 @@ default_tab = true
             None,
             &mut changed_scene,
             OsPreferences::default(),
-        );
+        )
+        .unwrap();
         let policy = &changed_scene.zone_registry.zones["subtitle"].rendering_policy;
         assert_eq!(policy.transition_in_ms, Some(275));
         assert_eq!(policy.transition_out_ms, Some(100));
@@ -514,7 +631,8 @@ default_tab = true
     #[test]
     fn startup_with_animations_off_zeroes_motion_below_config() {
         let mut scene = make_scene();
-        let off = run_scene_startup(&RawConfig::default(), None, &mut scene, ANIMATIONS_OFF);
+        let off =
+            run_scene_startup(&RawConfig::default(), None, &mut scene, ANIMATIONS_OFF).unwrap();
         let subtitle = &scene.zone_registry.zones["subtitle"].rendering_policy;
         assert_eq!(subtitle.transition_in_ms, Some(0));
         assert_eq!(subtitle.transition_out_ms, Some(0));
@@ -532,7 +650,7 @@ default_tab = true
         dt_map.insert("motion.enter.ms".into(), "275".into());
         raw.design_tokens = Some(RawDesignTokens(dt_map));
         let mut scene = make_scene();
-        run_scene_startup(&raw, None, &mut scene, ANIMATIONS_OFF);
+        run_scene_startup(&raw, None, &mut scene, ANIMATIONS_OFF).unwrap();
         let subtitle = &scene.zone_registry.zones["subtitle"].rendering_policy;
         assert_eq!(subtitle.transition_in_ms, Some(275), "config wins");
         assert_eq!(subtitle.transition_out_ms, Some(0));
@@ -543,7 +661,8 @@ default_tab = true
             None,
             &mut scene,
             OsPreferences::default(),
-        );
+        )
+        .unwrap();
         assert!(!scene.widget_registry.reduce_motion);
     }
 
@@ -559,7 +678,7 @@ default_tab = true
             caret_blink_ms: 0,
             ..OsPreferences::default()
         };
-        let at_125 = run_scene_startup(&RawConfig::default(), None, &mut scene, os);
+        let at_125 = run_scene_startup(&RawConfig::default(), None, &mut scene, os).unwrap();
         assert_eq!(scene.widget_registry.zoom, 1.25);
         assert_eq!(
             tze_hud_config::tokens::px_scale(&at_125.global_tokens),
@@ -580,7 +699,8 @@ default_tab = true
             None,
             &mut scene,
             OsPreferences::default(),
-        );
+        )
+        .unwrap();
         assert_eq!(scene.widget_registry.zoom, 1.0);
         for key in [
             tze_hud_config::tokens::TEXT_SCALE_KEY,
@@ -613,7 +733,7 @@ default_tab = true
 "##;
         let raw: RawConfig = toml::from_str(toml_str).expect("TOML parse should succeed");
         let mut scene = make_scene();
-        run_scene_startup(&raw, None, &mut scene, OsPreferences::default());
+        run_scene_startup(&raw, None, &mut scene, OsPreferences::default()).unwrap();
 
         // The declared tab must exist even though it hosts no widgets.
         assert_eq!(
@@ -656,7 +776,7 @@ name = "Third"
 "##;
         let raw: RawConfig = toml::from_str(toml_str).expect("TOML parse should succeed");
         let mut scene = make_scene();
-        run_scene_startup(&raw, None, &mut scene, OsPreferences::default());
+        run_scene_startup(&raw, None, &mut scene, OsPreferences::default()).unwrap();
 
         assert_eq!(scene.tabs.len(), 3, "all declared tabs must materialize");
         let second_id = scene
@@ -688,7 +808,7 @@ name = "Beta"
 "##;
         let raw: RawConfig = toml::from_str(toml_str).expect("TOML parse should succeed");
         let mut scene = make_scene();
-        run_scene_startup(&raw, None, &mut scene, OsPreferences::default());
+        run_scene_startup(&raw, None, &mut scene, OsPreferences::default()).unwrap();
 
         assert_eq!(scene.tabs.len(), 2, "all declared tabs must materialize");
         let alpha_id = scene

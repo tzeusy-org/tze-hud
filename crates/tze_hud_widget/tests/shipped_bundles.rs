@@ -259,12 +259,15 @@ fn dock_alternate_uses_the_shared_schema_without_changing_default_assets() {
             (BundleScanResult::Ok(bundle), Some(size)) => {
                 let dock = bundle.dock.unwrap();
                 assert_eq!((dock.width, dock.height), size);
-                let errors = tze_hud_config::dock::DockConfig {
+                let validation = tze_hud_config::dock::DockConfig {
                     accepts: vec!["alternate-test".into()],
                     ..Default::default()
                 }
-                .validate_bundles(52.0, |_| Some(dock.height));
-                assert_eq!(errors.is_empty(), dock.height <= 52.0 * (4.0 / 3.0));
+                .validate_bundles(
+                    Some("52"),
+                    &HashMap::from([("alternate-test".into(), Some(size))]),
+                );
+                assert_eq!(validation.is_ok(), dock.height <= 52.0 * (4.0 / 3.0));
             }
             (BundleScanResult::Err(BundleError::SvgParseError { .. }), None) => {}
             (result, expected) => panic!("{dimensions}: {result:?}, expected {expected:?}"),

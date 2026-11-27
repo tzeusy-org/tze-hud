@@ -1,5 +1,7 @@
 //! Owner configuration for the optional per-session widget dock.
 
+use std::{collections::HashMap, fmt};
+
 use serde::{Deserialize, Serialize};
 use tze_hud_scene::config::{ConfigError, ConfigErrorCode};
 
@@ -9,6 +11,26 @@ pub const DEFAULT_ROW_HEIGHT_DP: f32 = 52.0;
 pub const DEFAULT_CAPTION_WIDTH_DP: f32 = 96.0;
 pub const DEFAULT_AUTO_CLEAR_MS: u64 = 900_000;
 const MAX_ACCEPTS: usize = 6;
+
+/// Errors validating dock configuration against the selected widget bundles.
+#[derive(Debug)]
+pub struct DockValidationErrors(pub Vec<ConfigError>);
+
+impl fmt::Display for DockValidationErrors {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "dock configuration is invalid")?;
+        for error in &self.0 {
+            write!(
+                f,
+                "\n[{:?}] {} (expected {}, got {}). {}",
+                error.code, error.field_path, error.expected, error.got, error.hint,
+            )?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for DockValidationErrors {}
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default, deny_unknown_fields)]
@@ -56,17 +78,34 @@ impl DockConfig {
         }
     }
 
-    /// Validate against the natural height of the bundles selected at startup.
-    /// The height is measured in SVG units before applying display scale.
+    /// Validate the winning bundles' authored dimensions before display scaling.
+    /// A missing type and a loaded type with no common extent are distinct errors.
     pub fn validate_bundles(
         &self,
-        row_height_dp: f32,
-        mut natural_height: impl FnMut(&str) -> Option<f32>,
-    ) -> Vec<ConfigError> {
-        let height_limit = row_height_dp * (4.0 / 3.0);
+        row_height_token: Option<&str>,
+        authored_extents: &HashMap<String, Option<(f32, f32)>>,
+    ) -> Result<(), DockValidationErrors> {
+        if self.accepts.is_empty() {
+            return Ok(());
+        }
+        let row_height_dp = match row_height_token {
+            Some(value) => crate::tokens::parse_numeric(value)
+                .filter(|height| *height > 0.0)
+                .ok_or_else(|| {
+                    DockValidationErrors(vec![ConfigError {
+                        code: ConfigErrorCode::TokenValueParseError,
+                        field_path: format!("design_tokens.{ROW_HEIGHT_TOKEN}"),
+                        expected: "a finite positive height in logical pixels".into(),
+                        got: value.into(),
+                        hint: format!("set {ROW_HEIGHT_TOKEN} to a positive number"),
+                    }])
+                })?,
+            None => DEFAULT_ROW_HEIGHT_DP,
+        };
+        let height_limit = f64::from(row_height_dp) * (4.0 / 3.0);
         let mut errors = Vec::new();
         for name in &self.accepts {
-            match natural_height(name) {
+            match authored_extents.get(name) {
                 None => errors.push(ConfigError {
                     code: ConfigErrorCode::UnknownWidgetType,
                     ..error(
@@ -76,16 +115,31 @@ impl DockConfig {
                         "use a widget type loaded from a bundle or a built-in",
                     )
                 }),
-                Some(height) if height > height_limit => errors.push(error(
+                Some(Some((width, height)))
+                    if width.is_finite() && *width > 0.0 && height.is_finite() && *height > 0.0 =>
+                {
+                    if f64::from(*height) * 0.75 > f64::from(row_height_dp) {
+                        errors.push(error(
+                            "accepts",
+                            "natural height at most 4/3 of dock.row.height",
+                            format!("{name} ({height} dp, limit {height_limit:.3} dp)"),
+                            "remove the widget type or increase dock.row.height",
+                        ));
+                    }
+                }
+                Some(_) => errors.push(error(
                     "accepts",
-                    "natural height at most 4/3 of dock.row.height",
-                    format!("{name} ({height:.1} dp, limit {height_limit:.1} dp)"),
-                    "remove the widget type or increase dock.row.height",
+                    "a common finite positive authored width and height across selected SVG layers",
+                    name.clone(),
+                    "give the selected SVG layers a matching viewBox or explicit width and height",
                 )),
-                Some(_) => {}
             }
         }
-        errors
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(DockValidationErrors(errors))
+        }
     }
 }
 
@@ -161,22 +215,42 @@ mod tests {
     #[test]
     fn dock_validates_bundle_names_and_viewbox_height() {
         let dock = DockConfig {
-            accepts: ["progress-bar", "unknown", "gauge", "status-indicator"]
-                .map(str::to_owned)
-                .into(),
+            accepts: [
+                "progress-bar",
+                "unknown",
+                "gauge",
+                "status-indicator",
+                "unmeasurable",
+            ]
+            .map(str::to_owned)
+            .into(),
             ..Default::default()
         };
-        let errors = dock.validate_bundles(DEFAULT_ROW_HEIGHT_DP, |name| match name {
-            "progress-bar" => Some(52.0),
-            "gauge" => Some(224.0),
-            "status-indicator" => Some(124.0),
-            _ => None,
-        });
-        assert_eq!(errors.len(), 3);
+        let extents = HashMap::from([
+            ("progress-bar".into(), Some((360.0, 52.0))),
+            ("gauge".into(), Some((72.0, 224.0))),
+            ("status-indicator".into(), Some((320.0, 124.0))),
+            ("unmeasurable".into(), None),
+        ]);
+        let DockValidationErrors(errors) = dock.validate_bundles(None, &extents).unwrap_err();
+        assert_eq!(errors.len(), 4);
         assert_eq!(errors[0].got, "unknown");
         assert_eq!(errors[0].code, ConfigErrorCode::UnknownWidgetType);
-        for (error, name) in errors[1..].iter().zip(["gauge", "status-indicator"]) {
+        for (error, name) in errors[1..3].iter().zip(["gauge", "status-indicator"]) {
             assert!(error.got.starts_with(name) && error.expected.contains("dock.row.height"));
+        }
+        assert_eq!(errors[3].got, "unmeasurable");
+        assert_eq!(
+            errors[3].code,
+            ConfigErrorCode::Other("CONFIG_INVALID_DOCK".into())
+        );
+        assert!(errors[3].expected.contains("authored width and height"));
+        for invalid in ["0", "-1", "NaN"] {
+            let DockValidationErrors(errors) =
+                dock.validate_bundles(Some(invalid), &extents).unwrap_err();
+            assert_eq!(errors.len(), 1);
+            assert_eq!(errors[0].code, ConfigErrorCode::TokenValueParseError);
+            assert_eq!(errors[0].field_path, "design_tokens.dock.row.height");
         }
     }
 }
