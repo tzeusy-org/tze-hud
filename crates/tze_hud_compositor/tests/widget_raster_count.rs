@@ -1748,7 +1748,7 @@ async fn dock_session_caption_follows_only_its_accepted_display() {
     use std::sync::Arc;
     use tze_hud_compositor::renderer::frame::WindowedFrameBuild;
     use tze_hud_compositor::{DisplayLayout, DisplayRect, FrameTarget, HeadlessSurface};
-    use tze_hud_scene::dock::{DockLayout, DockMetrics, DockProjection};
+    use tze_hud_scene::dock::{DockLayout, DockMetrics, DockPointer, DockProjection};
     use tze_hud_scene::scope::scoped_namespace;
     use tze_hud_scene::{Rect, TestClock};
 
@@ -1760,9 +1760,12 @@ async fn dock_session_caption_follows_only_its_accepted_display() {
     caption_tokens.insert("type.label.m.family".into(), "monospace".into());
     caption_tokens.insert("font.mono".into(), "IBM Plex Mono".into());
     caption_tokens.insert("color.on_surface.variant".into(), "#00FF00".into());
-    gpu.compositor.set_token_map(caption_tokens);
+    caption_tokens.insert("motion.exit.easing".into(), "linear".into());
+    caption_tokens.insert("motion.exit.ms".into(), "120".into());
+    gpu.compositor.set_token_map(caption_tokens.clone());
     gpu.compositor.init_text_renderer(format);
-    let mut scene = SceneGraph::new_with_clock(480.0, 256.0, Arc::new(TestClock::new(1_000)));
+    let clock = Arc::new(TestClock::new(1_000));
+    let mut scene = SceneGraph::new_with_clock(480.0, 256.0, clock.clone());
     scene.create_tab("Main", 0).unwrap();
     let gauge = register_bundle(
         &mut gpu.compositor,
@@ -1983,5 +1986,104 @@ async fn dock_session_caption_follows_only_its_accepted_display() {
         ),
         widget_region(&overflow_pixels, 480, (0, 0), (24, 30, 84, 40)),
         "the direct headless path draws the same local caption when it owns the dock"
+    );
+
+    // Reuse the verified named refit and an isolated pair of live rows. The
+    // formerly unscoped top row has no caption to contaminate the glyph oracle.
+    scene.clear_dock_widget(&scoped, &gauge);
+    project(&mut scene, &selected);
+    caption(&mut scene, "hud (2)".into());
+    scene
+        .publish_to_dock(&gauge, HashMap::new(), &scoped, None, 0, 0)
+        .unwrap();
+    let survivor = scene
+        .dock_instance(&scoped, &gauge)
+        .unwrap()
+        .instance_name
+        .clone();
+    let departed = scene
+        .dock_instance("agent", &gauge)
+        .unwrap()
+        .instance_name
+        .clone();
+    let placed = build(&mut gpu.compositor, &mut scene);
+    let pointer = scene.dock_passive_column().unwrap().clone();
+    assert!(pointer.observe(DockPointer::Inside));
+    let before_clear = named(&mut gpu.compositor, &placed);
+    scene.clear_dock_widget("agent", &gauge);
+    assert!(!gpu.compositor.advance_dock_compaction(&mut scene, true));
+    let held = build(&mut gpu.compositor, &mut scene);
+    let held_pixels = named(&mut gpu.compositor, &held);
+    let crop = |pixels: &[u8], y| widget_region(pixels, 480, (0, 0), (24, y, 168, 39));
+    let row = crop(&held_pixels, 76);
+    assert_eq!(row, crop(&before_clear, 76));
+    assert_ne!(row, crop(&mirror_pixels, 76), "the survivor really draws");
+    assert_eq!(
+        crop(&held_pixels, 31),
+        crop(&mirror_pixels, 31),
+        "no departure ghost"
+    );
+    assert!(
+        gpu.compositor
+            .widget_renderer()
+            .unwrap()
+            .texture_entry(&departed)
+            .is_none()
+    );
+    let frame_signature = |compositor: &Compositor, frame, target| {
+        compositor.display_frame_signature(frame, &selected_target, Some(target))
+    };
+    let held_signature = frame_signature(&gpu.compositor, &held, &selected.name);
+    assert!(pointer.observe(DockPointer::Outside));
+    assert!(gpu.compositor.advance_dock_compaction(&mut scene, true));
+    clock.advance(40);
+    assert!(gpu.compositor.advance_dock_compaction(&mut scene, true));
+    let middle = build(&mut gpu.compositor, &mut scene);
+    let middle_pixels = named(&mut gpu.compositor, &middle);
+    assert_eq!(
+        crop(&middle_pixels, 61),
+        row,
+        "caption and widget translate together"
+    );
+    assert_ne!(
+        frame_signature(&gpu.compositor, &middle, &selected.name),
+        held_signature
+    );
+    assert_eq!(
+        frame_signature(&gpu.compositor, &middle, "MIRROR"),
+        frame_signature(&gpu.compositor, &held, "MIRROR")
+    );
+    assert_eq!(
+        capture(
+            &mut gpu.compositor,
+            &middle,
+            &selected_target,
+            Some("MIRROR")
+        ),
+        mirror_pixels
+    );
+
+    assert!(pointer.observe(DockPointer::Inside));
+    clock.advance(80);
+    assert!(!gpu.compositor.advance_dock_compaction(&mut scene, true));
+    let paused = build(&mut gpu.compositor, &mut scene);
+    assert_eq!(named(&mut gpu.compositor, &paused), middle_pixels);
+    tze_hud_config::tokens::apply_os_motion_layer(&mut caption_tokens, &Default::default(), false);
+    gpu.compositor.set_token_map(caption_tokens);
+    assert!(!gpu.compositor.advance_dock_compaction(&mut scene, true));
+    assert!(pointer.observe(DockPointer::Outside));
+    assert!(!gpu.compositor.advance_dock_compaction(&mut scene, true));
+    let terminal = build(&mut gpu.compositor, &mut scene);
+    let terminal_pixels = named(&mut gpu.compositor, &terminal);
+    assert_eq!(
+        crop(&terminal_pixels, 31),
+        row,
+        "reduced motion snaps out of the gap"
+    );
+    assert_eq!(crop(&terminal_pixels, 76), crop(&mirror_pixels, 76));
+    assert_eq!(
+        raster_count(&gpu.compositor, &survivor),
+        1,
+        "motion only repositions"
     );
 }

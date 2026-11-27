@@ -25,7 +25,7 @@ use crate::operator::status::{UnplacedReason, UnplacedZone};
 use tze_hud_compositor::{DisplayLayout, DisplayRect, FrameTarget, WindowSurface};
 use tze_hud_config::displays::{is_legacy_display_key, normalize_display_key};
 use tze_hud_scene::Rect;
-use winit::dpi::PhysicalSize;
+use winit::dpi::{PhysicalPosition, PhysicalSize};
 use winit::event_loop::ActiveEventLoop;
 use winit::monitor::MonitorHandle;
 use winit::window::{Window, WindowAttributes, WindowId, WindowLevel};
@@ -955,6 +955,69 @@ impl RefitBudget {
 /// Recreating a lost secondary is retried this many times per display.
 const MAX_SECONDARY_RECREATES: u32 = 3;
 
+/// Checked desktop client geometry for passive cursor classification.
+pub(super) struct DockCursorClient {
+    pub(super) origin: Option<PhysicalPosition<i32>>,
+    size: PhysicalSize<u32>,
+}
+
+#[cfg(target_os = "windows")]
+pub(super) fn dock_cursor_client(window: &Window) -> Option<DockCursorClient> {
+    use windows::Win32::Foundation::{POINT, RECT};
+    use windows::Win32::Graphics::Gdi::ClientToScreen;
+    use windows::Win32::UI::WindowsAndMessaging::{GetClientRect, IsIconic};
+
+    let hwnd = overlay_hwnd(window)?;
+    let mut client = RECT::default();
+    let mut origin = POINT::default();
+    // SAFETY: `window` keeps our HWND alive; both output buffers are valid.
+    unsafe {
+        if IsIconic(hwnd).as_bool() || !ClientToScreen(hwnd, &mut origin).as_bool() {
+            return None;
+        }
+        GetClientRect(hwnd, &mut client).ok()?;
+    }
+    Some(DockCursorClient {
+        origin: Some(PhysicalPosition::new(origin.x, origin.y)),
+        size: PhysicalSize::new(
+            client.right.try_into().ok()?,
+            client.bottom.try_into().ok()?,
+        ),
+    })
+}
+
+#[cfg(not(target_os = "windows"))]
+fn dock_cursor_client(window: &Window) -> Option<DockCursorClient> {
+    if window.is_minimized().unwrap_or(false) {
+        return None;
+    }
+    Some(DockCursorClient {
+        origin: window.inner_position().ok(),
+        size: window.inner_size(),
+    })
+}
+
+#[cfg(target_os = "windows")]
+pub(super) fn cursor_outer_origin(window: &Window) -> Option<PhysicalPosition<i32>> {
+    use windows::Win32::Foundation::RECT;
+    use windows::Win32::UI::WindowsAndMessaging::GetWindowRect;
+
+    let mut rect = RECT::default();
+    // SAFETY: `window` keeps our HWND alive and the output buffer is valid.
+    unsafe { GetWindowRect(overlay_hwnd(window)?, &mut rect) }.ok()?;
+    Some(PhysicalPosition::new(rect.left, rect.top))
+}
+
+pub(super) fn dock_cursor_matches_projection(
+    column: &tze_hud_scene::dock::DockPassiveColumn,
+    primary: &MonitorSpec,
+    target: &MonitorSpec,
+) -> bool {
+    target.dock_bounds_observed
+        && target.name == column.target
+        && target.scene_rect(primary) == column.display
+}
+
 impl super::WinitApp {
     /// Scene coordinates of a cursor position reported by a window
     /// (`secondary` = `None` for the primary).
@@ -968,6 +1031,60 @@ impl super::WinitApp {
             secondary.map(|i| &self.state.secondaries[i].spec),
             self.state.primary_monitor.as_ref(),
         )
+    }
+
+    /// Verify the dock's accepted Scene mapping against our live drawable
+    /// windows. A planned monitor move may precede the actual window refit.
+    pub(super) fn dock_cursor_mapping_current(
+        &self,
+        column: &tze_hud_scene::dock::DockPassiveColumn,
+        source: Option<WindowId>,
+        observed_origin: Option<PhysicalPosition<i32>>,
+    ) -> bool {
+        if self.state.displays_dirty.load(Ordering::Acquire) {
+            return false;
+        }
+        let Some((primary_window, primary)) = self
+            .state
+            .window
+            .as_ref()
+            .zip(self.state.primary_monitor.as_ref())
+        else {
+            return false;
+        };
+        let fitted = self.state.effective_mode == crate::window::WindowMode::Overlay
+            && self.state.config.overlay_auto_size;
+        let client_matches = |client: &DockCursorClient, spec: &MonitorSpec| {
+            (client.size.width, client.size.height) == (spec.width, spec.height)
+                && (!fitted || client.origin == Some(PhysicalPosition::new(spec.x, spec.y)))
+        };
+        if !dock_cursor_client(primary_window).is_some_and(|client| {
+            client_matches(&client, primary)
+                && observed_origin.is_none_or(|origin| client.origin == Some(origin))
+        }) {
+            return false;
+        }
+        let matches_column =
+            |spec: &MonitorSpec| dock_cursor_matches_projection(column, primary, spec);
+        let usable = |display: &SecondaryDisplay| {
+            dock_cursor_client(&display.window)
+                .is_some_and(|client| client_matches(&client, &display.spec))
+        };
+        let target_live = matches_column(primary)
+            || self
+                .state
+                .secondaries
+                .iter()
+                .any(|display| matches_column(&display.spec) && usable(display));
+        let source_live = source.is_none_or(|id| {
+            primary_window.id() == id
+                || self
+                    .state
+                    .secondaries
+                    .iter()
+                    .any(|display| display.window.id() == id && usable(display))
+        });
+        target_live && source_live
     }
 
     /// Reconcile the overlay windows with the connected monitors: move the
@@ -1166,6 +1283,9 @@ impl super::WinitApp {
                 self.refit_overlay_windows(&primary_window, &primary);
             }
             return;
+        }
+        if primary_changed || lost_any || rescaled || !remove.is_empty() || !add.is_empty() {
+            self.invalidate_dock_cursor();
         }
         for i in remove {
             super::lifecycle::remove_chrome_observer(&self.state.secondaries[i].window);

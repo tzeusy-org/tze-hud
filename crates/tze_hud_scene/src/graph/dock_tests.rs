@@ -363,3 +363,209 @@ fn dock_named_ingress_cannot_bypass_scope_and_cleanup_reclaims_exact_owners() {
         level(0.9)
     );
 }
+
+fn named_projection(scene: &SceneGraph, height: f32) -> crate::dock::DockProjection {
+    let aspect_ratios = vec![
+        (PROGRESS.into(), 360.0 / 52.0),
+        (COUNTDOWN.into(), 160.0 / 52.0),
+    ];
+    crate::dock::DockProjection {
+        target: Some("DOCK".into()),
+        layout: DockLayout::new(
+            Rect::new(-1920.0, 0.0, scene.display_area.width.max(1920.0), height),
+            3,
+            DockMetrics {
+                row_height: 52.0,
+                caption_width: 96.0,
+                gap: 8.0,
+            },
+            aspect_ratios.iter().map(|(_, aspect)| *aspect),
+        ),
+        pixels_per_dp: 1.0,
+        aspect_ratios,
+    }
+}
+
+fn place(scene: &mut SceneGraph, projection: Option<crate::dock::DockProjection>) {
+    scene.set_dock_projection(
+        &[PROGRESS.into(), COUNTDOWN.into()],
+        projection,
+        NonZeroU64::new(5_000).unwrap(),
+    );
+}
+
+fn slots(scene: &SceneGraph, row: usize, name: &str) -> (Rect, Rect) {
+    use crate::dock::DockWidgetSlot;
+    let DockWidgetSlot::Placed(widget) = scene.dock_widget_slot(name) else {
+        panic!("placed {name}")
+    };
+    (
+        scene.dock_caption_rect(row).expect("placed caption"),
+        widget,
+    )
+}
+
+#[test]
+fn dock_holds_live_sparse_slots_and_compacts_only_after_outside() {
+    use crate::dock::DockPointer;
+
+    let (mut scene, clock) = setup(3);
+    let projection = named_projection(&scene, 240.0);
+    assert_eq!(projection.layout.capacity, 3);
+    place(&mut scene, Some(projection.clone()));
+    scene
+        .publish_to_dock(PROGRESS, level(0.3), "a", None, 0, 10)
+        .unwrap();
+    for (widget, owner) in [(PROGRESS, "b"), (COUNTDOWN, "b"), (PROGRESS, "c")] {
+        scene
+            .publish_to_dock(widget, HashMap::new(), owner, None, 0, 0)
+            .unwrap();
+    }
+
+    scene.certify_dock_passive_column("DOCK", projection.layout.display);
+    let pointer = scene.dock_passive_column().unwrap().clone();
+    assert!(pointer.observe(DockPointer::Inside));
+    let b = record(&scene, "b", COUNTDOWN).widget_name.clone();
+    let a = record(&scene, "a", PROGRESS).widget_name.clone();
+    let b_progress = record(&scene, "b", PROGRESS).widget_name.clone();
+    let held = slots(&scene, 1, &b);
+    clock.advance(10);
+    assert_eq!(scene.drain_expired_widget_publications(), 1);
+    assert!(!scene.widget_registry.instances.contains_key(&a));
+    scene.clear_dock_widget("b", PROGRESS);
+    assert!(
+        !scene
+            .widget_registry
+            .active_publishes
+            .contains_key(&b_progress)
+    );
+    let epoch = scene.geometry_epoch;
+    let ease = |t: f32| 1.0 - (1.0 - t) * (1.0 - t);
+    assert!(!scene.advance_dock_compaction(true, 120_000, ease));
+    assert_eq!(scene.geometry_epoch, epoch);
+    assert_eq!(slots(&scene, 0, &b), held);
+    scene
+        .publish_to_dock(PROGRESS, level(0.4), "b", None, 0, 0)
+        .unwrap();
+    let appended = record(&scene, "b", PROGRESS).widget_name.clone();
+    assert_ne!(appended, b_progress);
+    assert!(matches!(
+        scene.dock_widget_slot(&appended),
+        crate::dock::DockWidgetSlot::Hidden
+    ));
+    assert_eq!(slots(&scene, 0, &b), held);
+
+    assert_eq!(
+        scene.publish_to_dock(PROGRESS, level(0.4), "d", None, 0, 0),
+        Err(DockPublishError::Full)
+    );
+    scene.clear_dock_widget("c", PROGRESS);
+    scene
+        .publish_to_dock(PROGRESS, level(0.4), "d", None, 0, 0)
+        .unwrap();
+    let d = record(&scene, "d", PROGRESS).widget_name.clone();
+    assert_eq!(slots(&scene, 1, &d).0, projection.layout.caption(2));
+
+    assert!(pointer.observe(DockPointer::Outside));
+    assert!(scene.advance_dock_compaction(true, 120_000, ease));
+    clock.advance(60);
+    assert!(scene.advance_dock_compaction(true, 120_000, ease));
+    let partial = slots(&scene, 0, &b);
+    assert!(partial.0.y < held.0.y && partial.1.x < held.1.x);
+    assert_eq!(partial.0.y, partial.1.y);
+    // An enter/exit pair that coalesces still restarts from the committed pose.
+    assert!(pointer.observe(DockPointer::Inside));
+    clock.advance(100);
+    assert!(pointer.observe(DockPointer::Outside));
+    assert!(scene.advance_dock_compaction(true, 120_000, ease));
+    assert_eq!(slots(&scene, 0, &b), partial);
+    clock.advance_us(119_999);
+    assert!(scene.advance_dock_compaction(true, 120_000, ease));
+    let near_end = slots(&scene, 0, &b);
+    assert!(scene.advance_dock_compaction(true, 120_000, ease));
+    assert_eq!(slots(&scene, 0, &b), near_end);
+    let epoch = scene.geometry_epoch;
+    clock.advance_us(1);
+    assert!(!scene.advance_dock_compaction(true, 120_000, ease));
+    assert_eq!(scene.geometry_epoch, epoch + 1);
+    assert_eq!(
+        slots(&scene, 0, &b),
+        (
+            projection.layout.caption(0),
+            projection.layout.widget(0, [], 160.0 / 52.0)
+        )
+    );
+    assert_eq!(slots(&scene, 1, &d).0, projection.layout.caption(1));
+    assert_eq!(
+        slots(&scene, 0, &appended).1,
+        projection.layout.widget(0, [160.0 / 52.0], 360.0 / 52.0)
+    );
+
+    // A sufficient live/physical gap accepts another row after compaction.
+    scene
+        .publish_to_dock(PROGRESS, level(0.4), "e", None, 0, 0)
+        .unwrap();
+    scene.clear_dock_widget("d", PROGRESS);
+    scene.clear_dock_widget("e", PROGRESS);
+    let epoch = scene.geometry_epoch;
+    assert!(!scene.advance_dock_compaction(true, 120_000, ease));
+    assert_eq!(scene.geometry_epoch, epoch, "no displaced survivor");
+}
+
+#[test]
+fn dock_revokes_stale_samples_and_keeps_existing_rows_on_display_loss() {
+    use crate::dock::DockPointer;
+    use crate::graph::visibility::SurfaceClasses;
+
+    let (mut scene, _) = setup(3);
+    let projection = named_projection(&scene, 240.0);
+    place(&mut scene, Some(projection.clone()));
+    scene
+        .publish_to_dock(PROGRESS, level(0.3), "a", None, 0, 0)
+        .unwrap();
+    scene.certify_dock_passive_column("DOCK", projection.layout.display);
+    let old = scene.dock_passive_column().unwrap().clone();
+    assert!(old.observe(DockPointer::Outside));
+
+    place(&mut scene, None);
+    let countdown = scene
+        .publish_to_dock(COUNTDOWN, HashMap::new(), "a", None, 0, 0)
+        .unwrap();
+    assert!(scene.dock_passive_column().is_none());
+    place(&mut scene, Some(projection.clone()));
+    assert_eq!(scene.dock_instance("a", COUNTDOWN).unwrap().id, countdown);
+    scene.certify_dock_passive_column("DOCK", projection.layout.display);
+    scene.set_owner_hidden(SurfaceClasses {
+        widgets: true,
+        ..SurfaceClasses::NONE
+    });
+    scene.set_owner_hidden(SurfaceClasses::NONE);
+    assert!(scene.dock_passive_column().is_none());
+    scene.certify_dock_passive_column("DOCK", projection.layout.display);
+    let before_empty = scene.dock_passive_column().unwrap().clone();
+
+    scene.clear_dock_widget("a", PROGRESS);
+    scene.clear_dock_widget("a", COUNTDOWN);
+    assert!(scene.dock_passive_column().is_none());
+    for owner in ["b", "c"] {
+        scene
+            .publish_to_dock(PROGRESS, level(0.3), owner, None, 0, 0)
+            .unwrap();
+    }
+    scene.certify_dock_passive_column("DOCK", projection.layout.display);
+    before_empty.observe(DockPointer::Outside);
+    old.observe(DockPointer::Inside);
+    old.observe(DockPointer::Outside);
+    scene.clear_dock_widget("b", PROGRESS);
+    assert!(!scene.advance_dock_compaction(true, 0, |t| t));
+    assert_eq!(
+        scene.dock_caption_rect(0),
+        Some(projection.layout.caption(1))
+    );
+    assert!(!scene.advance_dock_compaction(false, 0, |t| t));
+    assert_eq!(
+        scene.dock_caption_rect(0),
+        Some(projection.layout.caption(0)),
+        "headless has no pointer"
+    );
+}

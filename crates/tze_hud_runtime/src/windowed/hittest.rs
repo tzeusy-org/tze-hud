@@ -1,6 +1,7 @@
 use tze_hud_compositor::{Compositor, CompositorSurface};
 use tze_hud_input::{PortalCursor, PortalRect, ResizeEdge, hit_affordance, portal_hover_cursor};
 use tze_hud_scene::SceneId;
+use tze_hud_scene::dock::{DockPassiveColumn, DockPointer};
 use tze_hud_scene::graph::SceneGraph;
 use winit::window::{CursorIcon, WindowId};
 
@@ -216,6 +217,24 @@ fn screen_cursor_to_window_cursor(
     ))
 }
 
+pub(super) fn observe_dock_point(
+    column: &DockPassiveColumn,
+    point: Option<(f32, f32)>,
+    mapping_current: impl FnOnce() -> bool,
+) -> bool {
+    let contact = match point {
+        Some((x, y)) if x.is_finite() && y.is_finite() && mapping_current() => {
+            if column.column.contains_point(x, y) {
+                DockPointer::Inside
+            } else {
+                DockPointer::Outside
+            }
+        }
+        _ => DockPointer::Unknown,
+    };
+    column.observe(contact)
+}
+
 impl WinitApp {
     /// Refresh cursor position from OS state when passthrough is active.
     ///
@@ -224,37 +243,87 @@ impl WinitApp {
     /// [`WinitApp::on_raw_mouse_motion`]); reading the global cursor position
     /// on it lets hit-testing flip back to capture when the cursor enters an
     /// active region.
-    pub(super) fn refresh_cursor_position_from_os(&mut self) {
+    pub(super) fn refresh_cursor_position_from_os(&mut self) -> bool {
+        #[cfg(target_os = "windows")]
         if self.state.effective_mode == WindowMode::Overlay {
-            #[cfg(target_os = "windows")]
+            use windows::Win32::Foundation::POINT;
+            use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
+
+            let Some(window) = &self.state.window else {
+                return self.observe_native_dock_cursor(None);
+            };
+            let mut pt = POINT { x: 0, y: 0 };
+            // SAFETY: GetCursorPos writes to POINT and has no other preconditions.
+            let actual_cursor = unsafe { GetCursorPos(&mut pt) }
+                .ok()
+                .map(|()| winit::dpi::PhysicalPosition::new(pt.x, pt.y));
+            let outer = super::displays::cursor_outer_origin(window);
+            let window_origin = cursor_refresh_window_origin(outer, || {
+                window.current_monitor().map(|monitor| monitor.position())
+            });
+            if let Some((x, y)) =
+                actual_cursor.and_then(|p| screen_cursor_to_window_cursor(p, window_origin))
             {
-                use windows::Win32::Foundation::POINT;
-                use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
-
-                let Some(window) = &self.state.window else {
-                    return;
-                };
-                let window_pos = cursor_refresh_window_origin(window.outer_position().ok(), || {
-                    window.current_monitor().map(|monitor| monitor.position())
-                });
-
-                let mut pt = POINT { x: 0, y: 0 };
-                // SAFETY: GetCursorPos writes to the provided POINT and has no
-                // additional safety preconditions.
-                let ok = unsafe { GetCursorPos(&mut pt).is_ok() };
-                if ok {
-                    if let Some((cursor_x, cursor_y)) = screen_cursor_to_window_cursor(
-                        winit::dpi::PhysicalPosition::new(pt.x, pt.y),
-                        window_pos,
-                    ) {
-                        self.apply_os_cursor_position(cursor_x, cursor_y);
-                    } else {
-                        tracing::trace!(
-                            "overlay: skipped OS cursor refresh because window origin is unavailable"
-                        );
-                    }
-                }
+                self.apply_os_cursor_position(x, y);
             }
+            return self.observe_native_dock_cursor(actual_cursor);
+        }
+        false
+    }
+
+    #[cfg(target_os = "windows")]
+    fn observe_native_dock_cursor(
+        &self,
+        actual_cursor: Option<winit::dpi::PhysicalPosition<i32>>,
+    ) -> bool {
+        let snapshot = self.state.pipeline.hit_test_snapshot.load();
+        let Some(column) = &snapshot.dock_passive_column else {
+            return false;
+        };
+        // The incumbent hover path accepts a monitor-origin fallback.
+        // Compaction requires a verified client mapping and a fresh point.
+        let origin = self
+            .state
+            .window
+            .as_ref()
+            .and_then(|window| super::displays::dock_cursor_client(window)?.origin);
+        let point = actual_cursor.and_then(|point| screen_cursor_to_window_cursor(point, origin));
+        observe_dock_point(column, point, || {
+            self.dock_cursor_mapping_current(column, None, origin)
+        })
+    }
+
+    pub(super) fn invalidate_dock_cursor(&self) {
+        if let Some(column) = &self
+            .state
+            .pipeline
+            .hit_test_snapshot
+            .load()
+            .dock_passive_column
+        {
+            column.observe(DockPointer::Unknown);
+        }
+    }
+
+    pub(super) fn observe_dock_cursor(&self, point: (f32, f32), source: WindowId) {
+        let snapshot = self.state.pipeline.hit_test_snapshot.load();
+        if let Some(column) = &snapshot.dock_passive_column {
+            observe_dock_point(column, Some(point), || {
+                self.dock_cursor_mapping_current(column, Some(source), None)
+            });
+        }
+    }
+
+    pub(super) fn dock_cursor_left(&self, window_id: WindowId) {
+        let snapshot = self.state.pipeline.hit_test_snapshot.load();
+        if let Some(column) = &snapshot.dock_passive_column {
+            let outside = self.state.effective_mode != WindowMode::Overlay
+                && self.dock_cursor_mapping_current(column, Some(window_id), None);
+            column.observe(if outside {
+                DockPointer::Outside
+            } else {
+                DockPointer::Unknown
+            });
         }
     }
 
@@ -288,9 +357,11 @@ impl WinitApp {
             .control_panel
             .as_ref()
             .is_some_and(|panel| panel.is_open());
+        let overlay = self.state.effective_mode == WindowMode::Overlay;
+        let passive = cfg!(target_os = "windows") && snapshot.dock_passive_column.is_some();
         wake::cursor_entry_armed(
-            self.state.effective_mode == WindowMode::Overlay,
-            interactive || panel_open,
+            overlay,
+            interactive || panel_open || passive,
             !self.state.overlay_capturing,
         )
     }
@@ -396,7 +467,14 @@ impl WinitApp {
     /// wake. The capture flip itself still happens in that turn on the main
     /// thread, before anything waits on the compositor.
     pub(super) fn cursor_entry_turn(&mut self) -> CursorEntryTurn {
-        self.refresh_cursor_position_from_os();
+        let dock_contact_changed = self.refresh_cursor_position_from_os();
+        self.cursor_entry_turn_after_refresh(dock_contact_changed)
+    }
+
+    pub(super) fn cursor_entry_turn_after_refresh(
+        &mut self,
+        dock_contact_changed: bool,
+    ) -> CursorEntryTurn {
         let signature = self.cursor_entry_signature();
         let previous = self.state.cursor_entry.signature.replace(signature);
         let has_other_work = self.state.shutdown.is_triggered()
@@ -404,7 +482,7 @@ impl WinitApp {
             || self.state.quiescent_efficiency.is_some()
             || !self.state.pending_keyboard_events.is_empty()
             || self.state.wake.has_unfinished_main_work();
-        if has_other_work || previous != Some(signature) {
+        if dock_contact_changed || has_other_work || previous != Some(signature) {
             self.state
                 .wake
                 .mark_main_work_pending(RuntimeWakeupSource::AnimationDeadline);

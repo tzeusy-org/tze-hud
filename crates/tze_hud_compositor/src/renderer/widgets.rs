@@ -67,6 +67,11 @@ impl WidgetDraws {
         scene: &mut SceneGraph,
         windowed_primary: Option<FrameTarget>,
     ) {
+        if let Some(dock) = &self.dock
+            && windowed_primary.is_some()
+        {
+            scene.certify_dock_passive_column(&dock.display.name, dock.display.rect);
+        }
         let geometry = &mut scene.overlay.widget_geometry;
         geometry.clear();
         let Some(wr) = wr else { return };
@@ -94,6 +99,24 @@ impl WidgetDraws {
 }
 
 impl super::Compositor {
+    /// Settle dock geometry before the ordinary frame gate, using the existing
+    /// exit motion. Headless has no pointer and can always settle.
+    pub fn advance_dock_compaction(&self, scene: &mut SceneGraph, windowed: bool) -> bool {
+        use super::easing::Easing;
+        let ease: fn(f32) -> f32 = match self.zone_motion.exit {
+            Easing::Linear => |t| Easing::Linear.apply(t),
+            Easing::EaseInOut => |t| Easing::EaseInOut.apply(t),
+            Easing::EaseOutQuad => |t| Easing::EaseOutQuad.apply(t),
+            Easing::EaseInQuad => |t| Easing::EaseInQuad.apply(t),
+        };
+        let duration = if tze_hud_config::tokens::os_reduce_motion(&self.token_map) {
+            0
+        } else {
+            u64::from(self.zone_motion.exit_ms) * 1_000
+        };
+        scene.advance_dock_compaction(windowed, duration, ease)
+    }
+
     /// Countdowns are a one-shot display deadline, never a frame-rate animation.
     pub fn next_widget_deadline_wall_us(&self, scene: &SceneGraph) -> Option<u64> {
         if self.safe_mode_overlay {
@@ -196,6 +219,31 @@ impl super::Compositor {
         scene: &SceneGraph,
         display: &DisplayRect,
     ) -> Vec<TextItem> {
+        self.dock_caption_items_at(scene, display, |index| scene.dock_caption_rect(index))
+    }
+
+    pub(super) fn dock_caption_items_for_cache(
+        &self,
+        scene: &SceneGraph,
+        display: &DisplayRect,
+    ) -> Vec<TextItem> {
+        let Some(projection) = scene.dock_projection() else {
+            return Vec::new();
+        };
+        let layout = &projection.layout;
+        // A live row can enter the aperture at terminal compaction without
+        // changing Scene.version. Prime its width/height key before that turn.
+        self.dock_caption_items_at(scene, display, |index| {
+            (index < layout.capacity).then(|| layout.caption(index))
+        })
+    }
+
+    fn dock_caption_items_at(
+        &self,
+        scene: &SceneGraph,
+        display: &DisplayRect,
+        bounds: impl Fn(usize) -> Option<Rect>,
+    ) -> Vec<TextItem> {
         let Some(projection) = scene.dock_projection() else {
             return Vec::new();
         };
@@ -238,11 +286,10 @@ impl super::Compositor {
         scene
             .dock_rows()
             .iter()
-            .take(projection.layout.capacity)
             .enumerate()
             .filter_map(|(index, row)| {
                 let caption = scene.dock_caption(&row.namespace)?;
-                let bounds = projection.layout.caption(index);
+                let bounds = bounds(index)?;
                 if bounds.width < 1.0 {
                     return None;
                 }

@@ -1064,17 +1064,18 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         self.sync_design_tokens();
         self.sync_capture_exclusion();
         if displays::take_dirty(&self.state.displays_dirty) {
+            self.invalidate_dock_cursor();
             self.sync_displays(event_loop);
         }
         self.sync_zone_assignments();
-        self.refresh_cursor_position_from_os();
+        let dock_contact_changed = self.refresh_cursor_position_from_os();
         self.synthesize_left_release_if_physically_up();
         self.refresh_widget_hover_tracking();
         self.update_overlay_cursor_hittest();
         // The cursor follows controls that appear or leave under a resting pointer.
         self.update_portal_cursor_icon();
         let portal_drain = self.settle_scene_work();
-        let settled_scene_changed = portal_drain.scene_changed();
+        let settled_scene_changed = portal_drain.scene_changed() || dock_contact_changed;
 
         // ── Per-frame ticks + present poll ────────────────────
         // Moved here from the `RedrawRequested` handler so the main loop no
@@ -2303,6 +2304,22 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         self.state.cursor_entry.tick = false;
         let wake_source = main_work_source_for_window_event(&event);
         let secondary = displays::secondary_index(&self.state.secondaries, window_id);
+        let own_window = secondary.is_some()
+            || self
+                .state
+                .window
+                .as_ref()
+                .is_some_and(|w| w.id() == window_id);
+        if own_window
+            && matches!(
+                &event,
+                WindowEvent::Moved(_)
+                    | WindowEvent::Resized(_)
+                    | WindowEvent::ScaleFactorChanged { .. }
+            )
+        {
+            self.invalidate_dock_cursor();
+        }
         #[cfg(target_os = "windows")]
         if let WindowEvent::Resized(size) = &event
             && self.restore_minimized_overlay(window_id, secondary, *size)
@@ -2442,6 +2459,9 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                 self.state.cursor_y = y;
                 self.state.cursor_window = Some(window_id);
                 self.state.cursor_left_window = false;
+                if own_window {
+                    self.observe_dock_cursor((x, y), window_id);
+                }
                 if self.panel_pointer_moved(secondary) {
                     self.update_overlay_cursor_hittest();
                     return;
@@ -2462,6 +2482,9 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                 // CursorLeft after the new one's CursorMoved.
                 if self.state.cursor_window.is_none_or(|id| id == window_id) {
                     self.state.cursor_left_window = true;
+                    if own_window {
+                        self.dock_cursor_left(window_id);
+                    }
                     self.cancel_chrome_feedback();
                 }
             }

@@ -2397,7 +2397,9 @@ impl Compositor {
                 scene,
                 &crate::display::FrameTarget::primary(self.width, self.height),
             )
-            .map_or_else(Vec::new, |display| self.dock_caption_items(scene, display));
+            .map_or_else(Vec::new, |display| {
+                self.dock_caption_items_for_cache(scene, display)
+            });
         let forced_prime = self.truncation_cache_scene_version == u64::MAX || !same_instance;
         let interval_ms = adaptive_reprime_interval_ms(self.resize_reprime_content_bytes);
         if !forced_prime

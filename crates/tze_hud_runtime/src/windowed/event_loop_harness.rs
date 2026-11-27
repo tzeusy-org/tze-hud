@@ -3073,6 +3073,120 @@ mod tests {
         assert!(runtime.events.scene().pending_actions.is_empty());
     }
 
+    #[tokio::test]
+    async fn dock_terminal_pose_stays_owed_after_failed_submit_and_capture() {
+        use crate::operator::screenshot::capture_channel;
+        use tze_hud_scene::clock::TestClock;
+        use tze_hud_scene::dock::{DockLayout, DockMetrics, DockPointer, DockProjection};
+
+        let _gpu = crate::test_support::lock_headless_runtime().await;
+        let clock = Arc::new(TestClock::new(1_000));
+        let mut cfg = super::super::WindowedConfig {
+            config_toml: Some("[[tabs]]\nname = 'Main'".into()),
+            ..Default::default()
+        };
+        cfg.window.width = 320;
+        cfg.window.height = 200;
+        let mut runtime = CaptureRenderHarness::boot(cfg, clock.clone()).await;
+        let queued = Arc::new(tokio::sync::Notify::new());
+        let (endpoint, inbox) = capture_channel({
+            let queued = Arc::clone(&queued);
+            move || queued.notify_one()
+        });
+        runtime.events.app.state.capture_inbox = inbox;
+        let display = Rect::new(0.0, 0.0, 320.0, 200.0);
+        runtime
+            .compositor
+            .set_display_layout(tze_hud_compositor::DisplayLayout::new(
+                vec![tze_hud_compositor::DisplayRect {
+                    name: "PRIMARY".into(),
+                    rect: display,
+                    primary: true,
+                }],
+                &Default::default(),
+            ));
+        let mut tokens = runtime.events.app.state.global_tokens.clone();
+        tokens.insert("motion.exit.ms".into(), "120".into());
+        runtime.compositor.set_token_map(tokens);
+        let layout = DockLayout::new(
+            display,
+            2,
+            DockMetrics {
+                row_height: 40.0,
+                caption_width: 40.0,
+                gap: 4.0,
+            },
+            [1.0],
+        );
+        assert_eq!(layout.capacity, 2);
+        let pointer = {
+            let mut scene = runtime.events.scene();
+            scene.set_dock_projection(
+                &["progress-bar".into()],
+                Some(DockProjection {
+                    target: Some("PRIMARY".into()),
+                    layout,
+                    pixels_per_dp: 1.0,
+                    aspect_ratios: vec![("progress-bar".into(), 1.0)],
+                }),
+                std::num::NonZeroU64::new(5_000).unwrap(),
+            );
+            for owner in ["first", "second"] {
+                scene
+                    .publish_to_dock("progress-bar", Default::default(), owner, None, 0, 0)
+                    .unwrap();
+            }
+            scene.certify_dock_passive_column("PRIMARY", display);
+            scene.dock_passive_column().unwrap().clone()
+        };
+        assert!(pointer.observe(DockPointer::Inside));
+        assert!(runtime.turn(true));
+        runtime
+            .events
+            .scene()
+            .clear_dock_widget("first", "progress-bar");
+        assert!(
+            runtime.turn(true),
+            "draw clears first instance but keeps the second slot"
+        );
+        assert_eq!(
+            runtime.events.scene().dock_caption_rect(0),
+            Some(layout.caption(1))
+        );
+        assert!(!runtime.turn(true), "held geometry settles to idle");
+
+        assert!(pointer.observe(DockPointer::Outside));
+        assert!(
+            runtime.turn(true),
+            "outside starts the existing animation cadence"
+        );
+        let before_terminal = runtime.frames.last_rendered();
+        let ordinary_counters = runtime.events.app.state.wake.counters().snapshot();
+        clock.advance(120);
+        let capture = tokio::spawn(async move { endpoint.capture_frame(0).await });
+        queued.notified().await;
+        assert!(
+            runtime.turn(false),
+            "terminal geometry asks for ordinary submission"
+        );
+        let (frame, permit) = capture.await.unwrap().unwrap();
+        assert_eq!((frame.width, frame.height), (320, 200));
+        drop(permit);
+        assert_eq!(runtime.frames.last_rendered(), before_terminal);
+        assert_eq!(
+            runtime.events.app.state.wake.counters().snapshot(),
+            ordinary_counters
+        );
+        {
+            let scene = runtime.events.scene();
+            assert_eq!(scene.version, before_terminal.0);
+            assert_eq!(scene.geometry_epoch, before_terminal.1 + 1);
+            assert_eq!(scene.dock_caption_rect(0), Some(layout.caption(0)));
+        }
+        assert!(runtime.turn(true), "terminal geometry is still owed");
+        assert!(!runtime.turn(true), "successful retry restores idle");
+    }
+
     /// Moves the former compositor build-only gate onto the runtime's actual
     /// capture drain, idle ledger, submission counters and main-thread present
     /// consumer. A failed ordinary acquire exposes capture advancing the ledger
@@ -11099,6 +11213,135 @@ mod tests {
             "released scene lock must drain FIFO work"
         );
         assert_eq!(harness.composer_draft().as_deref(), Some("x"));
+    }
+
+    #[test]
+    fn dock_passive_cursor_stays_quiet_under_held_scene_and_rejects_stale_mapping() {
+        use super::super::displays::{MonitorSpec, dock_cursor_matches_projection};
+        use super::super::hittest::observe_dock_point;
+        use super::super::wake::CursorEntryTurn;
+        use tze_hud_scene::dock::{DockLayout, DockMetrics, DockProjection};
+
+        let mut harness = HeadlessEventLoopHarness::new();
+        harness.app.state.effective_mode = crate::window::WindowMode::Overlay;
+        let primary = MonitorSpec {
+            name: "PRIMARY".into(),
+            x: 700,
+            y: -400,
+            width: 1920,
+            height: 1080,
+            scale: 1.0,
+            dock_bounds_observed: true,
+        };
+        let selected = MonitorSpec {
+            name: "SELECTED".into(),
+            x: -1260,
+            y: -320,
+            ..primary.clone()
+        };
+        let mirror = MonitorSpec {
+            name: "MIRROR".into(),
+            ..selected.clone()
+        };
+        let display = selected.scene_rect(&primary);
+        let column = {
+            let shared = harness.shared_state();
+            let guard = shared.try_lock().expect(BUSY);
+            let mut scene = guard.scene.try_lock().expect(BUSY);
+            let aspect_ratios = vec![("progress-bar".into(), 2.0)];
+            let metrics = DockMetrics {
+                row_height: 52.0,
+                caption_width: 96.0,
+                gap: 8.0,
+            };
+            let layout = DockLayout::new(display, 3, metrics, [2.0]);
+            crate::scene_startup::run_scene_startup(
+                &Default::default(),
+                None,
+                &mut scene,
+                tze_hud_config::tokens::OsPreferences::default(),
+            )
+            .unwrap();
+            scene.set_dock_projection(
+                &["progress-bar".into()],
+                Some(DockProjection {
+                    target: Some(selected.name.clone()),
+                    layout,
+                    pixels_per_dp: 1.0,
+                    aspect_ratios,
+                }),
+                std::num::NonZeroU64::new(5_000).unwrap(),
+            );
+            scene
+                .publish_to_dock("progress-bar", Default::default(), "agent", None, 0, 0)
+                .unwrap();
+            scene.certify_dock_passive_column(&selected.name, display);
+            harness.app.state.pipeline.hit_test_snapshot.store(Arc::new(
+                crate::pipeline::HitTestSnapshot::from_scene(&scene),
+            ));
+            scene.dock_passive_column().unwrap().clone()
+        };
+        assert!(display.x < 0.0);
+        let inside = (column.column.x + 1.0, column.column.y + 1.0);
+        let mut moved = selected.clone();
+        moved.x += 12;
+        let sample = |point, spec: &MonitorSpec, realized| {
+            observe_dock_point(&column, point, || {
+                realized && dock_cursor_matches_projection(&column, &primary, spec)
+            })
+        };
+        assert!(sample(Some(inside), &selected, true));
+        assert!(!sample(Some(inside), &selected, true));
+        assert!(
+            sample(Some(inside), &mirror, true),
+            "untrusted mirror retires Inside"
+        );
+        assert!(!sample(Some(inside), &moved, true));
+        assert!(
+            !sample(Some(inside), &selected, false),
+            "pending native refit stays Unknown"
+        );
+        assert!(
+            !sample(None, &selected, true),
+            "failed fresh cursor read stays Unknown"
+        );
+        assert!(sample(Some((0.0, 0.0)), &selected, true));
+        assert!(
+            sample(None, &selected, true),
+            "read failure retires known Outside"
+        );
+        assert!(sample(Some(inside), &selected, true));
+        harness.app.state.cursor_entry.signature = Some(harness.app.cursor_entry_signature());
+        assert!(!harness.app.cursor_entry_signature().capture);
+        let wake = harness.app.state.wake.clone();
+        let compositor_before = wake.compositor().checkpoint();
+        let main_before = wake.main_work_generation();
+        let counters_before = wake.counters().snapshot();
+        let shared = harness.shared_state();
+        let guard = shared.try_lock().expect(BUSY);
+        let _held_scene = guard.scene.try_lock().expect(BUSY);
+        for _ in 0..100 {
+            let changed = sample(Some(inside), &selected, true);
+            assert!(!changed);
+            assert_eq!(
+                harness.app.cursor_entry_turn_after_refresh(changed),
+                CursorEntryTurn::Quiet { next: None }
+            );
+        }
+        assert_eq!(wake.counters().snapshot(), counters_before);
+        assert_eq!(wake.main_work_generation(), main_before);
+        assert_eq!(wake.compositor().checkpoint(), compositor_before);
+
+        let changed = sample(Some((0.0, 0.0)), &selected, true);
+        assert!(changed);
+        assert_eq!(
+            harness.app.cursor_entry_turn_after_refresh(changed),
+            CursorEntryTurn::FullTurn
+        );
+        assert!(wake.finish_main_work(wake.main_work_checkpoint()));
+        assert_eq!(wake.main_work_generation(), main_before + 1);
+        assert_eq!(wake.compositor().checkpoint(), compositor_before + 1);
+        assert!(!harness.app.cursor_entry_signature().capture);
     }
 
     #[test]

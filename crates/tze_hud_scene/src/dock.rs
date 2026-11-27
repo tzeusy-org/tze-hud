@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::num::NonZeroU64;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::{Deserialize, Serialize};
 
@@ -117,6 +118,8 @@ pub struct DockLayout {
     pub column: Rect,
     pub capacity: usize,
     pub scale: f32,
+    max_rows: usize,
+    physical_capacity: usize,
     metrics: DockMetrics,
 }
 
@@ -156,24 +159,30 @@ impl DockLayout {
             height,
         );
         let pitch = metrics.row_height + metrics.gap;
-        let capacity = if metrics.row_height > 0.0 {
-            max_rows.min(((column.height + metrics.gap) / pitch).floor() as usize)
+        let physical_capacity = if metrics.row_height > 0.0 {
+            ((column.height + metrics.gap) / pitch).floor() as usize
         } else {
             0
         };
         Self {
             display,
             column,
-            capacity,
+            capacity: max_rows.min(physical_capacity),
             scale: scale as f32,
+            max_rows,
+            physical_capacity,
             metrics,
         }
     }
 
     pub fn caption(&self, row: usize) -> Rect {
+        self.caption_at(row as f32)
+    }
+
+    fn caption_at(&self, row: f32) -> Rect {
         Rect::new(
             self.column.x,
-            self.column.y + row as f32 * (self.metrics.row_height + self.metrics.gap),
+            self.column.y + row * (self.metrics.row_height + self.metrics.gap),
             self.metrics.caption_width,
             self.metrics.row_height,
         )
@@ -205,6 +214,8 @@ impl DockLayout {
 pub struct DockWidget {
     pub widget_type: String,
     pub instance_name: String,
+    #[serde(skip)]
+    x: Option<f64>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -213,6 +224,10 @@ pub struct DockRow {
     pub namespace: String,
     /// Live instances, oldest first.
     pub widgets: Vec<DockWidget>,
+    #[serde(skip)]
+    slot: usize,
+    #[serde(skip)]
+    position: f32,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -233,6 +248,56 @@ pub enum DockWidgetSlot {
     Placed(Rect),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DockPointer {
+    Unknown = 0,
+    Inside = 1,
+    Outside = 2,
+}
+
+/// A certified passive column shared with one window-loop producer. The
+/// contact and latest hold edge occupy one atomic word. Revoking a column
+/// drops Scene's reference, so a late write can only update the old snapshot.
+#[derive(Clone, Debug)]
+pub struct DockPassiveColumn {
+    pub target: String,
+    pub display: Rect,
+    pub column: Rect,
+    contact: Arc<AtomicU64>,
+}
+
+impl DockPassiveColumn {
+    pub fn observe(&self, pointer: DockPointer) -> bool {
+        let old = self.contact.load(Ordering::Relaxed);
+        let contact = pointer as u64;
+        if old & 3 == contact {
+            return false;
+        }
+        let hold = (old & !3)
+            + if pointer == DockPointer::Outside {
+                0
+            } else {
+                4
+            };
+        self.contact.store(hold | contact, Ordering::Relaxed);
+        true
+    }
+
+    fn sample(&self) -> (bool, u64) {
+        let state = self.contact.load(Ordering::Relaxed);
+        (state & 3 == DockPointer::Outside as u64, state >> 2)
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct DockMotion {
+    started_us: u64,
+    duration_us: u64,
+    ease: fn(f32) -> f32,
+    progress: f32,
+    hold_edge: u64,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) struct DockState {
     accepts: Vec<String>,
@@ -242,6 +307,12 @@ pub(crate) struct DockState {
     /// A restored scene must wait for the current runtime's actual display.
     #[serde(skip)]
     projection: Option<DockProjection>,
+    #[serde(skip)]
+    pointer: Option<DockPassiveColumn>,
+    #[serde(skip)]
+    needs_compaction: bool,
+    #[serde(skip)]
+    motion: Option<DockMotion>,
 }
 
 impl DockState {
@@ -256,10 +327,154 @@ impl DockState {
         };
         let row = &mut self.rows[row_index];
         row.widgets.remove(widget_index);
-        if row.widgets.is_empty() {
+        let gap = if row.widgets.is_empty() {
             self.rows.remove(row_index);
+            row_index < self.rows.len()
+        } else {
+            widget_index < row.widgets.len()
+        };
+        if self.rows.is_empty() {
+            self.reset_motion();
+        } else if gap && self.projection.as_ref().is_some_and(|p| p.target.is_some()) {
+            self.needs_compaction = true;
+            self.motion = None;
         }
         true
+    }
+
+    fn reset_motion(&mut self) {
+        self.needs_compaction = false;
+        self.motion = None;
+        self.pointer = None;
+    }
+
+    fn normalize(&mut self) {
+        if self.projection.is_some() {
+            self.compact(1.0, true);
+        }
+        self.reset_motion();
+    }
+
+    fn next_row_slot(&self) -> Option<usize> {
+        let projection = self.projection.as_ref()?;
+        if projection.target.is_none() {
+            return (self.rows.len() < self.capacity).then_some(self.rows.len());
+        }
+        let layout = &projection.layout;
+        let slot = self.rows.last().map_or(0, |row| row.slot + 1);
+        (self.rows.len() < layout.max_rows && slot < layout.physical_capacity).then_some(slot)
+    }
+
+    fn append(
+        &mut self,
+        index: Option<usize>,
+        slot: Option<usize>,
+        namespace: &str,
+        mut widget: DockWidget,
+    ) {
+        if let Some(index) = index {
+            let row = &mut self.rows[index];
+            let previous = row.widgets.last().expect("live row");
+            widget.x = self.projection.as_ref().and_then(|projection| {
+                previous
+                    .x
+                    .and_then(|x| projection.after(x, &previous.widget_type))
+                    .filter(|x| projection.fits(*x, &widget.widget_type))
+            });
+            row.widgets.push(widget);
+        } else {
+            let slot = slot.expect("admitted dock row");
+            let projection = self.projection.as_ref().expect("admitted dock projection");
+            let first = projection.first_widget_x();
+            widget.x = projection.fits(first, &widget.widget_type).then_some(first);
+            self.rows.push(DockRow {
+                namespace: namespace.into(),
+                widgets: vec![widget],
+                slot,
+                position: slot as f32,
+            });
+        }
+    }
+
+    fn has_gap(&self) -> bool {
+        let Some(projection) = &self.projection else {
+            return false;
+        };
+        self.rows.iter().enumerate().any(|(index, row)| {
+            if row.slot != index || row.position != index as f32 {
+                return true;
+            }
+            let mut x = Some(projection.first_widget_x());
+            row.widgets.iter().any(|widget| {
+                let goal = x.filter(|x| projection.fits(*x, &widget.widget_type));
+                x = goal.and_then(|x| projection.after(x, &widget.widget_type));
+                widget.x != goal
+            })
+        })
+    }
+
+    fn compact(&mut self, fraction: f32, terminal: bool) -> bool {
+        let projection = self.projection.as_ref().expect("projected dock");
+        let mut changed = false;
+        for (index, row) in self.rows.iter_mut().enumerate() {
+            let position = if terminal {
+                row.slot = index;
+                index as f32
+            } else {
+                row.position + (index as f32 - row.position) * fraction
+            };
+            changed |= row.position != position;
+            row.position = position;
+            let mut x = Some(projection.first_widget_x());
+            for widget in &mut row.widgets {
+                let goal = x.filter(|x| projection.fits(*x, &widget.widget_type));
+                let position = if terminal {
+                    goal
+                } else {
+                    widget
+                        .x
+                        .zip(goal)
+                        .map(|(from, to)| from + (to - from) * f64::from(fraction))
+                };
+                changed |= widget.x != position;
+                widget.x = position;
+                x = goal.and_then(|x| projection.after(x, &widget.widget_type));
+            }
+        }
+        changed
+    }
+}
+
+impl DockProjection {
+    fn first_widget_x(&self) -> f64 {
+        f64::from(
+            self.layout.column.x + self.layout.metrics.caption_width + self.layout.metrics.gap,
+        )
+    }
+
+    fn widget_width(&self, widget_type: &str) -> Option<f64> {
+        self.aspect_ratios
+            .iter()
+            .find(|(name, _)| name == widget_type)
+            .map(|(_, ratio)| f64::from(self.layout.metrics.row_height) * *ratio)
+            .filter(|width| *width > 0.0 && width.is_finite())
+    }
+
+    fn after(&self, x: f64, widget_type: &str) -> Option<f64> {
+        Some(x + self.widget_width(widget_type)? + f64::from(self.layout.metrics.gap))
+    }
+
+    fn fits(&self, x: f64, widget_type: &str) -> bool {
+        self.widget_width(widget_type).is_some_and(|width| {
+            let aperture = f64::from(self.layout.column.width);
+            let used = x - self.first_widget_x()
+                + width
+                + f64::from(self.layout.metrics.caption_width)
+                + f64::from(self.layout.metrics.gap);
+            // The fitted aperture and metrics are f32. Accommodate rounding
+            // at their shared edge without admitting another physical item.
+            used <= aperture + aperture * f64::from(2.0 * f32::EPSILON)
+        })
     }
 }
 
@@ -307,10 +522,23 @@ impl SceneGraph {
             {
                 return false;
             }
+            let placement_changed = match (&dock.projection, &projection) {
+                (Some(old), Some(new)) => {
+                    old.target != new.target
+                        || old.layout.display != new.layout.display
+                        || old.layout.column != new.layout.column
+                        || old.layout.metrics != new.layout.metrics
+                        || old.aspect_ratios != new.aspect_ratios
+                }
+                _ => true,
+            };
             dock.accepts = accepts.to_vec();
             dock.capacity = capacity;
             dock.auto_clear_ms = auto_clear_ms;
             dock.projection = projection;
+            if placement_changed {
+                dock.normalize();
+            }
         } else if projection.is_some() {
             self.dock = Some(DockState {
                 accepts: accepts.to_vec(),
@@ -318,6 +546,9 @@ impl SceneGraph {
                 auto_clear_ms,
                 rows: Vec::new(),
                 projection,
+                pointer: None,
+                needs_compaction: false,
+                motion: None,
             });
         } else {
             return false;
@@ -375,42 +606,135 @@ impl SceneGraph {
         let Some(projection) = self.dock_projection() else {
             return Hidden;
         };
-        if index >= projection.layout.capacity {
+        if !Self::dock_row_fits(projection, index, row) {
             return Hidden;
         }
         if projection.target.is_none() {
             return Registry;
         }
+        let widget = &row.widgets[widget_index];
+        let Some(x) = widget.x else {
+            return Hidden;
+        };
+        let Some(width) = projection.widget_width(&widget.widget_type) else {
+            return Hidden;
+        };
+        let caption = projection.layout.caption_at(row.position);
+        Placed(Rect::new(x as f32, caption.y, width as f32, caption.height))
+    }
 
-        let aspect = |widget: &DockWidget| {
-            projection
-                .aspect_ratios
-                .iter()
-                .find(|(name, _)| *name == widget.widget_type)
-                .map(|(_, ratio)| *ratio)
-        };
-        let Some(ratio) = aspect(&row.widgets[widget_index]) else {
-            return Hidden;
-        };
-        // An absent committed predecessor would put this widget in the wrong
-        // slot. Check before advancing across any of the row's widths.
-        let preceding = &row.widgets[..widget_index];
-        if preceding.iter().any(|widget| aspect(widget).is_none()) {
-            return Hidden;
+    fn dock_row_fits(projection: &DockProjection, index: usize, row: &DockRow) -> bool {
+        index < projection.layout.capacity
+            && (projection.target.is_none() || row.slot < projection.layout.physical_capacity)
+    }
+
+    pub fn dock_caption_rect(&self, index: usize) -> Option<Rect> {
+        let projection = self.dock_projection()?;
+        let row = self.dock_rows().get(index)?;
+        Self::dock_row_fits(projection, index, row)
+            .then(|| projection.layout.caption_at(row.position))
+    }
+
+    /// The compositor certifies the exact display used by dock drawing.
+    /// This column is passive and is never added to the hit/capture regions.
+    pub fn certify_dock_passive_column(&mut self, target: &str, display: Rect) {
+        if !self.widgets_shown() {
+            return;
         }
-        let slot = projection
-            .layout
-            .widget(index, preceding.iter().filter_map(aspect), ratio);
-        if slot.width > 0.0
-            && slot.height > 0.0
-            && [slot.x, slot.y, slot.width, slot.height]
-                .into_iter()
-                .all(f32::is_finite)
+        let Some(dock) = &mut self.dock else { return };
+        let Some(projection) = &dock.projection else {
+            return;
+        };
+        if dock.pointer.is_none()
+            && !dock.rows.is_empty()
+            && projection.target.as_deref() == Some(target)
+            && projection.layout.display == display
+            && projection.layout.capacity > 0
         {
-            Placed(slot)
-        } else {
-            Hidden
+            dock.pointer = Some(DockPassiveColumn {
+                target: target.into(),
+                display,
+                column: projection.layout.column,
+                contact: Arc::default(),
+            });
         }
+    }
+
+    pub fn dock_passive_column(&self) -> Option<&DockPassiveColumn> {
+        self.dock.as_ref()?.pointer.as_ref()
+    }
+
+    pub(crate) fn revoke_dock_passive_column(&mut self) {
+        if let Some(dock) = &mut self.dock {
+            dock.pointer = None;
+            dock.motion = None;
+        }
+    }
+
+    /// Advance the shared draw pose once, before the frame gate. A windowed
+    /// surface without a current observation holds the last committed pose.
+    pub fn advance_dock_compaction(
+        &mut self,
+        windowed: bool,
+        duration_us: u64,
+        ease: fn(f32) -> f32,
+    ) -> bool {
+        if !self.widgets_shown() || !self.dock.as_ref().is_some_and(|dock| dock.needs_compaction) {
+            return false;
+        }
+        let now = self.now_monotonic_us();
+        let dock = self.dock.as_mut().expect("dock compaction pending");
+        let (outside, hold_edge) = if windowed {
+            dock.pointer
+                .as_ref()
+                .map_or((false, 0), DockPassiveColumn::sample)
+        } else {
+            (true, 0)
+        };
+        if !outside {
+            dock.motion = None;
+            return false;
+        }
+        if dock
+            .motion
+            .is_some_and(|motion| motion.hold_edge != hold_edge)
+        {
+            dock.motion = None;
+        }
+        if dock.motion.is_none() && !dock.has_gap() {
+            dock.needs_compaction = false;
+            return false;
+        }
+        let motion = dock.motion.get_or_insert(DockMotion {
+            started_us: now,
+            duration_us,
+            ease,
+            progress: 0.0,
+            hold_edge,
+        });
+        let elapsed = now.saturating_sub(motion.started_us);
+        let terminal = elapsed >= motion.duration_us || duration_us == 0;
+        let fraction = if terminal {
+            1.0
+        } else if motion.progress >= 1.0 {
+            // An eased f32 can round to one before the clock reaches the end.
+            // Preserve the terminal geometry acknowledgement on a later turn.
+            0.0
+        } else {
+            let progress = (motion.ease)(elapsed as f32 / motion.duration_us as f32);
+            let fraction = (progress - motion.progress) / (1.0 - motion.progress);
+            motion.progress = progress;
+            fraction
+        };
+        let changed = dock.compact(fraction, terminal);
+        if terminal {
+            dock.motion = None;
+            dock.needs_compaction = false;
+        }
+        if changed || terminal {
+            self.bump_geometry_epoch();
+        }
+        !terminal
     }
 
     /// A configured widget always uses its default artwork, even when its
@@ -455,7 +779,8 @@ impl SceneGraph {
             .ok_or_else(not_found)?;
         let params = Self::validate_widget_params_for_definition(widget_type, definition, &params)?;
         let row_index = dock.rows.iter().position(|row| row.namespace == namespace);
-        if row_index.is_none() && (dock.projection.is_none() || dock.rows.len() >= dock.capacity) {
+        let row_slot = dock.next_row_slot();
+        if row_index.is_none() && row_slot.is_none() {
             return Err(DockPublishError::Full);
         }
         let auto_clear_ms = dock.auto_clear_ms.get();
@@ -521,18 +846,14 @@ impl SceneGraph {
         let new_widget = is_new.then(|| DockWidget {
             widget_type: widget_type.into(),
             instance_name: instance.instance_name.clone(),
+            x: None,
         });
         self.commit_widget_publication(instance, &definition, record)?;
         if let Some(widget) = new_widget {
-            let rows = &mut self.dock.as_mut().expect("configured dock").rows;
-            if let Some(index) = row_index {
-                rows[index].widgets.push(widget);
-            } else {
-                rows.push(DockRow {
-                    namespace: namespace.into(),
-                    widgets: vec![widget],
-                });
-            }
+            self.dock
+                .as_mut()
+                .expect("configured dock")
+                .append(row_index, row_slot, namespace, widget);
         }
         Ok(id)
     }
