@@ -286,11 +286,11 @@ impl Appearance {
         let svgs_changed = without_scales(&resolved) != without_scales(&previous);
         drop(previous);
         // Bundles are files: read them off the async workers.
-        let svgs = if svgs_changed {
+        let widget_bundles = if svgs_changed {
             let roots = self.bundle_roots.clone();
             let tokens = resolved.clone();
             tokio::task::spawn_blocking(move || {
-                crate::widget_startup::widget_svg_assets(&roots, &tokens)
+                crate::widget_startup::reload_widget_bundles(&roots, &tokens)
             })
             .await
             .map_err(|e| format!("Widget bundles could not be re-read: {e}"))?
@@ -305,9 +305,7 @@ impl Appearance {
             scene.widget_registry.zoom = tze_hud_config::tokens::effective_scale(&resolved);
             scene.widget_registry.reduce_motion =
                 tze_hud_config::tokens::os_reduce_motion(&resolved);
-            for (widget_type, file, bytes) in svgs {
-                scene.enqueue_widget_svg_asset(&widget_type, &file, bytes);
-            }
+            crate::widget_startup::apply_widget_restyle(&mut scene, widget_bundles);
             scene.version += 1;
             tracing::info!(
                 theme = tze_hud_config::themes::selected_theme_name(&table),

@@ -167,6 +167,170 @@ fn assert_widget_work(c: &mut Compositor, raster: u64, upload: u64) {
 }
 
 #[tokio::test]
+async fn dock_presentation_selects_and_retires_its_own_raster() {
+    use std::num::NonZeroU64;
+    use tze_hud_scene::dock::{DockLayout, DockMetrics, DockPresentation, WidgetBundleOrigin};
+    use tze_hud_scene::types::{Rect, WidgetSvgLayer};
+
+    let Some(mut gpu) = Gpu::with_widgets(512, 256).await else {
+        return;
+    };
+    let ledger = widget_ledger(1024 * 1024);
+    gpu.compositor.set_resident_ledger(ledger.clone());
+    let mut scene = SceneGraph::new_with_clock(512.0, 256.0, Arc::new(TestClock::new(1_000)));
+    let tab = scene.create_tab("Main", 0).unwrap();
+    let solid = |color| {
+        format!(r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 64"><rect width="128" height="64" fill="{color}"/></svg>"#)
+            .into_bytes()
+    };
+    let layer = |file: &str| WidgetSvgLayer {
+        svg_file: file.into(),
+        bindings: Vec::new(),
+    };
+    let BundleScanResult::Ok(mut bundle) = bundle!("gauge", ["background.svg", "fill.svg"]) else {
+        panic!("gauge fixture");
+    };
+    bundle.definition.layers = vec![layer("default.svg")];
+    bundle.svg_contents = HashMap::from([
+        ("default.svg".into(), solid("#ff0000")),
+        ("dock.svg".into(), solid("#0000ff")),
+    ]);
+    let origin = WidgetBundleOrigin::embedded("gauge-test");
+    let alternate = DockPresentation::new(
+        vec![layer("dock.svg")],
+        128.0,
+        64.0,
+        None,
+        &bundle.svg_contents,
+    );
+    let kind = register_bundle(
+        &mut gpu.compositor,
+        &mut scene,
+        BundleScanResult::Ok(bundle),
+    );
+    scene
+        .widget_registry
+        .set_dock_presentation(&kind, origin.clone(), Some(alternate));
+    register_instance(
+        &mut scene,
+        tab,
+        &kind,
+        "standalone",
+        Some(relative(0.125, 0.25, 0.25, 0.25)),
+        true,
+    );
+    publish(&mut scene, "standalone", "level", 0.25);
+    let layout = DockLayout::new(
+        Rect::new(0.0, 0.0, 512.0, 256.0),
+        1,
+        DockMetrics {
+            row_height: 64.0,
+            caption_width: 32.0,
+            gap: 8.0,
+        },
+        [2.0],
+    );
+    scene.configure_dock(vec![kind.clone()], layout, NonZeroU64::new(10_000).unwrap());
+    let scope = "agent-b";
+    let params = |level| HashMap::from([("level".into(), Value::F32(level))]);
+    scene
+        .publish_to_dock(&kind, params(0.25), scope, None, 0, 0)
+        .unwrap();
+    let dock = scene
+        .dock_instance(scope, &kind)
+        .unwrap()
+        .instance_name
+        .clone();
+    // Equal pixel dimensions expose variant selection independently of dock layout.
+    assert!(scene.set_widget_geometry(&dock, relative(0.625, 0.25, 0.25, 0.25)));
+    let (standalone_x, dock_x, y) = (128, 384, 96);
+    let initial = gpu.render(&mut scene);
+    initial.expect(standalone_x, y, [255, 0, 0, 255], 2, "default gauge");
+    initial.expect(dock_x, y, [0, 0, 255, 255], 2, "dock gauge");
+    #[cfg(feature = "dev-mode")]
+    assert_widget_work(&mut gpu.compositor, 2, 2);
+    let raster_bytes = 128 * 64 * 4;
+    assert_eq!(ledger.snapshot().widget_raster_bytes, 2 * raster_bytes);
+
+    // Change only the descriptor and leave the registered bytes stale. Failed
+    // admission must not draw the old dock pixels or the ordinary gauge plan.
+    let green = solid("#00ff00");
+    let alternate = DockPresentation::new(
+        vec![layer("dock.svg")],
+        128.0,
+        64.0,
+        None,
+        &HashMap::from([("dock.svg".into(), green.clone())]),
+    );
+    scene
+        .widget_registry
+        .set_dock_presentation(&kind, origin, Some(alternate));
+    assert_eq!(gpu.draw(&mut scene).widget_rasterized, [dock.as_str()]);
+    assert!(
+        gpu.compositor
+            .widget_renderer()
+            .unwrap()
+            .texture_entry(&dock)
+            .is_none()
+    );
+    assert_eq!(ledger.snapshot().widget_raster_bytes, raster_bytes);
+    #[cfg(feature = "dev-mode")]
+    assert_widget_work(&mut gpu.compositor, 1, 0);
+
+    gpu.compositor
+        .widget_renderer_mut()
+        .unwrap()
+        .register_svg(&kind, "dock.svg", green);
+    let current = gpu.render(&mut scene);
+    current.expect(
+        standalone_x,
+        y,
+        [255, 0, 0, 255],
+        2,
+        "default plan after restyle",
+    );
+    current.expect(
+        dock_x,
+        y,
+        [0, 255, 0, 255],
+        2,
+        "current dock plan at the same size",
+    );
+    assert_eq!(raster_count(&gpu.compositor, "standalone"), 1);
+    #[cfg(feature = "dev-mode")]
+    assert_widget_work(&mut gpu.compositor, 1, 1);
+    assert!(gpu.draw(&mut scene).widget_rasterized.is_empty());
+    #[cfg(feature = "dev-mode")]
+    assert_widget_work(&mut gpu.compositor, 0, 0);
+    assert_eq!(ledger.snapshot().widget_raster_bytes, 2 * raster_bytes);
+
+    scene
+        .publish_to_dock(&kind, params(0.75), scope, None, 2_000, 0)
+        .unwrap();
+    gpu.draw(&mut scene);
+    assert!(
+        gpu.compositor
+            .widget_renderer()
+            .unwrap()
+            .has_active_transition()
+    );
+    scene.set_owner_hidden(SurfaceClasses {
+        widgets: true,
+        ..SurfaceClasses::NONE
+    });
+    scene.release_scope(scope);
+    assert!(gpu.draw(&mut scene).widget_rasterized.is_empty());
+    let renderer = gpu.compositor.widget_renderer().unwrap();
+    assert!(renderer.texture_entry(&dock).is_none());
+    assert_eq!(renderer.raster_count(&dock), 0);
+    assert!(!renderer.has_active_transition());
+    assert_eq!(renderer.raster_count("standalone"), 1);
+    assert_eq!(ledger.snapshot().widget_raster_bytes, raster_bytes);
+    #[cfg(feature = "dev-mode")]
+    assert_widget_work(&mut gpu.compositor, 0, 0);
+}
+
+#[tokio::test]
 async fn widget_param_update_rasterizes_only_that_instance() {
     let Some(mut gpu) = Gpu::with_widgets(512, 256).await else {
         return;

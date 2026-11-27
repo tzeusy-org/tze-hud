@@ -20,6 +20,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use tze_hud_resource::validation::parse_svg_dimensions;
+use tze_hud_scene::dock::WidgetBundleOrigin;
 use tze_hud_scene::types::{
     ContentionPolicy, GeometryPolicy, RenderingPolicy, WidgetBinding, WidgetBindingMapping,
     WidgetDefinition, WidgetHoverBehavior, WidgetNormalizedRect, WidgetParamConstraints,
@@ -46,6 +47,8 @@ pub struct LoadedBundle {
     /// Optional owner-authored dock layout, sharing `definition`'s schema.
     /// Default layers and runtime-registered agent asset targets stay unchanged.
     pub dock: Option<LoadedDockPresentation>,
+    /// Opaque comparison identity for restyling the live bundle.
+    pub origin: WidgetBundleOrigin,
 }
 
 /// Loaded dock sources and their authored extent, before any display scaling.
@@ -258,7 +261,7 @@ pub fn load_bundle_from_files(
             .map(|(_, b)| b.to_vec())
             .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::NotFound))
     };
-    match load_bundle_inner(&read, label, tokens) {
+    match load_bundle_inner(&read, label, tokens, WidgetBundleOrigin::embedded(label)) {
         Ok(bundle) => BundleScanResult::Ok(bundle),
         Err(e) => BundleScanResult::Err(e),
     }
@@ -270,13 +273,14 @@ fn load_bundle_dir_inner(
     tokens: &HashMap<String, String>,
 ) -> Result<LoadedBundle, BundleError> {
     let read = |name: &str| std::fs::read(dir.join(name));
-    load_bundle_inner(&read, path_str, tokens)
+    load_bundle_inner(&read, path_str, tokens, WidgetBundleOrigin::directory(dir))
 }
 
 fn load_bundle_inner(
     read: &dyn Fn(&str) -> std::io::Result<Vec<u8>>,
     path_str: &str,
     tokens: &HashMap<String, String>,
+    origin: WidgetBundleOrigin,
 ) -> Result<LoadedBundle, BundleError> {
     // Steps 1-2: Read and parse widget.toml.
     let manifest_bytes = read("widget.toml").map_err(|e| {
@@ -471,6 +475,7 @@ fn load_bundle_inner(
         definition,
         svg_contents,
         dock,
+        origin,
     })
 }
 

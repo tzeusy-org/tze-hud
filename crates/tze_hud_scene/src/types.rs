@@ -2833,6 +2833,10 @@ pub struct WidgetRegistry {
     /// lightweight (parameter-only).
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub runtime_svg_handles: HashMap<std::string::String, std::string::String>,
+    /// Owner-loaded visual alternates. Agent SVG registration still uses
+    /// the files named by the default widget definition.
+    #[serde(skip)]
+    dock_presentations: HashMap<String, crate::dock::DockPresentationEntry>,
     /// The owner's zoom (`ui.scale`): every widget box is drawn at this
     /// multiple of its configured size ([`Self::drawn_geometry`]). Set by
     /// the runtime; not part of the layout.
@@ -2856,6 +2860,7 @@ impl WidgetRegistry {
             instances: HashMap::new(),
             active_publishes: HashMap::new(),
             runtime_svg_handles: HashMap::new(),
+            dock_presentations: HashMap::new(),
             zoom: unit_zoom(),
             reduce_motion: false,
         }
@@ -2894,6 +2899,53 @@ impl WidgetRegistry {
     /// Look up a widget definition by id.
     pub fn get_definition(&self, id: &str) -> Option<&WidgetDefinition> {
         self.definitions.get(id)
+    }
+
+    /// Access a loaded alternate without applying the instance ownership rule.
+    pub fn dock_presentation(
+        &self,
+        widget_type: &str,
+    ) -> Option<&std::sync::Arc<crate::dock::DockPresentation>> {
+        self.dock_presentations
+            .get(widget_type)
+            .map(|entry| &entry.presentation)
+    }
+
+    pub fn dock_presentation_origin(
+        &self,
+        widget_type: &str,
+    ) -> Option<&crate::dock::WidgetBundleOrigin> {
+        self.dock_presentations
+            .get(widget_type)
+            .map(|entry| &entry.origin)
+    }
+
+    pub fn set_dock_presentation(
+        &mut self,
+        widget_type: &str,
+        origin: crate::dock::WidgetBundleOrigin,
+        presentation: Option<crate::dock::DockPresentation>,
+    ) -> bool {
+        let Some(presentation) = presentation else {
+            return self.dock_presentations.remove(widget_type).is_some();
+        };
+        if self
+            .dock_presentations
+            .get(widget_type)
+            .is_some_and(|current| {
+                current.origin == origin && *current.presentation == presentation
+            })
+        {
+            return false;
+        }
+        self.dock_presentations.insert(
+            widget_type.into(),
+            crate::dock::DockPresentationEntry {
+                origin,
+                presentation: std::sync::Arc::new(presentation),
+            },
+        );
+        true
     }
 
     /// Register or update the runtime asset handle for a widget SVG layer.

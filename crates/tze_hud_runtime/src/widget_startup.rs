@@ -29,10 +29,12 @@ use std::path::Path;
 
 use tze_hud_config::raw::RawConfig;
 use tze_hud_config::widgets::{LoadedWidgetType, build_widget_instance, resolve_bundle_path};
+use tze_hud_scene::dock::DockPresentation;
 use tze_hud_scene::graph::SceneGraph;
 use tze_hud_scene::types::SceneId;
 use tze_hud_widget::loader::{
-    BundleScanResult, load_bundle_from_files, scan_bundle_dirs_with_diagnostics,
+    BundleScanResult, LoadedBundle, LoadedDockPresentation, load_bundle_from_files,
+    scan_bundle_dirs_with_diagnostics,
 };
 
 // ─── Built-in bundles ─────────────────────────────────────────────────────────
@@ -94,8 +96,7 @@ const BUILTIN_BUNDLES: &[(&str, BundleFiles)] = &[
 ///   bundles resolve against the global token map.
 ///
 /// SVG asset from a loaded widget bundle: `(widget_type_id, svg_filename, svg_bytes)`.
-/// Includes owner-authored dock files under distinct names; default definitions
-/// still select their original layers. Alternate selection is not wired here.
+/// Includes owner-authored dock files under distinct names.
 pub(crate) type WidgetSvgAsset = (String, String, Vec<u8>);
 
 /// The on-disk bundle roots `[widget_bundles].paths` names, relative to
@@ -151,25 +152,86 @@ fn scan_all_bundles_with_diagnostics(
     (scan_results, warnings)
 }
 
-/// The SVGs of every loadable bundle with placeholders resolved against
-/// `token_map`, first bundle of a name winning as at startup: what a live
-/// token change re-registers so widgets restyle.
-pub(crate) fn widget_svg_assets(
+/// Reload the same winning bundles as startup, keeping art and its descriptor together.
+pub(crate) fn reload_widget_bundles(
     roots: &[std::path::PathBuf],
     token_map: &HashMap<String, String>,
-) -> Vec<WidgetSvgAsset> {
+) -> Vec<LoadedBundle> {
     let mut seen = std::collections::HashSet::new();
-    let mut assets = Vec::new();
-    for result in scan_all_bundles(roots, token_map) {
-        if let BundleScanResult::Ok(bundle) = result
-            && seen.insert(bundle.definition.id.clone())
-        {
-            for (file, bytes) in bundle.svg_contents {
-                assets.push((bundle.definition.id.clone(), file, bytes));
+    scan_all_bundles(roots, token_map)
+        .into_iter()
+        .filter_map(|result| match result {
+            BundleScanResult::Ok(bundle) if seen.insert(bundle.definition.id.clone()) => {
+                Some(bundle)
             }
+            _ => None,
+        })
+        .collect()
+}
+
+fn dock_presentation(
+    loaded: LoadedDockPresentation,
+    svg_contents: &HashMap<String, Vec<u8>>,
+) -> DockPresentation {
+    DockPresentation::new(
+        loaded.layers,
+        loaded.width,
+        loaded.height,
+        loaded.hover_behavior,
+        svg_contents,
+    )
+}
+
+pub(crate) fn apply_widget_restyle(scene: &mut SceneGraph, bundles: Vec<LoadedBundle>) {
+    for bundle in bundles {
+        let widget_type = &bundle.definition.id;
+        let registry = &mut scene.widget_registry;
+        let incoming_dock = bundle.dock.filter(|dock| {
+            registry.dock_presentation_origin(widget_type) == Some(&bundle.origin)
+                && registry.get_definition(widget_type).is_some_and(|live| {
+                    let candidate = &bundle.definition.parameter_schema;
+                    let unchanged_schema = live.parameter_schema.len() == candidate.len()
+                        && live.parameter_schema.iter().zip(candidate).all(|(a, b)| {
+                            a.name == b.name
+                                && a.param_type == b.param_type
+                                && a.audience == b.audience
+                                && a.constraints == b.constraints
+                        });
+                    unchanged_schema
+                        && !live.layers.iter().any(|default| {
+                            dock.layers
+                                .iter()
+                                .any(|layer| layer.svg_file == default.svg_file)
+                        })
+                })
+        });
+        let refresh_dock = incoming_dock.is_some();
+        let retained_dock = registry.dock_presentation(widget_type).cloned();
+        if let Some(dock) = incoming_dock {
+            registry.set_dock_presentation(
+                widget_type,
+                bundle.origin,
+                Some(dock_presentation(dock, &bundle.svg_contents)),
+            );
+        }
+        for (file, bytes) in bundle.svg_contents {
+            // Continue default-layer restyles while shielding live alternate
+            // files from a fallback or incompatible manifest.
+            if !refresh_dock
+                && (!bundle
+                    .definition
+                    .layers
+                    .iter()
+                    .any(|layer| layer.svg_file == file)
+                    || retained_dock
+                        .as_ref()
+                        .is_some_and(|dock| dock.layers.iter().any(|layer| layer.svg_file == file)))
+            {
+                continue;
+            }
+            scene.enqueue_widget_svg_asset(widget_type, &file, bytes);
         }
     }
-    assets
 }
 
 pub(crate) fn init_widget_registry(
@@ -230,6 +292,13 @@ pub(crate) fn init_widget_registry(
                     widget_name = %name,
                     svg_count = bundle.svg_contents.len(),
                     "widget_startup: registered widget type"
+                );
+                scene.widget_registry.set_dock_presentation(
+                    &name,
+                    bundle.origin,
+                    bundle
+                        .dock
+                        .map(|loaded| dock_presentation(loaded, &bundle.svg_contents)),
                 );
                 scene.widget_registry.register_definition(bundle.definition);
             }
@@ -478,8 +547,12 @@ mod tests {
 
     /// WHEN an on-disk bundle has the same type name as a built-in THEN the
     /// on-disk bundle wins and the type is registered once.
-    #[test]
-    fn on_disk_bundle_overrides_builtin_by_type_name() {
+    #[tokio::test]
+    async fn on_disk_bundle_overrides_builtin_by_type_name() {
+        use std::sync::Arc;
+        use tze_hud_config::tokens::{DesignTokenMap, OsPreferences};
+        use tze_hud_scene::render_wake::RenderWakeNotifier;
+
         let root = std::env::temp_dir().join(format!("tze_hud_override_{}", std::process::id()));
         let bundle = root.join("my-gauge");
         std::fs::create_dir_all(&bundle).unwrap();
@@ -569,20 +642,77 @@ height_pct = 1
                 .expect("selected owner dock source is in the asset catalog")
         };
         assert!(dock_source(&assets).contains("160 52"));
-        let mut changed_tokens = tokens;
-        changed_tokens.insert("dock.row.height".into(), "60".into());
-        let restyled = widget_svg_assets(std::slice::from_ref(&root), &changed_tokens);
-        assert!(dock_source(&restyled).contains("160 60"));
-        for file in ["background.svg", "fill.svg"] {
-            let bytes = |assets: &[WidgetSvgAsset]| {
-                assets
-                    .iter()
-                    .find(|(kind, name, _)| kind == "gauge" && name == file)
-                    .map(|(_, _, bytes)| bytes.clone())
+        let startup_dock = scene.widget_registry.dock_presentation("gauge").unwrap();
+        assert_eq!(startup_dock.height, 52.0);
+        assert!(startup_dock.matches_source("dock.svg", dock_source(&assets).as_bytes()));
+        let fallback_root = root.join("fallback");
+        let scene = Arc::new(tokio::sync::Mutex::new(scene));
+        let appearance = crate::appearance::Appearance::new(
+            Arc::new(crate::appearance::LiveTokens::new(
+                DesignTokenMap::new(),
+                tokens,
+                RenderWakeNotifier::default(),
+                RenderWakeNotifier::default(),
+            )),
+            scene.clone(),
+            None,
+            vec![root.clone(), fallback_root.clone()],
+            OsPreferences::default,
+        );
+        let height = |value: &str| DesignTokenMap::from([("dock.row.height".into(), value.into())]);
+        assert_eq!(appearance.apply(height("60")).await, Ok(true));
+        let (restyled, owner_dock) = {
+            let mut scene = scene.lock().await;
+            (
+                scene.drain_pending_widget_svg_assets(),
+                scene
+                    .widget_registry
+                    .dock_presentation("gauge")
                     .unwrap()
-            };
-            assert_eq!(bytes(&assets), bytes(&restyled));
+                    .clone(),
+            )
+        };
+        assert_eq!(owner_dock.height, 60.0);
+        assert!(dock_source(&restyled).contains("160 60"));
+        assert!(owner_dock.matches_source("dock.svg", dock_source(&restyled).as_bytes()));
+        let bytes = |assets: &[WidgetSvgAsset], file: &str| {
+            assets
+                .iter()
+                .find(|(kind, name, _)| kind == "gauge" && name == file)
+                .map(|(_, _, bytes)| bytes.clone())
+        };
+        for file in ["background.svg", "fill.svg"] {
+            assert!(bytes(&restyled, file).is_some());
+            assert_eq!(bytes(&assets, file), bytes(&restyled, file));
         }
+
+        let fallback = fallback_root.join("my-gauge");
+        std::fs::create_dir_all(&fallback).unwrap();
+        for file in ["widget.toml", "background.svg", "fill.svg"] {
+            std::fs::copy(bundle.join(file), fallback.join(file)).unwrap();
+        }
+        // Match the old alternate filename and extent with distinct artwork;
+        // the incoming disjoint defaults still follow the normal reload path.
+        let fallback_dock = br#"<svg viewBox="0 0 160 60"><rect id="bar" fill="orange"/></svg>"#;
+        std::fs::write(fallback.join("dock.svg"), fallback_dock).unwrap();
+        assert!(!owner_dock.matches_source("dock.svg", fallback_dock));
+        let mut fallback_fill = std::fs::read_to_string(fallback.join("fill.svg")).unwrap();
+        fallback_fill.push_str("<!-- fallback default -->");
+        std::fs::write(fallback.join("fill.svg"), fallback_fill).unwrap();
+        std::fs::remove_file(bundle.join("dock.svg")).unwrap();
+        assert_eq!(appearance.apply(height("66")).await, Ok(true));
+        let mut scene = scene.lock().await;
+        let restyled = scene.drain_pending_widget_svg_assets();
+        assert!(bytes(&restyled, "dock.svg").is_none());
+        assert!(
+            std::str::from_utf8(&bytes(&restyled, "fill.svg").unwrap())
+                .unwrap()
+                .contains("<!-- fallback default -->")
+        );
+        assert!(Arc::ptr_eq(
+            scene.widget_registry.dock_presentation("gauge").unwrap(),
+            &owner_dock,
+        ));
         std::fs::remove_dir_all(&root).ok();
 
         assert_eq!(

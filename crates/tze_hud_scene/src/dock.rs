@@ -2,13 +2,15 @@
 
 use std::collections::HashMap;
 use std::num::NonZeroU64;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
 use crate::graph::SceneGraph;
 use crate::types::{
-    ContentionPolicy, Rect, SceneId, WidgetInstance, WidgetParamAudience, WidgetParameterValue,
-    WidgetPublishRecord,
+    ContentionPolicy, Rect, SceneId, WidgetHoverBehavior, WidgetInstance, WidgetParamAudience,
+    WidgetParameterValue, WidgetPublishRecord, WidgetSvgLayer,
 };
 use crate::validation::ValidationError;
 
@@ -17,6 +19,83 @@ pub struct DockMetrics {
     pub row_height: f32,
     pub caption_width: f32,
     pub gap: f32,
+}
+
+/// Owner-loaded alternate artwork and hover metadata for an existing widget type.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DockPresentation {
+    pub layers: Vec<WidgetSvgLayer>,
+    pub width: f32,
+    pub height: f32,
+    pub hover_behavior: Option<WidgetHoverBehavior>,
+    sources: HashMap<String, blake3::Hash>,
+}
+
+impl DockPresentation {
+    pub fn new(
+        layers: Vec<WidgetSvgLayer>,
+        width: f32,
+        height: f32,
+        hover_behavior: Option<WidgetHoverBehavior>,
+        svg_contents: &HashMap<String, Vec<u8>>,
+    ) -> Self {
+        let sources = layers
+            .iter()
+            .filter_map(|layer| {
+                let file = &layer.svg_file;
+                svg_contents
+                    .get(file)
+                    .map(|bytes| (file.clone(), blake3::hash(bytes)))
+            })
+            .collect();
+        Self {
+            layers,
+            width,
+            height,
+            hover_behavior,
+            sources,
+        }
+    }
+
+    /// SVG registration may be denied by the renderer's resident budget.
+    /// Never bind this descriptor against an older version left at the same filename.
+    pub fn matches_source(&self, file: &str, bytes: &[u8]) -> bool {
+        self.sources
+            .get(file)
+            .is_some_and(|expected| *expected == blake3::hash(bytes))
+    }
+}
+
+/// Internal comparison identity of the selected startup/reload bundle.
+#[derive(Clone, PartialEq, Eq)]
+pub struct WidgetBundleOrigin(BundleSource);
+
+#[derive(Clone, PartialEq, Eq)]
+enum BundleSource {
+    Directory(PathBuf),
+    Embedded(String),
+}
+
+impl WidgetBundleOrigin {
+    pub fn directory(path: &Path) -> Self {
+        Self(BundleSource::Directory(path.into()))
+    }
+
+    pub fn embedded(label: &str) -> Self {
+        Self(BundleSource::Embedded(label.into()))
+    }
+}
+
+impl std::fmt::Debug for WidgetBundleOrigin {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WidgetBundleOrigin").finish_non_exhaustive()
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct DockPresentationEntry {
+    pub origin: WidgetBundleOrigin,
+    pub presentation: Arc<DockPresentation>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -201,11 +280,24 @@ impl SceneGraph {
             .map(|widget| widget.instance_name.as_str())
     }
 
-    pub(crate) fn is_dock_widget(&self, instance_name: &str) -> bool {
+    pub fn is_dock_widget(&self, instance_name: &str) -> bool {
         self.dock_rows()
             .iter()
             .flat_map(|row| &row.widgets)
             .any(|widget| widget.instance_name == instance_name)
+    }
+
+    /// A configured widget always uses its default artwork, even when its
+    /// type has a loaded dock alternate.
+    pub fn widget_dock_presentation(
+        &self,
+        instance: &WidgetInstance,
+    ) -> Option<&Arc<DockPresentation>> {
+        if !self.is_dock_widget(&instance.instance_name) {
+            return None;
+        }
+        self.widget_registry
+            .dock_presentation(&instance.widget_type_name)
     }
 
     /// Publish immediately for a live, authenticated scope supplied by the caller.

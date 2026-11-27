@@ -5,7 +5,7 @@ use tze_hud_scene::WidgetParameterValue;
 use tze_hud_scene::graph::SceneGraph;
 use tze_hud_scene::widget_deadline::widget_params_at;
 
-use crate::widget::WidgetRenderer;
+use crate::widget::{WidgetRenderer, same_dock_presentation};
 
 impl super::Compositor {
     /// Countdowns are a one-shot display deadline, never a frame-rate animation.
@@ -103,6 +103,8 @@ impl super::Compositor {
             None => return,
         };
         wr.begin_sync();
+        let registry = &scene.widget_registry;
+        wr.retire_absent_dock_instances(registry);
         // Hidden by the owner: no raster or upload. Cached textures stay for
         // when they are shown again; transitions stop rather than tick frames
         // nobody sees, and the first shown sync snaps to the newest values.
@@ -112,7 +114,6 @@ impl super::Compositor {
         }
         let snap = wr.take_snap_on_show();
 
-        let registry = &scene.widget_registry;
         let now_us = scene.now_monotonic_us();
 
         // Collect instances that need texture updates. Widgets without active
@@ -150,6 +151,14 @@ impl super::Compositor {
                 Some(d) => d.clone(),
                 None => continue,
             };
+            let dock = scene.widget_dock_presentation(&instance);
+            if wr.texture_entry(&instance_name).is_some_and(|entry| {
+                !same_dock_presentation(entry.dock_presentation.as_ref(), dock)
+            }) {
+                // A denied source or texture admission must not draw the old
+                // presentation in place of the selected one.
+                wr.remove_texture(&instance_name);
+            }
 
             // Raster at the size the widget is drawn: its box at the zoom.
             let Some(geometry) = registry.drawn_geometry(&instance) else {
@@ -248,24 +257,32 @@ impl super::Compositor {
                 || still_animating
                 || params_changed
                 || resized
-                || wr.restyled(&instance.widget_type_name)
+                || wr.restyled(
+                    &def.id,
+                    dock.map_or(def.layers.as_slice(), |dock| &dock.layers),
+                )
                 || wr
                     .texture_entry(&instance_name)
                     .map(|e| e.dirty)
                     .unwrap_or(false);
 
             if dirty {
-                wr.rasterize_and_upload(
+                let uploaded = wr.rasterize_and_upload(
                     &self.device,
                     &self.queue,
                     &instance_name,
                     &def,
+                    dock.is_some() || scene.is_dock_widget(&instance_name),
+                    dock,
                     &effective_params,
                     pw,
                     ph,
                 );
                 // Record what params were rendered so we can detect future changes.
                 if let Some(entry) = wr.texture_entry_mut(&instance_name) {
+                    if uploaded {
+                        entry.dock_presentation = dock.cloned();
+                    }
                     entry.last_rendered_params = effective_params;
                     entry.dirty = false;
                 }
