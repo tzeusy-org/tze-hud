@@ -569,6 +569,20 @@ impl SceneGraph {
         true
     }
 
+    /// The configured cap for the next publish, even while there is no display.
+    pub fn dock_auto_clear_ms(&self) -> Option<NonZeroU64> {
+        self.dock.as_ref().map(|dock| dock.auto_clear_ms)
+    }
+
+    /// Change the next publish's cap without retiming existing publications.
+    pub fn set_dock_auto_clear_ms(&mut self, cap: NonZeroU64) -> bool {
+        let Some(dock) = &mut self.dock else {
+            return false;
+        };
+        dock.auto_clear_ms = cap;
+        true
+    }
+
     /// Installed dock types in the owner's configured order, even without a display.
     pub fn dock_types(&self) -> impl Iterator<Item = (&str, &WidgetDefinition)> + '_ {
         let accepts = self

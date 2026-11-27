@@ -542,7 +542,8 @@ pub(crate) fn default_sections(deps: &ControlPanelDeps) -> Vec<Box<dyn Section>>
                 deps.runtime.as_ref().and_then(|r| r.write_display.clone()),
                 deps.main_wake.clone(),
             )
-            .with_runtime(deps.runtime.clone()),
+            .with_runtime(deps.runtime.clone())
+            .with_appearance(deps.appearance.clone()),
         ),
         Box::new(sections::InputSection::new(
             deps.chords.clone(),

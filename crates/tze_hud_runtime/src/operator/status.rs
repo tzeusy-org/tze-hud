@@ -565,7 +565,7 @@ impl StatusSource {
             self.startup.as_ref(),
         );
         let sessions = self.sessions_json().await;
-        json!({
+        let mut status = json!({
             "holdings": holdings,
             // Live MCP sessions, so a leaked scope is visible.
             "sessions": sessions,
@@ -630,7 +630,11 @@ impl StatusSource {
                 .appearance
                 .as_ref()
                 .map_or(Value::Null, |a| a.os_prefs_json()),
-        })
+        });
+        if let Some(dock) = surfaces.dock {
+            status["dock"] = dock;
+        }
+        status
     }
 }
 

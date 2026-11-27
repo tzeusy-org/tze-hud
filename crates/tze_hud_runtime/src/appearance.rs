@@ -14,6 +14,7 @@
 //! with the bundled faces).
 
 use std::collections::HashMap;
+use std::num::NonZeroU64;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
@@ -224,6 +225,18 @@ impl Appearance {
 
     pub(crate) fn has_dock(&self) -> bool {
         self.has_dock
+    }
+
+    /// Keep the next publication's cap through subsequent display and appearance changes.
+    pub(crate) async fn set_dock_auto_clear_ms(&self, cap: NonZeroU64) -> Result<(), String> {
+        let mut applied = self.applying.lock().await;
+        let dock = applied.dock.as_mut().ok_or("Dock is not configured")?;
+        let mut scene = self.scene.lock().await;
+        if !scene.set_dock_auto_clear_ms(cap) {
+            return Err("Dock is not configured".into());
+        }
+        dock.config.auto_clear_ms = cap.get();
+        Ok(())
     }
 
     /// Restyle the HUD with `table` as its `[design_tokens]`. Refuses invalid
