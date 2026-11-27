@@ -28,11 +28,15 @@ import sys
 import tomllib
 from collections import defaultdict
 from collections.abc import Collection
+from datetime import date, datetime
 from pathlib import Path, PurePosixPath
 from typing import NamedTuple
 
 COLUMNS = ("rust", "rust_test", "python", "python_test", "markdown")
 SOURCE_SUFFIXES = (".rs", ".py", ".md")
+POLICY_FILE = "scripts/ci/size_targets.toml"
+INFLIGHT_CUTOFF = datetime.fromisoformat("2026-11-26T17:38:19Z")
+INFLIGHT_DECISION = "hud-3n24e.32"
 TWO_PART = {"crates", "app", "examples", "tests"}
 MARKDOWN_SKIP = (".beads/",)
 # `cfg(all(test, ...))` is test-only; `cfg(any(test, ...))` is shared code.
@@ -141,7 +145,7 @@ def tracked(root: Path) -> dict[str, str]:
 
 
 def committed(root: Path, ref: str) -> dict[str, str]:
-    """Read the comparison commit's tracked source blobs without a checkout."""
+    """Read the comparison commit's tracked source and size policy blobs."""
     commit = subprocess.check_output(
         ["git", "rev-parse", "--verify", "--end-of-options", f"{ref}^{{commit}}"],
         cwd=root, stderr=subprocess.PIPE,
@@ -151,7 +155,7 @@ def committed(root: Path, ref: str) -> dict[str, str]:
     for entry in entries.split(b"\0")[:-1]:
         metadata, name = entry.split(b"\t", 1)
         path = name.decode()
-        if path.endswith(SOURCE_SUFFIXES):
+        if path.endswith(SOURCE_SUFFIXES) or path == POLICY_FILE:
             mode, _, object_id = metadata.split()
             if mode not in (b"100644", b"100755"):
                 raise ValueError(f"comparison source must be a regular file: {path}")
@@ -167,7 +171,8 @@ def committed(root: Path, ref: str) -> dict[str, str]:
             header = stream.readline().split()
             if len(header) != 3 or header[:2] != [object_id, b"blob"]:
                 raise ValueError(f"comparison source unavailable: {path}")
-            files[path] = stream.read(int(header[2])).decode("utf-8", "replace")
+            errors = "strict" if path == POLICY_FILE else "replace"
+            files[path] = stream.read(int(header[2])).decode("utf-8", errors)
             if stream.read(1) != b"\n":
                 raise ValueError(f"comparison source incomplete: {path}")
     return files
@@ -186,12 +191,11 @@ def line_limits(values: dict, fields: Collection[str]) -> bool:
     )
 
 
-def size_targets(path: Path, known_surfaces: set[str] | None) -> dict[str, Target]:
-    with path.open("rb") as source:
-        policy = tomllib.load(source)
+def size_targets(policy: dict, known_surfaces: set[str] | None) -> dict[str, Target]:
     entries = policy.get("targets")
     allowances = policy.get("allowances", [])
-    if policy.keys() - {"targets", "allowances"} or not isinstance(entries, dict) or not entries:
+    policy_fields = {"targets", "allowances", "inflight_allowances"}
+    if policy.keys() - policy_fields or not isinstance(entries, dict) or not entries:
         raise ValueError("size policy must contain targets")
     if not isinstance(allowances, list):
         raise ValueError("size policy allowances must be a list")
@@ -236,12 +240,72 @@ def size_targets(path: Path, known_surfaces: set[str] | None) -> dict[str, Targe
     return targets
 
 
-def target_report(rows: dict, targets: dict[str, Target], base: dict | None) -> tuple[str, list[str]]:
+def signed_before_cutoff(value: str) -> bool:
+    try:
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+            return date.fromisoformat(value) < INFLIGHT_CUTOFF.date()
+        signed_at = datetime.fromisoformat(value)
+        return signed_at.utcoffset() is not None and signed_at < INFLIGHT_CUTOFF
+    except ValueError:
+        return False
+
+
+def inflight_allowances(policy: dict) -> dict[tuple[str, str], dict]:
+    entries = policy.get("inflight_allowances", [])
+    if not isinstance(entries, list):
+        raise ValueError("in-flight size allowances must be a list")
+
+    receipts = {}
+    required = ("feature", "approval", "signed_at", "decision", "target")
+    for entry in entries:
+        if not isinstance(entry, dict) or not all(
+            isinstance(entry.get(field), str) and entry[field].strip() for field in required
+        ):
+            raise ValueError("in-flight size allowance needs a feature, target, signed spec, date and decision")
+        feature, target = key = (entry["feature"], entry["target"])
+        values = {field: value for field, value in entry.items() if field not in required}
+        if key in receipts or not line_limits(values, COLUMNS) or not all(values.values()):
+            raise ValueError(f"{feature}: invalid or duplicate in-flight size allowance for {target}")
+        if entry["decision"] != INFLIGHT_DECISION or not signed_before_cutoff(entry["signed_at"]):
+            raise ValueError(f"{feature}: in-flight size allowance requires {INFLIGHT_DECISION} and a pre-cutoff signature")
+        receipts[key] = entry
+    return receipts
+
+
+def new_inflight_growth(policy: dict, previous: dict, targets: dict[str, Target]) -> dict:
+    receipts = inflight_allowances(policy)
+    previous_receipts = inflight_allowances(previous)
+    for key, entry in previous_receipts.items():
+        if receipts.get(key) != entry:
+            raise ValueError(f"{key[0]}: existing in-flight size allowance for {key[1]} must stay unchanged")
+
+    added = sorted(receipts.keys() - previous_receipts.keys())
+    growth: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    if added:
+        previous_targets = size_targets(previous, None) if previous else {}
+        for key in added:
+            feature, name = key
+            target = targets.get(name)
+            if target is None or target != previous_targets.get(name):
+                raise ValueError(f"{feature}: in-flight size allowance requires an unchanged target {name}")
+            for field in COLUMNS:
+                lines = receipts[key].get(field, 0)
+                if lines:
+                    if field not in target.ceilings:
+                        raise ValueError(f"{feature}: {name} has no ceiling for {field}")
+                    growth[name][field] += lines
+    return growth
+
+
+def target_report(
+    rows: dict, targets: dict[str, Target], base: dict | None, inflight: dict,
+) -> tuple[str, list[str]]:
     report = [
         "\n| Target surface | Metric | Current | Base | Sketch target | Recorded allowances | Distance to target |",
         "|---|---|--:|--:|--:|--:|--:|",
     ]
     failures = []
+    measured = []
     for name, target in targets.items():
         for field, ceiling in target.ceilings.items():
             current = sum(rows.get(surface, {}).get(field, 0) for surface in target.surfaces)
@@ -253,11 +317,26 @@ def target_report(rows: dict, targets: dict[str, Target], base: dict | None) -> 
             report.append(f"| {name} | {field} | {current:,} | {prior} | "
                           f"{ceiling:,} | {allowance:,} | {current - ceiling:+,} |")
             effective = ceiling + allowance
-            if previous is not None and current > previous and current > effective:
+            if previous is None:
+                continue
+            growth = current - previous
+            granted = inflight.get(name, {}).get(field, 0)
+            if granted:
+                expected = max(growth, 0) if current > effective else 0
+                if granted != expected:
+                    failures.append(
+                        f"{name} ({field}) has {granted:,} in-flight allowance lines "
+                        f"but needs {expected:,} for measured growth from {previous:,} to {current:,}"
+                    )
+                else:
+                    measured.append(f"- {name} ({field}) {previous:,} → {current:,}, +{granted:,} lines")
+            elif growth > 0 and current > effective:
                 failures.append(
                     f"{name} ({field}) grew from {previous:,} to {current:,} lines "
                     f"above its {effective:,}-line ceiling (target {ceiling:,} + allowance {allowance:,})"
                 )
+    if measured:
+        report.extend(["", "In-flight allowances applied to this comparison", "", *measured])
     return "\n".join(report) + "\n", failures
 
 
@@ -271,20 +350,32 @@ def main(argv: list[str] | None = None) -> int:
     rows = count(files)
     text = table(rows)
     failures = []
-    policy = args.root / "scripts/ci/size_targets.toml"
+    policy = args.root / POLICY_FILE
     try:
         base = None
+        previous_policy = {}
         known_surfaces = None
         if args.base is not None:
             base_files = committed(args.root, args.base)
             base = count(base_files)
+            previous_policy = tomllib.loads(base_files.get(POLICY_FILE, ""))
             # The report omits all-zero rows. Use filenames to recognize empty surfaces.
             known_surfaces = {
                 surface(path) for path in files.keys() | base_files.keys()
                 if path.endswith((".rs", ".py")) or counted_markdown(path)
             }
-        if args.base is not None or policy.exists():
-            target_text, failures = target_report(rows, size_targets(policy, known_surfaces), base)
+        if args.base is not None or policy.exists() or policy.is_symlink():
+            if policy.is_symlink() or not policy.is_file():
+                raise ValueError(f"{POLICY_FILE} must be a regular file")
+            with policy.open("rb") as source:
+                current_policy = tomllib.load(source)
+            targets = size_targets(current_policy, known_surfaces)
+            if base is None:
+                inflight_allowances(current_policy)
+                inflight = {}
+            else:
+                inflight = new_inflight_growth(current_policy, previous_policy, targets)
+            target_text, failures = target_report(rows, targets, base, inflight)
             text += target_text
     except subprocess.CalledProcessError:
         print(f"size gate: cannot read comparison commit {args.base!r}", file=sys.stderr)

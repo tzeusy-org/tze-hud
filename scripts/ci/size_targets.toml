@@ -2,8 +2,8 @@
 # 2026-11-22 greenfield sketch §1.5 (Rust) and §1.8 (client skills).
 # The sketch estimates logical lines. The report counts tracked physical lines.
 # Surface names below are the grouping keys in size_report.py's ordinary report.
-# Use the owner-merge hold and cite signed owner approval in every PR that
-# changes ceilings, mappings or allowances. Retire a deleted surface's mapping
+# Use the owner-merge hold and cite signed owner approval when changing
+# ceilings, mappings or permanent allowances. Retire a deleted surface's mapping
 # in its removal PR so subsequent comparisons can resolve every remaining name.
 
 [targets.core]
@@ -61,3 +61,9 @@ markdown = 900
 # to its owner-signed spec, a target name and additional lines per granted metric.
 # CI checks that the reference is present. The owner verifies that the cited
 # spec grants the recorded allowance when reviewing the PR.
+
+# A new [[inflight_allowances]] entry records the feature, approval (signed
+# spec), signed_at (date or offset timestamp), decision (hud-3n24e.32), target
+# and positive line counts for the metrics above their ceilings. Section
+# "Git / GitHub Workflow" in AGENTS.md gives the cutoff and review procedure.
+# Later comparisons keep the original entry as evidence and apply no credit.

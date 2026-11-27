@@ -191,10 +191,19 @@ checked out. Its lock serializes hooks, not other Cargo processes.
 
 - Size policy changes in [`scripts/ci/size_targets.toml`](scripts/ci/size_targets.toml)
   require a citation to the owner's signed approval in the PR. Apply the
-  `owner-merge` hold for every change to ceilings, mappings or allowances,
-  including later amendments. For a feature allowance, cite the signed
-  feature spec in both the PR and the table. The size check validates that the
-  reference is present. The owner verifies that it grants the recorded change.
+  `owner-merge` hold to changes to the policy, ceilings, mappings or permanent
+  allowances. Cite the signed feature spec in the PR and the table for every
+  feature allowance. The owner verifies the scope of permanent allowances.
+- Agents may land measured in-flight allowances under owner decision
+  `hud-3n24e.32` for feature specs signed before **2026-11-26 17:38:19 UTC**,
+  when #1714 merged. Add a new `[[inflight_allowances]]` entry for each
+  affected target in the feature PR. Cite both the signed spec and the owner
+  decision in the PR and entry, including the signing date or exact time.
+  Match the measured positive growth against the tested base for each metric
+  above its effective ceiling. The entry applies only to the landing that
+  adds it. Preserve previous entries as evidence. An independent reviewer
+  verifies the signature, scope and measured delta. Specs signed from the
+  cutoff onward follow the ordinary size rule.
 - `main` takes no direct merges: the `main merge queue` ruleset requires every PR to land through the queue, so the older `gh pr merge <N> --squash [--delete-branch]` recipes no longer apply. Enqueue instead (CI / Build below) and confirm the landing with `gh pr view <N> --json state,mergedAt`.
 - `beads-pr-reviewer-worker`: automated reviewer threads (Copilot, Gemini) are left by bots and count toward `UNRESOLVED_COUNT`; they must be replied to and resolved before merge just like human threads.
 - `beads-pr-reviewer-worker`: the `list_review_threads.py` helper may return 0 threads even when threads exist; always verify with `evaluate_merge_readiness.py` or `gh api repos/.../pulls/<N>/comments` before treating unresolved count as zero.
