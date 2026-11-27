@@ -96,7 +96,7 @@ async fn test_layer_filter_background_only_emits_background_vertices() {
         let mut scene = SceneGraph::new(1280.0, 720.0);
         // Register both zones before publishing, preserving each case's order.
         for (name, description, geometry, layer, _) in &zones {
-            let mut zone = zone_fixture(name, geometry.clone(), ZoneMediaType::SolidColor, *layer);
+            let mut zone = zone_fixture(name, *geometry, ZoneMediaType::SolidColor, *layer);
             zone.description = (*description).into();
             scene.register_zone(zone);
         }
