@@ -1393,6 +1393,10 @@ impl Compositor {
                 hash_f32s(
                     &mut hasher,
                     &[
+                        target.scene_bounds.x,
+                        target.scene_bounds.y,
+                        target.scene_bounds.width,
+                        target.scene_bounds.height,
                         target.trigger.x,
                         target.trigger.y,
                         target.trigger.width,

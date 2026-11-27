@@ -11574,6 +11574,41 @@ mod tests {
                     Value::F32(0.0)
                 );
             }
+            // On a later availability turn next_due is already consumed. The
+            // final post-present cursor check is still required before commit.
+            observe(&mut harness, 0, due + std::time::Duration::from_secs(1));
+            let next = harness.app.state.dock_param_hover.next_due().unwrap();
+            harness.app.state.dock_param_hover.expire_dwell(next);
+            let held = scene.blocking_lock();
+            assert!(!harness.app.apply_dock_param_hover());
+            assert!(harness.app.state.dock_param_hover.next_due().is_none());
+            assert!(
+                harness
+                    .app
+                    .state
+                    .dock_param_hover
+                    .needs_positive_sample(next)
+            );
+            let before = wake.main_work_generation();
+            harness.app.schedule_shared_scene_availability_wake();
+            drop(held);
+            wait(before);
+            // This uses the incumbent invalid-point observation path that a
+            // fresh native read failure also takes; no Windows input is faked.
+            harness.app.invalidate_dock_cursor();
+            assert!(!harness.app.apply_dock_param_hover());
+            assert!(!harness.app.state.dock_param_hover.has_debt());
+            assert!(
+                !harness
+                    .app
+                    .state
+                    .dock_param_hover
+                    .needs_positive_sample(next)
+            );
+            assert_eq!(
+                harness.scene().widget_registry.instances[&a.instance_name].current_params["tooltip_visible"],
+                Value::F32(0.0)
+            );
         }
     }
 

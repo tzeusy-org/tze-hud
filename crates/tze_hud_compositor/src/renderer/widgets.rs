@@ -51,6 +51,8 @@ impl DockHoverCard {
 pub struct DockRuntimeHoverTarget {
     pub instance: SceneId,
     pub instance_name: String,
+    /// Authoritative unsnapped Scene slot, checked again before a local write.
+    pub scene_bounds: Rect,
     /// The snapped quad and its authored trigger in Scene pixels.
     pub bounds: Rect,
     pub trigger: Rect,
@@ -298,10 +300,15 @@ impl WidgetDraws {
             }) else {
                 continue;
             };
+            let DockWidgetSlot::Placed(scene_bounds) = scene.dock_widget_slot(&quad.instance_name)
+            else {
+                continue;
+            };
             let trigger = behavior.trigger_rect;
             runtime_targets.push(DockRuntimeHoverTarget {
                 instance: instance.id,
                 instance_name: quad.instance_name.clone(),
+                scene_bounds,
                 bounds,
                 trigger: Rect::new(
                     bounds.x + bounds.width * trigger.x_pct,

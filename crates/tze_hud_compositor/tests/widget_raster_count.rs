@@ -2237,6 +2237,9 @@ async fn progress_dock_hover_targets_follow_only_successful_placed_rasters() {
     let b_target = target(&before, b).unwrap();
     for (entry, name) in [(a_target, &a_name), (b_target, &b_name)] {
         assert_eq!(&entry.instance_name, name);
+        assert!(
+            matches!(scene.dock_widget_slot(name), tze_hud_scene::dock::DockWidgetSlot::Placed(raw) if raw == entry.scene_bounds)
+        );
         assert_eq!(entry.behavior, authored_hover);
         assert_eq!(
             entry.trigger, entry.bounds,

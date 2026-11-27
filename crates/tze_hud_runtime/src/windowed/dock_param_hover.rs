@@ -39,6 +39,7 @@ impl Target {
 fn same_visit(a: &DockRuntimeHoverTarget, b: &DockRuntimeHoverTarget) -> bool {
     a.instance == b.instance
         && a.instance_name == b.instance_name
+        && a.scene_bounds == b.scene_bounds
         && a.bounds == b.bounds
         && a.trigger == b.trigger
         && a.behavior == b.behavior
@@ -74,9 +75,17 @@ impl DockParamHover {
         column: Option<&DockPassiveColumn>,
         point: Option<(f32, f32)>,
     ) {
-        self.sample = column
-            .zip(point)
-            .map(|(column, point)| (column.clone(), point));
+        let Some((column, point)) = column.zip(point) else {
+            self.sample = None;
+            return;
+        };
+        if let Some((previous, old_point)) = &mut self.sample
+            && previous.shares_attachment(column)
+        {
+            *old_point = point;
+        } else {
+            self.sample = Some((column.clone(), point));
+        }
     }
 
     pub(super) fn reconcile(
@@ -153,6 +162,17 @@ impl DockParamHover {
             .as_ref()
             .filter(|visit| visit.exact && !visit.activated)
             .map(|visit| visit.due)
+    }
+
+    /// Re-sample after presentation for both a newly due transition and a
+    /// retained positive that can finally commit on this availability turn.
+    pub(super) fn needs_positive_sample(&self, now: Instant) -> bool {
+        self.next_due().is_some_and(|due| now >= due)
+            || (self.visit.as_ref().is_some_and(|visit| visit.exact)
+                && self
+                    .writes
+                    .values()
+                    .any(|write| write.desired && !write.applied))
     }
 
     pub(super) fn has_debt(&self) -> bool {
@@ -266,11 +286,11 @@ fn positive_allowed(scene: &SceneGraph, target: &Target) -> bool {
     let Some(instance) = scene.widget_registry.instances.get(&data.instance_name) else {
         return false;
     };
+    let DockWidgetSlot::Placed(scene_bounds) = scene.dock_widget_slot(&data.instance_name) else {
+        return false;
+    };
     if !scene.widgets_shown()
-        || !matches!(
-            scene.dock_widget_slot(&data.instance_name),
-            DockWidgetSlot::Placed(_)
-        )
+        || scene_bounds != data.scene_bounds
         || scene
             .dock_passive_column()
             .is_none_or(|column| !column.shares_attachment(&target.frame.column))
@@ -337,12 +357,7 @@ impl super::WinitApp {
     pub(super) fn settle_dock_param_hover(&mut self, now: Instant) -> bool {
         let snapshot = self.state.pipeline.hit_test_snapshot.load_full();
         self.reconcile_dock_param_hover(&snapshot, now);
-        let contact_changed = if self
-            .state
-            .dock_param_hover
-            .next_due()
-            .is_some_and(|due| now >= due)
-        {
+        let contact_changed = if self.state.dock_param_hover.needs_positive_sample(now) {
             // Present may have blocked after the ordinary cursor refresh. Its
             // newly observed Outside edge also owes passive compaction work.
             #[cfg(target_os = "windows")]
@@ -431,6 +446,7 @@ pub(super) mod tests {
                 DockRuntimeHoverTarget {
                     instance: instance.id,
                     instance_name: instance.instance_name.clone(),
+                    scene_bounds: bounds,
                     bounds,
                     trigger: bounds,
                     behavior: scene
@@ -477,6 +493,7 @@ pub(super) mod tests {
                 .map(|target| DockRuntimeHoverTarget {
                     instance: target.instance,
                     instance_name: target.instance_name.clone(),
+                    scene_bounds: target.scene_bounds,
                     bounds: target.bounds,
                     trigger: target.trigger,
                     behavior: target.behavior.clone(),
@@ -556,6 +573,80 @@ pub(super) mod tests {
             scene.widget_registry.instances[&card.instance_name].current_params["tooltip_visible"],
             WidgetParameterValue::F32(0.0)
         );
+    }
+
+    #[test]
+    fn real_compaction_rejects_old_same_attachment_pose_then_accepts_current_pose() {
+        let (mut scene, _, frame) = fixture();
+        let old = &frame.runtime_targets[1];
+        let presented = proof(&frame);
+        let mut hover = DockParamHover::default();
+        let now = Instant::now();
+        hover.remember(
+            Some(&frame.column),
+            Some((old.bounds.x + 1.0, old.bounds.y + 1.0)),
+        );
+        hover.reconcile(&snapshot(&frame), Some(&presented), now);
+        hover.expire_dwell(hover.next_due().unwrap());
+        scene.clear_dock_widget("a", "progress-bar");
+        frame
+            .column
+            .observe(tze_hud_scene::dock::DockPointer::Outside);
+        let geometry = scene.geometry_epoch;
+        scene.advance_dock_compaction(true, 0, |p| p);
+        let DockWidgetSlot::Placed(moved) = scene.dock_widget_slot(&old.instance_name) else {
+            panic!("surviving slot")
+        };
+        assert_ne!(moved, old.scene_bounds);
+        assert!(scene.geometry_epoch > geometry);
+        assert!(
+            scene
+                .dock_passive_column()
+                .unwrap()
+                .shares_attachment(&frame.column)
+        );
+        let publications = scene.widget_registry.active_publishes.clone();
+        assert!(
+            !hover.apply(&mut scene),
+            "old exact frame/proof cannot authorize the moved Scene pose"
+        );
+        assert!(!hover.has_debt());
+        assert_eq!(
+            scene.widget_registry.instances[&old.instance_name].current_params["tooltip_visible"],
+            WidgetParameterValue::F32(0.0)
+        );
+        // CPU presentation is injected from the actual new Scene slot. The
+        // strict shipped raster companion checks that the collector carries it.
+        let fresh = Arc::new(DockHoverFrame {
+            column: frame.column.clone(),
+            cards: Vec::new(),
+            runtime_targets: vec![DockRuntimeHoverTarget {
+                instance: old.instance,
+                instance_name: old.instance_name.clone(),
+                scene_bounds: moved,
+                bounds: moved,
+                trigger: moved,
+                behavior: old.behavior.clone(),
+                pixels: old.pixels,
+            }],
+        });
+        let fresh_proof = PresentedDockHover {
+            frame: fresh.clone(),
+            surface_epoch: presented.surface_epoch.clone(),
+        };
+        hover.remember(Some(&fresh.column), Some((moved.x + 1.0, moved.y + 1.0)));
+        hover.reconcile(
+            &snapshot(&fresh),
+            Some(&fresh_proof),
+            now + Duration::from_secs(1),
+        );
+        hover.expire_dwell(hover.next_due().unwrap());
+        assert!(hover.apply(&mut scene));
+        assert_eq!(
+            scene.widget_registry.instances[&old.instance_name].current_params["tooltip_visible"],
+            WidgetParameterValue::F32(1.0)
+        );
+        assert_eq!(scene.widget_registry.active_publishes, publications);
     }
 
     #[test]
