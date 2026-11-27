@@ -455,11 +455,32 @@ fn dock_holds_live_sparse_slots_and_compacts_only_after_outside() {
     ));
     assert_eq!(slots(&scene, 0, &b), held);
 
+    let d_lease = scene.grant_lease("d", 60_000);
+    let leases = scene.leases.clone();
+    let snapshot = scene.take_snapshot(clock.now_us(), clock.monotonic_us());
+    let version = scene.version;
+    assert_eq!(scene.dock_rows().len(), 2);
     assert_eq!(
-        scene.publish_to_dock(PROGRESS, level(0.4), "d", None, 0, 0),
+        scene.validate_dock_publish(PROGRESS, &level(0.4), "d"),
         Err(DockPublishError::Full)
     );
+    assert_eq!(
+        scene.publish_to_dock(PROGRESS, level(0.4), "d", Some(d_lease), 0, 0),
+        Err(DockPublishError::Full)
+    );
+    assert_eq!(scene.version, version);
+    assert_eq!(scene.geometry_epoch, epoch);
+    assert_eq!(scene.leases, leases);
+    assert_eq!(
+        scene.take_snapshot(clock.now_us(), clock.monotonic_us()),
+        snapshot
+    );
+    assert_eq!(slots(&scene, 0, &b), held);
     scene.clear_dock_widget("c", PROGRESS);
+    assert_eq!(
+        scene.validate_dock_publish(PROGRESS, &level(0.4), "d"),
+        Ok(())
+    );
     scene
         .publish_to_dock(PROGRESS, level(0.4), "d", None, 0, 0)
         .unwrap();
@@ -513,6 +534,52 @@ fn dock_holds_live_sparse_slots_and_compacts_only_after_outside() {
 }
 
 #[test]
+fn dock_admits_a_sparse_append_beyond_the_live_cap_ordinal() {
+    use crate::dock::DockPointer;
+
+    let (mut scene, _) = setup(3);
+    let projection = named_projection(&scene, 360.0);
+    assert_eq!(projection.layout.capacity, 3);
+    place(&mut scene, Some(projection.clone()));
+    for owner in ["a", "b", "c"] {
+        scene
+            .publish_to_dock(PROGRESS, level(0.3), owner, None, 0, 0)
+            .unwrap();
+    }
+    scene.certify_dock_passive_column("DOCK", projection.layout.display);
+    assert!(
+        scene
+            .dock_passive_column()
+            .unwrap()
+            .observe(DockPointer::Inside)
+    );
+    scene.clear_dock_widget("a", PROGRESS);
+    let names = ["b", "c"].map(|owner| record(&scene, owner, PROGRESS).widget_name.clone());
+    let held = [slots(&scene, 0, &names[0]), slots(&scene, 1, &names[1])];
+
+    let version = scene.version;
+    assert_eq!(
+        scene.validate_dock_publish(PROGRESS, &level(0.4), "d"),
+        Ok(())
+    );
+    assert_eq!(scene.version, version);
+    assert!(scene.dock_instance("d", PROGRESS).is_none());
+    scene
+        .publish_to_dock(PROGRESS, level(0.4), "d", None, 0, 0)
+        .unwrap();
+    let d = &record(&scene, "d", PROGRESS).widget_name;
+    assert_eq!(slots(&scene, 2, d).0, projection.layout.caption(3));
+    assert_eq!(
+        [slots(&scene, 0, &names[0]), slots(&scene, 1, &names[1])],
+        held
+    );
+    assert_eq!(
+        scene.validate_dock_publish(PROGRESS, &level(0.4), "e"),
+        Err(DockPublishError::Full)
+    );
+}
+
+#[test]
 fn dock_revokes_stale_samples_and_keeps_existing_rows_on_display_loss() {
     use crate::dock::DockPointer;
     use crate::graph::visibility::SurfaceClasses;
@@ -528,9 +595,45 @@ fn dock_revokes_stale_samples_and_keeps_existing_rows_on_display_loss() {
     assert!(old.observe(DockPointer::Outside));
 
     place(&mut scene, None);
+    let version = scene.version;
+    let epoch = scene.geometry_epoch;
+    let leases = scene.leases.clone();
+    let progress = scene.dock_instance("a", PROGRESS).unwrap().id;
+    assert_eq!(
+        scene.validate_dock_publish(PROGRESS, &level(0.4), "a"),
+        Ok(())
+    );
+    assert_eq!(
+        scene.validate_dock_publish(COUNTDOWN, &HashMap::new(), "a"),
+        Ok(())
+    );
+    assert!(matches!(
+        scene.validate_dock_publish(PROGRESS, &level(2.0), "a"),
+        Err(DockPublishError::Widget(
+            ValidationError::WidgetParameterInvalidValue { .. }
+        ))
+    ));
+    assert_eq!(
+        scene.validate_dock_publish(PROGRESS, &level(0.4), "b"),
+        Err(DockPublishError::Full)
+    );
+    assert_eq!(record(&scene, "a", PROGRESS).params, level(0.3));
+    assert!(scene.dock_instance("a", COUNTDOWN).is_none());
+    assert_eq!(scene.version, version);
+    assert_eq!(scene.geometry_epoch, epoch);
+    assert_eq!(scene.leases, leases);
+    assert_eq!(scene.dock_rows().len(), 1);
+    assert_eq!(
+        scene.publish_to_dock(PROGRESS, level(0.4), "a", None, 0, 0),
+        Ok(progress)
+    );
     let countdown = scene
         .publish_to_dock(COUNTDOWN, HashMap::new(), "a", None, 0, 0)
         .unwrap();
+    assert!(matches!(
+        scene.dock_widget_slot(&record(&scene, "a", COUNTDOWN).widget_name),
+        crate::dock::DockWidgetSlot::Hidden
+    ));
     assert!(scene.dock_passive_column().is_none());
     place(&mut scene, Some(projection.clone()));
     assert_eq!(scene.dock_instance("a", COUNTDOWN).unwrap().id, countdown);

@@ -171,6 +171,10 @@ pub fn run_scene_startup(
     let tab_map = bootstrap_config_tabs(scene, raw);
 
     let widgets = init_widget_registry(scene, raw, config_parent, &tab_map, &global_tokens)?;
+    if let Some(dock) = &widgets.dock {
+        // Listeners may start before the first usable window or display report.
+        dock.project(scene, &global_tokens, None);
+    }
 
     let mut zone_registry = ZoneRegistry::with_defaults();
     crate::appearance::restyle_zones(&mut zone_registry, &global_tokens);
@@ -349,10 +353,12 @@ mod tests {
 
     #[test]
     fn dock_startup_accepts_shipped_countdown_and_progress_viewports() {
+        use tze_hud_scene::{dock::DockPublishError, validation::ValidationError};
+
         let mut raw: RawConfig = toml::from_str(
             r#"
             [dock]
-            accepts = ["countdown", "progress-bar"]
+            accepts = ["countdown", "progress-bar", "countdown"]
             [[tabs]]
             name = "Main"
             [[tabs.widgets]]
@@ -385,12 +391,35 @@ mod tests {
                 .unwrap();
             assert!(std::str::from_utf8(svg).unwrap().contains(view_box));
         }
-        assert!(
+        assert_eq!(
             scene
-                .publish_to_dock("countdown", Default::default(), "before-layout", None, 0, 0)
-                .is_err(),
-            "startup validation does not enable dock admission"
+                .dock_types()
+                .map(|(kind, definition)| (kind, definition.id.as_str()))
+                .collect::<Vec<_>>(),
+            [("countdown", "countdown"), ("progress-bar", "progress-bar")]
         );
+        let version = scene.version;
+        assert!(scene.dock_projection().is_none());
+        assert_eq!(
+            scene.publish_to_dock("countdown", Default::default(), "before-layout", None, 0, 0),
+            Err(DockPublishError::Full),
+            "startup exposes configured types without enabling row admission"
+        );
+        assert!(scene.dock_definition("gauge").is_none());
+        assert_eq!(
+            scene.validate_dock_publish("gauge", &Default::default(), "before-layout"),
+            Err(DockPublishError::Widget(ValidationError::WidgetNotFound {
+                name: "gauge".into(),
+            }))
+        );
+        assert!(
+            !startup
+                .dock
+                .unwrap()
+                .project(&mut scene, &startup.global_tokens, None)
+        );
+        assert_eq!(scene.version, version);
+        assert!(scene.dock_rows().is_empty());
         raw.design_tokens = Some(RawDesignTokens(HashMap::from([
             ("progress.width".into(), "360".into()),
             ("progress.height".into(), "52".into()),
@@ -405,6 +434,25 @@ mod tests {
                 .unwrap();
             assert!(std::str::from_utf8(svg).unwrap().contains("0 0 360 52"));
         }
+
+        raw.dock = None;
+        let mut disabled = make_scene();
+        let startup =
+            run_scene_startup(&raw, None, &mut disabled, OsPreferences::default()).unwrap();
+        assert!(startup.dock.is_none());
+        assert!(
+            disabled
+                .widget_registry
+                .get_definition("countdown")
+                .is_some()
+        );
+        assert!(disabled.dock_types().next().is_none());
+        assert_eq!(
+            disabled.validate_dock_publish("countdown", &Default::default(), "before-layout"),
+            Err(DockPublishError::Widget(ValidationError::WidgetNotFound {
+                name: "countdown".into(),
+            }))
+        );
     }
 
     #[test]

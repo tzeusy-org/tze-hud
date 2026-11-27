@@ -10,8 +10,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::graph::SceneGraph;
 use crate::types::{
-    ContentionPolicy, Rect, SceneId, WidgetHoverBehavior, WidgetInstance, WidgetParamAudience,
-    WidgetParameterValue, WidgetPublishRecord, WidgetSvgLayer, ZoneRegistry, resolve_zone_geometry,
+    ContentionPolicy, Rect, SceneId, WidgetDefinition, WidgetHoverBehavior, WidgetInstance,
+    WidgetParamAudience, WidgetParameterValue, WidgetPublishRecord, WidgetSvgLayer, ZoneRegistry,
+    resolve_zone_geometry,
 };
 use crate::validation::ValidationError;
 
@@ -369,34 +370,30 @@ impl DockState {
         (self.rows.len() < layout.max_rows && slot < layout.physical_capacity).then_some(slot)
     }
 
-    fn append(
-        &mut self,
-        index: Option<usize>,
-        slot: Option<usize>,
-        namespace: &str,
-        mut widget: DockWidget,
-    ) {
-        if let Some(index) = index {
-            let row = &mut self.rows[index];
-            let previous = row.widgets.last().expect("live row");
-            widget.x = self.projection.as_ref().and_then(|projection| {
-                previous
-                    .x
-                    .and_then(|x| projection.after(x, &previous.widget_type))
-                    .filter(|x| projection.fits(*x, &widget.widget_type))
-            });
-            row.widgets.push(widget);
-        } else {
-            let slot = slot.expect("admitted dock row");
-            let projection = self.projection.as_ref().expect("admitted dock projection");
-            let first = projection.first_widget_x();
-            widget.x = projection.fits(first, &widget.widget_type).then_some(first);
-            self.rows.push(DockRow {
-                namespace: namespace.into(),
-                widgets: vec![widget],
-                slot,
-                position: slot as f32,
-            });
+    fn append(&mut self, admission: DockRowAdmission, namespace: &str, mut widget: DockWidget) {
+        match admission {
+            DockRowAdmission::Existing(index) => {
+                let row = &mut self.rows[index];
+                let previous = row.widgets.last().expect("live row");
+                widget.x = self.projection.as_ref().and_then(|projection| {
+                    previous
+                        .x
+                        .and_then(|x| projection.after(x, &previous.widget_type))
+                        .filter(|x| projection.fits(*x, &widget.widget_type))
+                });
+                row.widgets.push(widget);
+            }
+            DockRowAdmission::New(slot) => {
+                let projection = self.projection.as_ref().expect("admitted dock projection");
+                let first = projection.first_widget_x();
+                widget.x = projection.fits(first, &widget.widget_type).then_some(first);
+                self.rows.push(DockRow {
+                    namespace: namespace.into(),
+                    widgets: vec![widget],
+                    slot,
+                    position: slot as f32,
+                });
+            }
         }
     }
 
@@ -490,6 +487,18 @@ pub enum DockPublishError {
     Widget(#[from] ValidationError),
 }
 
+enum DockRowAdmission {
+    Existing(usize),
+    New(usize),
+}
+
+struct DockPublishPlan<'a> {
+    definition: &'a WidgetDefinition,
+    params: HashMap<String, WidgetParameterValue>,
+    row: DockRowAdmission,
+    auto_clear_ms: u64,
+}
+
 impl SceneGraph {
     /// Install owner policy after bundle validation. A smaller display only
     /// limits new rows. The new lifetime applies to the next accepted publish.
@@ -511,7 +520,8 @@ impl SceneGraph {
         );
     }
 
-    /// Update the runtime projection without dropping rows or retiming publications.
+    /// Install validated policy even before display geometry is available.
+    /// Updating the projection keeps existing rows and publication lifetimes.
     pub fn set_dock_projection(
         &mut self,
         accepts: &[String],
@@ -543,7 +553,7 @@ impl SceneGraph {
             if placement_changed {
                 dock.normalize();
             }
-        } else if projection.is_some() {
+        } else {
             self.dock = Some(DockState {
                 accepts: accepts.to_vec(),
                 capacity,
@@ -554,11 +564,34 @@ impl SceneGraph {
                 needs_compaction: false,
                 motion: None,
             });
-        } else {
-            return false;
         }
         self.version += 1;
         true
+    }
+
+    /// Installed dock types in the owner's configured order, even without a display.
+    pub fn dock_types(&self) -> impl Iterator<Item = (&str, &WidgetDefinition)> + '_ {
+        let accepts = self
+            .dock
+            .as_ref()
+            .map_or(&[][..], |dock| dock.accepts.as_slice());
+        accepts.iter().enumerate().filter_map(move |(index, name)| {
+            if accepts[..index].contains(name) {
+                return None;
+            }
+            self.widget_registry
+                .get_definition(name)
+                .map(|def| (name.as_str(), def))
+        })
+    }
+
+    /// Resolve a configured dock type against its installed bundle definition.
+    pub fn dock_definition(&self, widget_type: &str) -> Option<&WidgetDefinition> {
+        let dock = self.dock.as_ref()?;
+        if !dock.accepts.iter().any(|name| name == widget_type) {
+            return None;
+        }
+        self.widget_registry.get_definition(widget_type)
     }
 
     pub fn dock_projection(&self) -> Option<&DockProjection> {
@@ -754,6 +787,43 @@ impl SceneGraph {
             .dock_presentation(&instance.widget_type_name)
     }
 
+    fn plan_dock_publish(
+        &self,
+        widget_type: &str,
+        params: &HashMap<String, WidgetParameterValue>,
+        namespace: &str,
+    ) -> Result<DockPublishPlan<'_>, DockPublishError> {
+        let not_found = || ValidationError::WidgetNotFound {
+            name: widget_type.into(),
+        };
+        let dock = self.dock.as_ref().ok_or_else(not_found)?;
+        let definition = self.dock_definition(widget_type).ok_or_else(not_found)?;
+        let params = Self::validate_widget_params_for_definition(widget_type, definition, params)?;
+        let row = match dock.rows.iter().position(|row| row.namespace == namespace) {
+            Some(index) => DockRowAdmission::Existing(index),
+            None => DockRowAdmission::New(dock.next_row_slot().ok_or(DockPublishError::Full)?),
+        };
+        Ok(DockPublishPlan {
+            definition,
+            params,
+            row,
+            auto_clear_ms: dock.auto_clear_ms.get(),
+        })
+    }
+
+    /// Validate dock content and capacity without creating a row or touching a lease.
+    /// The caller must still authenticate the scope and supply a valid lease on publish.
+    pub fn validate_dock_publish(
+        &self,
+        widget_type: &str,
+        params: &HashMap<String, WidgetParameterValue>,
+        namespace: &str,
+    ) -> Result<(), DockPublishError> {
+        self.check_widget_publish_safe_mode(namespace)?;
+        self.plan_dock_publish(widget_type, params, namespace)
+            .map(|_| ())
+    }
+
     /// Publish immediately for a live, authenticated scope supplied by the caller.
     /// A zero requested lifetime uses the owner's finite cap.
     pub fn publish_to_dock(
@@ -769,25 +839,12 @@ impl SceneGraph {
         if let Some(lease_id) = lease_id {
             self.check_zone_publish_lease(namespace, lease_id)?;
         }
-        let not_found = || ValidationError::WidgetNotFound {
-            name: widget_type.into(),
-        };
-        let dock = self
-            .dock
-            .as_ref()
-            .filter(|dock| dock.accepts.iter().any(|accepted| accepted == widget_type))
-            .ok_or_else(not_found)?;
-        let definition = self
-            .widget_registry
-            .get_definition(widget_type)
-            .ok_or_else(not_found)?;
-        let params = Self::validate_widget_params_for_definition(widget_type, definition, &params)?;
-        let row_index = dock.rows.iter().position(|row| row.namespace == namespace);
-        let row_slot = dock.next_row_slot();
-        if row_index.is_none() && row_slot.is_none() {
-            return Err(DockPublishError::Full);
-        }
-        let auto_clear_ms = dock.auto_clear_ms.get();
+        let DockPublishPlan {
+            definition,
+            params,
+            row,
+            auto_clear_ms,
+        } = self.plan_dock_publish(widget_type, &params, namespace)?;
         let definition = definition.clone();
         let existing = self.dock_instance(namespace, widget_type).cloned();
         let is_new = existing.is_none();
@@ -857,7 +914,7 @@ impl SceneGraph {
             self.dock
                 .as_mut()
                 .expect("configured dock")
-                .append(row_index, row_slot, namespace, widget);
+                .append(row, namespace, widget);
         }
         Ok(id)
     }
