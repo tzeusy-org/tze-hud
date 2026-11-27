@@ -332,6 +332,16 @@ def free_port() -> int:
         return sock.getsockname()[1]
 
 
+def private_x11_geometry(output: str, window: str) -> tuple[int, int, int, int]:
+    match = re.fullmatch(
+        rf"WINDOW={re.escape(window)}\nX=(-?\d+)\nY=(-?\d+)\nWIDTH=([1-9]\d*)\nHEIGHT=([1-9]\d*)\nSCREEN=0\n?",
+        output,
+    )
+    if not match:
+        raise Refused("private HUD client geometry is unavailable")
+    return tuple(map(int, match.groups()))
+
+
 def pid_alive(pid: int) -> bool:
     if WINDOWS:  # os.kill(pid, 0) would terminate it there
         return WIN.process_alive(pid)
@@ -612,11 +622,67 @@ class Run:
             self._check_identity_mapping()
         if self.window_mode == "fullscreen":
             self.guard()
+            if self.dock_build_sha:
+                self.fit_private_dock_client()
         else:
             # An overlay may start without activation. No input is sent until
             # scenario 11 foregrounds its owned helper and the normal guard passes.
             if self.status().get("pid") != self.pid:
                 raise Refused("overlay status is not the owned HUD")
+
+    def fit_private_dock_client(self) -> None:
+        """Apply borderless fullscreen client geometry on our bare Xvfb root."""
+        from hud_x11_capture import Capture, CaptureError
+
+        if self.xvfb is None or self.xauthority is None or self.pid is None:
+            raise Refused("private HUD window setup requires Xvfb ownership")
+        self.guard()
+        env = {"DISPLAY": self.display, "XAUTHORITY": str(self.xauthority),
+               "HOME": str(self.xauthority.parent), "PATH": os.defpath}
+
+        def xdo(*args: str) -> str:
+            self.guard()
+            try:
+                return subprocess.run(["xdotool", *args], env=env, check=True, capture_output=True,
+                                      text=True, timeout=2).stdout
+            except (OSError, subprocess.SubprocessError, UnicodeError):
+                raise Refused("could not configure the owned X11 HUD client") from None
+
+        try:
+            capture = Capture(self.xvfb, self.display, self.xauthority)
+        except (CaptureError, OSError, EOFError, TimeoutError):
+            raise Refused("could not verify the private X11 root for window setup") from None
+        expected = (0, 0, *SCREEN)
+        try:
+            window = xdo("search", "--onlyvisible", "--pid", str(self.pid)).strip()
+            if not re.fullmatch(r"[1-9]\d{0,9}", window):
+                raise Refused("expected one visible X11 window for the owned HUD")
+
+            def client_geometry():
+                return private_x11_geometry(xdo("getwindowgeometry", "--shell", window), window)
+
+            geometry = client_geometry()
+            if geometry != expected:
+                # Bare Xvfb has no WM to honor winit's borderless fullscreen
+                # request. A move after resize makes winit republish the real
+                # display bounds before we admit rows or inject any pointer.
+                if geometry[2:] != SCREEN:
+                    xdo("windowsize", "--sync", window, *map(str, SCREEN))
+                xdo("windowmove", "--sync", window, "1", "1")
+                xdo("windowmove", "--sync", window, "0", "0")
+                if client_geometry() != expected:
+                    raise Refused("actual private HUD client does not fill the owned root")
+        finally:
+            if capture.close() != {"returncode": 0, "forced": False, "reaped": True}:
+                raise Refused("private X11 window setup probe did not exit cleanly")
+
+        def reported(status):
+            displays = status.get("displays") or []
+            return (status.get("pid") == self.pid and status.get("sha") == self.dock_build_sha
+                    and len(displays) == 1 and displays[0].get("primary") is True
+                    and tuple(displays[0].get(k) for k in ("x", "y", "width", "height")) == expected)
+
+        self.expect("owned fullscreen client and reported display fill the private X11 root", reported)
 
     def _check_identity_mapping(self) -> None:
         """Status rects are scene pixels; SendInput takes physical ones. Run only where they agree."""

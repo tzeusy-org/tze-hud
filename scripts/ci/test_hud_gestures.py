@@ -171,6 +171,69 @@ class DockTooltipWitnessTests(unittest.TestCase):
         self.assertEqual(len(evidence["ink_mask_sha256"]), 64)
 
 
+class PrivateDockClientTests(unittest.TestCase):
+    WINDOW = "2097154"
+
+    @staticmethod
+    def geometry(width, height):
+        return f"WINDOW=2097154\nX=0\nY=0\nWIDTH={width}\nHEIGHT={height}\nSCREEN=0\n"
+
+    def run_fixture(self):
+        run = object.__new__(g.Run)
+        run.owned_pids = [4242]
+        run.xvfb = mock.Mock(pid=3131)
+        run.xauthority = Path("/scratch/dock/Xauthority-91")
+        run.display = ":91"
+        run.dock_build_sha = "a" * 40
+        run.guard = mock.Mock()
+        run.expect = mock.Mock()
+        return run
+
+    def test_fits_only_the_owned_window_before_accepting_status(self):
+        run = self.run_fixture()
+        replies = [self.WINDOW + "\n", self.geometry(800, 600), "", "", "", self.geometry(1280, 800)]
+        outputs = [mock.Mock(stdout=reply) for reply in replies]
+        with mock.patch("hud_x11_capture.Capture") as capture, mock.patch.object(
+            g.subprocess, "run", side_effect=outputs
+        ) as command:
+            capture.return_value.close.return_value = {"returncode": 0, "forced": False, "reaped": True}
+            run.fit_private_dock_client()
+
+        capture.assert_called_once_with(run.xvfb, run.display, run.xauthority)
+        capture.return_value.close.assert_called_once_with()
+        self.assertEqual([call.args[0] for call in command.call_args_list], [
+            ["xdotool", "search", "--onlyvisible", "--pid", "4242"],
+            ["xdotool", "getwindowgeometry", "--shell", self.WINDOW],
+            ["xdotool", "windowsize", "--sync", self.WINDOW, "1280", "800"],
+            ["xdotool", "windowmove", "--sync", self.WINDOW, "1", "1"],
+            ["xdotool", "windowmove", "--sync", self.WINDOW, "0", "0"],
+            ["xdotool", "getwindowgeometry", "--shell", self.WINDOW],
+        ])
+        self.assertEqual(run.guard.call_count, 1 + len(replies))
+        for call in command.call_args_list:
+            self.assertEqual(call.kwargs["env"]["DISPLAY"], run.display)
+            self.assertEqual(call.kwargs["env"]["XAUTHORITY"], str(run.xauthority))
+            self.assertEqual(call.kwargs["timeout"], 2)
+        reported = run.expect.call_args.args[1]
+        display = {"x": 0, "y": 0, "width": 1280, "height": 800, "primary": True}
+        actual = {"pid": 4242, "sha": run.dock_build_sha, "displays": [display]}
+        self.assertTrue(reported(actual))
+        self.assertFalse(reported({**actual, "pid": 1111}))
+        self.assertFalse(reported({**actual, "displays": [{**display, "width": 800}]}))
+
+    def test_ambiguous_client_refuses_before_resize_and_closes_the_probe(self):
+        run = self.run_fixture()
+        with mock.patch("hud_x11_capture.Capture") as capture, mock.patch.object(
+            g.subprocess, "run", return_value=mock.Mock(stdout="2097154\n2097155\n")
+        ) as command:
+            capture.return_value.close.return_value = {"returncode": 0, "forced": False, "reaped": True}
+            with self.assertRaisesRegex(g.Refused, "one visible X11 window"):
+                run.fit_private_dock_client()
+        command.assert_called_once()
+        capture.return_value.close.assert_called_once_with()
+        run.expect.assert_not_called()
+
+
 class GuardTests(unittest.TestCase):
     def test_optional_mouse_receipts_bind_identity_and_report_incomplete_capture_without_raising(self) -> None:
         for case in ("captured", "empty", "no-startup", "rotation", "identity", "survivor", "restart", "read-error",
