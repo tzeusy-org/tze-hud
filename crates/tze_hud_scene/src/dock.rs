@@ -1,6 +1,16 @@
-//! Geometry shared by dock admission, presentation and pointer routing.
+//! Scene-owned dock instances and geometry for admission, presentation and pointer routing.
 
-use crate::types::Rect;
+use std::collections::HashMap;
+use std::num::NonZeroU64;
+
+use serde::{Deserialize, Serialize};
+
+use crate::graph::SceneGraph;
+use crate::types::{
+    ContentionPolicy, Rect, SceneId, WidgetInstance, WidgetParamAudience, WidgetParameterValue,
+    WidgetPublishRecord,
+};
+use crate::validation::ValidationError;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DockMetrics {
@@ -90,6 +100,248 @@ impl DockLayout {
             self.metrics.row_height * aspect_ratio,
             self.metrics.row_height,
         )
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct DockWidget {
+    pub widget_type: String,
+    pub instance_name: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct DockRow {
+    /// Exact publication owner, including the session scope when present.
+    pub namespace: String,
+    /// Live instances, oldest first.
+    pub widgets: Vec<DockWidget>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub(crate) struct DockState {
+    accepts: Vec<String>,
+    capacity: usize,
+    auto_clear_ms: NonZeroU64,
+    rows: Vec<DockRow>,
+}
+
+impl DockState {
+    pub(crate) fn remove_instance(&mut self, instance_name: &str) -> bool {
+        let Some((row_index, widget_index)) = self.rows.iter().enumerate().find_map(|(i, row)| {
+            row.widgets
+                .iter()
+                .position(|widget| widget.instance_name == instance_name)
+                .map(|j| (i, j))
+        }) else {
+            return false;
+        };
+        let row = &mut self.rows[row_index];
+        row.widgets.remove(widget_index);
+        if row.widgets.is_empty() {
+            self.rows.remove(row_index);
+        }
+        true
+    }
+}
+
+#[derive(Debug, PartialEq, thiserror::Error)]
+pub enum DockPublishError {
+    #[error("dock full; show this in a card")]
+    Full,
+    #[error(transparent)]
+    Widget(#[from] ValidationError),
+}
+
+impl SceneGraph {
+    /// Install owner policy after bundle validation. A smaller display only
+    /// limits new rows. The new lifetime applies to the next accepted publish.
+    pub fn configure_dock(
+        &mut self,
+        accepts: Vec<String>,
+        layout: DockLayout,
+        auto_clear_ms: NonZeroU64,
+    ) {
+        if let Some(dock) = &mut self.dock {
+            if dock.accepts == accepts
+                && dock.capacity == layout.capacity
+                && dock.auto_clear_ms == auto_clear_ms
+            {
+                return;
+            }
+            dock.accepts = accepts;
+            dock.capacity = layout.capacity;
+            dock.auto_clear_ms = auto_clear_ms;
+        } else {
+            self.dock = Some(DockState {
+                accepts,
+                capacity: layout.capacity,
+                auto_clear_ms,
+                rows: Vec::new(),
+            });
+        }
+        self.version += 1;
+    }
+
+    pub fn dock_rows(&self) -> &[DockRow] {
+        self.dock.as_ref().map_or(&[], |dock| dock.rows.as_slice())
+    }
+
+    pub fn dock_instance(&self, namespace: &str, widget_type: &str) -> Option<&WidgetInstance> {
+        let name = self.dock_instance_name(namespace, widget_type)?;
+        self.widget_registry.instances.get(name)
+    }
+
+    fn dock_instance_name(&self, namespace: &str, widget_type: &str) -> Option<&str> {
+        self.dock_rows()
+            .iter()
+            .find(|row| row.namespace == namespace)?
+            .widgets
+            .iter()
+            .find(|widget| widget.widget_type == widget_type)
+            .map(|widget| widget.instance_name.as_str())
+    }
+
+    pub(crate) fn is_dock_widget(&self, instance_name: &str) -> bool {
+        self.dock_rows()
+            .iter()
+            .flat_map(|row| &row.widgets)
+            .any(|widget| widget.instance_name == instance_name)
+    }
+
+    /// Publish immediately for a live, authenticated scope supplied by the caller.
+    /// A zero requested lifetime uses the owner's finite cap.
+    pub fn publish_to_dock(
+        &mut self,
+        widget_type: &str,
+        params: HashMap<String, WidgetParameterValue>,
+        namespace: &str,
+        lease_id: Option<SceneId>,
+        transition_ms: u32,
+        ttl_ms: u64,
+    ) -> Result<SceneId, DockPublishError> {
+        self.check_widget_publish_safe_mode(namespace)?;
+        if let Some(lease_id) = lease_id {
+            self.check_zone_publish_lease(namespace, lease_id)?;
+        }
+        let not_found = || ValidationError::WidgetNotFound {
+            name: widget_type.into(),
+        };
+        let dock = self
+            .dock
+            .as_ref()
+            .filter(|dock| dock.accepts.iter().any(|accepted| accepted == widget_type))
+            .ok_or_else(not_found)?;
+        let definition = self
+            .widget_registry
+            .get_definition(widget_type)
+            .ok_or_else(not_found)?;
+        let params = Self::validate_widget_params_for_definition(widget_type, definition, &params)?;
+        let row_index = dock.rows.iter().position(|row| row.namespace == namespace);
+        if row_index.is_none() && dock.rows.len() >= dock.capacity {
+            return Err(DockPublishError::Full);
+        }
+        let auto_clear_ms = dock.auto_clear_ms.get();
+        let definition = definition.clone();
+        let existing = self.dock_instance(namespace, widget_type).cloned();
+        let is_new = existing.is_none();
+        let mut instance = existing.unwrap_or_else(|| {
+            let (id, instance_name) = loop {
+                let id = SceneId::new();
+                let name = format!("dock:{id}");
+                if !self.widget_registry.instances.contains_key(&name) {
+                    break (id, name);
+                }
+            };
+            WidgetInstance {
+                id,
+                widget_type_name: widget_type.into(),
+                tab_id: SceneId::null(),
+                geometry_override: None,
+                contention_override: Some(ContentionPolicy::LatestWins),
+                instance_name,
+                current_params: definition
+                    .parameter_schema
+                    .iter()
+                    .map(|p| (p.name.clone(), p.default_value.clone()))
+                    .collect(),
+                auto_clear_ms: None,
+            }
+        });
+        // A lease handoff starts a new publication. Preserve widget identity
+        // and local state but do not carry ordinary values from the old lease.
+        if self
+            .widget_registry
+            .active_publishes
+            .get(&instance.instance_name)
+            .and_then(|records| records.first())
+            .is_some_and(|record| record.lease_id != lease_id)
+        {
+            for declaration in &definition.parameter_schema {
+                if declaration.audience == WidgetParamAudience::Model {
+                    instance
+                        .current_params
+                        .insert(declaration.name.clone(), declaration.default_value.clone());
+                }
+            }
+        }
+        instance.auto_clear_ms = Some(auto_clear_ms);
+        let id = instance.id;
+        let now = self.now_wall_us();
+        let record = WidgetPublishRecord {
+            ttl_paused_us: 0,
+            widget_name: instance.instance_name.clone(),
+            publisher_namespace: namespace.into(),
+            params,
+            published_at_wall_us: now,
+            merge_key: None,
+            expires_at_wall_us: (ttl_ms != 0)
+                .then(|| now.saturating_add(ttl_ms.saturating_mul(1_000))),
+            transition_ms,
+            lease_id,
+            publication_origin: None,
+        };
+        let new_widget = is_new.then(|| DockWidget {
+            widget_type: widget_type.into(),
+            instance_name: instance.instance_name.clone(),
+        });
+        self.commit_widget_publication(instance, &definition, record)?;
+        if let Some(widget) = new_widget {
+            let rows = &mut self.dock.as_mut().expect("configured dock").rows;
+            if let Some(index) = row_index {
+                rows[index].widgets.push(widget);
+            } else {
+                rows.push(DockRow {
+                    namespace: namespace.into(),
+                    widgets: vec![widget],
+                });
+            }
+        }
+        Ok(id)
+    }
+
+    /// Retime only this scope's publication, within the cap captured on publish.
+    pub fn hold_dock_widget(&mut self, namespace: &str, widget_type: &str, ttl_ms: u64) -> bool {
+        let Some(name) = self
+            .dock_instance_name(namespace, widget_type)
+            .map(str::to_owned)
+        else {
+            return false;
+        };
+        let expiry = (ttl_ms != 0).then(|| {
+            self.now_wall_us()
+                .saturating_add(ttl_ms.saturating_mul(1_000))
+        });
+        self.hold_widget_publications_inner(&name, namespace, expiry)
+    }
+
+    /// Clear only this scope's instance. Releasing its last instance frees the row.
+    pub fn clear_dock_widget(&mut self, namespace: &str, widget_type: &str) {
+        if let Some(name) = self
+            .dock_instance_name(namespace, widget_type)
+            .map(str::to_owned)
+        {
+            self.clear_widget_for_publisher_inner(&name, namespace);
+        }
     }
 }
 
