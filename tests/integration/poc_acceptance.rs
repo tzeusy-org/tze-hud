@@ -3189,9 +3189,13 @@ mod dock_adapter {
                     }),
                 )
                 .await;
-            assert_ne!(result["isError"], true, "{result}");
             let body: Value = serde_json::from_str(result["content"][0]["text"].as_str().unwrap())
                 .expect("dock publish result");
+            assert_ne!(
+                result["isError"], true,
+                "adapter publish {kind} (request {id}) refused with {}",
+                body["code"]
+            );
             assert_eq!(body["ok"], true);
             assert_eq!(body["expires_in_ms"], CAP_MS);
         }
@@ -3293,7 +3297,7 @@ mod dock_adapter {
         let adapter_b = b.as_mut().unwrap();
         adapter_a.initialize().await;
         adapter_b.initialize().await;
-        let progress = |level| json!({"level":level});
+        let progress = |value| json!({"progress":value});
         adapter_a.publish(2, "progress-bar", progress(0.25)).await;
         adapter_b.publish(2, "progress-bar", progress(0.75)).await;
         let before = status(&poc).await;
