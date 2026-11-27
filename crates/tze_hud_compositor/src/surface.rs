@@ -1431,6 +1431,7 @@ mod tests {
             let frame = Arc::new(DockHoverFrame {
                 column: column.clone(),
                 cards: vec![card],
+                runtime_targets: Vec::new(),
             });
             (
                 popup.clone(),

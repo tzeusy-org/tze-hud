@@ -2089,6 +2089,258 @@ async fn dock_session_caption_follows_only_its_accepted_display() {
 }
 
 #[tokio::test]
+async fn progress_dock_hover_targets_follow_only_successful_placed_rasters() {
+    use std::num::NonZeroU64;
+    use tze_hud_compositor::renderer::{DockRuntimeHoverTarget, frame::WindowedFrameBuild};
+    use tze_hud_compositor::{DisplayLayout, DisplayRect, FrameTarget};
+    use tze_hud_scene::Rect;
+    use tze_hud_scene::dock::{DockLayout, DockMetrics, DockProjection};
+
+    let Some(mut gpu) = Gpu::with_widgets(640, 300).await else {
+        return;
+    };
+    let mut scene = SceneGraph::new_with_clock(640.0, 300.0, Arc::new(TestClock::new(1_000)));
+    scene.create_tab("Main", 0).unwrap();
+    let kind = register_bundle(
+        &mut gpu.compositor,
+        &mut scene,
+        bundle!("progress-bar", ["track.svg", "fill.svg"]),
+    );
+    let authored_hover = scene
+        .widget_registry
+        .get_definition(&kind)
+        .unwrap()
+        .hover_behavior
+        .clone()
+        .unwrap();
+    assert_eq!(authored_hover.visibility_param, "tooltip_visible");
+    assert_eq!(
+        (
+            authored_hover.delay_ms,
+            authored_hover.hidden_value,
+            authored_hover.visible_value
+        ),
+        (180, 0.0, 1.0)
+    );
+
+    let arrangement = |display, include_selected| {
+        let mut displays = vec![
+            DisplayRect {
+                name: "PRIMARY".into(),
+                rect: Rect::new(0.0, 0.0, 640.0, 300.0),
+                primary: true,
+            },
+            DisplayRect {
+                name: "MIRROR".into(),
+                rect: display,
+                primary: false,
+            },
+        ];
+        if include_selected {
+            displays.push(DisplayRect {
+                name: "SELECTED".into(),
+                rect: display,
+                primary: false,
+            });
+        }
+        DisplayLayout::new(displays, &Default::default())
+    };
+    let projection = |scene: &mut SceneGraph, display| {
+        let aspect = 320.0 / 50.0;
+        let layout = DockLayout::new(
+            display,
+            2,
+            DockMetrics {
+                row_height: 52.0,
+                caption_width: 96.0,
+                gap: 8.0,
+            },
+            [aspect],
+        );
+        scene.set_dock_projection(
+            std::slice::from_ref(&kind),
+            Some(DockProjection {
+                target: Some("SELECTED".into()),
+                layout,
+                pixels_per_dp: 1.0,
+                aspect_ratios: vec![(kind.clone(), aspect)],
+            }),
+            NonZeroU64::new(30_000).unwrap(),
+        );
+    };
+    let display = Rect::new(-1280.0, 60.0, 1280.0, 300.0);
+    gpu.compositor
+        .set_display_layout(arrangement(display, true));
+    projection(&mut scene, display);
+    let publish = |scene: &mut SceneGraph, owner, progress| {
+        scene
+            .publish_to_dock(
+                &kind,
+                HashMap::from([("progress".into(), Value::F32(progress))]),
+                owner,
+                None,
+                0,
+                0,
+            )
+            .unwrap()
+    };
+    let a = publish(&mut scene, "agent-a", 0.2);
+    let b = publish(&mut scene, "agent-b", 0.8);
+    let a_name = scene
+        .dock_instance("agent-a", &kind)
+        .unwrap()
+        .instance_name
+        .clone();
+    let b_name = scene
+        .dock_instance("agent-b", &kind)
+        .unwrap()
+        .instance_name
+        .clone();
+
+    let build = |c: &mut Compositor, scene: &mut SceneGraph| {
+        c.prime_markdown_cache(scene);
+        c.prime_truncation_cache(scene);
+        c.build_windowed_frame(scene, 640, 300)
+    };
+    fn target(frame: &WindowedFrameBuild, instance: SceneId) -> Option<&DockRuntimeHoverTarget> {
+        frame
+            .dock_hover()?
+            .runtime_targets
+            .iter()
+            .find(|entry| entry.instance == instance)
+    }
+    let frame_target = |display: Rect| FrameTarget {
+        x: display.x,
+        y: display.y,
+        width: display.width as u32,
+        height: display.height as u32,
+        primary: false,
+    };
+    let capture = |c: &mut Compositor, frame: &WindowedFrameBuild, display, name: &str| {
+        c.capture_windowed_display(
+            frame,
+            &frame_target(display),
+            Some(name),
+            wgpu::TextureFormat::Rgba8UnormSrgb,
+        )
+        .unwrap()
+        .rgba
+    };
+
+    let before = build(&mut gpu.compositor, &mut scene);
+    let hover = before.dock_hover().expect("progress-only dock hover frame");
+    assert_eq!(hover.column.target, "SELECTED");
+    assert_eq!(hover.column.display, display);
+    assert!(hover.cards.is_empty());
+    assert_eq!(hover.runtime_targets.len(), 2);
+    let a_target = target(&before, a).unwrap();
+    let b_target = target(&before, b).unwrap();
+    for (entry, name) in [(a_target, &a_name), (b_target, &b_name)] {
+        assert_eq!(&entry.instance_name, name);
+        assert_eq!(entry.behavior, authored_hover);
+        assert_eq!(
+            entry.trigger, entry.bounds,
+            "shipped trigger covers the whole card"
+        );
+        assert!(entry.trigger.is_within(&display));
+        assert_eq!(
+            scene
+                .overlay
+                .widget_geometry
+                .iter()
+                .find(|quad| &quad.instance_name == name)
+                .unwrap()
+                .bounds,
+            entry.bounds
+        );
+    }
+    assert!(!a_target.trigger.intersects(&b_target.trigger));
+    assert_ne!(a_target.pixels, b_target.pixels);
+    let selected = capture(&mut gpu.compositor, &before, display, "SELECTED");
+    let mirror = capture(&mut gpu.compositor, &before, display, "MIRROR");
+    let mut inside = [0; 2];
+    for (i, (painted, blank)) in selected
+        .chunks_exact(4)
+        .zip(mirror.chunks_exact(4))
+        .enumerate()
+    {
+        if painted != blank {
+            let x = display.x + (i % 1280) as f32;
+            let y = display.y + (i / 1280) as f32;
+            if a_target.bounds.contains_point(x, y) {
+                inside[0] += 1;
+            } else if b_target.bounds.contains_point(x, y) {
+                inside[1] += 1;
+            } else {
+                panic!("unexpected progress dock pixels outside both cards at {x},{y}");
+            }
+        }
+    }
+    assert!(inside.iter().all(|&count| count > 100));
+    assert!(gpu.compositor.dock_tooltip.load().is_none());
+
+    let attempts = raster_count(&gpu.compositor, &a_name);
+    let no_quota = widget_ledger(0);
+    gpu.compositor.set_resident_ledger(no_quota.clone());
+    assert_eq!(publish(&mut scene, "agent-a", 0.4), a);
+    for _ in 0..2 {
+        let frame = build(&mut gpu.compositor, &mut scene);
+        assert!(
+            target(&frame, a).is_none(),
+            "fallback pixels confer no current hover authority"
+        );
+        assert_eq!(target(&frame, b).unwrap().pixels, b_target.pixels);
+        assert_eq!(
+            capture(&mut gpu.compositor, &frame, display, "SELECTED"),
+            selected
+        );
+    }
+    assert_eq!(raster_count(&gpu.compositor, &a_name), attempts + 1);
+    assert_eq!(no_quota.snapshot().class_denial_count, 1);
+    assert_eq!(no_quota.snapshot().widget_raster_bytes, 0);
+
+    gpu.compositor
+        .set_resident_ledger(widget_ledger(1024 * 1024));
+    assert_eq!(publish(&mut scene, "agent-a", 0.6), a);
+    let repaired = build(&mut gpu.compositor, &mut scene);
+    assert_ne!(target(&repaired, a).unwrap().pixels, a_target.pixels);
+    assert_eq!(target(&repaired, b).unwrap().pixels, b_target.pixels);
+    assert_ne!(
+        capture(&mut gpu.compositor, &repaired, display, "SELECTED"),
+        selected
+    );
+    assert_eq!(
+        capture(&mut gpu.compositor, &repaired, display, "MIRROR"),
+        mirror
+    );
+
+    let narrower = Rect::new(-800.0, 100.0, 800.0, 300.0);
+    gpu.compositor
+        .set_display_layout(arrangement(narrower, true));
+    projection(&mut scene, narrower);
+    let refit = build(&mut gpu.compositor, &mut scene);
+    let refit_hover = refit.dock_hover().unwrap();
+    assert_eq!(refit_hover.column.display, narrower);
+    assert!(!refit_hover.column.shares_attachment(&hover.column));
+    for (id, old) in [(a, a_target), (b, b_target)] {
+        let changed = target(&refit, id).unwrap();
+        assert!(changed.bounds.width < old.bounds.width);
+        assert!(changed.trigger.is_within(&narrower));
+        assert_eq!(changed.trigger, changed.bounds);
+        assert_ne!(changed.pixels, old.pixels);
+    }
+
+    // An equal-bounds mirror cannot replace the named target that certified
+    // these quads. Offscreen captures above neither present nor arm a visit.
+    gpu.compositor
+        .set_display_layout(arrangement(narrower, false));
+    let unavailable = build(&mut gpu.compositor, &mut scene);
+    assert!(unavailable.dock_hover().is_none());
+    assert!(scene.overlay.widget_geometry.is_empty());
+    assert_eq!(scene.dock_rows().len(), 2);
+}
+
+#[tokio::test]
 async fn compact_clipped_label_tooltip_uses_actual_draw_and_named_target() {
     use std::num::NonZeroU64;
     use tze_hud_compositor::renderer::DockTooltipRequest;

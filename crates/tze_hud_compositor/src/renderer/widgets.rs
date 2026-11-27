@@ -6,7 +6,9 @@ use std::time::Duration;
 
 use tze_hud_scene::dock::{DockPassiveColumn, DockWidgetSlot};
 use tze_hud_scene::graph::SceneGraph;
-use tze_hud_scene::types::{FontFamily, RenderingPolicy, TextOverflow};
+use tze_hud_scene::types::{
+    FontFamily, RenderingPolicy, TextOverflow, WidgetHoverBehavior, WidgetParamAudience,
+};
 use tze_hud_scene::widget_deadline::widget_params_at;
 use tze_hud_scene::{DegradationLevel, Rect};
 use tze_hud_scene::{SceneId, WidgetParameterValue};
@@ -44,12 +46,25 @@ impl DockHoverCard {
     }
 }
 
+/// An authored runtime parameter and its trigger on an actually drawn dock quad.
+#[derive(Debug)]
+pub struct DockRuntimeHoverTarget {
+    pub instance: SceneId,
+    pub instance_name: String,
+    /// The snapped quad and its authored trigger in Scene pixels.
+    pub bounds: Rect,
+    pub trigger: Rect,
+    pub behavior: WidgetHoverBehavior,
+    pub pixels: [u8; 32],
+}
+
 /// Captured from drawable texture entries for one verified display. The
 /// swapchain acknowledges this receipt only when the image actually presents.
 #[derive(Debug)]
 pub struct DockHoverFrame {
     pub column: DockPassiveColumn,
     pub cards: Vec<Arc<DockHoverCard>>,
+    pub runtime_targets: Vec<DockRuntimeHoverTarget>,
 }
 
 /// Ties actual presented pixels to the lifetime of one drawable.
@@ -216,45 +231,93 @@ impl WidgetDraws {
         if column.target != dock.display.name || column.display != dock.display.rect {
             return;
         }
-        let cards: Vec<_> = dock
-            .quads
-            .iter()
-            .filter_map(|quad| {
-                let (entry, mut bounds) =
-                    wr.drawable_widget(quad, dock.display.rect.width, dock.display.rect.height)?;
-                let uploaded_label = entry.clipped_compact_label.as_ref()?;
-                let instance = scene.widget_registry.instances.get(&quad.instance_name)?;
-                let def = scene
-                    .widget_registry
-                    .get_definition(&instance.widget_type_name)?;
-                let hover = entry
-                    .dock_presentation
-                    .as_ref()?
+        let mut cards = Vec::new();
+        let mut runtime_targets = Vec::new();
+        for quad in &dock.quads {
+            let Some((entry, mut bounds)) =
+                wr.drawable_widget(quad, dock.display.rect.width, dock.display.rect.height)
+            else {
+                continue;
+            };
+            let Some(pixels) = entry.dock_pixels.filter(|_| !entry.dirty) else {
+                continue;
+            };
+            let Some(instance) = scene.widget_registry.instances.get(&quad.instance_name) else {
+                continue;
+            };
+            let Some(def) = scene
+                .widget_registry
+                .get_definition(&instance.widget_type_name)
+            else {
+                continue;
+            };
+            bounds.x += dock.display.rect.x;
+            bounds.y += dock.display.rect.y;
+
+            let presentation = entry.dock_presentation.as_deref();
+            if let Some(presentation) = presentation
+                && presentation.uses_builtin_countdown_layout()
+            {
+                let Some(uploaded_label) = entry.clipped_compact_label.as_ref() else {
+                    continue;
+                };
+                let Some(WidgetParameterValue::String(label)) =
+                    instance.current_params.get("label")
+                else {
+                    continue;
+                };
+                let Some(hover) = presentation
                     .hover_behavior
                     .as_ref()
-                    .or(def.hover_behavior.as_ref())?;
-                let WidgetParameterValue::String(label) = instance.current_params.get("label")?
+                    .or(def.hover_behavior.as_ref())
                 else {
-                    return None;
+                    continue;
                 };
-                if entry.dirty || uploaded_label.as_ref() != label.as_str() {
-                    return None;
+                if uploaded_label.as_ref() == label.as_str() {
+                    cards.push(Arc::new(DockHoverCard {
+                        instance: instance.id,
+                        label: Arc::clone(uploaded_label),
+                        bounds,
+                        delay: Duration::from_millis(u64::from(hover.delay_ms)),
+                        pixels: *pixels.as_bytes(),
+                    }));
                 }
-                bounds.x += dock.display.rect.x;
-                bounds.y += dock.display.rect.y;
-                Some(Arc::new(DockHoverCard {
-                    instance: instance.id,
-                    label: Arc::clone(uploaded_label),
-                    bounds,
-                    delay: Duration::from_millis(u64::from(hover.delay_ms)),
-                    pixels: *entry.dock_pixels?.as_bytes(),
-                }))
-            })
-            .collect();
-        if !cards.is_empty() {
+                continue;
+            }
+
+            let behavior = match presentation {
+                Some(presentation) => presentation.hover_behavior.as_ref(),
+                None => def.hover_behavior.as_ref(),
+            };
+            let Some(behavior) = behavior.filter(|behavior| {
+                entry.dock_raster_current
+                    && def.parameter_schema.iter().any(|param| {
+                        param.name == behavior.visibility_param
+                            && param.audience == WidgetParamAudience::Runtime
+                    })
+            }) else {
+                continue;
+            };
+            let trigger = behavior.trigger_rect;
+            runtime_targets.push(DockRuntimeHoverTarget {
+                instance: instance.id,
+                instance_name: quad.instance_name.clone(),
+                bounds,
+                trigger: Rect::new(
+                    bounds.x + bounds.width * trigger.x_pct,
+                    bounds.y + bounds.height * trigger.y_pct,
+                    bounds.width * trigger.width_pct,
+                    bounds.height * trigger.height_pct,
+                ),
+                behavior: behavior.clone(),
+                pixels: *pixels.as_bytes(),
+            });
+        }
+        if !cards.is_empty() || !runtime_targets.is_empty() {
             dock.hover = Some(Arc::new(DockHoverFrame {
                 column: column.clone(),
                 cards,
+                runtime_targets,
             }));
         }
     }
@@ -799,6 +862,7 @@ impl super::Compositor {
                 );
                 // Record what params were rendered so we can detect future changes.
                 if let Some(entry) = wr.texture_entry_mut(instance_name) {
+                    entry.dock_raster_current = uploaded && entry.dock_pixels.is_some();
                     if uploaded {
                         entry.dock_presentation = dock.cloned();
                     } else {

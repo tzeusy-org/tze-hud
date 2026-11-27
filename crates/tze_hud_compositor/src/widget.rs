@@ -1847,6 +1847,8 @@ pub struct WidgetTextureEntry {
     pub(crate) dock_presentation: Option<Arc<DockPresentation>>,
     /// Fingerprint of the last successful RGBA upload for a dock-owned instance.
     pub(crate) dock_pixels: Option<blake3::Hash>,
+    /// Whether the current dock raster succeeded, even if older pixels remain drawable.
+    pub(crate) dock_raster_current: bool,
     /// Full label when the last successful compact upload drew a clipped prefix.
     pub(crate) clipped_compact_label: Option<std::sync::Arc<str>>,
     /// Animation state: start time, duration, starting params, target params.
@@ -3583,6 +3585,7 @@ impl WidgetRenderer {
                 last_rendered_params: HashMap::new(),
                 dock_presentation: None,
                 dock_pixels: None,
+                dock_raster_current: false,
                 clipped_compact_label: None,
                 animation,
             },

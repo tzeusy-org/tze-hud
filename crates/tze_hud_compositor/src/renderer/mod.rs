@@ -76,7 +76,8 @@ pub(crate) mod token_colors;
 pub(crate) mod widget_geometry;
 pub(crate) mod widgets;
 pub use widgets::{
-    DockHoverCard, DockHoverFrame, DockTooltipHandle, DockTooltipRequest, PresentedDockHover,
+    DockHoverCard, DockHoverFrame, DockRuntimeHoverTarget, DockTooltipHandle, DockTooltipRequest,
+    PresentedDockHover,
 };
 #[cfg(any(test, feature = "dev-mode"))]
 mod work_observation;

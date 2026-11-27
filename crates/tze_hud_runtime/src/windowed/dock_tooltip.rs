@@ -254,6 +254,7 @@ mod tests {
             Arc::new(DockHoverFrame {
                 column: column.clone(),
                 cards: vec![a, b],
+                runtime_targets: Vec::new(),
             })
         };
         let old_frame = frame(a.clone(), b.clone());
@@ -412,6 +413,7 @@ mod tests {
         let same_geometry = Arc::new(DockHoverFrame {
             column: visible_again.clone(),
             cards: vec![a.clone()],
+            runtime_targets: Vec::new(),
         });
         let second_present = PresentedDockHover {
             frame: same_geometry.clone(),
@@ -440,6 +442,7 @@ mod tests {
         let new_frame = Arc::new(DockHoverFrame {
             column: recreated.clone(),
             cards: vec![card(replacement, "Full A", 0.0, a.pixels)],
+            runtime_targets: Vec::new(),
         });
         snapshot.dock_hover = Some(new_frame.clone());
         let new_present = PresentedDockHover {
