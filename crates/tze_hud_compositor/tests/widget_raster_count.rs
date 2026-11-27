@@ -2239,7 +2239,9 @@ async fn compact_clipped_label_tooltip_uses_actual_draw_and_named_target() {
         .store(Some(initial_request.clone()));
     assert!(gpu.compositor.poll_dock_tooltip());
     let drawn = build(&mut gpu.compositor, &mut scene);
-    let capture = |c: &mut Compositor, frame, name| {
+    let capture = |c: &mut Compositor,
+                   frame: &tze_hud_compositor::renderer::frame::WindowedFrameBuild,
+                   name| {
         c.capture_windowed_display(frame, &target, Some(name), format)
             .unwrap()
             .rgba
