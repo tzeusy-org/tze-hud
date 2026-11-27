@@ -469,15 +469,16 @@ async fn portal_frame_gets_full_width_header_band_handle() {
         pane.bounds.width < 600.0,
         "the pane grip must be the small centered grip, not a full-width band"
     );
+
+    portal_resize_scales_and_clamps_text_font(&compositor);
+    drag_handle_hit_test_wins_on_passthrough_tile(&compositor);
+    chrome_states_stale_entries_pruned_on_repopulate(&compositor);
 }
 
 /// the compositor applies the tile's viewer-local font-scale
 /// multiplier, clamped to the token-default legible range, when resolving a
 /// portal text node's effective font. GPU only builds the compositor (no readback).
-#[tokio::test]
-async fn portal_resize_scales_and_clamps_text_font() {
-    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);
-
+fn portal_resize_scales_and_clamps_text_font(compositor: &Compositor) {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab = scene.create_tab("Main", 0).unwrap();
     let lease = scene.grant_lease("agent", 60_000);
@@ -822,10 +823,7 @@ async fn drag_handle_regions_cover_visible_tile_and_zone_but_not_widget() {
     );
 }
 
-#[tokio::test]
-async fn drag_handle_hit_test_wins_on_passthrough_tile() {
-    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);
-
+fn drag_handle_hit_test_wins_on_passthrough_tile(compositor: &Compositor) {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab = scene.create_tab("Main", 0).unwrap();
     let lease = scene.grant_lease("agent-a", 60_000);
@@ -842,7 +840,7 @@ async fn drag_handle_hit_test_wins_on_passthrough_tile() {
         tile.input_mode = InputMode::Passthrough;
     }
 
-    populate_drag_handles(&compositor, &mut scene, 1920.0, 1080.0);
+    populate_drag_handles(compositor, &mut scene, 1920.0, 1080.0);
     let handle = scene
         .overlay
         .drag_handle_hit_regions
@@ -879,10 +877,7 @@ async fn drag_handle_hit_test_wins_on_passthrough_tile() {
 /// that are still present in the current `drag_handle_hit_regions` set —
 /// the zero-allocation `iter().any()` retain must
 /// have identical semantics to the previous `HashSet`-based approach.
-#[tokio::test]
-async fn chrome_states_stale_entries_pruned_on_repopulate() {
-    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);
-
+fn chrome_states_stale_entries_pruned_on_repopulate(compositor: &Compositor) {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab = scene.create_tab("Main", 0).unwrap();
     let lease = scene.grant_lease("agent-a", 60_000);
@@ -897,7 +892,7 @@ async fn chrome_states_stale_entries_pruned_on_repopulate() {
         .unwrap();
 
     // First populate: tile present → one drag handle and a live state entry.
-    populate_drag_handles(&compositor, &mut scene, 1920.0, 1080.0);
+    populate_drag_handles(compositor, &mut scene, 1920.0, 1080.0);
     assert_eq!(
         scene.overlay.drag_handle_hit_regions.len(),
         1,
@@ -926,7 +921,7 @@ async fn chrome_states_stale_entries_pruned_on_repopulate() {
 
     // Second populate: no tiles → no drag handles.  Both state entries
     // (previously-live and phantom) must be pruned.
-    populate_drag_handles(&compositor, &mut scene, 1920.0, 1080.0);
+    populate_drag_handles(compositor, &mut scene, 1920.0, 1080.0);
     assert!(
         scene.overlay.drag_handle_hit_regions.is_empty(),
         "no hit regions expected after tile removal"
