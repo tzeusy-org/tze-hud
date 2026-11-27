@@ -375,21 +375,24 @@ async fn builtin_compact_countdown_keeps_standalone_pixels_and_timer_cadence() {
         true,
     );
     let values = |label: &str, ms| {
-        HashMap::from([
-            ("label".into(), string(label)),
-            ("severity".into(), enumeration("error")),
-            (
-                "ends_in_ms".into(),
-                Value::Deadline(WidgetDeadline::relative(ms)),
-            ),
-        ])
+        [
+            ("label", string(label)),
+            ("severity", enumeration("error")),
+            ("ends_in_ms", Value::Deadline(WidgetDeadline::relative(ms))),
+        ]
+    };
+    let dock_values = |label: &str, ms| -> HashMap<String, Value> {
+        values(label, ms)
+            .into_iter()
+            .map(|(key, value)| (key.to_owned(), value))
+            .collect()
     };
     publish_params(
         &mut scene,
         "standalone",
         "configured",
         0,
-        values("Cutover", 120_000),
+        HashMap::from(values("Cutover", 120_000)),
     );
     let standalone = gpu.render_pixels(&mut scene);
     #[cfg(feature = "dev-mode")]
@@ -413,7 +416,7 @@ async fn builtin_compact_countdown_keeps_standalone_pixels_and_timer_cadence() {
         ("agent-b", "Peer", 300_000, 120.0),
     ] {
         scene
-            .publish_to_dock(&kind, values(label, ms), scope, None, 0, 0)
+            .publish_to_dock(&kind, dock_values(label, ms), scope, None, 0, 0)
             .unwrap();
         let name = scene
             .dock_instance(scope, &kind)
@@ -489,7 +492,14 @@ async fn builtin_compact_countdown_keeps_standalone_pixels_and_timer_cadence() {
     #[cfg(feature = "dev-mode")]
     assert_widget_work(&mut gpu.compositor, 2, 2);
     scene
-        .publish_to_dock(&kind, values("Release", 119_000), "agent-a", None, 0, 0)
+        .publish_to_dock(
+            &kind,
+            dock_values("Release", 119_000),
+            "agent-a",
+            None,
+            0,
+            0,
+        )
         .unwrap();
     gpu.draw(&mut scene);
     assert_eq!(raster_count(&gpu.compositor, &a), 3);
