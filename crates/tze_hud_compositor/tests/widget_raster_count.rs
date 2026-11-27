@@ -738,18 +738,33 @@ async fn overlapping_widgets_stack_by_instance_name() {
     }
 }
 
-/// Real shipped bundle pixels, semantic color tokens and countdown raster work.
-/// TestClock advances wall time; no host timer or synthetic SVG is the oracle.
-#[tokio::test]
-async fn countdown_kpi_and_stepper_render_their_shipped_contracts() {
-    use std::sync::Arc;
-    use tze_hud_scene::{TestClock, WidgetDeadline, graph::SurfaceClasses};
-    let Some(mut gpu) = Gpu::with_widgets(360, 124).await else {
-        return;
-    };
+use std::sync::Arc;
+use tze_hud_scene::{TestClock, WidgetDeadline, graph::SurfaceClasses};
+use tze_hud_telemetry::FrameTelemetry;
+
+fn timer_scene() -> (SceneGraph, Arc<TestClock>, SceneId) {
     let clock = Arc::new(TestClock::new(1_000));
     let mut scene = SceneGraph::new_with_clock(360.0, 124.0, clock.clone());
     let tab = scene.create_tab("Bundles", 0).unwrap();
+    (scene, clock, tab)
+}
+
+fn rendered_timer_value(c: &Compositor, widget: &str, parameter: &str) -> Value {
+    let renderer = c.widget_renderer().unwrap();
+    let entry = renderer.texture_entry(widget).unwrap();
+    entry.last_rendered_params[parameter].clone()
+}
+
+#[track_caller]
+fn draw_deadline_frame(gpu: &mut Gpu, scene: &mut SceneGraph, due: bool) -> FrameTelemetry {
+    assert_eq!(gpu.compositor.widget_deadline_needs_render(scene), due);
+    gpu.draw(scene)
+}
+
+/// Real shipped bundle pixels, semantic color tokens and countdown raster work.
+/// TestClock advances wall time; no host timer or synthetic SVG is the oracle.
+fn assert_countdown_kpi_and_stepper_contracts(gpu: &mut Gpu) {
+    let (mut scene, clock, tab) = timer_scene();
     for loaded in [
         bundle!("countdown", ["card.svg"]),
         bundle!("kpi", ["card.svg"]),
@@ -856,29 +871,20 @@ async fn countdown_kpi_and_stepper_render_their_shipped_contracts() {
     );
     assert!(gpu.compositor.widget_deadline_needs_render(&scene));
     let five = gpu.render_pixels(&mut scene);
-    let rendered_text = |c: &Compositor| {
-        c.widget_renderer()
-            .unwrap()
-            .texture_entry("countdown")
-            .unwrap()
-            .last_rendered_params["ends_in_ms"]
-            .clone()
-    };
+    let rendered_text = |c: &Compositor| rendered_timer_value(c, "countdown", "ends_in_ms");
+    let count = |c: &Compositor| raster_count(c, "countdown");
     assert_eq!(rendered_text(&gpu.compositor), string("5 min"));
-    let initial_rasters = raster_count(&gpu.compositor, "countdown");
+    let initial_rasters = count(&gpu.compositor);
     assert!(!gpu.compositor.has_inflight_animation(&scene));
     clock.advance(59_999);
-    assert!(!gpu.compositor.widget_deadline_needs_render(&scene));
-    assert!(gpu.draw(&mut scene).widget_rasterized.is_empty());
-    assert_eq!(raster_count(&gpu.compositor, "countdown"), initial_rasters);
+    let early = draw_deadline_frame(gpu, &mut scene, false);
+    assert!(early.widget_rasterized.is_empty());
+    assert_eq!(count(&gpu.compositor), initial_rasters);
     clock.advance(1);
-    assert!(gpu.compositor.widget_deadline_needs_render(&scene));
-    assert_eq!(gpu.draw(&mut scene).widget_rasterized, ["countdown"]);
+    let due = draw_deadline_frame(gpu, &mut scene, true);
+    assert_eq!(due.widget_rasterized, ["countdown"]);
     assert_eq!(rendered_text(&gpu.compositor), string("4 min"));
-    assert_eq!(
-        raster_count(&gpu.compositor, "countdown"),
-        initial_rasters + 1
-    );
+    assert_eq!(count(&gpu.compositor), initial_rasters + 1);
 
     // The windowed idle-gate harness separately covers pause and resume.
     scene.set_owner_hidden(SurfaceClasses {
@@ -887,21 +893,15 @@ async fn countdown_kpi_and_stepper_render_their_shipped_contracts() {
     });
     clock.advance(60_000);
     assert_eq!(gpu.compositor.next_widget_deadline_wall_us(&scene), None);
-    assert!(!gpu.compositor.widget_deadline_needs_render(&scene));
-    assert!(gpu.draw(&mut scene).widget_rasterized.is_empty());
-    assert_eq!(
-        raster_count(&gpu.compositor, "countdown"),
-        initial_rasters + 1
-    );
+    let hidden = draw_deadline_frame(gpu, &mut scene, false);
+    assert!(hidden.widget_rasterized.is_empty());
+    assert_eq!(count(&gpu.compositor), initial_rasters + 1);
 
     scene.set_owner_hidden(SurfaceClasses::NONE);
-    assert!(gpu.compositor.widget_deadline_needs_render(&scene));
-    assert_eq!(gpu.draw(&mut scene).widget_rasterized, ["countdown"]);
+    let shown = draw_deadline_frame(gpu, &mut scene, true);
+    assert_eq!(shown.widget_rasterized, ["countdown"]);
     assert_eq!(rendered_text(&gpu.compositor), string("3 min"));
-    assert_eq!(
-        raster_count(&gpu.compositor, "countdown"),
-        initial_rasters + 2
-    );
+    assert_eq!(count(&gpu.compositor), initial_rasters + 2);
     assert!(!gpu.compositor.has_inflight_animation(&scene));
 
     clock.advance(180_000);
@@ -924,46 +924,31 @@ async fn countdown_kpi_and_stepper_render_their_shipped_contracts() {
         "zero retains its severity at antialiased coverage: {actual:?}"
     );
     publish(&mut scene, "countdown", &[remaining(90_000)]);
-    assert!(
-        gpu.compositor
-            .next_widget_deadline_wall_us(&scene)
-            .is_some()
-    );
-    scene
-        .widget_registry
-        .instances
-        .get_mut("countdown")
-        .unwrap()
-        .geometry_override = Some(relative(0.0, 0.0, 0.0, 1.0));
+    let next_deadline = gpu.compositor.next_widget_deadline_wall_us(&scene);
+    assert!(next_deadline.is_some());
+    let instances = &mut scene.widget_registry.instances;
+    let countdown = instances.get_mut("countdown").unwrap();
+    countdown.geometry_override = Some(relative(0.0, 0.0, 0.0, 1.0));
     assert_eq!(gpu.compositor.next_widget_deadline_wall_us(&scene), None);
     assert!(!gpu.compositor.widget_deadline_needs_render(&scene));
     gpu.draw(&mut scene);
-    assert!(
-        gpu.compositor
-            .widget_renderer()
-            .unwrap()
-            .texture_entry("countdown")
-            .is_none()
-    );
+    let renderer = gpu.compositor.widget_renderer().unwrap();
+    assert!(renderer.texture_entry("countdown").is_none());
 }
 
 /// The elapsed timer rasterizes once per display change and never between
 /// (per second, then per minute), and its longest strings fit the card.
 #[tokio::test]
 async fn elapsed_rasterizes_once_per_display_change_and_fits_its_longest_strings() {
-    use std::sync::Arc;
-    use tze_hud_scene::{TestClock, WidgetDeadline};
     let Some(mut gpu) = Gpu::with_widgets(360, 124).await else {
         return;
     };
-    let clock = Arc::new(TestClock::new(1_000));
-    let mut scene = SceneGraph::new_with_clock(360.0, 124.0, clock.clone());
-    let tab = scene.create_tab("Bundles", 0).unwrap();
-    let name = register_bundle(
-        &mut gpu.compositor,
-        &mut scene,
-        bundle!("elapsed", ["card.svg"]),
-    );
+    assert_countdown_kpi_and_stepper_contracts(&mut gpu);
+    gpu.compositor
+        .init_widget_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+    let (mut scene, clock, tab) = timer_scene();
+    let elapsed = bundle!("elapsed", ["card.svg"]);
+    let name = register_bundle(&mut gpu.compositor, &mut scene, elapsed);
     register_instance(&mut scene, tab, &name, &name, Some(FULL_FRAME), true);
     let start = |scene: &mut SceneGraph, ago_ms| {
         publish_params(
@@ -981,14 +966,7 @@ async fn elapsed_rasterizes_once_per_display_change_and_fits_its_longest_strings
         );
     };
     let count = |c: &Compositor| raster_count(c, "elapsed");
-    let shown = |c: &Compositor| {
-        c.widget_renderer()
-            .unwrap()
-            .texture_entry("elapsed")
-            .unwrap()
-            .last_rendered_params["started_ms_ago"]
-            .clone()
-    };
+    let shown = |c: &Compositor| rendered_timer_value(c, "elapsed", "started_ms_ago");
     for (start_ms, before, after, boundary) in [
         (0, "0:00", "0:01", 1_000),
         (180_000, "3 min", "4 min", 60_000),
@@ -999,12 +977,10 @@ async fn elapsed_rasterizes_once_per_display_change_and_fits_its_longest_strings
         assert!(!gpu.compositor.has_inflight_animation(&scene));
         let before_count = count(&gpu.compositor);
         clock.advance(boundary - 1);
-        assert!(!gpu.compositor.widget_deadline_needs_render(&scene));
-        gpu.draw(&mut scene);
+        draw_deadline_frame(&mut gpu, &mut scene, false);
         assert_eq!(count(&gpu.compositor), before_count);
         clock.advance(1);
-        assert!(gpu.compositor.widget_deadline_needs_render(&scene));
-        gpu.draw(&mut scene);
+        draw_deadline_frame(&mut gpu, &mut scene, true);
         assert_eq!(
             (count(&gpu.compositor), shown(&gpu.compositor)),
             (before_count + 1, string(after))
