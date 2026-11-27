@@ -721,11 +721,13 @@ async fn hud_tfm3p_flow_offsets_resolve_without_a_text_rasterizer() {
         y1 >= y0 + 40.0,
         "second child must clear the first child's 40px height: y0={y0} y1={y1}"
     );
+
+    tile_opacity_scales_flat_and_rounded_solid_fill(&compositor);
+    hud_b0x0m_static_image_tint_scaled_by_tile_opacity(&mut compositor);
+    tile_text_distinguishes_durable_opacity_from_transient_fade(&mut compositor);
 }
 
-#[tokio::test]
-async fn tile_opacity_scales_flat_and_rounded_solid_fill() {
-    let (compositor, _surface) = require_gpu!(tile_test_gpu().await);
+fn tile_opacity_scales_flat_and_rounded_solid_fill(compositor: &Compositor) {
     let color = Rgba::new(0.2, 0.4, 0.6, 0.8);
     let bounds = Rect::new(0.0, 0.0, 120.0, 120.0);
     for radius in [None, Some(12.0)] {
@@ -769,19 +771,16 @@ async fn tile_opacity_scales_flat_and_rounded_solid_fill() {
 /// A `StaticImage` textured quad's tint alpha must be scaled by the FULL tile
 /// fade — `tile_effective_opacity`, which includes the portal-transition
 /// component — not just `effective_tile_opacity`.
-#[tokio::test]
-async fn hud_b0x0m_static_image_tint_scaled_by_tile_opacity() {
-    let (mut compositor, _surface) = require_gpu!(tile_test_gpu().await);
-
+fn hud_b0x0m_static_image_tint_scaled_by_tile_opacity(compositor: &mut Compositor) {
     let mut scene = SceneGraph::new(256.0, 256.0);
-    let resource_id = upload_white_image(&mut compositor, &mut scene);
+    let resource_id = upload_white_image(compositor, &mut scene);
     let root_id = SceneId::new();
     let bounds = Rect::new(0.0, 0.0, 120.0, 120.0);
     let tile_id =
         b0x0m_tile_with_root(&mut scene, bounds, root_id, image_data(resource_id, bounds));
 
     // Isolate the transient fade with durable tile opacity still at 1.
-    pin_fade(&mut compositor, tile_id, 0.5);
+    pin_fade(compositor, tile_id, 0.5);
     assert!(
         (compositor.portal_tile_anim_opacity(tile_id) - 0.5).abs() < 1e-4,
         "test setup: portal fade must be pinned at 0.5"
@@ -819,9 +818,7 @@ async fn hud_b0x0m_static_image_tint_scaled_by_tile_opacity() {
 
 /// Minimized tiles skip text work. A transient portal fade keeps the
 /// text shaped at zero alpha so the first visible frame can reuse it.
-#[tokio::test]
-async fn tile_text_distinguishes_durable_opacity_from_transient_fade() {
-    let (mut compositor, _surface) = require_gpu!(tile_test_gpu().await);
+fn tile_text_distinguishes_durable_opacity_from_transient_fade(compositor: &mut Compositor) {
     let mut scene = SceneGraph::new(256.0, 256.0);
     let bounds = Rect::new(0.0, 0.0, 120.0, 120.0);
     let tile_id = w41ef_portal_tile(&mut scene, bounds, bounds);
@@ -839,11 +836,11 @@ async fn tile_text_distinguishes_durable_opacity_from_transient_fade() {
     for opacity in [0.0, 0.5, 1.0] {
         scene.tiles.get_mut(&tile_id).unwrap().opacity = opacity;
         assert_eq!(
-            transcript_alpha(&compositor, &scene),
+            transcript_alpha(compositor, &scene),
             (opacity > 0.0).then_some(opacity),
             "durable tile opacity {opacity}"
         );
     }
-    pin_fade(&mut compositor, tile_id, 0.0);
-    assert_eq!(transcript_alpha(&compositor, &scene), Some(0.0));
+    pin_fade(compositor, tile_id, 0.0);
+    assert_eq!(transcript_alpha(compositor, &scene), Some(0.0));
 }
