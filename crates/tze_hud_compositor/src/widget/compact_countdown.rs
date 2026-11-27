@@ -111,6 +111,34 @@ pub(super) fn prepare(
     for id in ["warning", "error"] {
         displayed = apply_svg_attribute(&displayed, id, "transform", &transform);
     }
+    // Ordinary countdown forms are at most seven bytes. Only an extended
+    // wall-clock rollback readout needs this extra shaping probe; compress it
+    // horizontally only if its full advance or ink crosses the reserved edge.
+    if matches!(params.get("ends_in_ms"), Some(WidgetParameterValue::String(value)) if value.len() > 7)
+    {
+        let reserve = match params.get("severity") {
+            Some(WidgetParameterValue::Enum(severity))
+                if severity == "warning" || severity == "error" =>
+            {
+                readout_height
+            }
+            _ => 0.0,
+        };
+        let end = 160.0 - inset - reserve;
+        let (logical, ink) = text_bounds(&displayed, "value")?;
+        let rightmost = logical.right().max(ink.right());
+        if rightmost > end {
+            let scale = (end - inset) / (rightmost - inset);
+            if !scale.is_finite() || scale <= 0.0 {
+                return None;
+            }
+            let transform = format!(
+                "translate({inset} 0) scale({scale} 1) translate({} 0)",
+                -inset
+            );
+            displayed = apply_svg_attribute(&displayed, "value", "transform", &transform);
+        }
+    }
     let label = match params.get("label") {
         Some(WidgetParameterValue::String(label)) => label.as_str(),
         _ => "",
@@ -340,13 +368,25 @@ mod tests {
         mask: &tiny_skia::Pixmap,
         ground: [u8; 3],
         threshold: f64,
+        glyph: bool,
         context: &str,
     ) {
+        let peak = mask.pixels().iter().map(|p| p.alpha()).max().unwrap_or(0);
+        // Small hinted glyphs need not contain an almost-opaque pixel. Sample
+        // their actual high-coverage band, never below 75% absolute coverage.
+        // Severity marks still require the original near-opaque core.
+        let absolute_floor = if glyph { 192 } else { 250 };
+        let relative_floor = (u16::from(peak) * 9).div_ceil(10) as u8;
+        let effective_floor = if glyph {
+            absolute_floor.max(relative_floor)
+        } else {
+            absolute_floor
+        };
         let core: Vec<_> = mask
             .pixels()
             .iter()
             .enumerate()
-            .filter(|(_, p)| p.alpha() >= 250)
+            .filter(|(_, p)| p.alpha() >= effective_floor)
             .map(|(i, _)| i)
             .collect();
         let minimum = core
@@ -360,8 +400,9 @@ mod tests {
         capture_json(
             &format!("{context}-ground{ground:?}"),
             serde_json::json!({
-                "case": context, "ground_srgb": ground, "core_minimum_alpha":250,
-                "core_pixels":core.len(), "maximum_mask_alpha":mask.pixels().iter().map(|p|p.alpha()).max(),
+                "case": context, "ground_srgb": ground, "glyph":glyph,
+                "core_absolute_minimum_alpha":absolute_floor, "core_peak_relative_minimum_alpha":relative_floor,
+                "core_minimum_alpha":effective_floor, "core_pixels":core.len(), "maximum_mask_alpha":peak,
                 "mask_bounds":text_mask_alpha_bounds(mask.as_ref()),
                 "minimum_composed_contrast":minimum.is_finite().then_some(minimum), "required_contrast":threshold,
                 "composition":"premultiplied RGBA8 sRGB texture, linear-light source-over"
@@ -372,7 +413,7 @@ mod tests {
             "{context}: no genuinely filled core pixels"
         );
         eprintln!(
-            "[DOCK-COUNTDOWN-CONTRAST] {context} ground={ground:?} core={} coverage>=250/255 min={minimum:.4}",
+            "[DOCK-COUNTDOWN-CONTRAST] {context} ground={ground:?} core={} peak={peak}/255 absolute_floor={absolute_floor} relative_floor={relative_floor} coverage>={effective_floor}/255 min={minimum:.4}",
             core.len()
         );
         assert!(
@@ -501,7 +542,15 @@ mod tests {
                                 "{theme}/{severity}/label{index}/{readout}/{width}x{height}/{id}"
                             );
                             for ground in [[255, 255, 255], [63, 63, 89]] {
-                                contrast(&actual, &clean, &mask, ground, required, &context);
+                                contrast(
+                                    &actual,
+                                    &clean,
+                                    &mask,
+                                    ground,
+                                    required,
+                                    matches!(id, "label" | "value"),
+                                    &context,
+                                );
                             }
                         }
                         if severity == "info" {
@@ -535,6 +584,10 @@ mod tests {
                 ],
             );
             let prepared = prepare_bundle(&bundle, &params("Cutover", "error", 24));
+            assert!(!prepared.svg.contains("translate(10 0) scale("));
+            let rollback = prepare_bundle(&bundle, &params("Cutover", "error", 100));
+            assert_eq!(text(&rollback.svg, "value"), "100 h 00");
+            assert!(!rollback.svg.contains("translate(10 0) scale("));
             let label = ink_bounds(&prepared.svg, "label").unwrap();
             let readout = ink_bounds(&prepared.svg, "value").unwrap();
             assert!(label.left() >= 10.0 && label.top() >= 3.0 && label.bottom() <= 25.0);
@@ -550,8 +603,8 @@ mod tests {
             }
         }
     }
-    /// Characterization, deliberately not a claim that the admitted24h limit
-    /// bounds every string under arbitrary wall-clock movement.
+    /// The admitted 24h duration does not bound strings after wall rollback.
+    /// Keep the representational maximum complete inside the actual mark lane.
     #[test]
     fn compact_countdown_characterizes_representational_maximum_without_clamping() {
         let deadline = WidgetDeadline {
@@ -563,50 +616,154 @@ mod tests {
         assert_eq!(formatted, "5124095576 h 02");
         for theme in ["tonal-glass", "classic", "blueprint"] {
             let bundle = bundle(theme, &[]);
-            let values = widget_params_at(
-                &HashMap::from([
-                    (
-                        "label".into(),
-                        WidgetParameterValue::String("Clock rollback".into()),
-                    ),
-                    (
-                        "severity".into(),
-                        WidgetParameterValue::Enum("error".into()),
-                    ),
-                    (
-                        "ends_in_ms".into(),
-                        WidgetParameterValue::Deadline(deadline.clone()),
-                    ),
-                ]),
-                0,
-            );
-            let prepared = prepare_bundle(&bundle, &values);
-            assert_eq!(
-                text(&prepared.svg, "value"),
-                formatted,
-                "no clamp, shortening or substituted formatter"
-            );
-            let (logical, ink) = text_bounds(&prepared.svg, "value").unwrap();
+            let alternate = bundle.dock.as_ref().unwrap();
+            let layer = &alternate.layers[0];
+            let source = std::str::from_utf8(&bundle.svg_contents[&layer.svg_file]).unwrap();
+            let mut plan = WidgetRenderPlan::compile(&[(source, &layer.bindings)]);
+            plan.builtin_countdown_layout = true;
             let line_height = if theme == "blueprint" { 18.0 } else { 20.0 };
-            let limit = 152.0 - line_height;
-            for (width, height) in [(160, 52), (120, 39)] {
-                let raster = rasterize_single_svg_layer(&prepared.svg, width, height).unwrap();
-                let mask = rasterize_single_svg_layer(
-                    &isolate(&prepared.svg, Some("value")),
-                    width,
-                    height,
-                )
-                .unwrap();
-                let context = format!("{theme}-representational-max-{width}x{height}");
-                capture_png(&format!("{context}-raw"), &raster);
-                capture_png(&format!("{context}-readout-mask"), &mask);
-                for ground in [[255, 255, 255], [63, 63, 89]] {
-                    capture_composed(&format!("{context}-ground{ground:?}"), &raster, ground);
+            let line_top = 26.0;
+            for severity in ["error", "warning", "info"] {
+                let values = widget_params_at(
+                    &HashMap::from([
+                        (
+                            "label".into(),
+                            WidgetParameterValue::String("Clock rollback".into()),
+                        ),
+                        (
+                            "severity".into(),
+                            WidgetParameterValue::Enum(severity.into()),
+                        ),
+                        (
+                            "ends_in_ms".into(),
+                            WidgetParameterValue::Deadline(deadline.clone()),
+                        ),
+                    ]),
+                    0,
+                );
+                let prepared = prepare_bundle(&bundle, &values);
+                let normal = prepare_bundle(&bundle, &params("Clock rollback", severity, 24));
+                assert_eq!(
+                    text(&prepared.svg, "value"),
+                    formatted,
+                    "no clamp, shortening or substituted formatter"
+                );
+                let (logical, ink) = text_bounds(&prepared.svg, "value").unwrap();
+                let (normal_logical, _) = text_bounds(&normal.svg, "value").unwrap();
+                let limit = 152.0 - if severity == "info" { 0.0 } else { line_height };
+                // X fitting cannot change the baseline or font's vertical metrics.
+                assert_eq!(
+                    (logical.top(), logical.bottom()),
+                    (normal_logical.top(), normal_logical.bottom())
+                );
+                assert!(logical.left() >= 8.0 && ink.left() >= 8.0);
+                assert!(ink.top() >= line_top && ink.bottom() <= line_top + line_height);
+                for (width, height) in [(160, 52), (120, 39)] {
+                    let raster = rasterize_widget_render_plan(
+                        &plan,
+                        &HashMap::new(),
+                        &values,
+                        width,
+                        height,
+                    )
+                    .unwrap();
+                    let mask = rasterize_single_svg_layer(
+                        &isolate(&prepared.svg, Some("value")),
+                        width,
+                        height,
+                    )
+                    .unwrap();
+                    let clean = rasterize_single_svg_layer(&backdrop(&prepared.svg), width, height)
+                        .unwrap();
+                    let bounds = text_mask_alpha_bounds(mask.as_ref())
+                        .expect("complete nonempty readout ink");
+                    let scale = width as f32 / 160.0;
+                    // Preserve the original error capture filenames for comparison.
+                    let context = if severity == "error" {
+                        format!("{theme}-representational-max-{width}x{height}")
+                    } else {
+                        format!("{theme}-representational-max-{severity}-{width}x{height}")
+                    };
+                    let overflow = logical.right().max(ink.right()) > limit;
+                    let audit = serde_json::json!({"case":context,"formatted":formatted,"severity":severity,"absolute_deadline_us":u64::MAX,"wall_now_us":0,"size":[width,height],"reserved_readout_right":limit,"logical_bounds":[logical.left(),logical.top(),logical.right(),logical.bottom()],"ink_bounds":[ink.left(),ink.top(),ink.right(),ink.bottom()],"rendered_mask_bounds":bounds,"reserved_line_overflow":overflow});
+                    eprintln!("[DOCK-COUNTDOWN-MAXIMUM] {audit}");
+                    if severity == "error" {
+                        capture_png(&format!("{context}-raw"), &raster);
+                        capture_png(&format!("{context}-readout-mask"), &mask);
+                        for ground in [[255, 255, 255], [63, 63, 89]] {
+                            capture_composed(
+                                &format!("{context}-ground{ground:?}"),
+                                &raster,
+                                ground,
+                            );
+                        }
+                        capture_json(&context, audit);
+                    }
+                    assert!(!overflow, "{context}: {logical:?} / {ink:?} cross {limit}");
+                    assert!(
+                        bounds.0 as f32 >= (8.0 * scale).floor()
+                            && bounds.2 as f32 <= (limit * scale).ceil()
+                    );
+                    assert!(
+                        bounds.1 as f32 >= (line_top * scale).floor()
+                            && bounds.3 as f32 <= ((line_top + line_height) * scale).ceil()
+                    );
+                    for ground in [[255, 255, 255], [63, 63, 89]] {
+                        contrast(
+                            &raster,
+                            &clean,
+                            &mask,
+                            ground,
+                            4.5,
+                            true,
+                            &format!("{context}/value"),
+                        );
+                    }
+                    for mark in ["warning", "error"] {
+                        let mark_mask = rasterize_single_svg_layer(
+                            &isolate(&prepared.svg, Some(mark)),
+                            width,
+                            height,
+                        )
+                        .unwrap();
+                        let normal_mark = rasterize_single_svg_layer(
+                            &isolate(&normal.svg, Some(mark)),
+                            width,
+                            height,
+                        )
+                        .unwrap();
+                        assert_eq!(
+                            mark_mask.data(),
+                            normal_mark.data(),
+                            "{context}: {mark} geometry/ink changed"
+                        );
+                        assert!(
+                            mask.pixels()
+                                .iter()
+                                .zip(mark_mask.pixels())
+                                .all(|(text, mark)| text.alpha() == 0 || mark.alpha() == 0),
+                            "{context}: readout overlaps {mark}"
+                        );
+                        if severity == mark {
+                            for ground in [[255, 255, 255], [63, 63, 89]] {
+                                contrast(
+                                    &raster,
+                                    &clean,
+                                    &mark_mask,
+                                    ground,
+                                    3.0,
+                                    false,
+                                    &format!("{context}/{mark}"),
+                                );
+                            }
+                        } else {
+                            assert!(
+                                text_mask_alpha_bounds(mark_mask.as_ref()).is_none(),
+                                "{context}: unexpected {mark}"
+                            );
+                        }
+                    }
                 }
-                let overflow = logical.right().max(ink.right()) > limit;
-                let audit = serde_json::json!({"case":context,"formatted":formatted,"absolute_deadline_us":u64::MAX,"wall_now_us":0,"size":[width,height],"reserved_readout_right":limit,"logical_bounds":[logical.left(),logical.top(),logical.right(),logical.bottom()],"ink_bounds":[ink.left(),ink.top(),ink.right(),ink.bottom()],"rendered_mask_bounds":text_mask_alpha_bounds(mask.as_ref()),"reserved_line_overflow":overflow});
-                eprintln!("[DOCK-COUNTDOWN-MAXIMUM] {audit}");
-                capture_json(&context, audit);
             }
         }
     }
