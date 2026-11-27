@@ -894,31 +894,72 @@ async fn shipped_dock_fills_both_signed_display_capacities() {
     use std::num::NonZeroU64;
     use tze_hud_compositor::{DisplayLayout, DisplayRect, FrameTarget};
     use tze_hud_config::dock::{CAPTION_WIDTH_TOKEN, DEFAULT_AUTO_CLEAR_MS, ROW_HEIGHT_TOKEN};
+    use tze_hud_config::raw::RawDesignTokens;
+    use tze_hud_config::themes::resolve_config_tokens;
     use tze_hud_config::tokens::{effective_scale, parse_numeric};
     use tze_hud_scene::Rect;
     use tze_hud_scene::dock::{
         DockLayout, DockMetrics, DockPresentation, DockProjection, DockPublishError,
     };
     use tze_hud_scene::scope::scoped_namespace;
+    use tze_hud_widget::loader::load_bundle_from_files;
 
     let Some(mut gpu) = Gpu::with_widgets(512, 256).await else {
         return;
     };
     let c = &mut gpu.compositor;
     let format = wgpu::TextureFormat::Rgba8UnormSrgb;
-    let defaults = tokens();
-    c.set_token_map(defaults.clone());
+    let overrides = RawDesignTokens(HashMap::from([
+        ("progress.width".into(), "360".into()),
+        ("progress.height".into(), "52".into()),
+    ]));
+    let resolved = resolve_config_tokens(&overrides.0);
+    c.set_token_map(resolved.clone());
     c.init_text_renderer(format);
     let mut scene = SceneGraph::new_with_clock(512.0, 256.0, Arc::new(TestClock::new(1_000)));
     scene.create_tab("Main", 0).unwrap();
 
     let aspects = [
         (
-            bundle!("progress-bar", ["track.svg", "fill.svg"]),
-            (320.0, 50.0),
+            load_bundle_from_files(
+                "progress-bar",
+                &[
+                    (
+                        "widget.toml",
+                        include_bytes!("../../../assets/widget_bundles/progress-bar/widget.toml"),
+                    ),
+                    (
+                        "track.svg",
+                        include_bytes!("../../../assets/widget_bundles/progress-bar/track.svg"),
+                    ),
+                    (
+                        "fill.svg",
+                        include_bytes!("../../../assets/widget_bundles/progress-bar/fill.svg"),
+                    ),
+                ],
+                &resolved,
+            ),
+            (360.0, 52.0),
         ),
         (
-            bundle!("countdown", ["card.svg", "dock.svg"]),
+            load_bundle_from_files(
+                "countdown",
+                &[
+                    (
+                        "widget.toml",
+                        include_bytes!("../../../assets/widget_bundles/countdown/widget.toml"),
+                    ),
+                    (
+                        "card.svg",
+                        include_bytes!("../../../assets/widget_bundles/countdown/card.svg"),
+                    ),
+                    (
+                        "dock.svg",
+                        include_bytes!("../../../assets/widget_bundles/countdown/dock.svg"),
+                    ),
+                ],
+                &resolved,
+            ),
             (160.0, 52.0),
         ),
     ]
@@ -958,8 +999,8 @@ async fn shipped_dock_fills_both_signed_display_capacities() {
     let namespaces: Vec<_> = (0..18)
         .map(|row| scoped_namespace("dock-fixture", &format!("session-{row}")))
         .collect();
-    let size = |key| parse_numeric(&defaults[key]).unwrap();
-    assert_eq!(effective_scale(&defaults), 1.0);
+    let size = |key| parse_numeric(&resolved[key]).unwrap();
+    assert_eq!(effective_scale(&resolved), 1.0);
     let registry = |scene: &SceneGraph| {
         (
             scene.widget_registry.instances.clone(),
@@ -972,7 +1013,7 @@ async fn shipped_dock_fills_both_signed_display_capacities() {
         rect: Rect::new(0.0, 0.0, 512.0, 256.0),
         primary: true,
     };
-    let mut instance_names = Vec::new();
+    let mut instance_names: Vec<[String; 2]> = Vec::new();
     for (name, width, height, scale, capacity, admit) in [
         ("FHD", 1920, 1080, 1.0, 13, true),
         ("UHD", 3840, 2160, 1.5, 17, true),
@@ -991,6 +1032,7 @@ async fn shipped_dock_fills_both_signed_display_capacities() {
             aspects.iter().map(|(_, aspect)| *aspect),
         );
         assert_eq!(layout.capacity, capacity, "{name} at scale {scale}");
+        assert_eq!(layout.column.width, 632.0 * scale);
         assert_eq!(
             layout.scale, 1.0,
             "default dock fits without width compression"
@@ -1026,22 +1068,18 @@ async fn shipped_dock_fills_both_signed_display_capacities() {
         assert_eq!(registry(&scene), before_projection);
 
         if admit {
-            for (index, owner) in namespaces[..capacity]
-                .iter()
-                .enumerate()
-                .skip(instance_names.len())
-            {
-                let kind = &accepts[index % 2];
-                scene
-                    .publish_to_dock(kind, params[index % 2].clone(), owner, None, 0, 0)
-                    .unwrap();
-                instance_names.push(
+            for owner in &namespaces[instance_names.len()..capacity] {
+                instance_names.push(std::array::from_fn(|index| {
+                    let kind = &accepts[index];
+                    scene
+                        .publish_to_dock(kind, params[index].clone(), owner, None, 0, 0)
+                        .unwrap();
                     scene
                         .dock_instance(owner, kind)
                         .unwrap()
                         .instance_name
-                        .clone(),
-                );
+                        .clone()
+                }));
             }
             let accepted = registry(&scene);
             let version = (scene.version, scene.geometry_epoch);
@@ -1063,31 +1101,60 @@ async fn shipped_dock_fills_both_signed_display_capacities() {
             assert_eq!(registry(&scene), accepted);
         }
         assert_eq!(scene.dock_rows().len(), instance_names.len());
-        for ((row, namespace), instance) in scene
+        for ((row, namespace), instances) in scene
             .dock_rows()
             .iter()
             .zip(&namespaces)
             .zip(&instance_names)
         {
             assert_eq!(&row.namespace, namespace);
-            assert_eq!(row.widgets.len(), 1);
-            assert_eq!(&row.widgets[0].instance_name, instance);
+            assert_eq!(row.widgets.len(), instances.len());
+            for (widget, (kind, instance)) in row.widgets.iter().zip(accepts.iter().zip(instances))
+            {
+                assert_eq!(
+                    (&widget.widget_type, &widget.instance_name),
+                    (kind, instance)
+                );
+            }
         }
 
         c.prime_markdown_cache(&mut scene);
         let frame = c.build_windowed_frame(&mut scene, 512, 256);
         let drawn = &scene.overlay.widget_geometry;
-        assert_eq!(drawn.len(), capacity, "{name} drawable rows");
-        let mut bottom = layout.column.y;
-        for instance in &instance_names[..capacity] {
-            let card = drawn
-                .iter()
-                .find(|card| &card.instance_name == instance)
-                .unwrap();
-            assert!(card.bounds.is_within(&layout.column) && card.bounds.is_within(&display));
-            assert_eq!(card.bounds.height, 52.0 * scale);
-            assert!(card.bounds.y >= bottom, "{name} rows overlap or reordered");
-            bottom = card.bounds.y + card.bounds.height;
+        assert_eq!(
+            drawn.len(),
+            2 * capacity,
+            "{name} two drawable cards per row"
+        );
+        // The draw list snaps to physical pixels. The column's percentage
+        // anchor can place its top and bottom between two pixels.
+        let column = layout.column;
+        let top = column.y.floor();
+        let pixel_column = Rect::new(
+            column.x,
+            top,
+            column.width,
+            (column.y + column.height).ceil() - top,
+        );
+        let mut bottom = top;
+        for instances in &instance_names[..capacity] {
+            let [progress, countdown] = instances.each_ref().map(|instance| {
+                let bounds = drawn
+                    .iter()
+                    .find(|card| &card.instance_name == instance)
+                    .unwrap()
+                    .bounds;
+                assert!(bounds.is_within(&pixel_column) && bounds.is_within(&display));
+                assert_eq!(bounds.height, 52.0 * scale);
+                bounds
+            });
+            assert_eq!(progress.x, layout.column.x + (96.0 + 8.0) * scale);
+            assert_eq!(progress.width, 360.0 * scale);
+            assert_eq!(countdown.x, progress.x + progress.width + 8.0 * scale);
+            assert_eq!(countdown.width, 160.0 * scale);
+            assert_eq!(countdown.y, progress.y);
+            assert!(progress.y >= bottom, "{name} rows overlap or reordered");
+            bottom = progress.y + progress.height;
         }
 
         if admit {
@@ -1107,7 +1174,7 @@ async fn shipped_dock_fills_both_signed_display_capacities() {
             });
             for card in drawn {
                 let origin = (
-                    (card.bounds.x - display.x + card.bounds.width * 0.5) as u32,
+                    (card.bounds.x - display.x + card.bounds.width * 0.75) as u32,
                     (card.bounds.y - display.y + card.bounds.height * 0.5) as u32,
                 );
                 let patch = (0, 0, 12, 12);
