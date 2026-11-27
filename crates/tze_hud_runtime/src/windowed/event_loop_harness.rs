@@ -1595,6 +1595,148 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn dock_mcp_routes_follow_the_accepted_monitor() {
+        use serde_json::{Value, json};
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tze_hud_scene::{Rect, TestClock, WidgetParameterValue};
+
+        async fn call(addr: SocketAddr, name: &str, arguments: Value) -> (Value, bool) {
+            let body = json!({
+                "jsonrpc":"2.0", "id":1, "method":"tools/call", "params":{"name":name, "arguments":arguments}
+            })
+            .to_string();
+            let mut conn = tokio::net::TcpStream::connect(addr).await.unwrap();
+            let request = format!(
+                "POST / HTTP/1.0\r\nContent-Type: application/json\r\nAuthorization: Bearer dock-fixture-key\r\nContent-Length: {}\r\n\r\n{body}",
+                body.len()
+            );
+            conn.write_all(request.as_bytes()).await.unwrap();
+            let mut response = String::new();
+            tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                conn.read_to_string(&mut response),
+            )
+            .await
+            .expect("loopback MCP responds")
+            .unwrap();
+            let response: Value =
+                serde_json::from_str(response.split_once("\r\n\r\n").unwrap().1).unwrap();
+            let result = &response["result"];
+            let text = result["content"][0]["text"]
+                .as_str()
+                .expect("MCP tool result");
+            (
+                serde_json::from_str(text).unwrap(),
+                result["isError"] == true,
+            )
+        }
+
+        let cfg = super::super::WindowedConfig {
+            config_toml: Some(
+                r#"
+                [dock]
+                accepts = ["countdown", "progress-bar", "countdown"]
+                [[tabs]]
+                name = "Main"
+                "#
+                .into(),
+            ),
+            agents: tze_hud_config::agents_file::AgentsFile::default()
+                .with_agent("dock-fixture", "dock-fixture-key", &["widget:*"])
+                .directory()
+                .unwrap()
+                .shared(),
+            ..Default::default()
+        };
+        let clock = Arc::new(TestClock::new(1_000));
+        let mut hud = HeadlessEventLoopHarness::with_network(cfg, clock.clone())
+            .await
+            .unwrap();
+        let addr = hud.mcp_addr();
+        let (listed, error) = call(addr, "hud_surfaces", json!({})).await;
+        assert!(!error, "{listed}");
+        let entries = listed["surfaces"].as_array().unwrap();
+        let dock = entries
+            .iter()
+            .filter(|entry| entry["s"].as_str().unwrap().starts_with("dock:"))
+            .collect::<Vec<_>>();
+        assert_eq!(dock.len(), 2);
+        assert_eq!(dock[0]["s"], "dock:countdown");
+        assert_eq!(dock[1]["s"], "dock:progress-bar");
+        assert_eq!(dock[0]["params"]["ends_in_ms"], "deadline<=24h");
+        assert!(dock[0].get("held").is_none());
+        assert!(dock[0]["params"].get("tooltip_visible").is_none());
+        assert!(!entries.iter().any(|entry| entry["s"] == "zone:dock"));
+
+        let label = "WWWWWWWWWWWWWWWWWWWWWWWA";
+        let publish = json!({
+            "surface":"dock:countdown","params":{"label":label, "ends_in_ms":30_000}
+        });
+        let version = {
+            let scene = hud.scene();
+            assert!(scene.dock_projection().is_none());
+            scene.version
+        };
+        let (full, error) = call(addr, "hud_publish", publish.clone()).await;
+        assert!(error);
+        assert_eq!(
+            full,
+            json!({"code":"CONTENT_REJECTED", "hint":"dock full; show this in a card"})
+        );
+        {
+            let scene = hud.scene();
+            assert_eq!(scene.version, version);
+            assert!(scene.leases.is_empty());
+            assert!(scene.dock_rows().is_empty());
+        }
+
+        hud.set_display_topology_with_scales(vec![(
+            tze_hud_compositor::DisplayRect {
+                name: "PRIMARY".into(),
+                rect: Rect::new(0.0, 0.0, 1920.0, 1080.0),
+                primary: true,
+            },
+            "MAIN".into(),
+            1.0,
+        )]);
+        let appearance = hud.app.state.appearance.as_ref().unwrap().clone();
+        assert!(appearance.apply_display_report().await);
+        let (published, error) = call(addr, "hud_publish", publish).await;
+        assert!(!error, "{published}");
+        assert_eq!(
+            published["expires_in_ms"],
+            tze_hud_config::dock::DEFAULT_AUTO_CLEAR_MS
+        );
+        let drawn = published["clipped"]["label"]
+            .as_u64()
+            .expect("selected compact label is clipped");
+        assert!((1..label.len() as u64).contains(&drawn), "{published}");
+        let (id, deadline) = {
+            let scene = hud.scene();
+            let instance = scene.dock_instance("dock-fixture", "countdown").unwrap();
+            assert_eq!(
+                instance.current_params["label"],
+                WidgetParameterValue::String(label.into())
+            );
+            (instance.id, instance.current_params["ends_in_ms"].clone())
+        };
+
+        clock.advance(500);
+        let (patched, error) = call(
+            addr,
+            "hud_publish",
+            json!({"surface":"dock:countdown","params":{"severity":"warning"}}),
+        )
+        .await;
+        assert!(!error, "{patched}");
+        assert!(patched.get("clipped").is_none(), "{patched}");
+        let scene = hud.scene();
+        let instance = scene.dock_instance("dock-fixture", "countdown").unwrap();
+        assert_eq!(instance.id, id);
+        assert_eq!(instance.current_params["ends_in_ms"], deadline);
+    }
+
+    #[tokio::test]
     async fn dock_admission_follows_the_accepted_monitor_and_committed_appearance() {
         use tze_hud_compositor::DisplayRect;
         use tze_hud_scene::dock::DockPublishError;
