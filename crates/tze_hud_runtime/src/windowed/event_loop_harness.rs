@@ -143,6 +143,7 @@ impl WindowedRuntimeState {
             overlay_capturing: false,
             static_hit_regions: Vec::new(),
             widget_hover_trackers: HashMap::new(),
+            dock_tooltip: super::dock_tooltip::DockTooltipVisit::default(),
             pending_widget_svgs: Vec::new(),
             startup_diagnostics: None,
             text_fit: Default::default(),

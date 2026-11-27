@@ -267,6 +267,10 @@ pub struct DockPassiveColumn {
 }
 
 impl DockPassiveColumn {
+    pub fn shares_attachment(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.contact, &other.contact)
+    }
+
     pub fn observe(&self, pointer: DockPointer) -> bool {
         let old = self.contact.load(Ordering::Relaxed);
         let contact = pointer as u64;

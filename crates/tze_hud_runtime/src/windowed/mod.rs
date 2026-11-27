@@ -183,6 +183,7 @@ impl Drop for FramePacingTimerGuard {
 mod answer_focus;
 mod config;
 mod displays;
+mod dock_tooltip;
 mod frame_work;
 #[cfg(target_os = "windows")]
 mod global_hotkey;
@@ -412,6 +413,7 @@ struct WindowedRuntimeState {
     static_hit_regions: Vec<HitRegion>,
     /// Runtime-managed widget hover trackers keyed by widget instance_name.
     widget_hover_trackers: std::collections::HashMap<String, WidgetHoverTracker>,
+    dock_tooltip: dock_tooltip::DockTooltipVisit,
     /// Pending widget SVG assets to register with the compositor after
     /// `init_widget_renderer` is called. Consumed once during first `resumed()`.
     pending_widget_svgs: Vec<crate::widget_startup::WidgetSvgAsset>,
@@ -830,6 +832,16 @@ impl WinitApp {
             .scheduled_main_deadline
             .filter(|deadline| deadline.at <= now)
         else {
+            if self
+                .state
+                .dock_tooltip
+                .next_due()
+                .is_some_and(|due| due <= now)
+            {
+                self.state.wake.counters().record_main_wakeup(
+                    crate::idle_efficiency::RuntimeWakeupSource::AnimationDeadline,
+                );
+            }
             return;
         };
         self.state.scheduled_main_deadline = None;
@@ -1041,9 +1053,13 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         if std::mem::take(&mut self.state.cursor_entry.tick) {
             if let CursorEntryTurn::Quiet { next } = self.cursor_entry_turn() {
                 self.state.scheduled_main_deadline = next;
-                event_loop.set_control_flow(next.map_or(ControlFlow::Wait, |deadline| {
-                    ControlFlow::WaitUntil(deadline.at)
-                }));
+                let wake_at = next
+                    .into_iter()
+                    .map(|deadline| deadline.at)
+                    .chain(self.state.dock_tooltip.next_due())
+                    .min();
+                event_loop
+                    .set_control_flow(wake_at.map_or(ControlFlow::Wait, ControlFlow::WaitUntil));
                 return;
             }
         }
@@ -1075,7 +1091,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         // The cursor follows controls that appear or leave under a resting pointer.
         self.update_portal_cursor_icon();
         let portal_drain = self.settle_scene_work();
-        let settled_scene_changed = portal_drain.scene_changed() || dock_contact_changed;
+        let mut settled_scene_changed = portal_drain.scene_changed() || dock_contact_changed;
 
         // ── Per-frame ticks + present poll ────────────────────
         // Moved here from the `RedrawRequested` handler so the main loop no
@@ -1091,6 +1107,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         self.maybe_present_frame();
 
         let now = Instant::now();
+        settled_scene_changed |= self.settle_dock_tooltip(now);
         let counters = Arc::clone(self.state.wake.counters());
         let quiescent_completion = self
             .state
@@ -1239,10 +1256,13 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
             .quiescent_efficiency
             .as_ref()
             .and_then(WindowedQuiescentEfficiencyRunState::next_deadline);
-        let control_flow = match (
-            control_flow_for_deadlines(now, deadlines),
-            quiescent_deadline,
-        ) {
+        // Dwell is main-owned. Only a tooltip that can actually show/hide
+        // needs to take the normal post-settle compositor wake.
+        let main_only = quiescent_deadline
+            .into_iter()
+            .chain(self.state.dock_tooltip.next_due())
+            .min();
+        let control_flow = match (control_flow_for_deadlines(now, deadlines), main_only) {
             (ControlFlow::Wait, Some(deadline)) => ControlFlow::WaitUntil(deadline),
             (ControlFlow::WaitUntil(main_deadline), Some(deadline)) => {
                 ControlFlow::WaitUntil(main_deadline.min(deadline))
@@ -1578,6 +1598,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         self.state.resize_grip_hover_state = Arc::clone(&compositor.resize_grip_hover_state);
         self.state.tile_close_hover_state = Arc::clone(&compositor.tile_close_hover_state);
         self.state.drag_handle_hover_state = Arc::clone(&compositor.drag_handle_hover_state);
+        self.state.dock_tooltip.output = Arc::clone(&compositor.dock_tooltip);
         // Reverse channel: read the compositor's per-frame wrapped-line layout for
         // soft-wrap vertical caret movement.
         self.state.composer_visual_layout = Arc::clone(&compositor.composer_visual_layout);
@@ -1964,6 +1985,17 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                                         crate::idle_efficiency::RuntimeWakeupSource::TtlDeadline,
                                     )
                                 });
+                            if let Some(build) = &render {
+                                // A secondary retry can be the first successful
+                                // compact draw. Retain unrelated hit geometry.
+                                let snapshot = hit_test_snapshot.load();
+                                if snapshot.dock_hover.is_some() || build.dock_hover().is_some() {
+                                    let mut next = (**snapshot).clone();
+                                    next.dock_hover = build.dock_hover().cloned();
+                                    next.dock_passive_column = scene.dock_passive_column().cloned();
+                                    hit_test_snapshot.store(Arc::new(next));
+                                }
+                            }
                             let question_wakes = scene.take_notification_wait_notifiers();
                             drop(scene);
                             for wake in question_wakes {
@@ -2050,7 +2082,8 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                             if match_presented_windows {
                                 build.bind_notification_candidates(&scene);
                             }
-                            let new_snap = crate::pipeline::HitTestSnapshot::from_scene(&scene);
+                            let mut new_snap = crate::pipeline::HitTestSnapshot::from_scene(&scene);
+                            new_snap.dock_hover = build.dock_hover().cloned();
                             hit_test_snapshot.store(Arc::new(new_snap));
                             let built_scene_version = scene.version;
                             let built_geometry_epoch = scene.geometry_epoch;
@@ -3388,6 +3421,7 @@ impl WindowedRuntime {
             overlay_capturing: false,
             static_hit_regions: Vec::new(),
             widget_hover_trackers: std::collections::HashMap::new(),
+            dock_tooltip: dock_tooltip::DockTooltipVisit::default(),
             pending_widget_svgs,
             startup_diagnostics,
             text_fit,

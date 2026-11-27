@@ -1,19 +1,85 @@
 //! Widget renderer methods for the compositor.
 
-use tze_hud_scene::WidgetParameterValue;
-use tze_hud_scene::dock::DockWidgetSlot;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
+
+use tze_hud_scene::dock::{DockPassiveColumn, DockWidgetSlot};
 use tze_hud_scene::graph::SceneGraph;
 use tze_hud_scene::types::{FontFamily, RenderingPolicy, TextOverflow};
 use tze_hud_scene::widget_deadline::widget_params_at;
 use tze_hud_scene::{DegradationLevel, Rect};
+use tze_hud_scene::{SceneId, WidgetParameterValue};
 
 use crate::display::{DisplayRect, FrameTarget};
+use crate::pipeline::{RoundedRectBorder, RoundedRectDrawCmd};
 use crate::text::TextItem;
 use crate::widget::{
     WidgetDrawGeometry, WidgetDrawQuad, WidgetRenderer, same_dock_presentation, snap_composite_rect,
 };
 
 use super::token_colors::{canonical_color, canonical_number, resolve_token_color};
+
+/// The visible label identity and exact successful upload of one compact card.
+#[derive(Clone, Debug)]
+pub struct DockHoverCard {
+    pub instance: SceneId,
+    pub label: Arc<str>,
+    pub bounds: Rect,
+    pub delay: Duration,
+    pub pixels: [u8; 32],
+}
+
+impl DockHoverCard {
+    pub fn same_visit(&self, other: &Self) -> bool {
+        self.same_place(other) && self.label == other.label
+    }
+
+    fn same_place(&self, other: &Self) -> bool {
+        self.instance == other.instance && self.bounds == other.bounds
+    }
+}
+
+/// Captured from drawable texture entries for one verified display. The
+/// swapchain acknowledges this receipt only when the image actually presents.
+#[derive(Debug)]
+pub struct DockHoverFrame {
+    pub column: DockPassiveColumn,
+    pub cards: Vec<Arc<DockHoverCard>>,
+}
+
+/// Ties actual presented pixels to the lifetime of one drawable.
+#[derive(Clone, Debug)]
+pub struct PresentedDockHover {
+    pub frame: Arc<DockHoverFrame>,
+    pub surface_epoch: Arc<AtomicBool>,
+}
+
+impl DockHoverFrame {
+    pub fn presented_equivalent(&self, column: &DockPassiveColumn, card: &DockHoverCard) -> bool {
+        self.column.shares_attachment(column)
+            && self.cards.iter().any(|painted| {
+                painted.same_visit(card)
+                    || (painted.same_place(card) && painted.pixels == card.pixels)
+            })
+    }
+}
+
+#[derive(Debug)]
+pub struct DockTooltipRequest {
+    pub column: DockPassiveColumn,
+    pub card: Arc<DockHoverCard>,
+    pub surface_epoch: Arc<AtomicBool>,
+    /// Verified available rectangle in Scene pixels.
+    pub work_area: Rect,
+}
+
+pub type DockTooltipHandle = Arc<arc_swap::ArcSwapOption<DockTooltipRequest>>;
+
+pub(super) struct DockTooltipPaint {
+    pub(super) backdrop: RoundedRectDrawCmd,
+    pub(super) text: TextItem,
+}
 
 #[derive(Default)]
 pub(super) struct WidgetDraws {
@@ -25,6 +91,19 @@ struct DockDraws {
     display: DisplayRect,
     quads: Vec<WidgetDrawQuad>,
     captions: Vec<TextItem>,
+    hover: Option<Arc<DockHoverFrame>>,
+    tooltip: Option<DockTooltipPaint>,
+}
+
+impl DockDraws {
+    fn matches(&self, target: &FrameTarget, display: Option<&str>) -> bool {
+        self.display.rect == target_rect(target)
+            && self.display.primary == target.primary
+            && match display {
+                Some(name) => name == self.display.name,
+                None => target.primary,
+            }
+    }
 }
 
 fn target_rect(target: &FrameTarget) -> Rect {
@@ -47,17 +126,92 @@ impl WidgetDraws {
         } else {
             &[]
         };
-        let dock = self.dock.as_ref().filter(|dock| {
-            dock.display.rect == target_rect(target)
-                && dock.display.primary == target.primary
-                && match display {
-                    Some(name) => name == dock.display.name,
-                    None => target.primary,
-                }
-        });
+        let dock = self
+            .dock
+            .as_ref()
+            .filter(|dock| dock.matches(target, display));
         match dock {
             Some(dock) => ([primary, &dock.quads], &dock.captions),
             None => ([primary, &[]], &[]),
+        }
+    }
+
+    pub(super) fn tooltip_for_target(
+        &self,
+        target: &FrameTarget,
+        display: Option<&str>,
+    ) -> Option<&DockTooltipPaint> {
+        self.dock
+            .as_ref()
+            .filter(|dock| dock.matches(target, display))?
+            .tooltip
+            .as_ref()
+    }
+
+    pub(super) fn dock_hover(&self) -> Option<&Arc<DockHoverFrame>> {
+        self.dock.as_ref()?.hover.as_ref()
+    }
+
+    pub(super) fn presented_dock_hover(
+        &self,
+        target: &FrameTarget,
+        display: Option<&str>,
+    ) -> Option<Arc<DockHoverFrame>> {
+        self.dock
+            .as_ref()
+            .filter(|dock| dock.matches(target, display))?
+            .hover
+            .clone()
+    }
+
+    fn collect_dock_hover(&mut self, scene: &SceneGraph, wr: &WidgetRenderer) {
+        let Some(dock) = &mut self.dock else { return };
+        let Some(column) = scene.dock_passive_column() else {
+            return;
+        };
+        if column.target != dock.display.name || column.display != dock.display.rect {
+            return;
+        }
+        let cards: Vec<_> = dock
+            .quads
+            .iter()
+            .filter_map(|quad| {
+                let (entry, mut bounds) =
+                    wr.drawable_widget(quad, dock.display.rect.width, dock.display.rect.height)?;
+                let uploaded_label = entry.clipped_compact_label.as_ref()?;
+                let instance = scene.widget_registry.instances.get(&quad.instance_name)?;
+                let def = scene
+                    .widget_registry
+                    .get_definition(&instance.widget_type_name)?;
+                let hover = entry
+                    .dock_presentation
+                    .as_ref()?
+                    .hover_behavior
+                    .as_ref()
+                    .or(def.hover_behavior.as_ref())?;
+                let WidgetParameterValue::String(label) = instance.current_params.get("label")?
+                else {
+                    return None;
+                };
+                if entry.dirty || uploaded_label.as_ref() != label.as_str() {
+                    return None;
+                }
+                bounds.x += dock.display.rect.x;
+                bounds.y += dock.display.rect.y;
+                Some(Arc::new(DockHoverCard {
+                    instance: instance.id,
+                    label: Arc::clone(uploaded_label),
+                    bounds,
+                    delay: Duration::from_millis(u64::from(hover.delay_ms)),
+                    pixels: *entry.dock_pixels?.as_bytes(),
+                }))
+            })
+            .collect();
+        if !cards.is_empty() {
+            dock.hover = Some(Arc::new(DockHoverFrame {
+                column: column.clone(),
+                cards,
+            }));
         }
     }
 
@@ -99,6 +253,58 @@ impl WidgetDraws {
 }
 
 impl super::Compositor {
+    pub fn poll_dock_tooltip(&mut self) -> bool {
+        let request = self.dock_tooltip.load_full();
+        if match (&request, &self.dock_tooltip_current) {
+            (Some(next), Some(old)) => Arc::ptr_eq(next, old),
+            (None, None) => true,
+            _ => false,
+        } {
+            return false;
+        }
+        self.dock_tooltip_current = request;
+        true
+    }
+
+    pub(super) fn prepare_dock_tooltip(&mut self, scene: &SceneGraph, widgets: &mut WidgetDraws) {
+        let Some(wr) = self.widget_renderer.as_ref() else {
+            return;
+        };
+        widgets.collect_dock_hover(scene, wr);
+        let Some(dock) = &mut widgets.dock else {
+            return;
+        };
+        let Some(hover) = &dock.hover else { return };
+        let Some(request) = self.dock_tooltip_current.as_ref() else {
+            return;
+        };
+        if !request.surface_epoch.load(Ordering::Acquire)
+            || !hover.column.shares_attachment(&request.column)
+            || !hover.cards.iter().any(|card| request.card.same_visit(card))
+        {
+            return;
+        }
+        let Some(projection) = scene.dock_projection() else {
+            return;
+        };
+        let Some(rasterizer) = self.text_rasterizer.as_mut() else {
+            return;
+        };
+        let Some((mut tooltip, fill, border)) = layout_dock_tooltip(
+            request,
+            projection.pixels_per_dp,
+            &self.token_map,
+            rasterizer,
+        ) else {
+            return;
+        };
+        tooltip.backdrop.color = self.gpu_color(fill);
+        if let (Some(style), Some(color)) = (&mut tooltip.backdrop.border, border) {
+            style.color = self.gpu_color(color);
+        }
+        dock.tooltip = Some(tooltip);
+    }
+
     /// Settle dock geometry before the ordinary frame gate, using the existing
     /// exit motion. Headless has no pointer and can always settle.
     pub fn advance_dock_compaction(&self, scene: &mut SceneGraph, windowed: bool) -> bool {
@@ -330,6 +536,8 @@ impl super::Compositor {
                 display: display.clone(),
                 quads: Vec::new(),
                 captions: self.dock_caption_items(scene, display),
+                hover: None,
+                tooltip: None,
             });
         let countdowns_paused = self.safe_mode_overlay || scene.widget_time_paused();
         let wr = match &mut self.widget_renderer {
@@ -561,4 +769,122 @@ impl super::Compositor {
         }
         draws
     }
+}
+
+fn layout_dock_tooltip(
+    request: &DockTooltipRequest,
+    scale: f32,
+    tokens: &std::collections::HashMap<String, String>,
+    rasterizer: &mut crate::text::TextRasterizer,
+) -> Option<(
+    DockTooltipPaint,
+    tze_hud_scene::Rgba,
+    Option<tze_hud_scene::Rgba>,
+)> {
+    use glyphon::{Attrs, Buffer, Family, Metrics, Shaping, Weight};
+
+    let area = request.work_area;
+    let display = request.column.display;
+    if !area.is_within(&display) || area.width <= 0.0 || area.height <= 0.0 {
+        return None;
+    }
+    let number = |key| {
+        tokens
+            .get(key)
+            .and_then(|value| tze_hud_config::tokens::parse_numeric(value))
+            .filter(|value| value.is_finite() && *value > 0.0)
+            .unwrap_or_else(|| canonical_number(key))
+    };
+    let color = |key| resolve_token_color(tokens, key).or_else(|| canonical_color(key));
+    let padding = number("space.s") * scale;
+    let size = (number("type.body.m.size") * scale).clamp(6.0, 200.0);
+    let line = f32::max(number("type.body.m.line_height") * scale, size);
+    if !padding.is_finite() || !line.is_finite() || !size.is_finite() {
+        return None;
+    }
+    let weight = (number("type.body.m.weight") as u16).clamp(100, 900);
+    let (font, family) = match tokens.get("type.body.m.family").map(String::as_str) {
+        Some("monospace") => (FontFamily::SystemMonospace, Family::Monospace),
+        Some("serif") => (FontFamily::SystemSerif, Family::Serif),
+        _ => (FontFamily::SystemSansSerif, Family::SansSerif),
+    };
+    let label = request.card.label.as_ref();
+    let natural = rasterizer
+        .measure_single_line(label, size, font, weight)
+        .ceil()
+        + 2.0 * padding
+        + 2.0;
+    let column = request.column.column;
+    let outer_edge = column.x - padding;
+    let inside_edge = column.x + column.width + padding;
+    let left_room = (outer_edge - area.x).min(area.width);
+    let right_room = (area.x + area.width - inside_edge).min(area.width);
+    let outward = left_room >= natural;
+    let room = if outward { left_room } else { right_room };
+    let width = natural.min(room);
+    let inner_width = width - 2.0 * padding;
+    if inner_width < size {
+        return None;
+    }
+
+    let fonts = rasterizer.font_system_mut();
+    let mut wrapped = Buffer::new(fonts, Metrics::new(size, line));
+    wrapped.set_size(fonts, Some(inner_width), None);
+    wrapped.set_wrap(fonts, crate::text::WRAPPED_TEXT_WRAP);
+    wrapped.set_text(
+        fonts,
+        label,
+        Attrs::new().family(family).weight(Weight(weight)),
+        Shaping::Advanced,
+    );
+    wrapped.shape_until_scroll(fonts, false);
+    let height = wrapped.layout_runs().count().max(1) as f32 * line + 2.0 * padding;
+    if height > area.height {
+        return None;
+    }
+    let x = (if outward {
+        outer_edge - width
+    } else {
+        inside_edge
+    })
+    .clamp(area.x, area.x + area.width - width)
+        - display.x;
+    let y = (request.card.bounds.y + (request.card.bounds.height - height) * 0.5)
+        .clamp(area.y, area.y + area.height - height)
+        - display.y;
+    let mut fill = color("color.surface.container.high")?;
+    fill.a *= number("opacity.surface").clamp(0.0, 1.0);
+    let border = color("color.outline.variant");
+    let backdrop = RoundedRectDrawCmd {
+        x,
+        y,
+        width,
+        height,
+        radius: number("shape.m") * scale,
+        color: fill.to_array(),
+        border: border.map(|border| RoundedRectBorder {
+            width: number("stroke.border.width") * scale,
+            color: border.to_array(),
+        }),
+        clip: None,
+    };
+    let mut text = TextItem::from_zone_policy(
+        label,
+        x,
+        y,
+        width,
+        height,
+        &RenderingPolicy {
+            font_family: Some(font),
+            font_size_px: Some(size),
+            font_weight: Some(weight),
+            text_color: color("color.on_surface"),
+            margin_px: Some(padding),
+            ..Default::default()
+        },
+        1.0,
+        1.0,
+    );
+    text.line_height_multiplier = line / size;
+    Some((DockTooltipPaint { backdrop, text }, fill, border))
 }

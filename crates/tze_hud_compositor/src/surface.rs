@@ -52,11 +52,29 @@ struct SwapchainSlot {
     pending: Option<wgpu::SurfaceTexture>,
     /// The matching candidates rendered into this exact pending texture.
     notification_candidates: Vec<tze_hud_scene::SceneId>,
+    dock_hover: Option<std::sync::Arc<crate::renderer::DockHoverFrame>>,
+    dock_surface_epoch: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// `true` from the start of `acquire_frame()` until the `CompositorFrame`
     /// guard is dropped (after `queue.submit()`). While set, the compositor
     /// holds a `TextureView` referencing `pending`, so the texture MUST NOT be
     /// presented (taken/destroyed) or invalidated by a reconfigure.
     encoding: bool,
+}
+
+fn invalidate_dock_hover(
+    slot: &mut SwapchainSlot,
+    presented: &arc_swap::ArcSwapOption<crate::renderer::PresentedDockHover>,
+) {
+    if slot.dock_hover.take().is_some() || presented.load().is_some() {
+        invalidate_dock_surface_epoch(slot);
+        presented.store(None);
+    }
+}
+
+fn invalidate_dock_surface_epoch(slot: &mut SwapchainSlot) {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    slot.dock_surface_epoch.store(false, Ordering::Release);
+    slot.dock_surface_epoch = std::sync::Arc::new(AtomicBool::new(true));
 }
 
 /// RAII guard that marks the end of the compositor's encode→submit critical
@@ -73,6 +91,7 @@ struct SwapchainSlot {
 struct EncodingGuard {
     slot: std::sync::Arc<std::sync::Mutex<SwapchainSlot>>,
     done: std::sync::Arc<std::sync::Condvar>,
+    presented_dock: std::sync::Arc<arc_swap::ArcSwapOption<crate::renderer::PresentedDockHover>>,
 }
 
 impl Drop for EncodingGuard {
@@ -105,6 +124,29 @@ pub struct CompositorFrame {
 }
 
 impl CompositorFrame {
+    pub(crate) fn record_dock_hover(
+        &self,
+        hover: Option<std::sync::Arc<crate::renderer::DockHoverFrame>>,
+    ) {
+        // Acquire already made an empty receipt explicit for this encode.
+        if hover.is_some()
+            && let Some(guard) = self._guard.downcast_ref::<EncodingGuard>()
+        {
+            guard
+                .slot
+                .lock()
+                .expect("swapchain lock poisoned")
+                .dock_hover = hover;
+        }
+    }
+
+    pub(crate) fn invalidate_dock_hover(&self) {
+        if let Some(guard) = self._guard.downcast_ref::<EncodingGuard>() {
+            let mut slot = guard.slot.lock().expect("swapchain lock poisoned");
+            invalidate_dock_hover(&mut slot, &guard.presented_dock);
+        }
+    }
+
     pub(crate) fn record_notification_candidates(&self, ids: Vec<tze_hud_scene::SceneId>) {
         if !ids.is_empty()
             && let Some(guard) = self._guard.downcast_ref::<EncodingGuard>()
@@ -361,6 +403,7 @@ pub struct WindowSurface {
     /// Windowed benchmarks use this as the presentation acknowledgement; a
     /// compositor-side build or submit attempt is not itself a displayed frame.
     presented_frame_count: std::sync::atomic::AtomicU64,
+    presented_dock: std::sync::Arc<arc_swap::ArcSwapOption<crate::renderer::PresentedDockHover>>,
     /// Rate limit for acquire-timeout logs: an occluded or asleep window
     /// times out on every attempt.
     timeout_log: LogThrottle,
@@ -483,12 +526,11 @@ pub(crate) fn gpu_queue_lock() -> std::sync::MutexGuard<'static, ()> {
 impl Drop for WindowSurface {
     fn drop(&mut self) {
         // An acquired-but-unpresented texture must go before its swapchain.
-        let pending = self
-            .swapchain
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .pending
-            .take();
+        let pending = {
+            let mut slot = self.swapchain.lock().unwrap_or_else(|e| e.into_inner());
+            invalidate_dock_hover(&mut slot, &self.presented_dock);
+            slot.pending.take()
+        };
         let _queue = gpu_queue_lock();
         drop(pending);
         // SAFETY: dropped exactly once, here; `self.surface` is not used again.
@@ -515,6 +557,8 @@ impl WindowSurface {
             swapchain: std::sync::Arc::new(std::sync::Mutex::new(SwapchainSlot {
                 pending: None,
                 notification_candidates: Vec::new(),
+                dock_hover: None,
+                dock_surface_epoch: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
                 encoding: false,
             })),
             swapchain_done: std::sync::Arc::new(std::sync::Condvar::new()),
@@ -524,6 +568,7 @@ impl WindowSurface {
             surface_recovery: std::sync::Mutex::new(SurfaceRecoveryState::default()),
             pending_resize: std::sync::atomic::AtomicU64::new(0),
             presented_frame_count: std::sync::atomic::AtomicU64::new(0),
+            presented_dock: std::sync::Arc::default(),
             timeout_log: LogThrottle::new(ACQUIRE_TIMEOUT_LOG_INTERVAL),
         }
     }
@@ -555,6 +600,19 @@ impl WindowSurface {
     pub fn presented_frame_count(&self) -> u64 {
         self.presented_frame_count
             .load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    pub fn presented_dock_hover(
+        &self,
+    ) -> Option<std::sync::Arc<crate::renderer::PresentedDockHover>> {
+        if self
+            .pending_resize
+            .load(std::sync::atomic::Ordering::Acquire)
+            != 0
+        {
+            return None;
+        }
+        self.presented_dock.load_full()
     }
 
     /// Attempt the recovery transition queued by a previous acquire failure.
@@ -662,6 +720,7 @@ impl WindowSurface {
                     break;
                 }
             }
+            invalidate_dock_hover(&mut slot, &self.presented_dock);
             // Only clear (drop) the pending texture if no encode references it.
             if !slot.encoding {
                 let _ = slot.pending.take();
@@ -754,7 +813,22 @@ impl WindowSurface {
 
         if let Some(texture) = slot.pending.take() {
             let _queue = gpu_queue_lock();
+            // A panic while presenting must not leave the prior card authorized.
+            let was_presented = self.presented_dock.load().is_some();
+            if was_presented {
+                self.presented_dock.store(None);
+            }
             texture.present();
+            if let Some(frame) = slot.dock_hover.take() {
+                self.presented_dock.store(Some(std::sync::Arc::new(
+                    crate::renderer::PresentedDockHover {
+                        frame,
+                        surface_epoch: slot.dock_surface_epoch.clone(),
+                    },
+                )));
+            } else if was_presented {
+                invalidate_dock_surface_epoch(&mut slot);
+            }
             self.presented_frame_count
                 .fetch_add(1, std::sync::atomic::Ordering::Release);
             (
@@ -784,12 +858,15 @@ impl WindowSurface {
         let slot = std::sync::Arc::new(std::sync::Mutex::new(SwapchainSlot {
             pending: None,
             notification_candidates: Vec::new(),
+            dock_hover: None,
+            dock_surface_epoch: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
             encoding: true,
         }));
         let done = std::sync::Arc::new(std::sync::Condvar::new());
         let guard = EncodingGuard {
             slot: slot.clone(),
             done: done.clone(),
+            presented_dock: std::sync::Arc::default(),
         };
         (
             PresentAvailability {
@@ -820,6 +897,7 @@ impl WindowSurface {
         let guard = EncodingGuard {
             slot: self.swapchain.clone(),
             done: self.swapchain_done.clone(),
+            presented_dock: self.presented_dock.clone(),
         };
         Some(CompositorFrame {
             view,
@@ -1022,6 +1100,7 @@ impl CompositorSurface for WindowSurface {
         // A reused image takes its receipt from the newest successful
         // encode. An incomplete encode cannot acknowledge the old receipt.
         slot.notification_candidates.clear();
+        slot.dock_hover = None;
         slot.encoding = true;
         let acquisition = SurfaceFrameAcquisition::from_pending_surface(slot.pending.is_some());
 
@@ -1061,6 +1140,7 @@ impl CompositorSurface for WindowSurface {
         match view {
             Some(view) => self.finish_frame(slot, view, acquisition),
             None => {
+                invalidate_dock_hover(&mut slot, &self.presented_dock);
                 // Skip this frame: close the critical section under the held
                 // lock and wake any waiter (present/reconfigure) before
                 // releasing it. `slot` is dropped on return.
@@ -1400,12 +1480,15 @@ mod tests {
         let slot = Arc::new(Mutex::new(SwapchainSlot {
             pending: None,
             notification_candidates: Vec::new(),
+            dock_hover: None,
+            dock_surface_epoch: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
             encoding: true,
         }));
         let done = Arc::new(Condvar::new());
         let guard = EncodingGuard {
             slot: slot.clone(),
             done: done.clone(),
+            presented_dock: Arc::default(),
         };
         let availability = PresentAvailability {
             slot: slot.clone(),

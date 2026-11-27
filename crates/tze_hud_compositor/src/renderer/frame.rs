@@ -135,6 +135,10 @@ struct NotificationPresentation {
 }
 
 impl WindowedFrameBuild {
+    pub fn dock_hover(&self) -> Option<&std::sync::Arc<super::DockHoverFrame>> {
+        self.widgets.dock_hover()
+    }
+
     /// Bind the compositor's just-built card geometry to this frame before
     /// releasing the scene lock. Only candidates with a caption can match.
     pub fn bind_notification_candidates(&mut self, scene: &SceneGraph) {
@@ -666,7 +670,7 @@ impl Compositor {
         // SVG rasterization can be slow; if a resize event arrives while we hold
         // the surface texture, the texture is destroyed and queue.submit panics.
         // Kept in the build phase (under the lock) since it reads scene state.
-        let widgets = self.prepare_widget_draws(scene, self.degradation_level, surf_w, surf_h);
+        let mut widgets = self.prepare_widget_draws(scene, self.degradation_level, surf_w, surf_h);
         telemetry.widget_rasterized = self
             .widget_renderer
             .as_ref()
@@ -687,6 +691,7 @@ impl Compositor {
             scene,
             Some(FrameTarget::primary(surf_w, surf_h)),
         );
+        self.prepare_dock_tooltip(scene, &mut widgets);
 
         // ── Keyboard focus ring (chrome layer) ───────────────────
         let mut focus_ring_vertices: Vec<RectVertex> = Vec::new();
@@ -847,6 +852,11 @@ impl Compositor {
                 self.device.poll(wgpu::Maintain::Wait);
             }))
         });
+        if present_result.is_ok() && signature_current {
+            frame.record_dock_hover(build.widgets.presented_dock_hover(target, display));
+        } else {
+            frame.invalidate_dock_hover();
+        }
         if present_result.is_ok() && !build.notification_candidates.is_empty() {
             frame.record_notification_candidates(
                 build
@@ -997,6 +1007,22 @@ impl Compositor {
     /// or control panel. Standalone widgets and the system card belong to
     /// the primary; the dock belongs to its verified target.
     fn target_view<'a>(
+        &self,
+        build: &'a WindowedFrameBuild,
+        target: &FrameTarget,
+        display: Option<&str>,
+    ) -> TargetView<'a> {
+        let mut view = self.target_view_base(build, target, display);
+        if let Some(tooltip) = build.widgets.tooltip_for_target(target, display) {
+            view.affordance_items.to_mut().push(tooltip.text.clone());
+            view.affordance_rects
+                .to_mut()
+                .push(tooltip.backdrop.clone());
+        }
+        view
+    }
+
+    fn target_view_base<'a>(
         &self,
         build: &'a WindowedFrameBuild,
         target: &FrameTarget,

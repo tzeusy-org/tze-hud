@@ -136,6 +136,9 @@ impl FrameTurnState {
             // The drain consumes one-shot echo/blur/hover observations. Keep
             // their repaint owed across capture, lock misses and failed submits.
             self.local_repaint_pending |= renderer.drain_local_composer_and_needs_render();
+            if request.windowed_dock {
+                self.local_repaint_pending |= renderer.poll_dock_tooltip();
+            }
             self.widget_repaint_pending &= scene.widgets_shown() && !scene.widget_time_paused();
             self.widget_repaint_pending |= renderer.widget_deadline_needs_render(scene);
             needs_render = frame_needs_render(
@@ -248,6 +251,7 @@ pub struct HitTestSnapshot {
     pub notification_reveals: Vec<tze_hud_scene::graph::overlay::NotificationRevealRegion>,
     pub notification_reveal_panel: Option<tze_hud_scene::graph::overlay::NotificationRevealPanel>,
     pub dock_passive_column: Option<tze_hud_scene::dock::DockPassiveColumn>,
+    pub dock_hover: Option<Arc<tze_hud_compositor::renderer::DockHoverFrame>>,
 }
 
 /// One entry in the hit-test snapshot.
@@ -303,6 +307,7 @@ impl HitTestSnapshot {
             notification_reveals: Vec::new(),
             notification_reveal_panel: None,
             dock_passive_column: None,
+            dock_hover: None,
         }
     }
 
@@ -378,6 +383,7 @@ impl HitTestSnapshot {
             notification_reveals: scene.overlay.notification_reveal_regions.clone(),
             notification_reveal_panel: scene.overlay.notification_reveal_panel,
             dock_passive_column: scene.dock_passive_column().cloned(),
+            dock_hover: None,
         }
     }
 

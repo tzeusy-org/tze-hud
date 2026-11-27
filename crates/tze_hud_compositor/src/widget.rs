@@ -1847,6 +1847,8 @@ pub struct WidgetTextureEntry {
     pub(crate) dock_presentation: Option<Arc<DockPresentation>>,
     /// Fingerprint of the last successful RGBA upload for a dock-owned instance.
     pub(crate) dock_pixels: Option<blake3::Hash>,
+    /// Full label when the last successful compact upload drew a clipped prefix.
+    pub(crate) clipped_compact_label: Option<std::sync::Arc<str>>,
     /// Animation state: start time, duration, starting params, target params.
     pub(crate) animation: Option<WidgetAnimationState>,
 }
@@ -2756,6 +2758,26 @@ pub fn rasterize_svg_layers(
     rasterize_widget_render_plan(&plan, param_constraints, params, pixel_width, pixel_height)
 }
 
+fn rasterize_compact_countdown(
+    plan: &WidgetRenderPlan,
+    constraints: &HashMap<String, (f32, f32)>,
+    params: &HashMap<String, WidgetParameterValue>,
+    width: u32,
+    height: u32,
+) -> Option<(tiny_skia::Pixmap, bool)> {
+    let [layer] = plan.layers.as_slice() else {
+        return None;
+    };
+    let prepared =
+        compact_countdown::prepare(&layer.svg_text, &layer.bindings, constraints, params)?;
+    let mut raster = None;
+    composite_layer(
+        &mut raster,
+        RasterizedSvgLayer::Shared(rasterize_cached_text_svg(&prepared.svg, width, height)?),
+    );
+    Some((raster?, prepared.clipped))
+}
+
 /// Rasterize a retained widget render plan.
 ///
 /// Static layers use the static layer cache, bound layers use a digest of the
@@ -2769,25 +2791,14 @@ pub fn rasterize_widget_render_plan(
     pixel_height: u32,
 ) -> Option<tiny_skia::Pixmap> {
     if plan.builtin_countdown_layout {
-        let [layer] = plan.layers.as_slice() else {
-            return None;
-        };
-        let prepared = compact_countdown::prepare(
-            &layer.svg_text,
-            &layer.bindings,
+        return rasterize_compact_countdown(
+            plan,
             param_constraints,
             params,
-        )?;
-        let mut raster = None;
-        composite_layer(
-            &mut raster,
-            RasterizedSvgLayer::Shared(rasterize_cached_text_svg(
-                &prepared.svg,
-                pixel_width,
-                pixel_height,
-            )?),
-        );
-        return raster;
+            pixel_width,
+            pixel_height,
+        )
+        .map(|(pixels, _)| pixels);
     }
     let resolved_layers: Vec<ResolvedLayerBindings> = plan
         .layers
@@ -3413,21 +3424,23 @@ impl WidgetRenderer {
             plans.default.as_ref().expect("default plan compiled above")
         };
 
-        // Delegate to the CPU-only rasterization path (shared with benchmarks/tests).
-        let composed = rasterize_widget_render_plan(
-            plan,
-            &param_constraints,
-            params,
-            pixel_width,
-            pixel_height,
-        );
+        // Keep the same clipping decision as the pixels from the compact plan.
+        let composed = if plan.builtin_countdown_layout {
+            rasterize_compact_countdown(plan, &param_constraints, params, pixel_width, pixel_height)
+        } else {
+            rasterize_widget_render_plan(
+                plan,
+                &param_constraints,
+                params,
+                pixel_width,
+                pixel_height,
+            )
+            .map(|pixels| (pixels, false))
+        };
 
-        let pixmap = match composed {
-            Some(p) => p,
-            None => {
-                tracing::debug!(widget = instance_name, "no layers rendered for widget");
-                return false;
-            }
+        let Some((pixmap, clipped_label)) = composed else {
+            tracing::debug!(widget = instance_name, "no layers rendered for widget");
+            return false;
         };
 
         // Upload to GPU texture (or create a new texture if size changed).
@@ -3442,10 +3455,17 @@ impl WidgetRenderer {
 
         if uploaded {
             if dock_owned {
-                self.textures
+                let entry = self
+                    .textures
                     .get_mut(instance_name)
-                    .expect("uploaded texture")
-                    .dock_pixels = Some(blake3::hash(pixmap.data()));
+                    .expect("uploaded texture");
+                entry.dock_pixels = Some(blake3::hash(pixmap.data()));
+                entry.clipped_compact_label = match params.get("label") {
+                    Some(WidgetParameterValue::String(label)) if clipped_label => {
+                        Some(std::sync::Arc::from(label.as_str()))
+                    }
+                    _ => None,
+                };
             }
             tracing::trace!(
                 widget = instance_name,
@@ -3563,6 +3583,7 @@ impl WidgetRenderer {
                 last_rendered_params: HashMap::new(),
                 dock_presentation: None,
                 dock_pixels: None,
+                clipped_compact_label: None,
                 animation,
             },
         );

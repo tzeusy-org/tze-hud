@@ -1087,6 +1087,93 @@ impl super::WinitApp {
         target_live && source_live
     }
 
+    fn dock_drawable(
+        &self,
+        column: &tze_hud_scene::dock::DockPassiveColumn,
+    ) -> Option<(&MonitorSpec, &Window, &WindowSurface)> {
+        let primary = self.state.primary_monitor.as_ref()?;
+        if dock_cursor_matches_projection(column, primary, primary) {
+            return Some((
+                primary,
+                self.state.window.as_deref()?,
+                self.state.window_surface.as_deref()?,
+            ));
+        }
+        self.state.secondaries.iter().find_map(|display| {
+            dock_cursor_matches_projection(column, primary, &display.spec).then_some((
+                &display.spec,
+                display.window.as_ref(),
+                display.surface.as_ref(),
+            ))
+        })
+    }
+
+    pub(super) fn dock_cursor_source_matches(
+        &self,
+        column: &tze_hud_scene::dock::DockPassiveColumn,
+        source: WindowId,
+    ) -> bool {
+        self.dock_drawable(column)
+            .is_some_and(|(_, window, _)| window.id() == source)
+    }
+
+    pub(super) fn presented_dock_hover(
+        &self,
+        column: &tze_hud_scene::dock::DockPassiveColumn,
+    ) -> Option<Arc<tze_hud_compositor::renderer::PresentedDockHover>> {
+        self.dock_drawable(column)?.2.presented_dock_hover()
+    }
+
+    pub(super) fn dock_tooltip_work_area(
+        &self,
+        column: &tze_hud_scene::dock::DockPassiveColumn,
+    ) -> Option<Rect> {
+        if !self.dock_cursor_mapping_current(column, None, None) {
+            return None;
+        }
+        #[cfg(target_os = "windows")]
+        {
+            let (spec, window, _) = self.dock_drawable(column)?;
+            let (name, monitor, work) =
+                crate::question_placement::Win32Probe::drawable_work_area(overlay_hwnd(window)?)?;
+            let client = dock_cursor_client(window)?;
+            let origin = client.origin?;
+            let bounds = Rect::new(
+                origin.x as f32,
+                origin.y as f32,
+                client.size.width as f32,
+                client.size.height as f32,
+            );
+            let fitted = self.state.effective_mode == crate::window::WindowMode::Overlay
+                && self.state.config.overlay_auto_size;
+            if tze_hud_compositor::normalize_display_name(&name) != spec.name
+                || !work.is_within(&monitor)
+                || !bounds.is_within(&monitor)
+                || (fitted && bounds != monitor)
+            {
+                return None;
+            }
+            let x = work.x.max(bounds.x);
+            let y = work.y.max(bounds.y);
+            let w = (work.x + work.width).min(bounds.x + bounds.width) - x;
+            let h = (work.y + work.height).min(bounds.y + bounds.height) - y;
+            (w > 0.0 && h > 0.0).then(|| {
+                Rect::new(
+                    column.display.x + (x - bounds.x),
+                    column.display.y + (y - bounds.y),
+                    w,
+                    h,
+                )
+            })
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            // Within the verified client viewport. There is no platform work
+            // area probe on this path and no desktop/taskbar guarantee.
+            self.dock_drawable(column).map(|_| column.display)
+        }
+    }
+
     /// Reconcile the overlay windows with the connected monitors: move the
     /// primary window if the primary monitor changed, open a window for each
     /// new monitor, close the ones whose monitor is gone, then publish the

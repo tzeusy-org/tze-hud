@@ -75,6 +75,9 @@ pub(crate) mod tile_render;
 pub(crate) mod token_colors;
 pub(crate) mod widget_geometry;
 pub(crate) mod widgets;
+pub use widgets::{
+    DockHoverCard, DockHoverFrame, DockTooltipHandle, DockTooltipRequest, PresentedDockHover,
+};
 #[cfg(any(test, feature = "dev-mode"))]
 mod work_observation;
 pub(crate) mod zone_render;
@@ -578,6 +581,8 @@ pub struct Compositor {
     /// thread.  `None` when no composer is active or no draft has arrived
     /// for the current frame.
     pub local_composer_state: LocalComposerStateHandle,
+    pub dock_tooltip: DockTooltipHandle,
+    dock_tooltip_current: Option<Arc<DockTooltipRequest>>,
     /// Reverse channel: the active composer's wrapped-line layout, published each
     /// frame for the input thread's soft-wrap vertical caret movement.
     ///
@@ -1193,6 +1198,8 @@ impl Compositor {
             resident_image_texture_cache: HashMap::new(),
             failed_icon_paths: HashSet::new(),
             local_composer_state: Arc::new(StdMutex::new(None)),
+            dock_tooltip: Arc::default(),
+            dock_tooltip_current: None,
             composer_visual_layout: Arc::new(StdMutex::new(None)),
             tile_flow_offsets: HashMap::new(),
             focus_ring_owner_state: Arc::new(StdMutex::new(None)),
@@ -1550,6 +1557,8 @@ impl Compositor {
             resident_image_texture_cache: HashMap::new(),
             failed_icon_paths: HashSet::new(),
             local_composer_state: Arc::new(StdMutex::new(None)),
+            dock_tooltip: Arc::default(),
+            dock_tooltip_current: None,
             composer_visual_layout: Arc::new(StdMutex::new(None)),
             tile_flow_offsets: HashMap::new(),
             focus_ring_owner_state: Arc::new(StdMutex::new(None)),

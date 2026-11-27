@@ -2087,3 +2087,196 @@ async fn dock_session_caption_follows_only_its_accepted_display() {
         "motion only repositions"
     );
 }
+
+#[tokio::test]
+async fn compact_clipped_label_tooltip_uses_actual_draw_and_named_target() {
+    use std::num::NonZeroU64;
+    use tze_hud_compositor::renderer::DockTooltipRequest;
+    use tze_hud_compositor::{DisplayLayout, DisplayRect, FrameTarget};
+    use tze_hud_scene::Rect;
+    use tze_hud_scene::dock::{
+        DockLayout, DockMetrics, DockPresentation, DockProjection, WidgetBundleOrigin,
+    };
+
+    let Some(mut gpu) = Gpu::with_widgets(960, 360).await else {
+        return;
+    };
+    let format = wgpu::TextureFormat::Rgba8UnormSrgb;
+    gpu.compositor.init_text_renderer(format);
+    let mut scene = SceneGraph::new_with_clock(960.0, 360.0, Arc::new(TestClock::new(1_000)));
+    scene.create_tab("Main", 0).unwrap();
+    let BundleScanResult::Ok(bundle) = bundle!("countdown", ["card.svg", "dock.svg"]) else {
+        panic!("embedded countdown");
+    };
+    let alt = bundle.dock.as_ref().unwrap();
+    let compact = DockPresentation::new(
+        alt.layers.clone(),
+        alt.width,
+        alt.height,
+        alt.hover_behavior.clone(),
+        &bundle.svg_contents,
+    )
+    .with_builtin_countdown_layout();
+    let kind = register_bundle(
+        &mut gpu.compositor,
+        &mut scene,
+        BundleScanResult::Ok(bundle),
+    );
+    scene.widget_registry.set_dock_presentation(
+        &kind,
+        WidgetBundleOrigin::embedded("builtin:countdown"),
+        Some(compact),
+    );
+
+    let display = Rect::new(-960.0, 60.0, 960.0, 360.0);
+    let target = FrameTarget {
+        x: display.x,
+        y: display.y,
+        width: 960,
+        height: 360,
+        primary: false,
+    };
+    let layout = DockLayout::new(
+        display,
+        4,
+        DockMetrics {
+            row_height: 52.0,
+            caption_width: 80.0,
+            gap: 8.0,
+        },
+        [160.0 / 52.0],
+    );
+    gpu.compositor.set_display_layout(DisplayLayout::new(
+        vec![
+            DisplayRect {
+                name: "PRIMARY".into(),
+                rect: Rect::new(0.0, 0.0, 960.0, 360.0),
+                primary: true,
+            },
+            DisplayRect {
+                name: "SELECTED".into(),
+                rect: display,
+                primary: false,
+            },
+            DisplayRect {
+                name: "MIRROR".into(),
+                rect: display,
+                primary: false,
+            },
+        ],
+        &Default::default(),
+    ));
+    scene.set_dock_projection(
+        std::slice::from_ref(&kind),
+        Some(DockProjection {
+            target: Some("SELECTED".into()),
+            layout,
+            pixels_per_dp: 1.0,
+            aspect_ratios: vec![(kind.clone(), 160.0 / 52.0)],
+        }),
+        NonZeroU64::new(30_000).unwrap(),
+    );
+    let publish = |scene: &mut SceneGraph, scope, label| {
+        scene
+            .publish_to_dock(
+                &kind,
+                HashMap::from([
+                    ("label".into(), string(label)),
+                    (
+                        "ends_in_ms".into(),
+                        Value::Deadline(WidgetDeadline::relative(30_000)),
+                    ),
+                ]),
+                scope,
+                None,
+                0,
+                0,
+            )
+            .unwrap();
+    };
+    let full = "WWWWWWWWWWWWWWWWWWWWWWWA";
+    publish(&mut scene, "agent-a", full);
+    publish(&mut scene, "agent-b", "WWWWWWWWWWWWWWWWWWWWe\u{301}");
+    let build =
+        |c: &mut Compositor, scene: &mut SceneGraph| c.build_windowed_frame(scene, 960, 360);
+    let before = build(&mut gpu.compositor, &mut scene);
+    let hover = before.dock_hover().unwrap();
+    assert_eq!(hover.column.target, "SELECTED");
+    assert_eq!(hover.cards.len(), 2);
+    let card = hover
+        .cards
+        .iter()
+        .find(|card| card.label.as_ref() == full)
+        .unwrap();
+    assert_eq!(card.delay.as_millis(), 180);
+    assert!(card.bounds.is_within(&display));
+    assert_eq!(
+        scene
+            .dock_instance("agent-a", &kind)
+            .unwrap()
+            .current_params["label"],
+        string(full)
+    );
+    let area = Rect::new(
+        display.x,
+        display.y + 12.0,
+        display.width,
+        display.height - 24.0,
+    );
+    gpu.compositor
+        .dock_tooltip
+        .store(Some(Arc::new(DockTooltipRequest {
+            column: hover.column.clone(),
+            card: card.clone(),
+            surface_epoch: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            work_area: area,
+        })));
+    assert!(gpu.compositor.poll_dock_tooltip());
+    let drawn = build(&mut gpu.compositor, &mut scene);
+    let capture = |c: &mut Compositor, frame, name| {
+        c.capture_windowed_display(frame, &target, Some(name), format)
+            .unwrap()
+            .rgba
+    };
+    let blank = capture(&mut gpu.compositor, &before, "SELECTED");
+    let shown = capture(&mut gpu.compositor, &drawn, "SELECTED");
+    let difference = shown
+        .chunks_exact(4)
+        .zip(blank.chunks_exact(4))
+        .enumerate()
+        .filter_map(|(i, (a, b))| (a != b).then_some((i % 960, i / 960)))
+        .collect::<Vec<_>>();
+    assert!(difference.len() > 100, "tooltip pixels must be present");
+    assert!(
+        difference.iter().all(|&(x, y)| {
+            let x = x as f32 + display.x;
+            let y = y as f32 + display.y;
+            area.contains_point(x, y) && x >= layout.column.x + layout.column.width
+        }),
+        "expected inside-edge placement outside the row in the available area"
+    );
+    assert_eq!(
+        capture(&mut gpu.compositor, &before, "MIRROR"),
+        capture(&mut gpu.compositor, &drawn, "MIRROR"),
+    );
+    assert!(!gpu.compositor.poll_dock_tooltip());
+
+    publish(&mut scene, "agent-a", "WWWWWWWWWWWWWWWWWWWWWWWB");
+    let changed = build(&mut gpu.compositor, &mut scene);
+    let updated = changed.dock_hover().unwrap();
+    let relabelled = updated
+        .cards
+        .iter()
+        .find(|entry| entry.instance == card.instance)
+        .unwrap();
+    assert!(!card.same_visit(relabelled));
+    assert_eq!(card.pixels, relabelled.pixels);
+    assert!(hover.presented_equivalent(&updated.column, relabelled));
+    assert_eq!(capture(&mut gpu.compositor, &changed, "SELECTED"), blank);
+
+    publish(&mut scene, "agent-a", "Fits");
+    let fit = build(&mut gpu.compositor, &mut scene);
+    let fit_cards = &fit.dock_hover().unwrap().cards;
+    assert_eq!(fit_cards.len(), 1);
+    assert_ne!(fit_cards[0].instance, card.instance);
+}

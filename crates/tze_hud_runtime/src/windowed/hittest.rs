@@ -273,49 +273,59 @@ impl WinitApp {
 
     #[cfg(target_os = "windows")]
     fn observe_native_dock_cursor(
-        &self,
+        &mut self,
         actual_cursor: Option<winit::dpi::PhysicalPosition<i32>>,
     ) -> bool {
-        let snapshot = self.state.pipeline.hit_test_snapshot.load();
-        let Some(column) = &snapshot.dock_passive_column else {
-            return false;
-        };
+        let snapshot = self.state.pipeline.hit_test_snapshot.load_full();
         // The incumbent hover path accepts a monitor-origin fallback.
-        // Compaction requires a verified client mapping and a fresh point.
-        let origin = self
-            .state
-            .window
-            .as_ref()
-            .and_then(|window| super::displays::dock_cursor_client(window)?.origin);
-        let point = actual_cursor.and_then(|point| screen_cursor_to_window_cursor(point, origin));
-        observe_dock_point(column, point, || {
-            self.dock_cursor_mapping_current(column, None, origin)
-        })
-    }
-
-    pub(super) fn invalidate_dock_cursor(&self) {
-        if let Some(column) = &self
-            .state
-            .pipeline
-            .hit_test_snapshot
-            .load()
+        // Dock observations require a verified client mapping and fresh point.
+        let origin = snapshot
             .dock_passive_column
-        {
-            column.observe(DockPointer::Unknown);
-        }
+            .as_ref()
+            .and(actual_cursor)
+            .and_then(|_| super::displays::dock_cursor_client(self.state.window.as_ref()?)?.origin);
+        let point = actual_cursor.and_then(|point| screen_cursor_to_window_cursor(point, origin));
+        self.observe_dock_pointer(&snapshot, point, None, origin)
     }
 
-    pub(super) fn observe_dock_cursor(&self, point: (f32, f32), source: WindowId) {
-        let snapshot = self.state.pipeline.hit_test_snapshot.load();
-        if let Some(column) = &snapshot.dock_passive_column {
-            observe_dock_point(column, Some(point), || {
-                self.dock_cursor_mapping_current(column, Some(source), None)
-            });
-        }
+    pub(super) fn invalidate_dock_cursor(&mut self) {
+        let snapshot = self.state.pipeline.hit_test_snapshot.load_full();
+        self.observe_dock_pointer(&snapshot, None, None, None);
     }
 
-    pub(super) fn dock_cursor_left(&self, window_id: WindowId) {
-        let snapshot = self.state.pipeline.hit_test_snapshot.load();
+    pub(super) fn observe_dock_cursor(&mut self, point: (f32, f32), source: WindowId) {
+        let snapshot = self.state.pipeline.hit_test_snapshot.load_full();
+        self.observe_dock_pointer(&snapshot, Some(point), Some(source), None);
+    }
+
+    fn observe_dock_pointer(
+        &mut self,
+        snapshot: &crate::pipeline::HitTestSnapshot,
+        point: Option<(f32, f32)>,
+        source: Option<WindowId>,
+        origin: Option<winit::dpi::PhysicalPosition<i32>>,
+    ) -> bool {
+        let column = snapshot.dock_passive_column.as_ref();
+        let point = point.filter(|(x, y)| {
+            x.is_finite()
+                && y.is_finite()
+                && column
+                    .is_some_and(|column| self.dock_cursor_mapping_current(column, source, origin))
+        });
+        let contact_changed =
+            column.is_some_and(|column| observe_dock_point(column, point, || true));
+        let tooltip_point = point.filter(|_| {
+            source.is_none_or(|id| {
+                column.is_some_and(|column| self.dock_cursor_source_matches(column, id))
+            })
+        });
+        self.state.dock_tooltip.remember(column, tooltip_point);
+        self.reconcile_dock_tooltip(snapshot, std::time::Instant::now());
+        contact_changed
+    }
+
+    pub(super) fn dock_cursor_left(&mut self, window_id: WindowId) {
+        let snapshot = self.state.pipeline.hit_test_snapshot.load_full();
         if let Some(column) = &snapshot.dock_passive_column {
             let outside = self.state.effective_mode != WindowMode::Overlay
                 && self.dock_cursor_mapping_current(column, Some(window_id), None);
@@ -325,6 +335,14 @@ impl WinitApp {
                 DockPointer::Unknown
             });
         }
+        // Win32 can deliver CursorLeft merely because the overlay returned
+        // to passthrough. The fresh desktop position on this turn determines
+        // whether the pointer actually left the card.
+        if cfg!(target_os = "windows") && self.state.effective_mode == WindowMode::Overlay {
+            return;
+        }
+        self.state.dock_tooltip.remember(None, None);
+        self.reconcile_dock_tooltip(&snapshot, std::time::Instant::now());
     }
 
     /// Take the cursor position read from the OS.
@@ -486,6 +504,15 @@ impl WinitApp {
             self.state
                 .wake
                 .mark_main_work_pending(RuntimeWakeupSource::AnimationDeadline);
+            return CursorEntryTurn::FullTurn;
+        }
+        if self.state.dock_tooltip.deadline_changed
+            || self
+                .state
+                .dock_tooltip
+                .next_due()
+                .is_some_and(|due| due <= std::time::Instant::now())
+        {
             return CursorEntryTurn::FullTurn;
         }
         // A FrameReady user event may be followed by raw mouse motion before
