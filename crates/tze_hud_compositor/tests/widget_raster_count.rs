@@ -2279,7 +2279,22 @@ async fn progress_dock_hover_targets_follow_only_successful_placed_rasters() {
     assert!(inside.iter().all(|&count| count > 100));
     assert!(gpu.compositor.dock_tooltip.load().is_none());
 
+    let initial_signature =
+        gpu.compositor
+            .display_frame_signature(&before, &frame_target(display), Some("SELECTED"));
+    let mirror_signature =
+        gpu.compositor
+            .display_frame_signature(&before, &frame_target(display), Some("MIRROR"));
     let attempts = raster_count(&gpu.compositor, &a_name);
+    let peer_attempts = raster_count(&gpu.compositor, &b_name);
+    let steady = build(&mut gpu.compositor, &mut scene);
+    assert_eq!(
+        gpu.compositor
+            .display_frame_signature(&steady, &frame_target(display), Some("SELECTED")),
+        initial_signature
+    );
+    assert_eq!(raster_count(&gpu.compositor, &a_name), attempts);
+    assert_eq!(raster_count(&gpu.compositor, &b_name), peer_attempts);
     let no_quota = widget_ledger(0);
     gpu.compositor.set_resident_ledger(no_quota.clone());
     assert_eq!(publish(&mut scene, "agent-a", 0.4), a);
@@ -2290,6 +2305,20 @@ async fn progress_dock_hover_targets_follow_only_successful_placed_rasters() {
             "fallback pixels confer no current hover authority"
         );
         assert_eq!(target(&frame, b).unwrap().pixels, b_target.pixels);
+        assert_ne!(
+            gpu.compositor.display_frame_signature(
+                &frame,
+                &frame_target(display),
+                Some("SELECTED")
+            ),
+            initial_signature,
+            "denied pixels remain drawn but the old hover metadata must not stay acknowledged"
+        );
+        assert_eq!(
+            gpu.compositor
+                .display_frame_signature(&frame, &frame_target(display), Some("MIRROR")),
+            mirror_signature
+        );
         assert_eq!(
             capture(&mut gpu.compositor, &frame, display, "SELECTED"),
             selected
@@ -2329,6 +2358,45 @@ async fn progress_dock_hover_targets_follow_only_successful_placed_rasters() {
         assert_eq!(changed.trigger, changed.bounds);
         assert_ne!(changed.pixels, old.pixels);
     }
+
+    // A real tail departure/recreation has the same paint and pose, but a new
+    // instance must receive its own selected-secondary native receipt.
+    let old_signature =
+        gpu.compositor
+            .display_frame_signature(&refit, &frame_target(narrower), Some("SELECTED"));
+    let old_mirror_signature =
+        gpu.compositor
+            .display_frame_signature(&refit, &frame_target(narrower), Some("MIRROR"));
+    let old_pixels = capture(&mut gpu.compositor, &refit, narrower, "SELECTED");
+    scene.clear_dock_widget("agent-b", &kind);
+    let replacement = publish(&mut scene, "agent-b", 0.8);
+    assert_ne!(replacement, b);
+    let recreated = build(&mut gpu.compositor, &mut scene);
+    assert_eq!(
+        target(&recreated, replacement).unwrap().bounds,
+        target(&refit, b).unwrap().bounds
+    );
+    assert_eq!(
+        target(&recreated, replacement).unwrap().pixels,
+        target(&refit, b).unwrap().pixels
+    );
+    assert_eq!(
+        capture(&mut gpu.compositor, &recreated, narrower, "SELECTED"),
+        old_pixels
+    );
+    assert_ne!(
+        gpu.compositor.display_frame_signature(
+            &recreated,
+            &frame_target(narrower),
+            Some("SELECTED")
+        ),
+        old_signature
+    );
+    assert_eq!(
+        gpu.compositor
+            .display_frame_signature(&recreated, &frame_target(narrower), Some("MIRROR")),
+        old_mirror_signature
+    );
 
     // An equal-bounds mirror cannot replace the named target that certified
     // these quads. Offscreen captures above neither present nor arm a visit.

@@ -1380,6 +1380,29 @@ impl Compositor {
                 }
             }
         }
+        // Runtime hover proof has semantic identity as well as pixels. A new
+        // instance with identical RGBA still needs its own native receipt.
+        if let Some(frame) = build.widgets.presented_dock_hover(target, display) {
+            for target in &frame.runtime_targets {
+                0xA8u8.hash(&mut hasher);
+                target.instance.hash(&mut hasher);
+                target.instance_name.hash(&mut hasher);
+                let hover = &target.behavior;
+                hover.visibility_param.hash(&mut hasher);
+                hover.delay_ms.hash(&mut hasher);
+                hash_f32s(
+                    &mut hasher,
+                    &[
+                        target.trigger.x,
+                        target.trigger.y,
+                        target.trigger.width,
+                        target.trigger.height,
+                        hover.hidden_value,
+                        hover.visible_value,
+                    ],
+                );
+            }
+        }
         hasher.finish()
     }
 

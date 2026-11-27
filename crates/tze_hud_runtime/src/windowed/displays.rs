@@ -562,7 +562,24 @@ pub(super) fn present_to_secondaries(
         let frame_target = target.frame_target();
         let signature =
             compositor.display_frame_signature(build, &frame_target, Some(&target.name));
-        if !target.ledger.needs_present(signature) {
+        let build_hover = build.dock_hover().filter(|hover| {
+            !hover.runtime_targets.is_empty()
+                && hover.column.target == target.name
+                && hover.column.display
+                    == Rect::new(
+                        frame_target.x,
+                        frame_target.y,
+                        frame_target.width as f32,
+                        frame_target.height as f32,
+                    )
+        });
+        let presented_hover = build_hover.and_then(|_| target.surface.presented_dock_hover());
+        if !target.ledger.needs_present(signature)
+            && runtime_hover_attachment_current(
+                build_hover.map(Arc::as_ref),
+                presented_hover.as_deref(),
+            )
+        {
             // Already on screen (content returned to what was presented).
             target.ledger.settle();
             continue;
@@ -597,6 +614,22 @@ pub(super) fn present_to_secondaries(
         any_submitted |= submitted;
     }
     any_submitted
+}
+
+/// A recertified column can have identical pixels and metadata. Only the
+/// selected surface's actual receipt closes its attachment, never a pointer hash.
+fn runtime_hover_attachment_current(
+    current: Option<&tze_hud_compositor::renderer::DockHoverFrame>,
+    presented: Option<&tze_hud_compositor::renderer::PresentedDockHover>,
+) -> bool {
+    current.is_none_or(|current| {
+        presented.is_some_and(|presented| {
+            presented
+                .surface_epoch
+                .load(std::sync::atomic::Ordering::Acquire)
+                && current.column.shares_attachment(&presented.frame.column)
+        })
+    })
 }
 
 /// Attributes for an overlay window covering `spec` (shared by the primary
@@ -2174,6 +2207,44 @@ pub(super) fn spawn_display_change_watcher(dirty: DisplaysDirty, wake: impl Fn()
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn runtime_hover_same_signature_requires_live_selected_attachment() {
+        use super::super::dock_param_hover::tests::{fixture, proof};
+        let (_, _, frame) = fixture();
+        let (_, _, recertified) = fixture();
+        let presented = proof(&frame);
+        assert!(runtime_hover_attachment_current(
+            Some(&frame),
+            Some(&presented)
+        ));
+        assert!(!runtime_hover_attachment_current(
+            Some(&recertified),
+            Some(&presented)
+        ));
+        assert!(!runtime_hover_attachment_current(Some(&frame), None));
+        assert!(
+            runtime_hover_attachment_current(None, Some(&presented)),
+            "an unrelated mirror needs no dock receipt"
+        );
+        presented
+            .surface_epoch
+            .store(false, std::sync::atomic::Ordering::Release);
+        assert!(!runtime_hover_attachment_current(
+            Some(&frame),
+            Some(&presented)
+        ));
+        let now = Instant::now();
+        let mut ledger = PresentLedger::default();
+        ledger.record(7, true, now);
+        assert!(!ledger.needs_present(7));
+        assert!(ledger.ready(now));
+        ledger.record(7, false, now);
+        assert!(
+            !ledger.ready(now),
+            "attachment retry retains ordinary failure backoff"
+        );
+    }
 
     fn spec(name: &str, x: i32, y: i32) -> MonitorSpec {
         MonitorSpec {

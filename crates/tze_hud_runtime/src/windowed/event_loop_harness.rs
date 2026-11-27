@@ -144,6 +144,7 @@ impl WindowedRuntimeState {
             static_hit_regions: Vec::new(),
             widget_hover_trackers: HashMap::new(),
             dock_tooltip: super::dock_tooltip::DockTooltipVisit::default(),
+            dock_param_hover: super::dock_param_hover::DockParamHover::default(),
             pending_widget_svgs: Vec::new(),
             startup_diagnostics: None,
             text_fit: Default::default(),
@@ -11356,6 +11357,224 @@ mod tests {
             "released scene lock must drain FIFO work"
         );
         assert_eq!(harness.composer_draft().as_deref(), Some("x"));
+    }
+
+    /// Scene/publication and Winit callbacks are real; the native presentation
+    /// receipt and validated pointer sample are injected, not OS evidence.
+    fn dock_hover_harness() -> (
+        HeadlessEventLoopHarness,
+        Arc<tze_hud_compositor::renderer::DockHoverFrame>,
+        tze_hud_compositor::renderer::PresentedDockHover,
+    ) {
+        use super::super::dock_param_hover::tests::{fixture, proof, snapshot};
+        let (scene, _, frame) = fixture();
+        let mut harness = HeadlessEventLoopHarness::new();
+        *harness
+            .app
+            .state
+            .shared_state
+            .blocking_lock()
+            .scene
+            .blocking_lock() = scene;
+        harness.app.state.effective_mode = crate::window::WindowMode::Overlay;
+        harness
+            .app
+            .state
+            .pipeline
+            .hit_test_snapshot
+            .store(Arc::new(snapshot(&frame)));
+        let presented = proof(&frame);
+        (harness, frame, presented)
+    }
+
+    #[test]
+    fn dock_runtime_hover_direct_target_switch_escapes_quiet() {
+        use super::super::dock_param_hover::tests::snapshot;
+        use super::super::wake::CursorEntryTurn;
+        use tze_hud_scene::WidgetParameterValue as Value;
+        let (mut harness, frame, presented) = dock_hover_harness();
+        let now = std::time::Instant::now();
+        let point = |index: usize| {
+            let bounds = frame.runtime_targets[index].bounds;
+            (bounds.x + 1.0, bounds.y + 1.0)
+        };
+        let observe = |harness: &mut HeadlessEventLoopHarness, index, at| {
+            let hover = &mut harness.app.state.dock_param_hover;
+            hover.remember(Some(&frame.column), Some(point(index)));
+            hover.reconcile(&snapshot(&frame), Some(&presented), at);
+        };
+        observe(&mut harness, 0, now);
+        let due = harness.app.state.dock_param_hover.next_due().unwrap();
+        let wake = harness.app.state.wake.clone();
+        let before = wake.main_work_generation();
+        harness.app.state.scheduled_main_deadline = Some(super::super::wake::Deadline::new(
+            due,
+            crate::idle_efficiency::RuntimeWakeupSource::AnimationDeadline,
+        ));
+        harness.app.on_resume_time_reached(due);
+        assert!(harness.app.state.scheduled_main_deadline.is_none());
+        assert_eq!(wake.main_work_generation(), before + 1);
+        harness.app.state.dock_param_hover.expire_dwell(due);
+        assert!(harness.app.apply_dock_param_hover());
+        assert!(wake.finish_main_work_after_settle(wake.main_work_checkpoint(), true));
+        harness.app.state.dock_param_hover.deadline_changed = false;
+        harness.app.state.cursor_entry.signature = Some(harness.app.cursor_entry_signature());
+        observe(&mut harness, 1, due);
+        assert_eq!(
+            harness.app.cursor_entry_turn_after_refresh(false),
+            CursorEntryTurn::FullTurn
+        );
+        let b_due = harness.app.state.dock_param_hover.next_due().unwrap();
+        assert_eq!(
+            b_due.duration_since(due),
+            std::time::Duration::from_millis(180)
+        );
+        assert!(
+            harness.app.apply_dock_param_hover(),
+            "hide A immediately, B waits its own dwell"
+        );
+        let a = &frame.runtime_targets[0];
+        let b = &frame.runtime_targets[1];
+        assert_eq!(
+            harness.scene().widget_registry.instances[&a.instance_name].current_params["tooltip_visible"],
+            Value::F32(0.0)
+        );
+        assert_eq!(
+            harness.scene().widget_registry.instances[&b.instance_name].current_params["tooltip_visible"],
+            Value::F32(0.0)
+        );
+        harness.app.state.dock_param_hover.expire_dwell(b_due);
+        assert!(harness.app.apply_dock_param_hover());
+        assert_eq!(
+            harness.scene().widget_registry.instances[&b.instance_name].current_params["tooltip_visible"],
+            Value::F32(1.0)
+        );
+        assert!(!harness.app.cursor_entry_signature().capture);
+        {
+            let mut scene = harness.scene();
+            let mut standalone = scene.widget_registry.instances[&a.instance_name].clone();
+            standalone.id = SceneId::new();
+            standalone.instance_name = "standalone-progress".into();
+            scene.widget_registry.register_instance(standalone);
+        }
+        harness.app.refresh_widget_hover_tracking();
+        assert_eq!(harness.app.state.widget_hover_trackers.len(), 1);
+        assert!(
+            harness
+                .app
+                .state
+                .widget_hover_trackers
+                .contains_key("standalone-progress"),
+            "only ordinary standalone geometry remains on the legacy route"
+        );
+        harness.app.state.dock_param_hover.deadline_changed = false;
+        harness.app.state.cursor_entry.signature = Some(harness.app.cursor_entry_signature());
+        assert_eq!(
+            harness.app.cursor_entry_turn_after_refresh(false),
+            CursorEntryTurn::Quiet { next: None }
+        );
+        // A new authoritative pointer sample at expiry overrides the old target.
+        harness.app.state.dock_param_hover.remember(None, None);
+        harness
+            .app
+            .state
+            .dock_param_hover
+            .reconcile(&snapshot(&frame), Some(&presented), b_due);
+        assert!(harness.app.apply_dock_param_hover());
+        assert_eq!(
+            harness.scene().widget_registry.instances[&b.instance_name].current_params["tooltip_visible"],
+            Value::F32(0.0)
+        );
+        assert!(!harness.app.state.dock_param_hover.has_debt());
+    }
+
+    #[test]
+    fn dock_runtime_hover_debt_waits_for_scene_availability() {
+        use super::super::dock_param_hover::tests::snapshot;
+        use tze_hud_scene::WidgetParameterValue as Value;
+        for shared_lock in [false, true] {
+            let (mut harness, frame, presented) = dock_hover_harness();
+            let now = std::time::Instant::now();
+            let observe = |harness: &mut HeadlessEventLoopHarness, index: usize, at| {
+                let target = &frame.runtime_targets[index];
+                let hover = &mut harness.app.state.dock_param_hover;
+                hover.remember(
+                    Some(&frame.column),
+                    Some((target.bounds.x + 1.0, target.bounds.y + 1.0)),
+                );
+                hover.reconcile(&snapshot(&frame), Some(&presented), at);
+            };
+            let wake = harness.app.state.wake.clone();
+            let wait = |before| {
+                let end = std::time::Instant::now() + SCENE_WAIT;
+                while wake.main_work_generation() == before {
+                    assert!(
+                        std::time::Instant::now() < end,
+                        "dock availability completion missing"
+                    );
+                    std::thread::yield_now();
+                }
+            };
+            observe(&mut harness, 0, now);
+            let due = harness.app.state.dock_param_hover.next_due().unwrap();
+            harness.app.state.dock_param_hover.expire_dwell(due);
+            let shared = harness.shared_state();
+            let scene = shared.blocking_lock().scene.clone();
+            let held_shared = shared_lock.then(|| shared.blocking_lock());
+            let held_scene = (!shared_lock).then(|| scene.blocking_lock());
+            let before = wake.main_work_generation();
+            assert!(!harness.app.apply_dock_param_hover());
+            assert!(harness.app.state.dock_param_hover.has_debt());
+            assert!(harness.app.has_deferred_scene_work(
+                &crate::windowed::PortalProjectionDrain::Completed {
+                    scene_changed: false
+                }
+            ));
+            assert!(harness.app.state.dock_param_hover.next_due().is_none());
+            harness.app.schedule_shared_scene_availability_wake();
+            assert_eq!(wake.main_work_generation(), before);
+            drop(held_scene);
+            drop(held_shared);
+            wait(before);
+            assert!(harness.app.apply_dock_param_hover());
+            assert!(!harness.app.state.dock_param_hover.has_debt());
+            let a = &frame.runtime_targets[0];
+            let b = &frame.runtime_targets[1];
+            assert_eq!(
+                harness.scene().widget_registry.instances[&a.instance_name].current_params["tooltip_visible"],
+                Value::F32(1.0)
+            );
+            // Retain an applied hide, but cancel B's not-yet-applied positive
+            // when the cursor leaves while both writes are blocked.
+            let held = scene.blocking_lock();
+            observe(&mut harness, 1, due);
+            harness
+                .app
+                .state
+                .dock_param_hover
+                .expire_dwell(harness.app.state.dock_param_hover.next_due().unwrap());
+            assert!(!harness.app.apply_dock_param_hover());
+            harness.app.state.dock_param_hover.remember(None, None);
+            harness
+                .app
+                .state
+                .dock_param_hover
+                .reconcile(&snapshot(&frame), Some(&presented), due);
+            assert!(harness.app.state.dock_param_hover.has_debt());
+            let before = wake.main_work_generation();
+            harness.app.schedule_shared_scene_availability_wake();
+            drop(held);
+            wait(before);
+            assert!(harness.app.apply_dock_param_hover());
+            assert!(!harness.app.state.dock_param_hover.has_debt());
+            for target in [a, b] {
+                assert_eq!(
+                    harness.scene().widget_registry.instances[&target.instance_name].current_params
+                        ["tooltip_visible"],
+                    Value::F32(0.0)
+                );
+            }
+        }
     }
 
     #[test]

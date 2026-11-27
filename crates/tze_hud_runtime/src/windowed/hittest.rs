@@ -329,6 +329,8 @@ impl WinitApp {
             })
         });
         self.state.dock_tooltip.remember(column, tooltip_point);
+        self.state.dock_param_hover.remember(column, tooltip_point);
+        self.reconcile_dock_param_hover(snapshot, std::time::Instant::now());
         self.reconcile_dock_tooltip(snapshot, std::time::Instant::now());
         contact_changed
     }
@@ -351,6 +353,8 @@ impl WinitApp {
             return;
         }
         self.state.dock_tooltip.remember(None, None);
+        self.state.dock_param_hover.remember(None, None);
+        self.reconcile_dock_param_hover(&snapshot, std::time::Instant::now());
         self.reconcile_dock_tooltip(&snapshot, std::time::Instant::now());
     }
 
@@ -515,7 +519,13 @@ impl WinitApp {
                 .mark_main_work_pending(RuntimeWakeupSource::AnimationDeadline);
             return CursorEntryTurn::FullTurn;
         }
-        if self.state.dock_tooltip.deadline_changed
+        if self.state.dock_param_hover.deadline_changed
+            || self
+                .state
+                .dock_param_hover
+                .next_due()
+                .is_some_and(|due| due <= std::time::Instant::now())
+            || self.state.dock_tooltip.deadline_changed
             || self
                 .state
                 .dock_tooltip

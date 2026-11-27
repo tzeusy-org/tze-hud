@@ -183,6 +183,7 @@ impl Drop for FramePacingTimerGuard {
 mod answer_focus;
 mod config;
 mod displays;
+mod dock_param_hover;
 mod dock_tooltip;
 mod frame_work;
 #[cfg(target_os = "windows")]
@@ -414,6 +415,7 @@ struct WindowedRuntimeState {
     /// Runtime-managed widget hover trackers keyed by widget instance_name.
     widget_hover_trackers: std::collections::HashMap<String, WidgetHoverTracker>,
     dock_tooltip: dock_tooltip::DockTooltipVisit,
+    dock_param_hover: dock_param_hover::DockParamHover,
     /// Pending widget SVG assets to register with the compositor after
     /// `init_widget_renderer` is called. Consumed once during first `resumed()`.
     pending_widget_svgs: Vec<crate::widget_startup::WidgetSvgAsset>,
@@ -888,7 +890,8 @@ impl WinitApp {
     /// complete while retained input still waits on a lock that another
     /// thread (such as an availability waiter) briefly holds.
     fn has_deferred_scene_work(&self, drain: &PortalProjectionDrain) -> bool {
-        drain.is_deferred()
+        self.state.dock_param_hover.has_debt()
+            || drain.is_deferred()
             || !self.state.pending_keyboard_events.is_empty()
             || !self.state.pending_scroll.is_empty()
             || self.state.pending_pointer_move
@@ -1108,6 +1111,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
 
         let now = Instant::now();
         settled_scene_changed |= self.settle_dock_tooltip(now);
+        settled_scene_changed |= self.settle_dock_param_hover(now);
         let counters = Arc::clone(self.state.wake.counters());
         let quiescent_completion = self
             .state
@@ -1156,6 +1160,12 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
 
         let deadline_crossed_during_settle = self.claim_due_scheduled_main_deadline(now);
         let mut deadlines = Vec::new();
+        if let Some(at) = self.state.dock_param_hover.next_due() {
+            deadlines.push(Deadline::new(
+                at,
+                crate::idle_efficiency::RuntimeWakeupSource::AnimationDeadline,
+            ));
+        }
         if let Some(at) =
             crate::widget_hover::next_hover_deadline(&self.state.widget_hover_trackers)
         {
@@ -3422,6 +3432,7 @@ impl WindowedRuntime {
             static_hit_regions: Vec::new(),
             widget_hover_trackers: std::collections::HashMap::new(),
             dock_tooltip: dock_tooltip::DockTooltipVisit::default(),
+            dock_param_hover: dock_param_hover::DockParamHover::default(),
             pending_widget_svgs,
             startup_diagnostics,
             text_fit,
