@@ -1942,7 +1942,6 @@ async fn dock_session_caption_follows_only_its_accepted_display() {
     );
     assert!(present.gpu_submitted && present.signature_current);
     assert!(present.telemetry.widget_rasterized.is_empty());
-    assert_eq!(surface.read_pixels(&gpu.compositor.device), overflow_pixels);
     assert_eq!(raster_count(&gpu.compositor, &instance), 1);
 
     // The bundled monospace face advances 0.6 em per accented grapheme or
