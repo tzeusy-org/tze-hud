@@ -890,6 +890,246 @@ async fn dock_draws_only_on_its_accepted_display_and_parks_overflow() {
 }
 
 #[tokio::test]
+async fn shipped_dock_fills_both_signed_display_capacities() {
+    use std::num::NonZeroU64;
+    use tze_hud_compositor::{DisplayLayout, DisplayRect, FrameTarget};
+    use tze_hud_config::dock::{CAPTION_WIDTH_TOKEN, DEFAULT_AUTO_CLEAR_MS, ROW_HEIGHT_TOKEN};
+    use tze_hud_config::tokens::{effective_scale, parse_numeric};
+    use tze_hud_scene::Rect;
+    use tze_hud_scene::dock::{
+        DockLayout, DockMetrics, DockPresentation, DockProjection, DockPublishError,
+    };
+    use tze_hud_scene::scope::scoped_namespace;
+
+    let Some(mut gpu) = Gpu::with_widgets(512, 256).await else {
+        return;
+    };
+    let c = &mut gpu.compositor;
+    let format = wgpu::TextureFormat::Rgba8UnormSrgb;
+    let defaults = tokens();
+    c.set_token_map(defaults.clone());
+    c.init_text_renderer(format);
+    let mut scene = SceneGraph::new_with_clock(512.0, 256.0, Arc::new(TestClock::new(1_000)));
+    scene.create_tab("Main", 0).unwrap();
+
+    let aspects = [
+        (
+            bundle!("progress-bar", ["track.svg", "fill.svg"]),
+            (320.0, 50.0),
+        ),
+        (
+            bundle!("countdown", ["card.svg", "dock.svg"]),
+            (160.0, 52.0),
+        ),
+    ]
+    .map(|(bundle, extent)| {
+        let BundleScanResult::Ok(bundle) = bundle else {
+            panic!("load the shipped dock bundle");
+        };
+        assert_eq!(bundle.dock_authored_extent(), Some(extent));
+        let alternate = bundle.dock.as_ref().map(|dock| {
+            DockPresentation::new(
+                dock.layers.clone(),
+                dock.width,
+                dock.height,
+                dock.hover_behavior.clone(),
+                &bundle.svg_contents,
+            )
+            .with_builtin_countdown_layout()
+        });
+        let origin = bundle.origin.clone();
+        let name = register_bundle(c, &mut scene, BundleScanResult::Ok(bundle));
+        assert_eq!(alternate.is_some(), name == "countdown");
+        if let Some(alternate) = alternate {
+            scene
+                .widget_registry
+                .set_dock_presentation(&name, origin, Some(alternate));
+        }
+        (name, f64::from(extent.0) / f64::from(extent.1))
+    });
+    let accepts = aspects.clone().map(|(name, _)| name);
+    let params = [
+        HashMap::from([("progress".into(), Value::F32(0.5))]),
+        HashMap::from([(
+            "ends_in_ms".into(),
+            Value::Deadline(WidgetDeadline::relative(120_000)),
+        )]),
+    ];
+    let namespaces: Vec<_> = (0..18)
+        .map(|row| scoped_namespace("dock-fixture", &format!("session-{row}")))
+        .collect();
+    let size = |key| parse_numeric(&defaults[key]).unwrap();
+    assert_eq!(effective_scale(&defaults), 1.0);
+    let registry = |scene: &SceneGraph| {
+        (
+            scene.widget_registry.instances.clone(),
+            scene.widget_registry.active_publishes.clone(),
+        )
+    };
+
+    let primary = DisplayRect {
+        name: "PRIMARY".into(),
+        rect: Rect::new(0.0, 0.0, 512.0, 256.0),
+        primary: true,
+    };
+    let mut instance_names = Vec::new();
+    for (name, width, height, scale, capacity, admit) in [
+        ("FHD", 1920, 1080, 1.0, 13, true),
+        ("UHD", 3840, 2160, 1.5, 17, true),
+        ("FHD", 1920, 1080, 1.0, 13, false),
+        ("UHD", 3840, 2160, 1.5, 17, false),
+    ] {
+        let display = Rect::new(-4000.0, 60.0, width as f32, height as f32);
+        let layout = DockLayout::new(
+            display,
+            32,
+            DockMetrics {
+                row_height: size(ROW_HEIGHT_TOKEN) * scale,
+                caption_width: size(CAPTION_WIDTH_TOKEN) * scale,
+                gap: size("space.s") * scale,
+            },
+            aspects.iter().map(|(_, aspect)| *aspect),
+        );
+        assert_eq!(layout.capacity, capacity, "{name} at scale {scale}");
+        assert_eq!(
+            layout.scale, 1.0,
+            "default dock fits without width compression"
+        );
+        c.set_display_layout(DisplayLayout::new(
+            vec![
+                primary.clone(),
+                DisplayRect {
+                    name: "MIRROR".into(),
+                    rect: display,
+                    primary: false,
+                },
+                DisplayRect {
+                    name: name.into(),
+                    rect: display,
+                    primary: false,
+                },
+            ],
+            &Default::default(),
+        ));
+
+        let before_projection = registry(&scene);
+        assert!(scene.set_dock_projection(
+            &accepts,
+            Some(DockProjection {
+                target: Some(name.into()),
+                layout,
+                pixels_per_dp: scale,
+                aspect_ratios: aspects.to_vec(),
+            }),
+            NonZeroU64::new(DEFAULT_AUTO_CLEAR_MS).unwrap(),
+        ));
+        assert_eq!(registry(&scene), before_projection);
+
+        if admit {
+            for (index, owner) in namespaces[..capacity]
+                .iter()
+                .enumerate()
+                .skip(instance_names.len())
+            {
+                let kind = &accepts[index % 2];
+                scene
+                    .publish_to_dock(kind, params[index % 2].clone(), owner, None, 0, 0)
+                    .unwrap();
+                instance_names.push(
+                    scene
+                        .dock_instance(owner, kind)
+                        .unwrap()
+                        .instance_name
+                        .clone(),
+                );
+            }
+            let accepted = registry(&scene);
+            let version = (scene.version, scene.geometry_epoch);
+            let refused = scene.publish_to_dock(
+                &accepts[0],
+                params[0].clone(),
+                &namespaces[capacity],
+                None,
+                0,
+                0,
+            );
+            assert_eq!(
+                refused,
+                Err(DockPublishError::Full),
+                "{name} row {} must be refused",
+                capacity + 1
+            );
+            assert_eq!((scene.version, scene.geometry_epoch), version);
+            assert_eq!(registry(&scene), accepted);
+        }
+        assert_eq!(scene.dock_rows().len(), instance_names.len());
+        for ((row, namespace), instance) in scene
+            .dock_rows()
+            .iter()
+            .zip(&namespaces)
+            .zip(&instance_names)
+        {
+            assert_eq!(&row.namespace, namespace);
+            assert_eq!(row.widgets.len(), 1);
+            assert_eq!(&row.widgets[0].instance_name, instance);
+        }
+
+        c.prime_markdown_cache(&mut scene);
+        let frame = c.build_windowed_frame(&mut scene, 512, 256);
+        let drawn = &scene.overlay.widget_geometry;
+        assert_eq!(drawn.len(), capacity, "{name} drawable rows");
+        let mut bottom = layout.column.y;
+        for instance in &instance_names[..capacity] {
+            let card = drawn
+                .iter()
+                .find(|card| &card.instance_name == instance)
+                .unwrap();
+            assert!(card.bounds.is_within(&layout.column) && card.bounds.is_within(&display));
+            assert_eq!(card.bounds.height, 52.0 * scale);
+            assert!(card.bounds.y >= bottom, "{name} rows overlap or reordered");
+            bottom = card.bounds.y + card.bounds.height;
+        }
+
+        if admit {
+            let target = FrameTarget {
+                x: display.x,
+                y: display.y,
+                width,
+                height,
+                primary: false,
+            };
+            let [pixels, blank] = [name, "MIRROR"].map(|output| {
+                let capture = c
+                    .capture_windowed_display(&frame, &target, Some(output), format)
+                    .unwrap();
+                assert_eq!((capture.width, capture.height), (width, height));
+                capture.rgba
+            });
+            for card in drawn {
+                let origin = (
+                    (card.bounds.x - display.x + card.bounds.width * 0.5) as u32,
+                    (card.bounds.y - display.y + card.bounds.height * 0.5) as u32,
+                );
+                let patch = (0, 0, 12, 12);
+                let visible = widget_region(&pixels, width, origin, patch);
+                let background = widget_region(&blank, width, origin, patch);
+                let changed = visible
+                    .iter()
+                    .zip(&background)
+                    .filter(|(a, b)| a != b)
+                    .count();
+                assert!(
+                    changed > 72,
+                    "{name} {} changed only {changed}/144 card pixels",
+                    card.instance_name
+                );
+            }
+            eprintln!("dock capacity proof {width}x{height} at {scale}x: {capacity} visible rows");
+        }
+    }
+}
+
+#[tokio::test]
 async fn widget_param_update_rasterizes_only_that_instance() {
     let Some(mut gpu) = Gpu::with_widgets(512, 256).await else {
         return;
