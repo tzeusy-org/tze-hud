@@ -355,6 +355,8 @@ class DockProgressWitnessTests(unittest.TestCase):
             "early": "early sample was late or changed",
             "premature": "changed before its authored dwell",
             "peer_pixels": "changed the peer B card pixels",
+            "short_a_ttl": "natural expiry could overlap",
+            "short_b_ttl": "natural expiry could overlap",
             "slow_delete": "DELETE did not complete within one second",
             "peer_identity": "preserve B's exact drawn identity",
         }
@@ -392,7 +394,10 @@ class DockProgressWitnessTests(unittest.TestCase):
 
                 run.glide.side_effect = move
                 a, b = mock.Mock(session="temporary-auth-a"), mock.Mock(session="temporary-auth-b")
-                a.call.return_value = b.call.return_value = False, {"ok": True, "expires_in_ms": 60_000}
+                a.call.return_value = False, {"ok": True,
+                                              "expires_in_ms": 1000 if fault == "short_a_ttl" else 60_000}
+                b.call.return_value = False, {"ok": True,
+                                              "expires_in_ms": 1000 if fault == "short_b_ttl" else 60_000}
                 a.end.side_effect = release_a
                 b.end.return_value = 202
                 capture = mock.Mock(ready={"peer": {"pid": 2479}, "root": 3})
@@ -438,6 +443,11 @@ class DockProgressWitnessTests(unittest.TestCase):
                     self.assertTrue(report["same_b_instance_and_rect"])
                     self.assertEqual(report["cleanup"]["sessions"], [202, 202])
                     self.assertIn("a-exit", report["images"])
+                    self.assertLess(report["exit_deadline_ns"], report["earliest_expiry_bound_ns"])
+                if fault in {"short_a_ttl", "short_b_ttl"}:
+                    self.assertNotIn("a_delete", report)
+                    self.assertNotIn("a-exit", report["images"])
+                    self.assertGreaterEqual(report["exit_deadline_ns"], report["earliest_expiry_bound_ns"])
 
 
 class GuardTests(unittest.TestCase):

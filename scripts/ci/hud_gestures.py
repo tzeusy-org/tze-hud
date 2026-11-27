@@ -1817,6 +1817,7 @@ def scenario_dock_progress_hover(run: Run) -> None:
         for index, (caption, progress) in enumerate(zip(captions, (0.25, 0.75))):
             sessions[index] = SessionSmoke(run.smoke.url, run.psk, caption)
             run.mark()
+            sent_ns = time.monotonic_ns()
             is_error, reply = sessions[index].call("hud_publish", {
                 "surface": "dock:progress-bar", "ttl_ms": 60_000,
                 "params": {"label": ("Alpha", "Beta")[index], "progress": progress},
@@ -1824,6 +1825,7 @@ def scenario_dock_progress_hover(run: Run) -> None:
             expires = reply.get("expires_in_ms")
             accepted = not is_error and reply.get("ok") is True
             report["publishes"].append({"card": "AB"[index], "progress": progress, "accepted": accepted,
+                                        "sent_ns": sent_ns,
                                         "expires_in_ms": expires if type(expires) is int else None})
             require(accepted and type(expires) is int and 0 < expires <= 60_000,
                     "scoped progress publish must have finite accepted lifetime")
@@ -1889,13 +1891,20 @@ def scenario_dock_progress_hover(run: Run) -> None:
         report["hover_flags"] = [True, False]
 
         stage = "release A through its real scoped transport"
-        session_a = sessions.pop(0)
+        # The reply floors remaining milliseconds after our send, making
+        # each send-time-plus-remaining value a conservative expiry bound.
+        expiry_floor = min(publish["sent_ns"] + publish["expires_in_ms"] * 1_000_000
+                           for publish in report["publishes"])
         start = time.monotonic_ns()
+        limit = start + NS
+        report["exit_deadline_ns"] = limit
+        report["earliest_expiry_bound_ns"] = expiry_floor
+        require(limit < expiry_floor, "natural expiry could overlap the one-second scoped exit witness")
+        session_a = sessions.pop(0)
         try:
             replies[0] = session_a.end()
         finally:
             report["a_delete"] = {"status": replies[0], "interval_ns": [start, time.monotonic_ns()]}
-        limit = start + NS
         require(replies[0] == 202 and report["a_delete"]["interval_ns"][1] <= limit,
                 "A's scoped DELETE did not complete within one second")
         while time.monotonic_ns() < limit:
