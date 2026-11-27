@@ -24,8 +24,10 @@ pub(super) struct DockTooltipVisit {
 
 struct Visit {
     column: DockPassiveColumn,
+    /// Last exact confirmed card. Keep it while the next raster is pending.
     card: Arc<DockHoverCard>,
     surface_epoch: Arc<AtomicBool>,
+    exact: bool,
     due: Option<Instant>,
 }
 
@@ -56,26 +58,50 @@ impl DockTooltipVisit {
     ) {
         let candidate = self.sample.as_ref().and_then(|(sampled, (x, y))| {
             let current = snapshot.dock_hover.as_deref()?;
+            let proof = presented.filter(|proof| proof.surface_epoch.load(Ordering::Acquire))?;
             if !sampled.shares_attachment(&current.column) {
                 return None;
             }
-            let presented =
-                presented.filter(|proof| proof.surface_epoch.load(Ordering::Acquire))?;
-            current.cards.iter().find_map(|card| {
-                (card.bounds.contains_point(*x, *y)
-                    && presented.frame.presented_equivalent(&current.column, card))
-                .then_some((&current.column, card, &presented.surface_epoch))
-            })
+            let card = current
+                .cards
+                .iter()
+                .find(|card| card.bounds.contains_point(*x, *y))?;
+            Some((&current.column, card, proof))
         });
-        if match (&self.visit, candidate) {
-            (Some(active), Some((column, card, epoch))) => {
-                active.column.shares_attachment(column)
-                    && active.card.same_visit(card)
-                    && Arc::ptr_eq(&active.surface_epoch, epoch)
+        if let Some((column, card, proof)) = candidate {
+            let exact = proof.frame.presented_equivalent(column, card);
+            if let Some(active) = &mut self.visit
+                && active.column.shares_attachment(column)
+                && Arc::ptr_eq(&active.surface_epoch, &proof.surface_epoch)
+                && active.card.same_visit(card)
+                && (exact || proof.frame.retains_visit(column, &active.card))
+            {
+                self.deadline_changed |=
+                    active.exact != exact || (exact && !active.card.same_pixels(card));
+                active.exact = exact;
+                if exact && !active.card.same_pixels(card) {
+                    active.card = card.clone();
+                }
+                return;
             }
-            (None, None) => true,
-            _ => false,
-        } {
+            if exact {
+                self.clear_visit();
+                self.deadline_changed = true;
+                self.visit = Some(Visit {
+                    column: column.clone(),
+                    card: card.clone(),
+                    surface_epoch: proof.surface_epoch.clone(),
+                    exact: true,
+                    due: Some(now + card.delay),
+                });
+                return;
+            }
+        }
+        self.clear_visit();
+    }
+
+    fn clear_visit(&mut self) {
+        if self.visit.take().is_none() {
             return;
         }
         self.deadline_changed = true;
@@ -83,35 +109,43 @@ impl DockTooltipVisit {
             self.output.store(None);
             self.repaint_owed = true;
         }
-        self.visit = candidate.map(|(column, card, epoch)| Visit {
-            column: column.clone(),
-            card: Arc::clone(card),
-            surface_epoch: Arc::clone(epoch),
-            due: Some(now + card.delay),
-        });
     }
 
     pub(super) fn next_due(&self) -> Option<Instant> {
-        self.visit.as_ref()?.due
+        let visit = self.visit.as_ref().filter(|visit| visit.exact)?;
+        let due = visit.due?;
+        if self
+            .output
+            .load()
+            .as_ref()
+            .is_some_and(|request| request.is_presented() || request.card.same_pixels(&visit.card))
+        {
+            return None;
+        }
+        Some(due)
     }
 
     fn expire_dwell(&mut self, now: Instant, work_area: Option<Rect>) -> bool {
-        let Some(visit) = self.visit.as_mut() else {
-            return false;
-        };
-        if visit.due.is_none_or(|due| now < due) {
+        if self.next_due().is_none_or(|due| now < due) {
             return false;
         }
-        visit.due = None;
+        let visit = self.visit.as_mut().expect("checked by next_due");
         let Some(work_area) = work_area else {
+            visit.due = None;
+            if self.output.load().is_some() {
+                self.output.store(None);
+                return true;
+            }
             return false;
         };
-        self.output.store(Some(Arc::new(DockTooltipRequest {
-            column: visit.column.clone(),
-            card: Arc::clone(&visit.card),
-            surface_epoch: Arc::clone(&visit.surface_epoch),
+        // The deadline stays with the visit. An unshown request can be
+        // reissued against new exact pixels without another 180 ms wait.
+        self.output.store(Some(Arc::new(DockTooltipRequest::new(
+            visit.column.clone(),
+            visit.card.clone(),
+            visit.surface_epoch.clone(),
             work_area,
-        })));
+        ))));
         true
     }
 }
@@ -130,21 +164,27 @@ impl super::WinitApp {
     pub(super) fn settle_dock_tooltip(&mut self, now: Instant) -> bool {
         let snapshot = self.state.pipeline.hit_test_snapshot.load_full();
         self.reconcile_dock_tooltip(&snapshot, now);
-        self.state.dock_tooltip.deadline_changed = false;
-        let repaint_owed = std::mem::take(&mut self.state.dock_tooltip.repaint_owed);
+        let mut contact_changed = false;
         if self
             .state
             .dock_tooltip
             .next_due()
-            .is_none_or(|due| now < due)
+            .is_some_and(|due| now >= due)
         {
-            return repaint_owed;
+            let area = snapshot
+                .dock_hover
+                .as_ref()
+                .and_then(|hover| self.dock_tooltip_work_area(&hover.column));
+            // Main-thread presentation may have blocked after the ordinary
+            // cursor refresh. Check the actual point again just before issue.
+            #[cfg(target_os = "windows")]
+            {
+                contact_changed = self.refresh_dock_cursor_for_activation();
+            }
+            contact_changed |= self.state.dock_tooltip.expire_dwell(now, area);
         }
-        let area = snapshot
-            .dock_hover
-            .as_ref()
-            .and_then(|hover| self.dock_tooltip_work_area(&hover.column));
-        self.state.dock_tooltip.expire_dwell(now, area) || repaint_owed
+        self.state.dock_tooltip.deadline_changed = false;
+        std::mem::take(&mut self.state.dock_tooltip.repaint_owed) || contact_changed
     }
 }
 
@@ -195,7 +235,7 @@ mod tests {
             .publish_to_dock("countdown", Default::default(), "agent", None, 0, 0)
             .unwrap();
         scene.certify_dock_passive_column("DISPLAY1", target);
-        let column = scene.dock_passive_column().unwrap();
+        let column = scene.dock_passive_column().unwrap().clone();
         let mut snapshot = HitTestSnapshot::from_scene(&scene);
         let dwell = Duration::from_millis(180);
         let id = scene.dock_instance("agent", "countdown").unwrap().id;
@@ -226,9 +266,18 @@ mod tests {
 
         let start = Instant::now();
         let mut hover = DockTooltipVisit::default();
-        hover.remember(Some(column), Some(point(&a)));
+        hover.remember(Some(&column), Some(point(&a)));
         hover.reconcile(&snapshot, None, start);
         assert_eq!(hover.next_due(), None, "encode alone cannot start dwell");
+        let updated_a = card(a.instance, "Full A", 0.0, [3; 32]);
+        snapshot.dock_hover = Some(frame(updated_a, b.clone()));
+        hover.reconcile(&snapshot, Some(&receipt), start);
+        assert_eq!(
+            hover.next_due(),
+            None,
+            "old same-label pixels cannot start dwell"
+        );
+        snapshot.dock_hover = Some(receipt.frame.clone());
         hover.reconcile(&snapshot, Some(&receipt), start);
         assert_eq!(hover.next_due(), Some(start + dwell));
         assert!(hover.deadline_changed);
@@ -241,21 +290,73 @@ mod tests {
         assert!(!hover.deadline_changed);
 
         let entered_b = start + Duration::from_millis(80);
-        hover.remember(Some(column), Some(point(&b)));
+        hover.remember(Some(&column), Some(point(&b)));
         hover.reconcile(&snapshot, Some(&receipt), entered_b);
         assert_eq!(hover.next_due(), Some(entered_b + dwell));
         assert!(!hover.repaint_owed);
-        assert!(!hover.expire_dwell(start + dwell, Some(target)));
-        assert!(hover.expire_dwell(entered_b + dwell, Some(target)));
+        let due_b = entered_b + dwell;
+        assert!(!hover.expire_dwell(due_b - Duration::from_millis(1), Some(target)));
+        let tick_b = card(b.instance, "Full B", 60.0, [4; 32]);
+        snapshot.dock_hover = Some(frame(a.clone(), tick_b.clone()));
+        hover.reconcile(&snapshot, Some(&receipt), due_b - Duration::from_millis(1));
+        assert_eq!(hover.visit.as_ref().unwrap().due, Some(due_b));
         assert_eq!(
-            hover.output.load().as_ref().unwrap().card.label.as_ref(),
-            "Full B"
+            hover.next_due(),
+            None,
+            "a pending tick does not spin an expired deadline"
+        );
+        assert!(!hover.expire_dwell(due_b, Some(target)));
+        let mut current_receipt = PresentedDockHover {
+            frame: snapshot.dock_hover.clone().unwrap(),
+            surface_epoch: receipt.surface_epoch.clone(),
+        };
+        let after_present = due_b + Duration::from_millis(1);
+        hover.reconcile(&snapshot, Some(&current_receipt), after_present);
+        assert_eq!(
+            hover.next_due(),
+            Some(due_b),
+            "native proof restores the original due time"
         );
 
-        let relabelled = card(b.instance, "B's new full label", 60.0, b.pixels);
+        // A movement after the pre-present sample cannot use its earned time.
+        let mut left_during_present = DockTooltipVisit::default();
+        left_during_present.remember(Some(&column), Some(point(&tick_b)));
+        left_during_present.reconcile(&snapshot, Some(&current_receipt), entered_b);
+        assert_eq!(left_during_present.next_due(), Some(due_b));
+        left_during_present.remember(None, None);
+        left_during_present.reconcile(&snapshot, Some(&current_receipt), after_present);
+        assert!(!left_during_present.expire_dwell(after_present, Some(target)));
+        assert!(left_during_present.output.load().is_none());
+
+        assert!(hover.expire_dwell(after_present, Some(target)));
+        let issued = hover.output.load_full().unwrap();
+        assert_eq!(issued.card.pixels, tick_b.pixels);
+        assert_eq!(issued.card.label.as_ref(), "Full B");
+        assert!(!issued.is_presented());
+
+        let tick_again = card(b.instance, "Full B", 60.0, [5; 32]);
+        snapshot.dock_hover = Some(frame(a.clone(), tick_again.clone()));
+        hover.reconcile(&snapshot, Some(&current_receipt), after_present);
+        assert!(!hover.expire_dwell(after_present, Some(target)));
+        current_receipt.frame = snapshot.dock_hover.clone().unwrap();
+        hover.reconcile(&snapshot, Some(&current_receipt), after_present);
+        assert!(hover.expire_dwell(after_present, Some(target)));
+        let confirmed = hover.output.load_full().unwrap();
+        assert!(!Arc::ptr_eq(&confirmed, &issued));
+        assert_eq!(confirmed.card.pixels, tick_again.pixels);
+        confirmed.acknowledge_for_testing();
+
+        let further_tick = card(b.instance, "Full B", 60.0, [6; 32]);
+        snapshot.dock_hover = Some(frame(a.clone(), further_tick));
+        hover.reconcile(&snapshot, Some(&current_receipt), after_present);
+        assert_eq!(hover.next_due(), None);
+        assert!(!hover.repaint_owed);
+        assert!(Arc::ptr_eq(&confirmed, &hover.output.load_full().unwrap()));
+
+        let relabelled = card(b.instance, "B's new full label", 60.0, tick_again.pixels);
         snapshot.dock_hover = Some(frame(a.clone(), relabelled.clone()));
         let relabelled_at = start + Duration::from_millis(300);
-        hover.reconcile(&snapshot, Some(&receipt), relabelled_at);
+        hover.reconcile(&snapshot, Some(&current_receipt), relabelled_at);
         assert!(hover.output.load().is_none());
         assert!(std::mem::take(&mut hover.repaint_owed));
         assert_eq!(
@@ -292,5 +393,64 @@ mod tests {
         hover.remember(None, None);
         hover.reconcile(&snapshot, Some(&recovered), recovered_at + dwell);
         assert_eq!(hover.next_due(), None, "leave disarms stationary receipt");
+
+        // Re-create the Scene contact after a coalesced hide/show, without an
+        // intervening frame that could otherwise clear the old hover sample.
+        use tze_hud_scene::graph::SurfaceClasses;
+        let after_leave = recovered_at + dwell;
+        hover.remember(Some(&column), Some(point(&a)));
+        hover.reconcile(&snapshot, Some(&recovered), after_leave);
+        assert_eq!(hover.next_due(), Some(after_leave + dwell));
+        scene.set_owner_hidden(SurfaceClasses {
+            widgets: true,
+            ..SurfaceClasses::NONE
+        });
+        scene.set_owner_hidden(SurfaceClasses::NONE);
+        scene.certify_dock_passive_column("DISPLAY1", target);
+        let visible_again = scene.dock_passive_column().unwrap().clone();
+        assert!(!visible_again.shares_attachment(&column));
+        let same_geometry = Arc::new(DockHoverFrame {
+            column: visible_again.clone(),
+            cards: vec![a.clone()],
+        });
+        let second_present = PresentedDockHover {
+            frame: same_geometry.clone(),
+            surface_epoch: recovered.surface_epoch.clone(),
+        };
+        snapshot.dock_hover = Some(same_geometry);
+        hover.reconcile(&snapshot, Some(&second_present), after_leave);
+        assert_eq!(
+            hover.next_due(),
+            None,
+            "coalesced visibility retires the old sample"
+        );
+        hover.remember(Some(&visible_again), Some(point(&a)));
+        hover.reconcile(&snapshot, Some(&second_present), after_leave);
+        assert_eq!(hover.next_due(), Some(after_leave + dwell));
+
+        scene.release_scope("agent");
+        scene
+            .publish_to_dock("countdown", Default::default(), "agent", None, 0, 0)
+            .unwrap();
+        scene.certify_dock_passive_column("DISPLAY1", target);
+        let recreated = scene.dock_passive_column().unwrap();
+        let replacement = scene.dock_instance("agent", "countdown").unwrap().id;
+        assert_ne!(a.instance, replacement);
+        assert!(!recreated.shares_attachment(&visible_again));
+        let new_frame = Arc::new(DockHoverFrame {
+            column: recreated.clone(),
+            cards: vec![card(replacement, "Full A", 0.0, a.pixels)],
+        });
+        snapshot.dock_hover = Some(new_frame.clone());
+        let new_present = PresentedDockHover {
+            frame: new_frame,
+            surface_epoch: recovered.surface_epoch.clone(),
+        };
+        hover.reconcile(&snapshot, Some(&new_present), after_leave + dwell);
+        assert_eq!(
+            hover.next_due(),
+            None,
+            "remove/recreate cannot replay dwell"
+        );
     }
 }

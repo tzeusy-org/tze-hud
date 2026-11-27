@@ -2103,7 +2103,8 @@ async fn compact_clipped_label_tooltip_uses_actual_draw_and_named_target() {
     };
     let format = wgpu::TextureFormat::Rgba8UnormSrgb;
     gpu.compositor.init_text_renderer(format);
-    let mut scene = SceneGraph::new_with_clock(960.0, 360.0, Arc::new(TestClock::new(1_000)));
+    let clock = Arc::new(TestClock::new(1_000));
+    let mut scene = SceneGraph::new_with_clock(960.0, 360.0, clock.clone());
     scene.create_tab("Main", 0).unwrap();
     let BundleScanResult::Ok(bundle) = bundle!("countdown", ["card.svg", "dock.svg"]) else {
         panic!("embedded countdown");
@@ -2223,14 +2224,19 @@ async fn compact_clipped_label_tooltip_uses_actual_draw_and_named_target() {
         display.width,
         display.height - 24.0,
     );
+    let epoch = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let request = |card| {
+        Arc::new(DockTooltipRequest::new(
+            hover.column.clone(),
+            card,
+            epoch.clone(),
+            area,
+        ))
+    };
+    let initial_request = request(card.clone());
     gpu.compositor
         .dock_tooltip
-        .store(Some(Arc::new(DockTooltipRequest {
-            column: hover.column.clone(),
-            card: card.clone(),
-            surface_epoch: Arc::new(std::sync::atomic::AtomicBool::new(true)),
-            work_area: area,
-        })));
+        .store(Some(initial_request.clone()));
     assert!(gpu.compositor.poll_dock_tooltip());
     let drawn = build(&mut gpu.compositor, &mut scene);
     let capture = |c: &mut Compositor, frame, name| {
@@ -2260,6 +2266,10 @@ async fn compact_clipped_label_tooltip_uses_actual_draw_and_named_target() {
         capture(&mut gpu.compositor, &drawn, "MIRROR"),
     );
     assert!(!gpu.compositor.poll_dock_tooltip());
+    assert!(
+        !initial_request.is_presented(),
+        "offscreen capture cannot acknowledge native visibility"
+    );
 
     publish(&mut scene, "agent-a", "WWWWWWWWWWWWWWWWWWWWWWWB");
     let changed = build(&mut gpu.compositor, &mut scene);
@@ -2273,6 +2283,109 @@ async fn compact_clipped_label_tooltip_uses_actual_draw_and_named_target() {
     assert_eq!(card.pixels, relabelled.pixels);
     assert!(hover.presented_equivalent(&updated.column, relabelled));
     assert_eq!(capture(&mut gpu.compositor, &changed, "SELECTED"), blank);
+
+    // Restore the first semantic label, then advance the real timer before
+    // the initial request has a native acknowledgement.
+    publish(&mut scene, "agent-a", full);
+    clock.advance(1_000);
+    let next_tick = build(&mut gpu.compositor, &mut scene);
+    let next_hover = next_tick.dock_hover().unwrap();
+    let next_card = next_hover
+        .cards
+        .iter()
+        .find(|entry| entry.instance == card.instance)
+        .unwrap();
+    assert!(card.same_visit(next_card));
+    assert!(!hover.presented_equivalent(&next_hover.column, next_card));
+    let no_popup = capture(&mut gpu.compositor, &next_tick, "SELECTED");
+    let tooltip_region = |pixels: &[u8]| {
+        let x = (layout.column.x + layout.column.width - display.x).ceil() as u32;
+        widget_region(pixels, 960, (0, 0), (x, 0, 960 - x, 360))
+    };
+    assert_eq!(
+        tooltip_region(&no_popup),
+        tooltip_region(&blank),
+        "pending first output waits for exact card pixels"
+    );
+    let rearmed = request(next_card.clone());
+    gpu.compositor.dock_tooltip.store(Some(rearmed.clone()));
+    assert!(gpu.compositor.poll_dock_tooltip());
+    let new_paint = build(&mut gpu.compositor, &mut scene);
+    assert_eq!(
+        tooltip_region(&capture(&mut gpu.compositor, &new_paint, "SELECTED")),
+        tooltip_region(&shown),
+    );
+    assert!(!rearmed.is_presented());
+
+    #[cfg(feature = "dev-mode")]
+    {
+        // Simulate the real native receipt explicitly. A second capture
+        // cannot perform this transition itself.
+        rearmed.acknowledge_for_testing();
+        clock.advance(1_000);
+        let steady = build(&mut gpu.compositor, &mut scene);
+        let steady_hover = steady.dock_hover().unwrap();
+        assert!(
+            !next_hover.presented_equivalent(
+                &steady_hover.column,
+                steady_hover
+                    .cards
+                    .iter()
+                    .find(|entry| entry.instance == card.instance)
+                    .unwrap(),
+            )
+        );
+        assert_eq!(
+            tooltip_region(&capture(&mut gpu.compositor, &steady, "SELECTED")),
+            tooltip_region(&shown),
+            "an acknowledged output persists through healthy timer updates",
+        );
+    }
+
+    // A real upload denial with a same-size, still-drawable fallback must
+    // revoke the current hover candidate even though the label did not change.
+    gpu.compositor.dock_tooltip.store(None);
+    assert!(gpu.compositor.poll_dock_tooltip());
+    let before_denial = build(&mut gpu.compositor, &mut scene);
+    let old_pixels = capture(&mut gpu.compositor, &before_denial, "SELECTED");
+    let name = scene
+        .dock_instance("agent-a", &kind)
+        .unwrap()
+        .instance_name
+        .clone();
+    let before_attempts = raster_count(&gpu.compositor, &name);
+    let no_quota = widget_ledger(0);
+    gpu.compositor.set_resident_ledger(no_quota.clone());
+    scene
+        .publish_to_dock(
+            &kind,
+            HashMap::from([
+                ("label".into(), string(full)),
+                ("severity".into(), enumeration("error")),
+                (
+                    "ends_in_ms".into(),
+                    Value::Deadline(WidgetDeadline::relative(30_000)),
+                ),
+            ]),
+            "agent-a",
+            None,
+            0,
+            0,
+        )
+        .unwrap();
+    let denied = build(&mut gpu.compositor, &mut scene);
+    assert_eq!(raster_count(&gpu.compositor, &name), before_attempts + 1);
+    assert_eq!(no_quota.snapshot().class_denial_count, 1);
+    assert_eq!(no_quota.snapshot().widget_raster_bytes, 0);
+    assert_eq!(
+        capture(&mut gpu.compositor, &denied, "SELECTED"),
+        old_pixels
+    );
+    let survivors = &denied.dock_hover().unwrap().cards;
+    assert_eq!(survivors.len(), 1);
+    assert_ne!(survivors[0].instance, card.instance);
+    gpu.compositor
+        .set_resident_ledger(widget_ledger(1024 * 1024));
 
     publish(&mut scene, "agent-a", "Fits");
     let fit = build(&mut gpu.compositor, &mut scene);

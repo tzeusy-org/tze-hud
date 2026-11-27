@@ -236,6 +236,22 @@ pub(super) fn observe_dock_point(
 }
 
 impl WinitApp {
+    #[cfg(target_os = "windows")]
+    fn native_cursor_position() -> Option<winit::dpi::PhysicalPosition<i32>> {
+        use windows::Win32::Foundation::POINT;
+        use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
+
+        let mut point = POINT::default();
+        // SAFETY: GetCursorPos writes to POINT and has no other preconditions.
+        unsafe { GetCursorPos(&mut point) }.ok()?;
+        Some(winit::dpi::PhysicalPosition::new(point.x, point.y))
+    }
+
+    #[cfg(target_os = "windows")]
+    pub(super) fn refresh_dock_cursor_for_activation(&mut self) -> bool {
+        self.observe_native_dock_cursor(Self::native_cursor_position())
+    }
+
     /// Refresh cursor position from OS state when passthrough is active.
     ///
     /// In overlay mode on Windows, `set_cursor_hittest(false)` prevents
@@ -246,17 +262,10 @@ impl WinitApp {
     pub(super) fn refresh_cursor_position_from_os(&mut self) -> bool {
         #[cfg(target_os = "windows")]
         if self.state.effective_mode == WindowMode::Overlay {
-            use windows::Win32::Foundation::POINT;
-            use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
-
             let Some(window) = &self.state.window else {
                 return self.observe_native_dock_cursor(None);
             };
-            let mut pt = POINT { x: 0, y: 0 };
-            // SAFETY: GetCursorPos writes to POINT and has no other preconditions.
-            let actual_cursor = unsafe { GetCursorPos(&mut pt) }
-                .ok()
-                .map(|()| winit::dpi::PhysicalPosition::new(pt.x, pt.y));
+            let actual_cursor = Self::native_cursor_position();
             let outer = super::displays::cursor_outer_origin(window);
             let window_origin = cursor_refresh_window_origin(outer, || {
                 window.current_monitor().map(|monitor| monitor.position())

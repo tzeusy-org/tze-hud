@@ -35,6 +35,10 @@ impl DockHoverCard {
         self.same_place(other) && self.label == other.label
     }
 
+    pub fn same_pixels(&self, other: &Self) -> bool {
+        self.same_place(other) && self.pixels == other.pixels
+    }
+
     fn same_place(&self, other: &Self) -> bool {
         self.instance == other.instance && self.bounds == other.bounds
     }
@@ -58,10 +62,17 @@ pub struct PresentedDockHover {
 impl DockHoverFrame {
     pub fn presented_equivalent(&self, column: &DockPassiveColumn, card: &DockHoverCard) -> bool {
         self.column.shares_attachment(column)
-            && self.cards.iter().any(|painted| {
-                painted.same_visit(card)
-                    || (painted.same_place(card) && painted.pixels == card.pixels)
-            })
+            && self.cards.iter().any(|painted| painted.same_pixels(card))
+    }
+
+    /// The old proof still represents this already-started semantic visit.
+    /// This grants continuity while a successful new raster awaits present.
+    pub fn retains_visit(&self, column: &DockPassiveColumn, card: &DockHoverCard) -> bool {
+        self.column.shares_attachment(column)
+            && self
+                .cards
+                .iter()
+                .any(|painted| painted.same_visit(card) || painted.same_pixels(card))
     }
 }
 
@@ -72,6 +83,38 @@ pub struct DockTooltipRequest {
     pub surface_epoch: Arc<AtomicBool>,
     /// Verified available rectangle in Scene pixels.
     pub work_area: Rect,
+    presented: AtomicBool,
+}
+
+impl DockTooltipRequest {
+    pub fn new(
+        column: DockPassiveColumn,
+        card: Arc<DockHoverCard>,
+        surface_epoch: Arc<AtomicBool>,
+        work_area: Rect,
+    ) -> Self {
+        Self {
+            column,
+            card,
+            surface_epoch,
+            work_area,
+            presented: AtomicBool::new(false),
+        }
+    }
+
+    pub fn is_presented(&self) -> bool {
+        self.presented.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn acknowledge_present(&self) {
+        self.presented.store(true, Ordering::Release);
+    }
+
+    #[cfg(feature = "dev-mode")]
+    #[doc(hidden)]
+    pub fn acknowledge_for_testing(&self) {
+        self.acknowledge_present();
+    }
 }
 
 pub type DockTooltipHandle = Arc<arc_swap::ArcSwapOption<DockTooltipRequest>>;
@@ -79,6 +122,7 @@ pub type DockTooltipHandle = Arc<arc_swap::ArcSwapOption<DockTooltipRequest>>;
 pub(super) struct DockTooltipPaint {
     pub(super) backdrop: RoundedRectDrawCmd,
     pub(super) text: TextItem,
+    pub(super) request: Arc<DockTooltipRequest>,
 }
 
 #[derive(Default)]
@@ -280,7 +324,10 @@ impl super::Compositor {
         };
         if !request.surface_epoch.load(Ordering::Acquire)
             || !hover.column.shares_attachment(&request.column)
-            || !hover.cards.iter().any(|card| request.card.same_visit(card))
+            || !hover.cards.iter().any(|card| {
+                request.card.same_visit(card)
+                    && (request.is_presented() || request.card.same_pixels(card))
+            })
         {
             return;
         }
@@ -290,7 +337,7 @@ impl super::Compositor {
         let Some(rasterizer) = self.text_rasterizer.as_mut() else {
             return;
         };
-        let Some((mut tooltip, fill, border)) = layout_dock_tooltip(
+        let Some((mut backdrop, text, fill, border)) = layout_dock_tooltip(
             request,
             projection.pixels_per_dp,
             &self.token_map,
@@ -298,11 +345,15 @@ impl super::Compositor {
         ) else {
             return;
         };
-        tooltip.backdrop.color = self.gpu_color(fill);
-        if let (Some(style), Some(color)) = (&mut tooltip.backdrop.border, border) {
+        backdrop.color = self.gpu_color(fill);
+        if let (Some(style), Some(color)) = (&mut backdrop.border, border) {
             style.color = self.gpu_color(color);
         }
-        dock.tooltip = Some(tooltip);
+        dock.tooltip = Some(DockTooltipPaint {
+            backdrop,
+            text,
+            request: request.clone(),
+        });
     }
 
     /// Settle dock geometry before the ordinary frame gate, using the existing
@@ -750,6 +801,10 @@ impl super::Compositor {
                 if let Some(entry) = wr.texture_entry_mut(instance_name) {
                     if uploaded {
                         entry.dock_presentation = dock.cloned();
+                    } else {
+                        // An older fallback texture may still draw, but an
+                        // unsuccessful current raster does not authorize hover.
+                        entry.clipped_compact_label = None;
                     }
                     entry.last_rendered_params = effective_params;
                     entry.dirty = false;
@@ -777,7 +832,8 @@ fn layout_dock_tooltip(
     tokens: &std::collections::HashMap<String, String>,
     rasterizer: &mut crate::text::TextRasterizer,
 ) -> Option<(
-    DockTooltipPaint,
+    RoundedRectDrawCmd,
+    TextItem,
     tze_hud_scene::Rgba,
     Option<tze_hud_scene::Rgba>,
 )> {
@@ -886,5 +942,5 @@ fn layout_dock_tooltip(
         1.0,
     );
     text.line_height_multiplier = line / size;
-    Some((DockTooltipPaint { backdrop, text }, fill, border))
+    Some((backdrop, text, fill, border))
 }

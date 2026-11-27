@@ -853,7 +853,13 @@ impl Compositor {
             }))
         });
         if present_result.is_ok() && signature_current {
-            frame.record_dock_hover(build.widgets.presented_dock_hover(target, display));
+            frame.record_dock_hover(
+                build.widgets.presented_dock_hover(target, display),
+                build
+                    .widgets
+                    .tooltip_for_target(target, display)
+                    .map(|paint| paint.request.clone()),
+            );
         } else {
             frame.invalidate_dock_hover();
         }
