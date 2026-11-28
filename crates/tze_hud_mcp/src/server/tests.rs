@@ -6104,7 +6104,7 @@ async fn release(server: &McpServer, region: &tze_hud_scene::types::ZoneHitRegio
     let (activation, wakes) = {
         let mut scene = server.scene.lock().await;
         let activation = activate
-            .then(|| scene.activate_notification(region, 0))
+            .then(|| scene.activate_pressed_notification(region, 0))
             .flatten();
         scene.end_notification_press();
         (activation, scene.take_notification_wait_notifiers())

@@ -1500,23 +1500,45 @@ impl SceneGraph {
             })
     }
 
-    /// Activate one exact, visible and unexpired notification control. Pointer
-    /// releases and keyboard activation both enter here. The FIFO remains the
+    /// Activate one exact, visible and unexpired notification control by
+    /// keyboard (answer chord digit or Enter). The FIFO remains the
     /// authoritative answer; its readiness callback must run after unlocking.
     pub fn activate_notification(
         &mut self,
         region: &ZoneHitRegion,
         exit_ms: u32,
     ) -> Option<super::NotificationActivation> {
+        self.activate_notification_from(region, exit_ms, false)
+    }
+
+    /// [`Self::activate_notification`] by the pointer press in progress: its
+    /// release on the control, or its completed destructive hold. Only this
+    /// path is the press's own activation, so only it can answer a card the
+    /// press holds past its deadline.
+    pub fn activate_pressed_notification(
+        &mut self,
+        region: &ZoneHitRegion,
+        exit_ms: u32,
+    ) -> Option<super::NotificationActivation> {
+        self.activate_notification_from(region, exit_ms, true)
+    }
+
+    fn activate_notification_from(
+        &mut self,
+        region: &ZoneHitRegion,
+        exit_ms: u32,
+        from_press: bool,
+    ) -> Option<super::NotificationActivation> {
         self.prune_notification_feedback();
         let key = region.publication_id;
         // Past its deadline, a card held by a press takes only that press's
-        // own control.
-        let pressed = self
-            .overlay
-            .notification_press
-            .as_ref()
-            .is_some_and(|press| press.region.interaction_id == region.interaction_id);
+        // own activation of its own control.
+        let pressed = from_press
+            && self
+                .overlay
+                .notification_press
+                .as_ref()
+                .is_some_and(|press| press.region.interaction_id == region.interaction_id);
         let record = self.live_notification_control(region, pressed)?;
         let ZoneContent::Notification(payload) = &record.content else {
             return None;

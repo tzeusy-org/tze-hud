@@ -81,7 +81,13 @@ impl WinitApp {
             let (hold_ms, _) = hold_timing(tokens);
             if let Some(hold) = scene.take_completed_notification_hold(hold_ms) {
                 let exit_ms = notification_exit_ms(&scene, &hold.region.zone_name, tokens);
-                activation = scene.activate_notification(&hold.region, exit_ms);
+                // A pointer hold is the press's own activation; a keyboard
+                // hold is not.
+                activation = if hold.key.is_none() {
+                    scene.activate_pressed_notification(&hold.region, exit_ms)
+                } else {
+                    scene.activate_notification(&hold.region, exit_ms)
+                };
                 match hold.key {
                     // The release that follows must not press anything again.
                     None => self.state.zone_press = None,

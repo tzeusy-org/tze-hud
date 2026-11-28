@@ -3628,7 +3628,7 @@ impl WinitApp {
                                         &self.state.global_tokens,
                                     );
                                     if let Some(wake) =
-                                        scene.activate_notification(&region, exit_ms)
+                                        scene.activate_pressed_notification(&region, exit_ms)
                                     {
                                         pending_notification_outcomes.push(wake);
                                     }

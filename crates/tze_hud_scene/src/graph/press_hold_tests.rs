@@ -165,6 +165,16 @@ fn answer_window_press_holds_card_until_release() {
             ..Default::default()
         },
     );
+    scene.overlay.notification_reveal_regions.push(
+        crate::graph::overlay::NotificationRevealRegion {
+            target: crate::graph::overlay::NotificationRevealTarget {
+                publication_id: id,
+                field: crate::graph::overlay::NotificationRevealField::Body,
+            },
+            bounds: Rect::new(0.0, 0.0, 10.0, 10.0),
+            focus_id: "body".into(),
+        },
+    );
     scene.prune_notification_feedback();
     assert!(
         scene
@@ -173,12 +183,17 @@ fn answer_window_press_holds_card_until_release() {
             .contains_key(&(id, 0))
     );
     assert!(scene.overlay.notification_go_to.contains_key(&id));
+    assert_eq!(scene.overlay.notification_reveal_regions.len(), 1);
     // One wake, at the bound, while it holds.
     assert_eq!(
         scene.next_publication_expiry_wall_us(),
         Some(deadline + NOTIFICATION_PRESS_HOLD_MAX_US)
     );
-    assert!(scene.activate_notification(&button, EXIT_MS).is_some());
+    assert!(
+        scene
+            .activate_pressed_notification(&button, EXIT_MS)
+            .is_some()
+    );
     assert!(
         !scene.end_notification_press(),
         "answered: nothing to expire"
@@ -201,7 +216,11 @@ fn answer_window_press_holds_card_until_release() {
     scene.begin_notification_press(&close);
     clock.advance(600);
     scene.drain_expired_zone_publications();
-    assert!(scene.activate_notification(&close, EXIT_MS).is_some());
+    assert!(
+        scene
+            .activate_pressed_notification(&close, EXIT_MS)
+            .is_some()
+    );
     scene.end_notification_press();
     assert!(!shown(&scene, "q"));
     assert_eq!(answers(&mut scene), [PendingActionKind::Dismiss]);
@@ -219,7 +238,11 @@ fn answer_window_press_holds_card_until_release() {
     let hold = scene
         .take_completed_notification_hold(800)
         .expect("hold due");
-    assert!(scene.activate_notification(&hold.region, EXIT_MS).is_some());
+    assert!(
+        scene
+            .activate_pressed_notification(&hold.region, EXIT_MS)
+            .is_some()
+    );
     assert_eq!(
         answers(&mut scene),
         [PendingActionKind::Callback("ship".into())]
@@ -267,7 +290,11 @@ fn press_hold_release_off_control_expires_card() {
         scene.notification_wait_outcome(id),
         Some(NotificationOutcome::Gone(NotificationGone::Expired))
     );
-    assert!(scene.activate_notification(&button, EXIT_MS).is_none());
+    assert!(
+        scene
+            .activate_pressed_notification(&button, EXIT_MS)
+            .is_none()
+    );
     assert!(answers(&mut scene).is_empty());
 
     // R13.1 S4: still down 5 s after the deadline: the card expires then and
@@ -283,7 +310,11 @@ fn press_hold_release_off_control_expires_card() {
     clock.advance(1);
     scene.drain_expired_zone_publications();
     assert!(!shown(&scene, "q"));
-    assert!(scene.activate_notification(&button, EXIT_MS).is_none());
+    assert!(
+        scene
+            .activate_pressed_notification(&button, EXIT_MS)
+            .is_none()
+    );
     scene.end_notification_press();
     assert!(answers(&mut scene).is_empty());
 
@@ -343,8 +374,44 @@ fn only_the_pressed_control_and_an_owner_answer_window_hold_a_card() {
     clock.advance(900);
     scene.begin_notification_press(&button);
     clock.advance(200);
-    assert!(scene.activate_notification(&other, EXIT_MS).is_none());
+    assert!(
+        scene
+            .activate_pressed_notification(&other, EXIT_MS)
+            .is_none()
+    );
     assert!(shown(&scene, "q"));
+}
+
+#[test]
+fn only_the_pointer_press_itself_answers_a_press_held_card() {
+    // Past the deadline the pressed control is reachable only by that
+    // press's own release or completed hold, never by the keyboard (an
+    // answer chord digit or Enter) or a plain reply-field open.
+    let (mut scene, clock) = scene();
+    ask(&mut scene, reply_question("q"), None, true);
+    let button = ship(&mut scene, "q");
+    clock.advance(900);
+    scene.begin_notification_press(&button);
+    clock.advance(200);
+    assert_eq!(scene.drain_expired_zone_publications(), 0);
+    assert!(scene.activate_notification(&button, EXIT_MS).is_none());
+    assert!(answers(&mut scene).is_empty());
+    assert!(shown(&scene, "q"), "still held for the press's own release");
+
+    let (mut scene, clock) = self::scene();
+    ask(&mut scene, reply_question("q"), None, true);
+    let other = control(&mut scene, "q", ZoneInteractionKind::Action { index: 1 });
+    clock.advance(900);
+    scene.begin_notification_press(&other);
+    clock.advance(200);
+    assert!(
+        !scene.set_notification_reply_view(Some(reply_view(other.publication_id, ""))),
+        "a non-press open of a past-deadline card is refused"
+    );
+    assert!(scene.overlay.notification_reply.is_none());
+    assert!(scene.activate_notification(&other, EXIT_MS).is_none());
+    scene.end_notification_press();
+    assert!(!shown(&scene, "q"));
 }
 
 #[test]
@@ -394,7 +461,9 @@ fn replace_clear_and_trim_win_over_a_press_hold() {
         }
         assert!(!shown(&scene, "q"), "{how}");
         assert!(
-            scene.activate_notification(&button, EXIT_MS).is_none(),
+            scene
+                .activate_pressed_notification(&button, EXIT_MS)
+                .is_none(),
             "{how}"
         );
         scene.end_notification_press();
@@ -513,7 +582,7 @@ fn press_opened_reply_field_keeps_a_past_deadline_card_until_closed() {
     clock.advance(200);
     assert_eq!(scene.drain_expired_zone_publications(), 0);
     assert!(matches!(
-        scene.activate_notification(&other, EXIT_MS),
+        scene.activate_pressed_notification(&other, EXIT_MS),
         Some(crate::graph::NotificationActivation::Reply(_))
     ));
     assert!(
@@ -539,7 +608,11 @@ fn press_opened_reply_field_keeps_a_past_deadline_card_until_closed() {
     clock.advance(900);
     scene.begin_notification_press(&other);
     clock.advance(200);
-    assert!(scene.activate_notification(&other, EXIT_MS).is_some());
+    assert!(
+        scene
+            .activate_pressed_notification(&other, EXIT_MS)
+            .is_some()
+    );
     scene.end_notification_press();
     assert!(
         scene

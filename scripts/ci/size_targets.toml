@@ -216,15 +216,15 @@ target = "ui_and_shell"
 rust = 15
 rust_test = 6
 
-# hud-ohgc9.13 press-held answer-window card: measured growth against origin/main bd9dee4c.
+# hud-ohgc9.13 press-held answer-window card: measured growth against origin/main 5ba5dfc7.
 [[inflight_allowances]]
 feature = "hud-ohgc9.13 press-held answer-window card"
 approval = "hud-ohgc9.13 design (owner-signed spec, PR #1686)"
 signed_at = "2026-11-20"
 decision = "hud-3n24e.32"
 target = "core"
-rust = 164
-rust_test = 489
+rust = 216
+rust_test = 712
 
 [[inflight_allowances]]
 feature = "hud-ohgc9.13 press-held answer-window card"
@@ -241,7 +241,7 @@ approval = "hud-ohgc9.13 design (owner-signed spec, PR #1686)"
 signed_at = "2026-11-20"
 decision = "hud-3n24e.32"
 target = "ui_and_shell"
-rust = 39
+rust = 45
 rust_test = 176
 
 [[inflight_allowances]]
