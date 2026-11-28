@@ -1285,8 +1285,9 @@ variable override. `go_to_apps` is a startup-only array of eligible Windows
 process executable names for Go to session. The default list is
 `WindowsTerminal.exe`, `Code.exe`, `Code - Insiders.exe`, `Cursor.exe`,
 `OpenConsole.exe`, `conhost.exe`, `wezterm-gui.exe`, `alacritty.exe` and
-`mintty.exe`. An explicit array replaces the defaults and `[]` disables
-lookup. `question_placement` (live, saved from the Layout card
+`mintty.exe`. A classic console window (`ConsoleWindowClass`) counts as
+`conhost.exe`, whichever shell owns it. An explicit array replaces the
+defaults and `[]` disables lookup. `question_placement` (live, saved from the Layout card
 row "New questions appear on"; no flag or variable) chooses where a new
 question card (a notification with a callback action) appears: `focused`
 (default) is the monitor of the foreground window, or the pointer's monitor
