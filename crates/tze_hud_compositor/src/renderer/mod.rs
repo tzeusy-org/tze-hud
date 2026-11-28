@@ -60,6 +60,7 @@ pub mod hit_regions;
 pub(crate) mod icon;
 pub(crate) mod image_cache;
 mod notification_layout;
+mod notification_reply;
 mod notification_reveal;
 mod notification_style;
 mod notification_text;

@@ -174,6 +174,7 @@ impl WindowedRuntimeState {
             context_menu_dismiss_pending: false,
             notification_keydowns: Default::default(),
             answer_keyboard: Default::default(),
+            notification_reply: Default::default(),
             primary_drag_gesture: None,
             global_tokens: HashMap::new(),
             resize_affordance_px: Default::default(),
@@ -975,6 +976,7 @@ impl HeadlessEventLoopHarness {
     /// input retained behind a busy scene lock.
     pub fn tick(&mut self) -> bool {
         self.last_turn_submitted = false;
+        self.app.sync_notification_reply();
         self.app.sync_design_tokens();
         if let Some((primary, secondaries)) = &self.display_fixture {
             self.app.sync_zone_assignments_for(primary, secondaries);
@@ -1228,10 +1230,12 @@ impl HeadlessEventLoopHarness {
     }
 
     /// Display-space center of the on-screen notification action button
-    /// whose callback is `callback_id`, as hit-tested after the last
+    /// whose fixed or typed callback is `callback_id`, as hit-tested after the last
     /// [`Self::tick`].
     pub fn notification_action_center(&self, callback_id: &str) -> Option<(f32, f32)> {
-        self.notification_target_center(|a| a.callback_id.as_deref() == Some(callback_id))
+        self.notification_target_center(|a| {
+            a.callback_id.as_deref().or(a.reply.as_deref()) == Some(callback_id)
+        })
     }
 
     /// Display center of a live link, using the compositor's exact action index.
@@ -1461,6 +1465,7 @@ impl HeadlessEventLoopHarness {
     /// Run the genuine production drain over the pending queue.
     #[cfg(test)]
     pub(super) fn drain(&mut self) {
+        self.app.sync_notification_reply();
         self.app.sync_answer_focus();
         self.app.drain_pending_keyboard_events();
     }
@@ -3423,6 +3428,7 @@ mod tests {
                                 text: "Blocked browser".into(),
                                 actions: vec![tze_hud_scene::NotificationAction {
                                     copy: None,
+                                    reply: None,
                                     label: "Open".into(),
                                     callback_id: None,
                                     url: Some("https://example.com/frame".into()),
@@ -3784,6 +3790,7 @@ mod tests {
             });
             let action = |id: &str, label: &str| NotificationAction {
                 copy: None,
+                reply: None,
                 label: label.to_string(),
                 callback_id: Some(id.to_string()),
                 url: None,
@@ -5048,6 +5055,7 @@ mod tests {
             for (i, url) in urls.iter().enumerate() {
                 payload.actions[i] = NotificationAction {
                     copy: None,
+                    reply: None,
                     label: format!("Link {i}"),
                     callback_id: None,
                     url: Some((*url).into()),
@@ -5298,6 +5306,333 @@ mod tests {
         assert!(take_action_ids(&harness).is_empty());
     }
 
+    fn set_reply_action(harness: &HeadlessEventLoopHarness, expiry: Option<u64>) {
+        let mut scene = harness.scene();
+        let card = &mut scene
+            .zone_registry
+            .active_publishes
+            .get_mut("notification-area")
+            .unwrap()[0];
+        card.expires_at_wall_us = expiry;
+        let tze_hud_scene::ZoneContent::Notification(payload) = &mut card.content else {
+            panic!("notification card");
+        };
+        payload.actions = vec![tze_hud_scene::NotificationAction {
+            label: "Other…".into(),
+            reply: Some("database".into()),
+            ..Default::default()
+        }];
+        scene.version += 1;
+    }
+
+    fn send_text_input_ime(
+        harness: &mut HeadlessEventLoopHarness,
+        event: winit::event::Ime,
+        at: u64,
+    ) {
+        let window = harness.app.text_input_window_id().unwrap();
+        harness.app.update_text_input_ime_focus(window, true);
+        harness
+            .app
+            .dispatch_text_input_ime(window, None, event, MonoUs(at));
+    }
+
+    #[test]
+    fn notification_reply_only_question_digit_keeps_its_draft_across_escape_and_sends_once() {
+        use winit::event::Ime;
+
+        let mut harness = approve_reject_notification_harness();
+        set_reply_action(&harness, None);
+        assert!(harness.tick());
+        let start = harness.notification_action_center("database").unwrap();
+        let open = |harness: &mut HeadlessEventLoopHarness| {
+            harness
+                .app
+                .state
+                .answer_keyboard
+                .requested
+                .store(true, std::sync::atomic::Ordering::Release);
+            harness.drain();
+            harness.type_text("1");
+            harness.drain();
+            assert!(harness.tick());
+        };
+        open(&mut harness);
+        let opened = harness.notification_action_center("database").unwrap();
+        assert!((opened.0 - start.0).abs() < 0.01 && (opened.1 - start.1).abs() < 0.01);
+        assert!(
+            harness
+                .scene()
+                .overlay
+                .notification_reply
+                .as_ref()
+                .unwrap()
+                .text
+                .is_empty()
+        );
+        assert!(
+            harness.scene().overlay.notification_geometry[0]
+                .reply_caret
+                .is_some()
+        );
+        harness.type_text("use the staging DB");
+        harness.drain();
+        harness.press_named_key("Escape");
+        harness.drain();
+        assert!(harness.scene().overlay.notification_reply.is_none());
+        assert!(take_action_ids(&harness).is_empty());
+
+        open(&mut harness);
+        assert_eq!(
+            harness
+                .scene()
+                .overlay
+                .notification_reply
+                .as_ref()
+                .unwrap()
+                .text,
+            "use the staging DB"
+        );
+        // The pending IME candidate owns Enter and does not alter the draft.
+        send_text_input_ime(&mut harness, Ime::Preedit("かん".into(), Some((3, 3))), 0);
+        harness.press_named_key("Enter");
+        harness.drain();
+        assert!(take_action_ids(&harness).is_empty());
+        assert_eq!(
+            harness
+                .scene()
+                .overlay
+                .notification_reply
+                .as_ref()
+                .unwrap()
+                .text,
+            "use the staging DB"
+        );
+        send_text_input_ime(&mut harness, Ime::Preedit(String::new(), None), 1);
+        send_text_input_ime(&mut harness, Ime::Commit("漢".into()), 2);
+        harness.drain();
+        assert!(harness.tick());
+        let card = harness.scene().overlay.notification_geometry[0].clone();
+        let caret = card.reply_caret.unwrap();
+        let window_origin = (40.0, 20.0);
+        let local = crate::windowed::notification_reply::reply_ime_area(caret, window_origin);
+        assert_eq!(
+            local,
+            tze_hud_scene::Rect::new(caret.x - 40.0, caret.y - 20.0, caret.width, caret.height)
+        );
+        assert!(card.reply.unwrap().contains_point(caret.x, caret.y));
+
+        // Paused input can neither edit nor submit. Resuming preserves the draft.
+        harness
+            .app
+            .state
+            .safe_mode_atomic
+            .store(true, std::sync::atomic::Ordering::Release);
+        harness.type_text("ignored");
+        harness.press_named_key("Backspace");
+        harness.press_named_key("Enter");
+        harness.drain();
+        assert!(take_action_ids(&harness).is_empty());
+        assert_eq!(
+            harness
+                .scene()
+                .overlay
+                .notification_reply
+                .as_ref()
+                .unwrap()
+                .text,
+            "use the staging DB漢"
+        );
+        harness
+            .app
+            .state
+            .safe_mode_atomic
+            .store(false, std::sync::atomic::Ordering::Release);
+        harness.type_text("!");
+        // The headless parent has no native window. Seed the memo that a
+        // previous native caret update would have stored on this session.
+        let reply = &mut harness.app.state.notification_reply;
+        assert_eq!(reply.replace_test_ime_anchor(Some(local)), None);
+        harness.press_named_key("Enter");
+        harness.drain();
+        assert_eq!(
+            harness
+                .app
+                .state
+                .notification_reply
+                .replace_test_ime_anchor(None),
+            None,
+            "a later portal caret update cannot leave the next reply using this memo"
+        );
+        let mut scene = harness.scene();
+        assert!(scene.overlay.notification_reply.is_none());
+        let actions = scene.take_pending_actions("notif-agent");
+        assert_eq!(actions.len(), 1);
+        assert_eq!(
+            actions[0].kind,
+            tze_hud_scene::graph::PendingActionKind::Reply {
+                callback_id: "database".into(),
+                text: "use the staging DB漢!".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn panel_open_releases_the_elapsed_notification_reply_deadline() {
+        use crate::shell::control_panel::PanelEvent;
+        use tze_hud_scene::{TestClock, config::ChordRole};
+
+        let clock = Arc::new(TestClock::new(1_000));
+        let mut harness = approve_reject_notification_harness_on(clock.clone());
+        let expiry = clock.now_us() + 20_000;
+        set_reply_action(&harness, Some(expiry));
+        assert!(harness.tick());
+        assert_eq!(harness.app.focus_newest_question(false), Ok(true));
+        harness.type_text("1");
+        harness.type_text("draft");
+        harness.drain();
+        clock.set_us(expiry);
+        {
+            let mut scene = harness.scene();
+            assert_eq!(scene.drain_expired_zone_publications(), 0);
+            assert_eq!(
+                scene.overlay.notification_reply.as_ref().unwrap().text,
+                "draft"
+            );
+        }
+
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let fixture =
+            runtime.block_on(async { super::super::panel_input::panel_task_tests::fixture() });
+        let panel = fixture.panel.clone();
+        harness.app.state.control_panel = Some(panel.clone());
+        panel.send(PanelEvent::Chord(ChordRole::Panel));
+        runtime.block_on(async {
+            tokio::time::timeout(std::time::Duration::from_secs(2), async {
+                while !panel.is_open() {
+                    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+                }
+            })
+            .await
+            .expect("panel opens");
+        });
+        harness.app.sync_panel_focus();
+        assert!(panel.is_open());
+        assert!(harness.app.state.notification_reply.active.is_none());
+        let scene = harness.scene();
+        assert!(scene.overlay.notification_reply.is_none());
+        assert!(
+            scene
+                .zone_registry
+                .active_for_zone("notification-area")
+                .is_empty()
+        );
+        drop(scene);
+        assert!(take_action_ids(&harness).is_empty());
+    }
+
+    #[test]
+    fn notification_reply_owns_held_keys_by_visit_and_ime_by_window() {
+        use winit::{event::Ime, window::WindowId};
+
+        let mut harness = approve_reject_notification_harness();
+        set_reply_action(&harness, None);
+        {
+            let mut scene = harness.scene();
+            let mut content = scene.zone_registry.active_for_zone("notification-area")[0]
+                .content
+                .clone();
+            let tze_hud_scene::ZoneContent::Notification(card) = &mut content else {
+                unreachable!();
+            };
+            card.actions[0].reply = Some("replica".into());
+            scene
+                .publish_to_zone(
+                    "notification-area",
+                    content,
+                    "notif-agent",
+                    Some("replica".into()),
+                    None,
+                    None,
+                )
+                .unwrap();
+        }
+        let select = |harness: &mut HeadlessEventLoopHarness, action| {
+            assert!(harness.tick());
+            let point = harness.notification_action_center(action).unwrap();
+            harness.click(point.0, point.1);
+            harness.drain();
+        };
+        let a = WindowId::from(100);
+        let b = WindowId::from(200);
+        harness.app.state.notification_reply.test_ime_window = Some(a);
+        select(&mut harness, "database");
+        harness.enqueue(key_down("KeyA", "a", 100));
+        harness.enqueue(character("a", 100));
+        harness.drain();
+        send_text_input_ime(&mut harness, Ime::Preedit("旧".into(), None), 101);
+
+        // Clicking the same reply button is not a new editing visit.
+        select(&mut harness, "database");
+        harness.press_named_key("Enter");
+        harness.drain();
+        assert!(harness.app.state.notification_reply.composing);
+        assert!(take_action_ids(&harness).is_empty());
+
+        select(&mut harness, "replica");
+        let mut repeat = key_down("KeyA", "A", 102);
+        if let PendingKeyboardEvent::KeyDown(raw) = &mut repeat {
+            raw.repeat = true;
+        }
+        harness.enqueue(repeat);
+        harness.enqueue(character("A", 102));
+        harness.enqueue(key_up("KeyA", "A", 103));
+        harness.drain();
+        let text = |harness: &HeadlessEventLoopHarness| {
+            harness
+                .scene()
+                .overlay
+                .notification_reply
+                .as_ref()
+                .unwrap()
+                .text
+                .clone()
+        };
+        assert_eq!(text(&harness), "");
+
+        // A loses native focus before B gains it. The remembered keyboard
+        // destination is still A, with no pending preedit to identify a
+        // delayed direct Commit. Its empty preedit and commit are refused.
+        send_text_input_ime(&mut harness, Ime::Disabled, 104);
+        harness.app.update_text_input_ime_focus(a, false);
+        for event in [Ime::Preedit(String::new(), None), Ime::Commit("旧".into())] {
+            harness
+                .app
+                .dispatch_text_input_ime(a, None, event, MonoUs(104));
+        }
+        assert_eq!(text(&harness), "");
+
+        // Delayed events from A also cannot alter B's current composition.
+        harness.app.state.notification_reply.test_ime_window = Some(b);
+        send_text_input_ime(&mut harness, Ime::Preedit("新".into(), None), 104);
+        for event in [
+            Ime::Preedit("旧".into(), None),
+            Ime::Preedit(String::new(), None),
+            Ime::Commit("旧".into()),
+            Ime::Disabled,
+        ] {
+            harness
+                .app
+                .dispatch_text_input_ime(a, None, event, MonoUs(105));
+        }
+        assert!(harness.app.state.notification_reply.composing);
+        assert_eq!(text(&harness), "");
+        send_text_input_ime(&mut harness, Ime::Preedit(String::new(), None), 106);
+        send_text_input_ime(&mut harness, Ime::Commit("新".into()), 106);
+        harness.drain();
+        assert_eq!(text(&harness), "新");
+    }
+
     #[test]
     fn card_copy_pointer_and_answer_digit_write_locally_and_keep_the_card() {
         const TEXT: &str = "cargo test -p example\njob-42";
@@ -5316,6 +5651,7 @@ mod tests {
                 payload.actions[1] = tze_hud_scene::NotificationAction {
                     label: "Copy cmd".into(),
                     copy: Some(TEXT.into()),
+                    reply: None,
                     ..Default::default()
                 };
                 let id = card.publication_id;
@@ -6330,6 +6666,7 @@ mod tests {
                 };
                 payload.actions[0] = NotificationAction {
                     copy: None,
+                    reply: None,
                     label: "Docs".into(),
                     callback_id: None,
                     url: Some(urls[0].into()),
@@ -6337,6 +6674,7 @@ mod tests {
                 };
                 payload.actions[1] = NotificationAction {
                     copy: None,
+                    reply: None,
                     label: "More".into(),
                     callback_id: None,
                     url: Some(urls[1].into()),
@@ -7308,6 +7646,7 @@ mod tests {
                         title: "Deploy".to_string(),
                         actions: vec![NotificationAction {
                             copy: None,
+                            reply: None,
                             label: "Ship".to_string(),
                             callback_id: Some("ship".to_string()),
                             url: None,
@@ -7393,6 +7732,7 @@ mod tests {
                         title: "Control".into(),
                         actions: vec![NotificationAction {
                             copy: None,
+                            reply: None,
                             label: "Keep".into(),
                             callback_id: Some("keep".into()),
                             url: None,
@@ -8704,6 +9044,8 @@ mod tests {
 
     #[test]
     fn notification_keyboard_cycle_activation_and_return_preserve_portal_editor() {
+        use winit::event::Ime;
+
         fn press(harness: &mut HeadlessEventLoopHarness, code: &str, key: &str, reverse: bool) {
             let mut down = key_down(code, key, 1_000);
             if let PendingKeyboardEvent::KeyDown(raw) = &mut down {
@@ -8750,6 +9092,93 @@ mod tests {
             }
             assert!(harness.tick());
             harness
+        }
+
+        // The nested reply owns its held letter through collapse and release.
+        // A portal composition from before the handoff cannot become card text.
+        {
+            let mut harness = card_with_editor();
+            set_reply_action(&harness, None);
+            assert!(harness.tick());
+            harness.type_text("portal");
+            harness.drain();
+            send_text_input_ime(&mut harness, Ime::Preedit("ポータル".into(), None), 90);
+            assert!(harness.app.state.composer_preedit.is_some());
+            assert_eq!(harness.app.focus_newest_question(true), Ok(true));
+            assert!(harness.app.state.answer_keyboard.focus.unwrap().nested);
+
+            let PendingKeyboardEvent::KeyDown(digit) = key_down("Digit1", "1", 100) else {
+                unreachable!();
+            };
+            assert!(harness.app.dispatch_os_key_down(&digit));
+            harness.enqueue(character("1", 100));
+            harness.enqueue(key_up("Digit1", "1", 101));
+            harness.drain();
+            assert!(harness.app.state.composer_preedit.is_none());
+            send_text_input_ime(&mut harness, Ime::Preedit(String::new(), None), 102);
+            send_text_input_ime(&mut harness, Ime::Commit("ポータル".into()), 102);
+
+            harness.enqueue(key_down("KeyA", "a", 103));
+            harness.enqueue(character("a", 103));
+            harness.drain();
+            assert_eq!(
+                harness
+                    .scene()
+                    .overlay
+                    .notification_reply
+                    .as_ref()
+                    .unwrap()
+                    .text,
+                "a"
+            );
+            press(&mut harness, "Escape", "Escape", false);
+            assert!(harness.scene().overlay.notification_reply.is_none());
+            assert!(harness.app.state.answer_keyboard.return_key.is_none());
+
+            let mut repeat = key_down("KeyA", "A", 1_200);
+            if let PendingKeyboardEvent::KeyDown(raw) = &mut repeat {
+                raw.repeat = true;
+            }
+            harness.enqueue(repeat);
+            harness.enqueue(character("A", 1_200));
+            // While A remains held, a distinct physical key can edit the saved
+            // portal. Its character has a different native event timestamp.
+            harness.enqueue(key_down("KeyB", "b", 1_201));
+            harness.enqueue(character("b", 1_201));
+            harness.enqueue(key_up("KeyB", "b", 1_202));
+            harness.drain();
+            assert_eq!(harness.composer_draft().as_deref(), Some("portalb"));
+            harness.enqueue(key_up("KeyA", "A", 1_203));
+            harness.drain();
+            harness.type_text("a");
+            harness.drain();
+            assert_eq!(harness.composer_draft().as_deref(), Some("portalba"));
+
+            assert_eq!(harness.app.focus_newest_question(true), Ok(true));
+            harness.type_text("1");
+            harness.drain();
+            harness.enqueue(key_down("KeyZ", "z", 1_204));
+            harness.drain();
+            send_text_input_ime(&mut harness, Ime::Preedit("カード".into(), None), 1_205);
+            harness.click(10.0, 10.0);
+            harness.drain();
+            assert!(harness.scene().overlay.notification_reply.is_none());
+            assert!(harness.app.state.answer_keyboard.focus.is_none());
+            send_text_input_ime(&mut harness, Ime::Preedit(String::new(), None), 1_206);
+            send_text_input_ime(&mut harness, Ime::Commit("カード".into()), 1_206);
+            harness.drain();
+            assert_eq!(harness.composer_draft().as_deref(), Some("portalba"));
+
+            send_text_input_ime(&mut harness, Ime::Preedit("次".into(), None), 1_207);
+            send_text_input_ime(&mut harness, Ime::Preedit(String::new(), None), 1_208);
+            send_text_input_ime(&mut harness, Ime::Commit("次".into()), 1_208);
+            // The old Z release happened off HUD. A fresh non-repeat starts
+            // a portal key lifecycle even while the reply remembers the press.
+            harness.type_text("z");
+            harness.drain();
+            // The pointer handoff clicked at the beginning of the composer.
+            assert_eq!(harness.composer_draft().as_deref(), Some("次zportalba"));
+            assert!(take_action_ids(&harness).is_empty());
         }
 
         // Use the actual main-thread intent and pending-keyboard drain. Each

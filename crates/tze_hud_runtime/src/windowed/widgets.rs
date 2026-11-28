@@ -2,6 +2,7 @@ use std::time::Instant;
 
 use tze_hud_compositor::LocalComposerState;
 use tze_hud_scene::types::{DragHandleContextMenuState, WidgetParameterValue};
+use winit::{event::Ime, window::WindowId};
 
 use super::hittest::{combined_overlay_hit_regions, pressable_control_regions};
 use super::input_dispatch::nanoseconds_since_start;
@@ -299,6 +300,142 @@ impl WinitApp {
         }
         self.dispatch_key_down_event(raw);
         true
+    }
+
+    pub(super) fn text_input_window_id(&self) -> Option<WindowId> {
+        #[cfg(test)]
+        if self.state.window.is_none() {
+            return Some(
+                self.state
+                    .notification_reply
+                    .test_ime_window
+                    .unwrap_or_else(WindowId::dummy),
+            );
+        }
+        match self.state.keyboard_window {
+            Some(index) => self.state.secondaries.get(index).map(|d| d.window.id()),
+            None => self.state.window.as_ref().map(|window| window.id()),
+        }
+    }
+
+    fn blur_text_input_ime(&mut self, window: WindowId) {
+        self.state
+            .notification_reply
+            .abandon_window_ime_preedit(window);
+        if self.text_input_window_id() == Some(window) {
+            self.state.notification_reply.composing = false;
+            self.set_composer_preedit(String::new(), None);
+        }
+    }
+
+    pub(super) fn update_text_input_ime_focus(&mut self, window: WindowId, focused: bool) {
+        let ime_focus = &mut self.state.notification_reply.ime_focused_window;
+        if focused {
+            if let Some(previous) = ime_focus.replace(window)
+                && previous != window
+            {
+                self.blur_text_input_ime(previous);
+            }
+        } else {
+            if *ime_focus == Some(window) {
+                *ime_focus = None;
+            }
+            self.blur_text_input_ime(window);
+        }
+    }
+
+    pub(super) fn accepts_text_input_ime(&self, window: WindowId) -> bool {
+        self.state.notification_reply.ime_focused_window == Some(window)
+            && self.text_input_window_id() == Some(window)
+    }
+
+    pub(super) fn select_text_input_window(&mut self, secondary: Option<usize>) {
+        if self.state.keyboard_window != secondary {
+            if let Some(previous) = self.text_input_window_id() {
+                self.blur_text_input_ime(previous);
+            }
+            self.state.keyboard_window = secondary;
+        }
+    }
+
+    fn set_text_input_preedit(
+        &mut self,
+        window: WindowId,
+        text: String,
+        cursor: Option<(usize, usize)>,
+    ) {
+        let reply = &mut self.state.notification_reply;
+        if !reply.update_ime_preedit(window, !text.is_empty()) {
+            return;
+        }
+        if reply.active.is_some() {
+            // The card keeps only committed text. The IME owns the keys during
+            // composition, including Enter when it confirms its candidate.
+            reply.composing = !text.is_empty();
+        } else if self.state.answer_keyboard.focus.is_none() {
+            self.set_composer_preedit(text, cursor);
+        }
+    }
+
+    pub(super) fn release_composer_preedit_for_notification(&mut self) {
+        self.state.notification_reply.abandon_ime_preedit();
+        self.set_composer_preedit(String::new(), None);
+    }
+
+    pub(super) fn dispatch_text_input_ime(
+        &mut self,
+        window: WindowId,
+        secondary: Option<usize>,
+        event: Ime,
+        timestamp_mono_us: tze_hud_scene::MonoUs,
+    ) {
+        if !self.accepts_text_input_ime(window) {
+            if matches!(event, Ime::Commit(_) | Ime::Disabled) {
+                self.state
+                    .notification_reply
+                    .reset_window_ime_preedit(window);
+            }
+            return;
+        }
+        match event {
+            Ime::Preedit(text, cursor) => {
+                self.set_text_input_preedit(window, text, cursor);
+            }
+            Ime::Disabled => {
+                self.state
+                    .notification_reply
+                    .reset_window_ime_preedit(window);
+                self.set_text_input_preedit(window, String::new(), None);
+            }
+            Ime::Commit(text) => {
+                self.dispatch_text_input_commit(window, secondary, text, timestamp_mono_us);
+            }
+            Ime::Enabled => {}
+        }
+    }
+
+    fn dispatch_text_input_commit(
+        &mut self,
+        window: WindowId,
+        secondary: Option<usize>,
+        text: String,
+        timestamp_mono_us: tze_hud_scene::MonoUs,
+    ) {
+        if !self.state.notification_reply.receive_ime_commit(window) {
+            return;
+        }
+        self.state.composer_preedit = None;
+        self.state.notification_reply.composing = false;
+        if self.panel_text(secondary, &text) {
+            return;
+        }
+        self.state
+            .wake
+            .mark_main_work_pending(crate::idle_efficiency::RuntimeWakeupSource::SceneChange);
+        self.dispatch_character_event(&tze_hud_input::keyboard::RawCharacterEvent {
+            character: text,
+            timestamp_mono_us,
+        });
     }
 
     pub(super) fn set_composer_preedit(&mut self, text: String, cursor: Option<(usize, usize)>) {

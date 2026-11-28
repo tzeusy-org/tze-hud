@@ -118,6 +118,7 @@ async fn test_safe_mode_rejects_mutations() {
                             text: "Question".into(),
                             actions: vec![crate::proto::NotificationActionProto {
                                 copy: None,
+                                reply: None,
                                 label: "Yes".into(),
                                 callback_id: "yes".into(),
                                 url: String::new(),

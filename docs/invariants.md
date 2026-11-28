@@ -134,17 +134,23 @@ guarded card under the pointer arms a wake
 [`the_owners_own_relayout_starts_no_guard`](../crates/tze_hud_runtime/src/windowed/event_loop_harness/tests/press_guard.rs),
 [`press_guard_is_not_zeroed_by_os_motion`](../crates/tze_hud_config/src/tokens.rs)).
 
-A notification action has one resolved callback, HTTPS URL or local copy
-target. Both planes validate it before mutation or scheduling. On MCP a
-targetless action with a non-empty label is a callback named by that label.
+A notification action has one resolved callback, HTTPS URL, local copy
+or typed reply target. Both planes validate it before mutation or scheduling.
+On MCP a targetless action with a non-empty label is a callback named by that label.
 Admission rejects a defaulted callback id that repeats another callback id
 or is `dismiss`. MCP counts explicit empty strings as present. gRPC treats its
 plain empty callback and URL strings as absent and requires a target.
 Multiple targets on either plane or a missing target on gRPC use
-`action needs one of callback_id, url or copy`. URLs require a parsed HTTPS
+`action needs one of callback_id, url, copy or reply`. URLs require a parsed HTTPS
 host and at most 2048 supplied UTF-8 bytes. Copy text requires 1 through
 2048 UTF-8 bytes without NUL. All action kinds share the four-action
 admission cap.
+
+Each card can open one typed reply field. Only a submitted line reaches the
+publisher FIFO, with its callback id and committed text. A claimed wait consumes
+the reply after encoding, as for a fixed action. Resident-origin replies use
+the authenticated agent's unscoped MCP namespace. Scoped MCP replies stay with
+their publishing session.
 
 Optional notification progress is finite and within 0 through 1 on both
 planes. A same-key update retains its visual slot and enter timeline.
@@ -265,7 +271,7 @@ paths. The hosted `go-to-session` gesture checks a real switch and unchanged
 window bounds.
 
 The fourth owner chord (`answer_hotkey`, Ctrl+Shift+F9) pins the newest rendered
-unanswered callback card. With no card it targets the newest waiting portal's
+unanswered question card. With no card it targets the newest waiting portal's
 composer; no target is a no-op; safe mode still captures input.
 Its digits 1–4, arrows, Tab/Shift+Tab and Enter/Space cannot retarget stale
 publications or leak text/repeats/releases to an editor. URL digits keep the
@@ -275,6 +281,15 @@ nested card/control state before an outer exit; it never removes draft text. An 
 card focus; an external loss cancels it. A running panel yields to an explicit
 answer request only after a question is found, without restoring the origin
 underneath the card.
+
+Activating a reply action gives the inline field keyboard focus on its display.
+The compositor publishes the drawn caret position for native IME placement.
+Committed text enters the card's local draft. Escape first clears selection,
+then collapses the field, returns focus and keeps the draft for that exact
+card. Safe mode suspends editing and submission. A focused nonempty field
+defers expiry without changing the original deadline. Leaving the field after
+that deadline expires the card. Replacement, clear, trim and dismissal drop
+the exact card's draft.
 
 Existing runtime parent
 [`notification_keyboard_cycle_activation_and_return_preserve_portal_editor`](../crates/tze_hud_runtime/src/windowed/event_loop_harness.rs)

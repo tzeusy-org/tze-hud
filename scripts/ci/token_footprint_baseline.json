@@ -8,7 +8,7 @@
     "vocab_fingerprint": "sha256:446a9538cb6c348e3516120d7c08b09f57c36495e2acfffe59a5bf8b0cfb1a2d",
     "counting_policy": "each canonical JSON-RPC body independently; UTF-8 bytes; encode_with_special_tokens; operation and flow totals are integer sums; model_visible counts tool name + arguments + result text only"
   },
-  "fixture_fingerprint": "blake3:045082f23a9c919d35b8ef205814d447204a840ac308f46b04c5926e68a8aeac",
+  "fixture_fingerprint": "blake3:4721bfef8774afb5e1a57570ac52bd5302ffaf2151b611589cfdff69b7a79b5f",
   "flows": {
     "discover": {
       "flow_version": 4,
@@ -294,7 +294,7 @@
     },
     "tools_list": {
       "flow_version": 4,
-      "flow_fingerprint": "blake3:5889589d7005855889e3d9939e1a2a76b9e54a5259cd15cf672a9c27818e8d7d",
+      "flow_fingerprint": "blake3:bf4d6aa06610081ffd66e5dd436fae3dd7da17433400ddba62b297bc04d1009f",
       "operations": {
         "tools/list": {
           "request": {
@@ -302,26 +302,26 @@
             "tokens": 21
           },
           "response": {
-            "bytes": 2793,
-            "tokens": 651
+            "bytes": 2850,
+            "tokens": 663
           },
           "total": {
-            "bytes": 2851,
-            "tokens": 672
+            "bytes": 2908,
+            "tokens": 684
           },
           "model_visible": {
-            "bytes": 2749,
-            "tokens": 635
+            "bytes": 2806,
+            "tokens": 647
           }
         }
       },
       "total": {
-        "bytes": 2851,
-        "tokens": 672
+        "bytes": 2908,
+        "tokens": 684
       },
       "model_visible": {
-        "bytes": 2749,
-        "tokens": 635
+        "bytes": 2806,
+        "tokens": 647
       }
     },
     "widget_publish": {
@@ -429,13 +429,13 @@
   },
   "approval": {
     "status": "owner_approved",
-    "decision_reference": "hud-ljhku.8 R8.5: the owner accepted the exact 2,749 model-visible bytes and 635 tokens for PR #1723 at 71036719056f90e044551134bb77bc975f69fce4 through questionnaire decision card-formula-tools-list, option A, on 2026-11-23.",
-    "basis": "Two byte-identical measurements at 73fe42f4 record tools/list 2,729 to 2,749 model-visible bytes / 627 to 635 tokens (wire 2,831 to 2,851 bytes / 664 to 672 tokens). All other flow fingerprints and metrics and the action-limit error are identical. Ceilings, tokenizer, flow version 4 and accounting are unchanged."
+    "decision_reference": "hud-ljhku.11 R11.1 S2 and G6: owner questionnaire decision typed-reply-tools-list, option A, accepted up to 2,806 model-visible bytes and 647 tokens on 2026-11-26.",
+    "basis": "Two byte-identical source-bound measurements at 3f99c25d confirm tools/list moves from 2,749 to 2,806 model-visible bytes and 635 to 647 tokens (wire 2,851 to 2,908 bytes and 672 to 684 tokens). The other eight flow fingerprints and metrics, the action-limit error, the tokenizer and the flow ceilings are unchanged."
   },
   "previous_approval": {
     "status": "owner_approved",
-    "decision_reference": "hud-ohgc9.6 AC6: the owner explicitly accepted tools/list 2,711->2,729 model-visible bytes / 622->627 tokens (wire 2,813->2,831 / 659->664) for PR1676 on 2026-11-21",
-    "basis": "Source-bound calibration on 66dadc83 plus this change: only tools_list changes (+18 bytes, +5 tokens). Every other flow keeps byte-identical fingerprints and metrics. Ceilings, tokenizer, flow version 4 and accounting unchanged. Two byte-identical current-source measurements. No Windows acceptance is inferred."
+    "decision_reference": "hud-ljhku.8 R8.5: the owner accepted the exact 2,749 model-visible bytes and 635 tokens for PR #1723 at 71036719056f90e044551134bb77bc975f69fce4 through questionnaire decision card-formula-tools-list, option A, on 2026-11-23.",
+    "basis": "Two byte-identical measurements at 73fe42f4 record tools/list 2,729 to 2,749 model-visible bytes / 627 to 635 tokens (wire 2,831 to 2,851 bytes / 664 to 672 tokens). All other flow fingerprints and metrics and the action-limit error are identical. Ceilings, tokenizer, flow version 4 and accounting are unchanged."
   },
   "production_discovery": {
     "source": "c3355f6144805c219f240ab4272a33da1e33364e",

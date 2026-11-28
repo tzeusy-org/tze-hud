@@ -1146,6 +1146,81 @@ async fn poc_publish_reports_clipped_text_only_when_cut() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn resident_notification_reply_uses_only_the_authenticated_unscoped_caller() {
+    let mut poc = Poc::boot().await;
+    let scope = poc.open_session_as(RESIDENT_PSK, "resident-scope").await;
+    let mut resident = Resident::connect(poc.hud.grpc_addr(), "resident", RESIDENT_PSK)
+        .await
+        .expect("resident handshake");
+    let published = resident
+        .request(ClientPayload::Publish(wire::Publish {
+            surface: NOTIFICATION.into(),
+            key: "database".into(),
+            content: Some(proto::ZoneContent {
+                payload: Some(proto::zone_content::Payload::Notification(
+                    proto::NotificationPayload {
+                        text: "Which database?".into(),
+                        actions: vec![proto::NotificationActionProto {
+                            label: "Other…".into(),
+                            reply: Some("answer-db".into()),
+                            ..Default::default()
+                        }],
+                        ..Default::default()
+                    },
+                )),
+            }),
+            ..Default::default()
+        }))
+        .await;
+    assert!(published.ok, "{published:?}");
+    poc.settle().await;
+    let (x, y) = poc
+        .hud
+        .notification_action_center("answer-db")
+        .expect("resident reply action");
+    poc.hud.click(x, y);
+    poc.settle().await;
+    poc.hud.type_text("use the staging DB");
+    poc.hud.press_named_key("Enter");
+    poc.settle().await;
+
+    let empty = json!({"items":[],"remaining":0});
+    let result = poc.call_as(RESIDENT_PSK, "hud_input", json!({})).await.body;
+    let id = result["items"][0]["id"].clone();
+    assert!(id.is_string(), "{result}");
+    assert_eq!(
+        result,
+        json!({"items":[{"id":id,"s":NOTIFICATION,
+        "action":"answer-db","text":"use the staging DB","key":"database"}],"remaining":0})
+    );
+    assert_eq!(poc.call("hud_input", json!({"ack":[id]})).await.body, empty);
+    let (status, _, response) = poc
+        .exchange_as(
+            RESIDENT_PSK,
+            "POST",
+            Some(&scope),
+            json!({"jsonrpc":"2.0","id":1,"method":"tools/call",
+            "params":{"name":"hud_input","arguments":{"ack":[id]}}}),
+        )
+        .await;
+    assert_eq!(status, 200);
+    let response: Value = serde_json::from_str(&response).unwrap();
+    let scoped: Value =
+        serde_json::from_str(response["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(scoped, empty);
+    assert_eq!(
+        poc.call_as(RESIDENT_PSK, "hud_input", json!({})).await.body,
+        result
+    );
+    assert_eq!(
+        poc.call_as(RESIDENT_PSK, "hud_input", json!({"ack":[id]}))
+            .await
+            .body,
+        empty
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn poc_notification_action_reaches_hud_input() {
     let mut poc = Poc::boot().await;
     let publish = poc
@@ -2461,6 +2536,7 @@ async fn poc_panel_runtime_rows_apply_save_and_stage_a_restart() {
                     text: "Continue?".into(),
                     actions: vec![proto::NotificationActionProto {
                         copy: None,
+                        reply: None,
                         label: "Yes".into(),
                         callback_id: "yes".into(),
                         url: String::new(),
@@ -2844,6 +2920,7 @@ async fn poc_agents_see_the_same_with_the_panel_open_or_content_hidden() {
 /// the status code, the `Mcp-Session-Id` response header and the body.
 async fn exchange(
     addr: std::net::SocketAddr,
+    psk: &'static str,
     method: &'static str,
     session: Option<String>,
     body: String,
@@ -2851,7 +2928,7 @@ async fn exchange(
     let mut stream = TcpStream::connect(addr).await.expect("connect to MCP");
     let header = session.map_or(String::new(), |id| format!("Mcp-Session-Id: {id}\r\n"));
     let request = format!(
-        "{method} /mcp HTTP/1.0\r\nAuthorization: Bearer {CLAUDE_PSK}\r\n{header}\
+        "{method} /mcp HTTP/1.0\r\nAuthorization: Bearer {psk}\r\n{header}\
          Content-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
         body.len()
     );
@@ -2880,6 +2957,16 @@ impl Poc {
         session: Option<&str>,
         body: Value,
     ) -> (u16, Option<String>, String) {
+        self.exchange_as(CLAUDE_PSK, method, session, body).await
+    }
+
+    async fn exchange_as(
+        &mut self,
+        psk: &'static str,
+        method: &'static str,
+        session: Option<&str>,
+        body: Value,
+    ) -> (u16, Option<String>, String) {
         let body = if body.is_null() {
             String::new()
         } else {
@@ -2887,6 +2974,7 @@ impl Poc {
         };
         let mut call = tokio::spawn(exchange(
             self.hud.mcp_addr(),
+            psk,
             method,
             session.map(str::to_owned),
             body,
@@ -2907,8 +2995,13 @@ impl Poc {
 
     /// Open a labeled MCP session as the stdio adapter does.
     async fn open_session(&mut self, label: &str) -> String {
+        self.open_session_as(CLAUDE_PSK, label).await
+    }
+
+    async fn open_session_as(&mut self, psk: &'static str, label: &str) -> String {
         let (status, session, _) = self
-            .exchange(
+            .exchange_as(
+                psk,
                 "POST",
                 None,
                 json!({"jsonrpc": "2.0", "id": 0, "method": "initialize", "params": {

@@ -1,3 +1,4 @@
+use super::notification_reply::zone_publication_expiry;
 use super::notification_wait::is_unanswered_question;
 use super::*;
 use std::collections::hash_map::Entry;
@@ -462,10 +463,16 @@ impl SceneGraph {
         let replaced_id = replacement.map(|index| publishes[index].publication_id);
         // A question is placed once, when presented; a same-key replacement
         // keeps the display its card already has.
+        let reply_holding_expiry = self.overlay.notification_reply_holding_expiry();
         record.display = match replacement {
             Some(index) => publishes[index].display.clone(),
             None if zone_name == "notification-area"
-                && is_unanswered_question(&record, &self.overlay.notification_choices, now_us) =>
+                && is_unanswered_question(
+                    &record,
+                    &self.overlay.notification_choices,
+                    now_us,
+                    reply_holding_expiry,
+                ) =>
             {
                 self.overlay
                     .question_placer
@@ -525,7 +532,7 @@ impl SceneGraph {
                     max,
                 },
                 // A full notification stack spares unanswered questions.
-                |r| is_unanswered_question(r, choices, now_us),
+                |r| is_unanswered_question(r, choices, now_us, reply_holding_expiry),
             )?;
         }
 
@@ -1413,6 +1420,35 @@ impl SceneGraph {
         })
     }
 
+    fn live_notification_control(&self, region: &ZoneHitRegion) -> Option<&ZonePublishRecord> {
+        if !self
+            .overlay
+            .zone_hit_regions
+            .iter()
+            .any(|live| live == region)
+        {
+            return None;
+        }
+        if self
+            .overlay
+            .notification_choices
+            .contains_key(&region.publication_id)
+        {
+            return None;
+        }
+        let now = self.now_wall_us();
+        self.zone_registry
+            .active_for_zone(&region.zone_name)
+            .iter()
+            .find(|record| {
+                record.publication_id == region.publication_id
+                    && record.publisher_namespace == region.publisher_namespace
+                    && self
+                        .zone_publication_expiry(record)
+                        .is_none_or(|expiry| expiry > now)
+            })
+    }
+
     /// Activate one exact, visible and unexpired notification control. Pointer
     /// releases and keyboard activation both enter here. The FIFO remains the
     /// authoritative answer; its readiness callback must run after unlocking.
@@ -1422,28 +1458,8 @@ impl SceneGraph {
         exit_ms: u32,
     ) -> Option<super::NotificationActivation> {
         self.prune_notification_feedback();
-        if !self
-            .overlay
-            .zone_hit_regions
-            .iter()
-            .any(|live| live == region)
-        {
-            return None;
-        }
         let key = region.publication_id;
-        if self.overlay.notification_choices.contains_key(&key) {
-            return None;
-        }
-        let now = self.now_wall_us();
-        let record = self
-            .zone_registry
-            .active_for_zone(&region.zone_name)
-            .iter()
-            .find(|record| {
-                record.publication_id == region.publication_id
-                    && record.publisher_namespace == region.publisher_namespace
-                    && record.expires_at_wall_us.is_none_or(|expiry| expiry > now)
-            })?;
+        let record = self.live_notification_control(region)?;
         let ZoneContent::Notification(payload) = &record.content else {
             return None;
         };
@@ -1473,6 +1489,27 @@ impl SceneGraph {
             ZoneInteractionKind::Action { index } => {
                 let action = payload.actions.get(*index)?;
                 action.validate().ok()?;
+                if action.reply.is_some() {
+                    if self
+                        .overlay
+                        .notification_reply
+                        .as_ref()
+                        .is_none_or(|reply| reply.publication_id != key)
+                        && !self.set_notification_reply_view(Some(
+                            super::overlay::NotificationReplyView {
+                                publication_id: key,
+                                action_index: *index,
+                                text: String::new(),
+                                cursor_byte: 0,
+                                selection_anchor: 0,
+                                at_capacity: false,
+                            },
+                        ))
+                    {
+                        return None;
+                    }
+                    return Some(super::NotificationActivation::Reply(region.clone()));
+                }
                 if let Some(text) = &action.copy {
                     return Some(super::NotificationActivation::Copy {
                         text: text.clone(),
@@ -1504,6 +1541,62 @@ impl SceneGraph {
             _ => return None,
         };
         let notification_key = record.merge_key.clone().filter(|key| !key.is_empty());
+        let wake = self.finish_notification_action(region, notification_key, kind, exit_ms)?;
+        Some(super::NotificationActivation::Callback(wake))
+    }
+
+    /// Submit the committed text from the exact card's local reply field.
+    /// Notify readiness after releasing the scene lock, as with a button answer.
+    pub fn submit_notification_reply(
+        &mut self,
+        region: &ZoneHitRegion,
+        text: String,
+        exit_ms: u32,
+    ) -> Option<RenderWakeNotifier> {
+        if text.is_empty()
+            || text.len() > crate::types::NOTIFICATION_REPLY_MAX_BYTES
+            || text.contains(crate::types::NOTIFICATION_REPLY_LINE_BREAKS)
+        {
+            return None;
+        }
+        self.prune_notification_feedback();
+        let ZoneInteractionKind::Action { index } = region.kind else {
+            return None;
+        };
+        let record = self.live_notification_control(region)?;
+        let ZoneContent::Notification(payload) = &record.content else {
+            return None;
+        };
+        let action = payload.actions.get(index)?;
+        action.validate().ok()?;
+        let callback_id = action.reply.clone()?;
+        let notification_key = record.merge_key.clone().filter(|key| !key.is_empty());
+        self.finish_notification_action(
+            region,
+            notification_key,
+            super::PendingActionKind::Reply { callback_id, text },
+            exit_ms,
+        )
+    }
+
+    fn finish_notification_action(
+        &mut self,
+        region: &ZoneHitRegion,
+        notification_key: Option<String>,
+        kind: super::PendingActionKind,
+        exit_ms: u32,
+    ) -> Option<RenderWakeNotifier> {
+        let key = region.publication_id;
+        let now = self.now_wall_us();
+        let was_holding_expiry = self.overlay.notification_reply_holding_expiry() == Some(key);
+        if self
+            .overlay
+            .notification_reply
+            .as_ref()
+            .is_some_and(|reply| reply.publication_id == key)
+        {
+            self.overlay.notification_reply = None;
+        }
         self.finish_notification_wait(key, super::NotificationOutcome::Answered);
         if matches!(region.kind, ZoneInteractionKind::Dismiss) || exit_ms == 0 {
             if !self.dismiss_notification(
@@ -1529,6 +1622,7 @@ impl SceneGraph {
             record.expires_at_wall_us = Some(
                 record
                     .expires_at_wall_us
+                    .filter(|expiry| !was_holding_expiry || *expiry > now)
                     .map_or(exit_at, |expiry| expiry.min(exit_at)),
             );
             self.overlay
@@ -1551,15 +1645,13 @@ impl SceneGraph {
             self.version += 1;
         }
         self.overlay.notification_owner_activated = Some(region.publication_id);
-        Some(super::NotificationActivation::Callback(
-            self.push_pending_action(super::PendingAction {
-                publication_id: Some(region.publication_id),
-                publisher_namespace: region.publisher_namespace.clone(),
-                zone_name: region.zone_name.clone(),
-                kind,
-                key: notification_key,
-            }),
-        ))
+        Some(self.push_pending_action(super::PendingAction {
+            publication_id: Some(region.publication_id),
+            publisher_namespace: region.publisher_namespace.clone(),
+            zone_name: region.zone_name.clone(),
+            kind,
+            key: notification_key,
+        }))
     }
 
     /// Drop ephemeral feedback whenever its exact publication is gone, hidden or
@@ -1567,11 +1659,35 @@ impl SceneGraph {
     pub fn prune_notification_feedback(&mut self) {
         let now = self.now_wall_us();
         let hidden = self.owner_hidden().zones;
+        if self
+            .overlay
+            .notification_reply
+            .as_ref()
+            .is_some_and(|reply| {
+                hidden
+                    || !self
+                        .zone_registry
+                        .active_publishes
+                        .values()
+                        .flatten()
+                        .any(|record| {
+                            record.publication_id == reply.publication_id
+                                && self
+                                    .zone_publication_expiry(record)
+                                    .is_none_or(|expiry| expiry > now)
+                        })
+            })
+        {
+            self.overlay.notification_reply = None;
+            self.version += 1;
+        }
+        let reply_holding_expiry = self.overlay.notification_reply_holding_expiry();
         let live = |zone: &str, id: SceneId, publisher: &str| {
             self.zone_registry.active_for_zone(zone).iter().any(|r| {
                 r.publication_id == id
                     && r.publisher_namespace == publisher
-                    && r.expires_at_wall_us.is_none_or(|expiry| expiry > now)
+                    && zone_publication_expiry(r, reply_holding_expiry)
+                        .is_none_or(|expiry| expiry > now)
             })
         };
         let keys: std::collections::HashSet<_> = self
@@ -1600,6 +1716,7 @@ impl SceneGraph {
                     r.kind,
                     ZoneInteractionKind::Dismiss
                         | ZoneInteractionKind::GoTo
+                        | ZoneInteractionKind::ReplyField
                         | ZoneInteractionKind::Action { .. }
                 ) || (!hidden && live(&r.zone_name, r.publication_id, &r.publisher_namespace))
             })
@@ -1614,7 +1731,8 @@ impl SceneGraph {
                     .flatten()
                     .any(|r| {
                         r.publication_id == *id
-                            && r.expires_at_wall_us.is_none_or(|expiry| expiry > now)
+                            && zone_publication_expiry(r, reply_holding_expiry)
+                                .is_none_or(|expiry| expiry > now)
                     })
                     && !keys.contains(id)
             });
@@ -1627,7 +1745,8 @@ impl SceneGraph {
                     .flatten()
                     .any(|record| {
                         record.publication_id == *id
-                            && record.expires_at_wall_us.is_none_or(|expiry| expiry > now)
+                            && zone_publication_expiry(record, reply_holding_expiry)
+                                .is_none_or(|expiry| expiry > now)
                     })
         });
         self.overlay
@@ -1647,7 +1766,8 @@ impl SceneGraph {
                     .flatten()
                     .any(|record| {
                         record.publication_id == id
-                            && record.expires_at_wall_us.is_none_or(|expiry| expiry > now)
+                            && zone_publication_expiry(record, reply_holding_expiry)
+                                .is_none_or(|expiry| expiry > now)
                     })
         });
         if self.overlay.notification_reveal.is_some_and(|request| {
@@ -1905,21 +2025,24 @@ impl SceneGraph {
 
     /// Remove zone publications whose `expires_at_wall_us` has passed.
     ///
-    /// `ZonePublishRecord` contract: "When present, the runtime MUST clear
-    /// this publication at or before this time."
+    /// A focused, nonempty reply field defers its exact card's removal.
     ///
     /// Returns the number of expired publications removed.
     ///
     /// Call this once per frame before rendering (Stage 4: Scene Commit).
     pub fn drain_expired_zone_publications(&mut self) -> usize {
         let now_us = self.clock.now_us();
+        let reply_holding_expiry = self.overlay.notification_reply_holding_expiry();
         let mut total_removed = 0usize;
         let expired: Vec<_> = self
             .zone_registry
             .active_publishes
             .values()
             .flatten()
-            .filter(|r| r.expires_at_wall_us.is_some_and(|expiry| expiry <= now_us))
+            .filter(|r| {
+                zone_publication_expiry(r, reply_holding_expiry)
+                    .is_some_and(|expiry| expiry <= now_us)
+            })
             .map(|r| r.publication_id)
             .collect();
         for id in expired {
@@ -1931,9 +2054,8 @@ impl SceneGraph {
 
         for publishes in self.zone_registry.active_publishes.values_mut() {
             let before = publishes.len();
-            publishes.retain(|r| match r.expires_at_wall_us {
-                Some(exp) => exp > now_us,
-                None => true,
+            publishes.retain(|r| {
+                zone_publication_expiry(r, reply_holding_expiry).is_none_or(|end| end > now_us)
             });
             total_removed += before - publishes.len();
         }
@@ -1959,7 +2081,7 @@ impl SceneGraph {
             .active_publishes
             .values()
             .flatten()
-            .filter_map(|record| record.expires_at_wall_us)
+            .filter_map(|record| self.zone_publication_expiry(record))
             .min();
         let widget_expiry = self
             .widget_registry

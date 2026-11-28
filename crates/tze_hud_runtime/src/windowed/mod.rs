@@ -196,6 +196,7 @@ mod monitor_identity;
 mod network;
 mod notification_copy;
 mod notification_hold;
+mod notification_reply;
 mod notification_reveal;
 mod panel_input;
 mod portal;
@@ -477,6 +478,7 @@ struct WindowedRuntimeState {
     notification_keydowns: std::collections::HashSet<String>,
     /// Coalesced WM_HOTKEY intent; only the main thread resolves a live card.
     answer_keyboard: answer_focus::AnswerKeyboardState,
+    notification_reply: notification_reply::NotificationReplyState,
     /// Original primary drag identity and, only on a missed Up, its terminal event.
     primary_drag_gesture: Option<portal::PrimaryDragGesture>,
     /// Global design token map from scene startup.
@@ -1057,6 +1059,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
             return;
         }
         self.sync_panel_focus();
+        self.sync_notification_reply();
         self.sync_answer_focus();
         self.sync_design_tokens();
         self.sync_capture_exclusion();
@@ -2460,6 +2463,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
             }
 
             WindowEvent::Focused(focused) => {
+                self.update_text_input_ime_focus(window_id, focused);
                 self.handle_window_focus(secondary, focused);
             }
 
@@ -2613,34 +2617,24 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
             // IME-composed characters (CJK, accented inputs, etc.). In v1 the
             // commit text is forwarded as a RawCharacterEvent so agents receive
             // CharacterEvent payloads regardless of input method.
-            //
-            // Preedit (above) is drawn locally and never forwarded to agents.
             // ── IME preedit: composition drawn at the composer caret ─────────
             // hud-ljhku.13: forwarded to the composer echo (underlined at the
             // caret); only Ime::Commit text enters the draft.
-            WindowEvent::Ime(winit::event::Ime::Preedit(text, cursor)) => {
-                if let Some(source) = wake_source {
-                    self.state.wake.mark_main_work_pending(source);
-                }
-                self.set_composer_preedit(text, cursor);
-            }
-            WindowEvent::Ime(winit::event::Ime::Disabled) => {
-                self.set_composer_preedit(String::new(), None);
-            }
-            WindowEvent::Ime(winit::event::Ime::Commit(text)) => {
-                self.state.composer_preedit = None;
-                if self.panel_text(secondary, &text) {
-                    return;
-                }
-                if let Some(source) = wake_source {
+            WindowEvent::Ime(event) => {
+                if matches!(event, winit::event::Ime::Preedit(..))
+                    && self.accepts_text_input_ime(window_id)
+                    && let Some(source) = wake_source
+                {
                     self.state.wake.mark_main_work_pending(source);
                 }
                 let timestamp_mono_us = tze_hud_scene::MonoUs(nanoseconds_since_start() / 1_000);
-                let raw_char = RawCharacterEvent {
-                    character: text.clone(),
-                    timestamp_mono_us,
-                };
-                self.dispatch_character_event(&raw_char);
+                self.dispatch_text_input_ime(window_id, secondary, event, timestamp_mono_us);
+            }
+            WindowEvent::Destroyed => {
+                self.update_text_input_ime_focus(window_id, false);
+                self.state
+                    .notification_reply
+                    .reset_window_ime_preedit(window_id);
             }
 
             // ── Redraw ────────────────────────────────────────────────────
@@ -3393,6 +3387,7 @@ impl WindowedRuntime {
             context_menu_dismiss_pending: false,
             notification_keydowns: Default::default(),
             answer_keyboard,
+            notification_reply: Default::default(),
             primary_drag_gesture: None,
             global_tokens: startup_compositor_tokens,
             resize_affordance_px: Default::default(),

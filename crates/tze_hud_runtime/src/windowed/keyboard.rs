@@ -542,21 +542,32 @@ impl WinitApp {
 
         // Held local keys never turn into agent input after focus or publication
         // changes. Shell/panel routing still has first refusal.
-        if self
-            .state
-            .notification_keydowns
-            .contains(&keyboard_key_identity(&raw.key_code, &raw.key))
-        {
+        let key_identity = keyboard_key_identity(&raw.key_code, &raw.key);
+        let reply = &mut self.state.notification_reply;
+        let held_reply_key = reply.suppress_held_key(&key_identity, raw.repeat, true);
+        if held_reply_key || self.state.notification_keydowns.contains(&key_identity) {
+            if held_reply_key || reply.active.is_some() {
+                reply.ignore_character_at = Some(raw.timestamp_mono_us);
+            }
             return;
         }
 
         // Finish the physical exit sequence before letting any later key reach
         // the saved editor. Its character event is consumed by the same debt.
         if self.state.answer_keyboard.return_key.is_some() {
-            self.state
-                .notification_keydowns
-                .insert(keyboard_key_identity(&raw.key_code, &raw.key));
+            self.state.notification_keydowns.insert(key_identity);
             return;
+        }
+
+        match self.route_notification_reply_key(raw) {
+            Ok(true) => return,
+            Err(()) => {
+                self.state
+                    .pending_keyboard_events
+                    .push_back(PendingKeyboardEvent::KeyDown(raw.clone()));
+                return;
+            }
+            Ok(false) => {}
         }
 
         // No active tab → nothing else to route to. Drop after global shell
@@ -1531,6 +1542,9 @@ impl WinitApp {
                 .insert(keyboard_key_identity(&raw.key_code, &raw.key));
         }
         if let Some(wake) = wake {
+            if matches!(wake, tze_hud_scene::graph::NotificationActivation::Reply(_)) {
+                self.state.notification_reply.ignore_character_at = Some(raw.timestamp_mono_us);
+            }
             self.deliver_notification_activation(wake, go_to_origin);
         }
         Ok(consumed)
@@ -1555,6 +1569,9 @@ impl WinitApp {
             self.state
                 .notification_keydowns
                 .remove(&keyboard_key_identity(&raw.key_code, &raw.key));
+            self.state
+                .notification_reply
+                .release_key(&keyboard_key_identity(&raw.key_code, &raw.key));
             self.state.answer_keyboard.hold_key = None;
             tracing::debug!(
                 key = %str_preview(&raw.key),
@@ -1592,6 +1609,7 @@ impl WinitApp {
         active_tab: Option<tze_hud_scene::SceneId>,
     ) {
         let key_identity = keyboard_key_identity(&raw.key_code, &raw.key);
+        let reply_key = self.state.notification_reply.release_key(&key_identity);
         // Releasing a held key ends its hold this turn (settle cancels it).
         if self.state.answer_keyboard.hold_key.as_ref() == Some(&key_identity) {
             self.state.answer_keyboard.hold_key = None;
@@ -1604,6 +1622,8 @@ impl WinitApp {
             return;
         }
         if self.state.notification_keydowns.remove(&key_identity)
+            || reply_key
+            || self.state.notification_reply.active.is_some()
             || self.state.answer_keyboard.focus.is_some()
             || self.state.answer_keyboard.return_key.is_some()
         {
@@ -1785,6 +1805,18 @@ impl WinitApp {
         raw: &RawCharacterEvent,
         active_tab: Option<tze_hud_scene::SceneId>,
     ) {
+        if self.state.answer_keyboard.return_key.is_none() {
+            match self.route_notification_reply_text(raw) {
+                Ok(true) => return,
+                Err(()) => {
+                    self.state
+                        .pending_keyboard_events
+                        .push_back(PendingKeyboardEvent::Character(raw.clone()));
+                    return;
+                }
+                Ok(false) => {}
+            }
+        }
         if !self.state.notification_keydowns.is_empty()
             || self.state.answer_keyboard.focus.is_some()
             || self.state.answer_keyboard.return_key.is_some()

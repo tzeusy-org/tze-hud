@@ -151,7 +151,10 @@ pub(super) fn route_answer_key(
     outcome.activation = scene.activate_notification(target, duration);
     if matches!(
         outcome.activation,
-        Some(tze_hud_scene::graph::NotificationActivation::GoTo { .. })
+        Some(
+            tze_hud_scene::graph::NotificationActivation::GoTo { .. }
+                | tze_hud_scene::graph::NotificationActivation::Reply(_)
+        )
     ) {
         return outcome;
     }
@@ -234,6 +237,8 @@ impl WinitApp {
             .is_some_and(|panel| panel.is_open());
         let found = if paused {
             Ok(false)
+        } else if !self.blur_notification_reply() {
+            Err(())
         } else {
             self.focus_newest_question(super::lifecycle::hud_owns_foreground() && !panel_open)
         };
@@ -341,6 +346,7 @@ impl WinitApp {
     /// Take OS keyboard focus on the window that shows scene point (x, y).
     pub(super) fn focus_native_window_at(&mut self, x: f32, y: f32) {
         let secondary = self.display_window_at(x, y);
+        self.select_text_input_window(secondary);
         let window = secondary
             .and_then(|index| self.state.secondaries.get(index))
             .map(|display| &display.window)
@@ -348,7 +354,6 @@ impl WinitApp {
         if let Some(window) = window {
             super::lifecycle::focus_window_for_text_input(window);
         }
-        self.state.keyboard_window = secondary;
         self.state
             .wake
             .mark_main_work_pending(crate::idle_efficiency::RuntimeWakeupSource::SceneChange);
@@ -365,33 +370,42 @@ impl WinitApp {
             }
             scene.prune_notification_feedback();
             let now = scene.now_wall_us();
-            let newest =
-                scene
-                    .overlay
-                    .zone_hit_regions
-                    .iter()
-                    .filter(|region| {
-                        let ZoneInteractionKind::Action { index } = region.kind else {
-                            return false;
-                        };
-                        !scene.overlay.notification_choices.contains_key(&region.publication_id)
-                    && scene.zone_registry.active_for_zone(&region.zone_name).iter().any(|record| {
-                        record.publication_id == region.publication_id
-                            && record.publisher_namespace == region.publisher_namespace
-                            && record.expires_at_wall_us.is_none_or(|expiry| expiry > now)
-                            && matches!(&record.content, ZoneContent::Notification(payload)
+            let newest = scene
+                .overlay
+                .zone_hit_regions
+                .iter()
+                .filter(|region| {
+                    let ZoneInteractionKind::Action { index } = region.kind else {
+                        return false;
+                    };
+                    !scene
+                        .overlay
+                        .notification_choices
+                        .contains_key(&region.publication_id)
+                        && scene
+                            .zone_registry
+                            .active_for_zone(&region.zone_name)
+                            .iter()
+                            .any(|record| {
+                                record.publication_id == region.publication_id
+                                    && record.publisher_namespace == region.publisher_namespace
+                                    && scene
+                                        .zone_publication_expiry(record)
+                                        .is_none_or(|expiry| expiry > now)
+                                    && matches!(&record.content, ZoneContent::Notification(payload)
                                 if payload.actions.get(index).is_some_and(|action|
-                                    action.callback_id.is_some() && action.validate().is_ok()))
-                    })
-                    })
-                    .max_by_key(|region| {
-                        (
-                            region.published_at_wall_us,
-                            region.publication_id.to_bytes_le(),
-                            &region.publisher_namespace,
-                            &region.zone_name,
-                        )
-                    });
+                                    (action.callback_id.is_some() || action.reply.is_some())
+                                        && action.validate().is_ok()))
+                            })
+                })
+                .max_by_key(|region| {
+                    (
+                        region.published_at_wall_us,
+                        region.publication_id.to_bytes_le(),
+                        &region.publisher_namespace,
+                        &region.zone_name,
+                    )
+                });
             let Some(newest) = newest else {
                 return Ok(false);
             };
@@ -446,6 +460,7 @@ impl WinitApp {
         // release debt can remain after the user switched apps while holding
         // a key; it must not suppress this new answer or its characters.
         self.state.notification_keydowns.clear();
+        self.release_composer_preedit_for_notification();
         self.state.answer_keyboard.return_key = None;
         self.state.answer_keyboard.invalidate_visit();
         self.state.answer_keyboard.focus = Some(focus);

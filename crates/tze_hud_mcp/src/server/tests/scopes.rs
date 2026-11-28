@@ -126,6 +126,160 @@ async fn input_reaches_only_the_session_that_asked() {
     assert_eq!(acked, empty);
 }
 
+#[tokio::test(start_paused = true)]
+async fn typed_reply_reaches_only_its_exact_wait_or_publishing_session() {
+    use std::{
+        future::Future,
+        task::{Context, Poll, Waker},
+    };
+    let (server, _) = server();
+    let (a, b) = (session(&server, "a").await, session(&server, "b").await);
+    let namespace = scope_of(&server, &a).namespace.clone();
+    let args = json!({"surface":"zone:notification-area","key":"build","ttl_ms":60000,
+        "content":{"title":"Which database?","actions":[{"label":"Other…","reply":"database"}]}});
+    let empty = json!({"items":[],"remaining":0});
+    let text = "use the staging DB — 東京";
+
+    for wait in [false, true] {
+        let mut args = args.clone();
+        if wait {
+            args["wait_ms"] = json!(30000);
+        }
+        let mut context = Context::from_waker(Waker::noop());
+        let mut ask = Box::pin(ok(&server, &a, "hud_publish", args));
+        if wait {
+            assert!(ask.as_mut().poll(&mut context).is_pending());
+        } else {
+            assert!(ask.as_mut().poll(&mut context).is_ready());
+        }
+        let id = card_of(&server, &namespace).await;
+        let (ready, waits) = {
+            let mut scene = server.scene.lock().await;
+            let region = render_card_control(&mut scene, id, Some(0));
+            assert!(matches!(
+                scene.activate_notification(&region, 0),
+                Some(tze_hud_scene::graph::NotificationActivation::Reply(_))
+            ));
+            for rejected in [String::new(), "é".repeat(141), "two\nlines".into()] {
+                assert!(
+                    scene
+                        .submit_notification_reply(&region, rejected, 0)
+                        .is_none()
+                );
+            }
+            let ready = scene
+                .submit_notification_reply(&region, text.into(), 0)
+                .expect("valid reply");
+            assert!(
+                scene
+                    .submit_notification_reply(&region, text.into(), 0)
+                    .is_none()
+            );
+            (ready, scene.take_notification_wait_notifiers())
+        };
+        ready.notify();
+        for wake in waits {
+            wake.notify();
+        }
+        assert_eq!(ok(&server, &b, "hud_input", json!({})).await, empty);
+        if wait {
+            assert_eq!(ok(&server, &a, "hud_input", json!({})).await, empty);
+            let Poll::Ready(answer) = ask.as_mut().poll(&mut context) else {
+                panic!("typed answer must resolve the armed wait");
+            };
+            assert_eq!(answer["action"], "database");
+            assert_eq!(answer["text"], text);
+            assert_eq!(ok(&server, &a, "hud_input", json!({})).await, empty);
+        } else {
+            let got = ok(&server, &a, "hud_input", json!({})).await;
+            let id = got["items"][0]["id"].clone();
+            assert!(id.is_string());
+            assert_eq!(
+                got,
+                json!({"items":[{"id":id,"s":"zone:notification-area",
+                "action":"database","text":text,"key":"build"}],"remaining":0})
+            );
+            assert_eq!(
+                ok(&server, &b, "hud_input", json!({"ack":[id]})).await,
+                empty
+            );
+            assert_eq!(ok(&server, &a, "hud_input", json!({})).await, got);
+            assert_eq!(
+                ok(&server, &a, "hud_input", json!({"ack":[id]})).await,
+                empty
+            );
+        }
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn typed_reply_wait_expires_on_time_and_later_send_uses_the_fifo() {
+    use std::{
+        future::Future,
+        task::{Context, Poll, Waker},
+        time::Duration,
+    };
+    use tze_hud_scene::graph::overlay::NotificationReplyView;
+
+    let (server, clock) = server();
+    let publisher = session(&server, "publisher").await;
+    let namespace = scope_of(&server, &publisher).namespace.clone();
+    let mut ask = Box::pin(ok(
+        &server,
+        &publisher,
+        "hud_publish",
+        json!({
+            "surface":"zone:notification-area", "key":"build", "ttl_ms":1500, "wait_ms":1000,
+            "content":{"title":"Where to deploy?", "actions":[{"label":"Other…", "reply":"target"}]}
+        }),
+    ));
+    let mut context = Context::from_waker(Waker::noop());
+    assert!(ask.as_mut().poll(&mut context).is_pending());
+    let id = card_of(&server, &namespace).await;
+    let text = "staging — 東京";
+    let region = {
+        let mut scene = server.scene.lock().await;
+        let region = render_card_control(&mut scene, id, Some(0));
+        assert!(scene.activate_notification(&region, 0).is_some());
+        assert!(
+            scene.set_notification_reply_view(Some(NotificationReplyView {
+                publication_id: id,
+                action_index: 0,
+                text: text.into(),
+                cursor_byte: text.len(),
+                selection_anchor: text.len(),
+                at_capacity: false,
+            }))
+        );
+        region
+    };
+    clock.advance(1000);
+    tokio::time::advance(Duration::from_secs(1)).await;
+    assert_eq!(
+        ask.as_mut().poll(&mut context),
+        Poll::Ready(json!({"ok":true,"expires_in_ms":500}))
+    );
+    clock.advance(1000);
+    tokio::time::advance(Duration::from_secs(1)).await;
+    let wake = {
+        let mut scene = server.scene.lock().await;
+        assert_eq!(scene.drain_expired_zone_publications(), 0);
+        scene
+            .submit_notification_reply(&region, text.into(), 0)
+            .unwrap()
+    };
+    wake.notify();
+    let got = ok(&server, &publisher, "hud_input", json!({})).await;
+    let item_id = got["items"][0]["id"].clone();
+    assert!(item_id.is_string());
+    assert_eq!(
+        got,
+        json!({"items":[{"id":item_id,"s":"zone:notification-area",
+        "action":"target", "text":text,"key":"build"}],"remaining":0})
+    );
+    assert_eq!(ok(&server, &publisher, "hud_input", json!({})).await, got);
+}
+
 /// R4.2: keyless clears, `held` and `busy` are per session; R4.5: a session
 /// may name its cards, unscoped zone and widget publishes still may not.
 #[tokio::test]

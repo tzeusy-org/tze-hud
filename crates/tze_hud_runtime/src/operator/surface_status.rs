@@ -190,6 +190,8 @@ fn notifications_json(scene: &SceneGraph, displays: &[Rect]) -> Value {
                         "copy"
                     } else if action.url.is_some() {
                         "url"
+                    } else if action.reply.is_some() {
+                        "reply"
                     } else {
                         "callback"
                     };
@@ -228,6 +230,9 @@ fn notifications_json(scene: &SceneGraph, displays: &[Rect]) -> Value {
                 "state": card.state,
                 "guarded": scene.overlay.notification_press_guard == Some(card.publication_id),
             });
+            if let Some(field) = card.reply {
+                entry["reply_field"] = rect_json(field);
+            }
             let sources: Vec<_> = scene
                 .overlay
                 .notification_reveal_regions
@@ -595,6 +600,7 @@ mod tests {
                     actions: vec![
                         NotificationAction {
                             copy: None,
+                            reply: None,
                             label: "Reply".into(),
                             callback_id: Some("answer".into()),
                             url: None,
@@ -602,6 +608,7 @@ mod tests {
                         },
                         NotificationAction {
                             copy: None,
+                            reply: None,
                             label: "Read".into(),
                             callback_id: None,
                             url: Some("https://example.invalid/?secret=value".into()),

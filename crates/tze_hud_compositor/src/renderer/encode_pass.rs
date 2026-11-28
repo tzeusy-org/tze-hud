@@ -536,8 +536,9 @@ impl super::Compositor {
                                 .copied()
                                 .unwrap_or_default()
                         };
-                        let action_layout =
-                            self.notification_action_layout(zone_name, record, policy, slot.width);
+                        let action_layout = self.notification_action_layout(
+                            scene, zone_name, record, policy, slot.width,
+                        );
                         // Alert banner severity mark: a hairline ring in the
                         // icon column (its glyph is text).
                         let agent_icon = super::icon::parse_notification_icon(&payload.icon)
@@ -598,10 +599,31 @@ impl super::Compositor {
                         // are drawn by `collect_text_items`. A destructive one
                         // adds a `color.error` hairline, and while held a
                         // hold fill sweeping in from the left.
+                        let action_bounds =
+                            action_layout.bounds(slot.x, slot.y, slot.width, slot.height);
+                        if let Some((field, draft)) = action_layout
+                            .reply_bounds(slot, &action_bounds)
+                            .zip(scene.overlay.notification_reply.as_ref())
+                        {
+                            let style = super::notification_reply::reply_style(zone_tokens);
+                            let geometry = super::notification_reply::line_geometry(
+                                &mut self.notification_layouts.borrow_mut(),
+                                field,
+                                draft,
+                                &style,
+                                zone_tokens,
+                            );
+                            out.extend(self.reply_field_commands(
+                                field,
+                                geometry.caret,
+                                &style,
+                                opacity,
+                            ));
+                        }
                         for (index, (action, b)) in payload
                             .actions
                             .iter()
-                            .zip(action_layout.bounds(slot.x, slot.y, slot.width, slot.height))
+                            .zip(action_bounds.iter().copied())
                             .enumerate()
                         {
                             let id = notification_action_interaction_id(zone_name, record, index);

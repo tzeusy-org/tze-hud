@@ -578,6 +578,7 @@ async fn grpc_zone_publish_ttl_sets_expiry_and_is_swept() {
                         actions: if actions {
                             vec![crate::proto::NotificationActionProto {
                                 copy: None,
+                                reply: None,
                                 label: "Yes".into(),
                                 callback_id: "yes".into(),
                                 url: String::new(),
@@ -776,6 +777,7 @@ async fn grpc_zone_publish_expires_at_is_swept() {
                         text: "Choose".into(),
                         actions: vec![crate::proto::NotificationActionProto {
                             copy: None,
+                            reply: None,
                             label: "Yes".into(),
                             callback_id: "yes".into(),
                             url: String::new(),
@@ -851,6 +853,7 @@ async fn grpc_zone_publish_present_at_is_held_until_due() {
                         text: "Choose".into(),
                         actions: vec![crate::proto::NotificationActionProto {
                             copy: None,
+                            reply: None,
                             label: "Yes".into(),
                             callback_id: "yes".into(),
                             url: String::new(),

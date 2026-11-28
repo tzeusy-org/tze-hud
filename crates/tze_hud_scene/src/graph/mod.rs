@@ -12,6 +12,8 @@ use std::sync::Arc;
 /// An accepted notification outcome, delivered only after unlocking the scene.
 pub enum NotificationActivation {
     Callback(RenderWakeNotifier),
+    /// Open the exact action's local inline editor.
+    Reply(ZoneHitRegion),
     /// A real owner input requested a match recheck and window activation.
     GoTo {
         publication_id: SceneId,
@@ -216,6 +218,7 @@ pub mod budget;
 pub mod holdings;
 pub mod leases;
 pub mod node_tree;
+mod notification_reply;
 pub mod publish;
 pub use publish::{Publication, Publisher};
 pub mod queries;
@@ -236,6 +239,7 @@ pub use visibility::SurfaceClasses;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PendingActionKind {
     Callback(String),
+    Reply { callback_id: String, text: String },
     Dismiss,
     Displaced,
 }

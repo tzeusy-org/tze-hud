@@ -21,6 +21,8 @@ pub struct NotificationGeometry {
     pub actions: Vec<Rect>,
     pub close: Rect,
     pub goto: Option<Rect>,
+    pub reply: Option<Rect>,
+    pub reply_caret: Option<Rect>,
     pub has_window_caption: bool,
     pub focus: Option<NotificationControl>,
     pub chosen: Option<usize>,
@@ -32,6 +34,17 @@ pub enum NotificationControl {
     Action(usize),
     Close,
     GoTo,
+}
+
+/// The focused card's local editing presentation. The runtime owns the draft.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NotificationReplyView {
+    pub publication_id: SceneId,
+    pub action_index: usize,
+    pub text: String,
+    pub cursor_byte: usize,
+    pub selection_anchor: usize,
+    pub at_capacity: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -192,6 +205,9 @@ pub struct RuntimeOverlayState {
     /// focus never enables digit shortcuts or their visual hints.
     #[serde(skip, default)]
     pub notification_answer: Option<SceneId>,
+    /// The open reply field. This local presentation never enters snapshots.
+    #[serde(skip, default)]
+    pub notification_reply: Option<NotificationReplyView>,
     /// The destructive action being held, if any ([`NotificationHold`]).
     /// Local only: the agent sees nothing until the hold completes.
     #[serde(skip, default)]
@@ -420,6 +436,15 @@ pub struct RuntimeOverlayState {
     /// Ephemeral: skipped during serialization.
     #[serde(skip, default)]
     pub tile_font_scale: HashMap<SceneId, f32>,
+}
+
+impl RuntimeOverlayState {
+    pub(super) fn notification_reply_holding_expiry(&self) -> Option<SceneId> {
+        self.notification_reply
+            .as_ref()
+            .filter(|reply| !reply.text.is_empty())
+            .map(|reply| reply.publication_id)
+    }
 }
 
 use super::SceneGraph;

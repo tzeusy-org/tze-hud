@@ -493,6 +493,50 @@ pub(crate) fn composer_wrap_line_widths(
     buf.layout_runs().map(|run| run.line_w).collect()
 }
 
+/// Shape caret positions for the HUD's unwrapped local editors.
+pub(crate) fn measure_editor_line(
+    font_system: &mut FontSystem,
+    text: &str,
+    font_size_px: f32,
+    line_height_multiplier: f32,
+) -> tze_hud_input::ComposerVisualLayout {
+    let line_height = font_size_px * line_height_multiplier;
+    let mut buf = Buffer::new(font_system, Metrics::new(font_size_px, line_height));
+    // Unbounded width + no wrap → the natural single-line width, matching
+    // measure_composer_caret's shaping exactly so the two never disagree.
+    buf.set_size(font_system, None, None);
+    buf.set_wrap(font_system, Wrap::None);
+    let base_attrs = Attrs::new().family(Family::SansSerif).weight(Weight(400));
+    buf.set_text(font_system, text, base_attrs, Shaping::Advanced);
+    buf.shape_until_scroll(font_system, false);
+
+    let mut glyph_x: Vec<(usize, f32)> = Vec::new();
+    let mut line_w = 0.0f32;
+    if let Some(run) = buf.layout_runs().next() {
+        line_w = run.line_w;
+        for g in run.glyphs.iter() {
+            glyph_x.push((g.start, g.x));
+        }
+    }
+    // Trailing sentinel maps the row end (caret past the last glyph).
+    glyph_x.push((text.len(), line_w));
+    glyph_x.sort_by(|a, b| a.0.cmp(&b.0));
+
+    tze_hud_input::ComposerVisualLayout {
+        lines: vec![tze_hud_input::ComposerVisualLine {
+            start_byte: 0,
+            end_byte: text.len(),
+            glyph_x,
+        }],
+        text_len: text.len(),
+        input_box: None,
+        // Set by the caller (`prime_composer_scroll_offset`), which knows
+        // the caret-follow scroll for this frame; this function only
+        // shapes glyph geometry.
+        h_scroll_px: 0.0,
+    }
+}
+
 /// Advance width (px) of `text` shaped on one unwrapped line, as the overlay
 /// text layer draws it. Runtime chrome (the control panel) uses it to size
 /// pills and right-aligned values exactly.
@@ -979,44 +1023,12 @@ impl TextRasterizer {
         font_size_px: f32,
         line_height_multiplier: f32,
     ) -> tze_hud_input::ComposerVisualLayout {
-        let line_height = font_size_px * line_height_multiplier;
-        let mut buf = Buffer::new(
+        measure_editor_line(
             &mut self.font_system,
-            Metrics::new(font_size_px, line_height),
-        );
-        // Unbounded width + no wrap → the natural single-line width, matching
-        // measure_composer_caret's shaping exactly so the two never disagree.
-        buf.set_size(&mut self.font_system, None, None);
-        buf.set_wrap(&mut self.font_system, Wrap::None);
-        let base_attrs = Attrs::new().family(Family::SansSerif).weight(Weight(400));
-        buf.set_text(&mut self.font_system, text, base_attrs, Shaping::Advanced);
-        buf.shape_until_scroll(&mut self.font_system, false);
-
-        let mut glyph_x: Vec<(usize, f32)> = Vec::new();
-        let mut line_w = 0.0f32;
-        if let Some(run) = buf.layout_runs().next() {
-            line_w = run.line_w;
-            for g in run.glyphs.iter() {
-                glyph_x.push((g.start, g.x));
-            }
-        }
-        // Trailing sentinel maps the row end (caret past the last glyph).
-        glyph_x.push((text.len(), line_w));
-        glyph_x.sort_by(|a, b| a.0.cmp(&b.0));
-
-        tze_hud_input::ComposerVisualLayout {
-            lines: vec![tze_hud_input::ComposerVisualLine {
-                start_byte: 0,
-                end_byte: text.len(),
-                glyph_x,
-            }],
-            text_len: text.len(),
-            input_box: None,
-            // Set by the caller (`prime_composer_scroll_offset`), which knows
-            // the caret-follow scroll for this frame; this function only
-            // shapes glyph geometry.
-            h_scroll_px: 0.0,
-        }
+            text,
+            font_size_px,
+            line_height_multiplier,
+        )
     }
 
     /// Measure a composer draft under WORD WRAP for the multi-line profile.

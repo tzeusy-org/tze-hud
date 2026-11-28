@@ -504,8 +504,7 @@ impl Compositor {
     ///    [`PublicationAnimationState`] whose fade delay comes from
     ///    [`Compositor::publication_fade_delay_ms`]. A publication with no expiry
     ///    is held until cleared and never fades.
-    /// 2. If its `expires_at_wall_us` changed (`hud_hold`), retarget the state
-    ///    so the single fade deadline moves (or disappears when held).
+    /// 2. If the effective expiry changed, follow the new deadline or hold.
     /// 3. Call `tick()` to check whether the delay has elapsed and start the fade.
     ///
     /// Stale entries (publications no longer present in `active_publishes`) are
@@ -557,19 +556,20 @@ impl Compositor {
             // Ensure every active publication has an animation state; tick existing ones.
             for record in publishes {
                 let key: PubKey = record.publication_id;
+                let expiry = scene.zone_publication_expiry(record);
                 let state = zone_states.entry(key).or_insert_with(|| {
                     PublicationAnimationState::new_at(
-                        Self::publication_fade_delay_ms(record, now_us, fade_duration_ms),
-                        record.expires_at_wall_us,
+                        Self::publication_fade_delay_ms(expiry, now_us, fade_duration_ms),
+                        expiry,
                         fade_duration_ms,
                         easing,
                         now,
                     )
                 });
-                if state.source_expiry_us != record.expires_at_wall_us {
+                if state.source_expiry_us != expiry {
                     state.retarget_at(
-                        Self::publication_fade_delay_ms(record, now_us, state.fade_duration_ms),
-                        record.expires_at_wall_us,
+                        Self::publication_fade_delay_ms(expiry, now_us, state.fade_duration_ms),
+                        expiry,
                         now,
                     );
                 }
@@ -588,11 +588,11 @@ impl Compositor {
     /// The selected exit span precedes expiry; a short TTL may clip the fade
     /// at authoritative removal. A zero span wakes only at expiry, not per frame.
     pub(super) fn publication_fade_delay_ms(
-        record: &ZonePublishRecord,
+        expiry: Option<u64>,
         now_us: u64,
         fade_duration_ms: u32,
     ) -> Option<u64> {
-        record.expires_at_wall_us.map(|exp_us| {
+        expiry.map(|exp_us| {
             let remaining_us = exp_us.saturating_sub(now_us);
             if fade_duration_ms == 0 {
                 remaining_us.div_ceil(1_000)

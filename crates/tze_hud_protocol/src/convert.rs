@@ -52,6 +52,7 @@ pub fn proto_zone_content_to_scene(c: &proto::ZoneContent) -> Option<ZoneContent
                     callback_id: (!a.callback_id.is_empty()).then(|| a.callback_id.clone()),
                     url: (!a.url.is_empty()).then(|| a.url.clone()),
                     copy: a.copy.clone(),
+                    reply: a.reply.clone(),
                     role: None,
                 })
                 .collect(),

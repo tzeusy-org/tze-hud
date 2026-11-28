@@ -3,7 +3,9 @@
 //! Outcomes and notification debt are ordinary scene values, so a rejected
 //! mutation batch rolls them back too. Owners flush readiness after scene unlock.
 
-use super::{PendingAction, PendingActionKind, SceneGraph};
+use super::{
+    PendingAction, PendingActionKind, SceneGraph, notification_reply::zone_publication_expiry,
+};
 use crate::types::{ZoneContent, ZonePublishRecord};
 use crate::{SceneId, render_wake::RenderWakeNotifier};
 use std::collections::HashMap;
@@ -12,20 +14,19 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
-/// An unexpired, unanswered card with a valid callback action. Counted once
+/// An unexpired, unanswered card with a valid callback or reply. Counted once
 /// per card. Link and copy actions do not contribute. `choices` holds answered cards.
 pub(crate) fn is_unanswered_question(
     record: &ZonePublishRecord,
     choices: &HashMap<SceneId, String>,
     now_wall_us: u64,
+    reply_holding_expiry: Option<SceneId>,
 ) -> bool {
-    record
-        .expires_at_wall_us
-        .is_none_or(|end| end > now_wall_us)
+    zone_publication_expiry(record, reply_holding_expiry).is_none_or(|end| end > now_wall_us)
         && !choices.contains_key(&record.publication_id)
         && matches!(&record.content, ZoneContent::Notification(payload)
             if payload.actions.iter().any(|action|
-                action.callback_id.is_some() && action.validate().is_ok()))
+                (action.callback_id.is_some() || action.reply.is_some()) && action.validate().is_ok()))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -109,6 +110,7 @@ impl SceneGraph {
             record,
             &self.overlay.notification_choices,
             self.now_wall_us(),
+            self.overlay.notification_reply_holding_expiry(),
         )
     }
 
@@ -126,8 +128,8 @@ impl SceneGraph {
         });
         if claimed_by_wait
             || self.overlay.notification_choices.contains_key(&id)
-            || victim
-                .expires_at_wall_us
+            || self
+                .zone_publication_expiry(&victim)
                 .is_some_and(|end| end <= now_wall_us)
         {
             return;

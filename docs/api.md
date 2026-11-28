@@ -94,7 +94,8 @@ and `hud_clear` have `idempotentHint:true`; publish/input make neither claim.
 For a one-shot notification with actions, add `wait_ms` (default 0, clamped to
 55000). The card is admitted and rendering wakes before the call waits; the
 absolute wait includes admission and `delay_ms`. An answer returns in this call
-as `action:"<callback_id>"`; a human × adds `action:"dismiss",kind:"dismiss"`.
+as `action:"<callback_id>"`. A typed reply adds `text`, and a human × returns
+`action:"dismiss",kind:"dismiss"`.
 It is consumed only after the reply is encoded and needs no ACK. A cancelled
 call releases its reservation and leaves accepted input in the ordinary FIFO,
 with the same retained id on repeated `hud_input` polls. Other card answers and
@@ -121,17 +122,18 @@ with the same cancellation and idle semantics as a `hud_input` wait.
 - Zone: `content` is a string, or a typed object for structured zones
   (`notification` with optional `title`, `body`, integer `urgency` 0–3
   (default 1), optional `progress` and optional
-  `actions: [{label, callback_id?|url|copy, role?}]`). Progress is a finite
+  `actions: [{label, callback_id?|url|copy|reply, role?}]`). Progress is a finite
   number from 0 through 1. The card draws a thin track in `color.outline.variant`
   and fills it in `color.primary`, independent of urgency. Omit progress to
   leave the space available. A same-key update moves the fill in place.
   An invalid value returns `INVALID_ARGUMENT` with
   `notification.progress must be a number in 0..1` on either plane.
-  Each action can specify a callback, an HTTPS URL or local clipboard text.
+  An action can specify a callback, an HTTPS URL, local clipboard text or a
+  callback that opens a one-line reply field.
   On MCP, an action with no target defaults to a callback whose id and answer
   are its label, byte for byte. MCP requires a non-empty label. A supplied MCP
   callback id must be non-empty. Supplying multiple targets rejects with
-  `INVALID_ARGUMENT` and hint `action needs one of callback_id, url or copy`.
+  `INVALID_ARGUMENT` and hint `action needs one of callback_id, url, copy or reply`.
   In MCP, an explicitly empty target string still counts as present.
   A label-only action whose label equals another action's callback id on the
   same card rejects
@@ -141,8 +143,8 @@ with the same cancellation and idle semantics as a `hud_input` wait.
   equal ids stay accepted. A label shared with a link or copy action is accepted.
   `role` is optional and MCP-only: `"destructive"` marks an irreversible
   callback answer (explicit or label-only). Any other value rejects with
-  `notification.actions[<i>].role must be destructive`. A link or copy action
-  with a role rejects with `notification.actions[<i>].role needs a callback action`.
+  `notification.actions[<i>].role must be destructive`. A link, copy or reply
+  action with a role rejects with `notification.actions[<i>].role needs a callback action`.
   The theme draws a destructive action's label and outline in
   `color.error` (on caution and error cards the label keeps that tone's text
   color and the outline is the cue), never filled at rest. The **primary**
@@ -152,8 +154,8 @@ with the same cancellation and idle semantics as a `hud_input` wait.
   has no primary. gRPC actions carry no role.
   An empty MCP URL gets `action url must be https`. On gRPC, plain-string
   `callback_id` and `url` defaults count as absent. The gRPC `progress` and
-  `copy` fields preserve presence. gRPC requires exactly one target and uses
-  the same target hint when all three are absent.
+  `copy` and `reply` fields preserve presence. gRPC requires exactly one
+  target and uses the same target hint when every target is absent.
   URLs must parse as HTTPS with a non-empty host and
   contain at most 2048 supplied UTF-8 bytes; every URL failure uses
   `action url must be https`. No network probe is performed. Both planes
@@ -167,6 +169,15 @@ with the same cancellation and idle semantics as a `hud_input` wait.
   current expiry and no item reaches `hud_input`. The answer chord's digit
   performs the same copy and returns focus. A card with only copy or link
   actions is eligible for ordinary stack trimming.
+  Use `{"label":"Other…","reply":"describe"}` for a short typed answer.
+  Both planes allow one reply action per card with a nonempty label and
+  callback id. A reply makes the card an unanswered question until it is
+  answered or removed. Activating the action opens a local one-line field.
+  Enter sends 1–280 UTF-8 bytes. Escape clears a selection first. The next
+  Escape collapses the field and restores focus. Reopening that card restores
+  its draft. A focused field with text defers card expiry. Leaving the field
+  after the original deadline expires the card immediately. Replacement,
+  clear, trim and dismissal discard the draft.
   Both MCP and gRPC accept at most 4 mixed actions
   (`MAX_NOTIFICATION_ACTIONS`); excess actions reject the whole publish with
   `INVALID_ARGUMENT` and hint `notification allows at most 4 actions`, before
@@ -556,6 +567,10 @@ The gRPC `Hold` and `Clear` behave the same on zones. An internal scene
   or retract input already accepted into the scene FIFO, retained by MCP or
   encoded in a response; its key and ACK id remain stable.
   TTL expiry, `hud_clear` and stale/unmatched releases do not emit human-X input.
+- A sent reply uses `{"id":…,"s":"zone:notification-area","action":"describe","text":"use staging"}`
+  and includes the activated card's `key` if present. Only committed answers
+  reach input. An armed `hud_publish wait_ms` can consume the exact answer and
+  return its `action` and `text` in the publish result.
 - A card trimmed from a full notification stack before anyone answered it
   queues one `{"id":…,"s":"zone:notification-area","kind":"displaced"}` item
   (with `"key"` when the card was keyed) for its publisher only. Expiry,
@@ -966,10 +981,12 @@ down to the lifecycle.
 `Publish.key` remains wire field 7. `Clear.key` is additive string field 2;
 its empty protobuf default preserves old clients. Keyed notification replacement,
 selective clear, byte validation and authenticated publisher isolation match MCP.
-`NotificationActionProto` adds only `string url = 3`; label (1) and
-callback_id (2) retain their wire identities. An absent/default URL with a valid
-callback preserves callback behavior. There is no new gRPC notification
-callback/dismiss stream.
+`NotificationActionProto` keeps label (1), callback_id (2), url (3) and
+optional copy (4). Optional `string reply = 5` carries the typed-answer callback
+id. Notification answers from resident streams use the agent's existing
+unscoped `hud_input` namespace. The same paired agent reads and acknowledges
+them through MCP without an `Mcp-Session-Id`. A scoped MCP session on that
+pairing owns only its own answers. Another agent owns a different namespace.
 
 Public `ClaimTile`, `MutationBatch`, `SceneSnapshot`, `Reclaimed`, placement
 and tile surfaces are removed. Their wire tags and names stay reserved.
@@ -1921,7 +1938,7 @@ distinguishes arguments from responses and partial configuration examples.
 
 | Measure | Before T5 (wire) | Wire | Model-visible | Budget (model-visible) |
 |---|---|---|---|---|
-| `tools/list` | 4,418 | 672 | 635 | ≤ 900 |
+| `tools/list` | 4,418 | 684 | 647 | ≤ 900 |
 | Discover (default scene) | ~430 (`list_zones`) | 194 | 126 | ≤ 150 |
 | Zone publish | ~197 | 90 | 39 | ≤ 80 |
 | Four-option notification ask + returned answer + ACK | — | 273 | 114 | ≤ 120 |
@@ -1935,9 +1952,10 @@ distinguishes arguments from responses and partial configuration examples.
 All rows use canonical flow version 4 and `tiktoken-rs` 0.12.0
 (`o200k_base`); the canonical gate requires two byte-identical final-source
 measurements. The implementation PR records owner decisions on changes to
-flow bytes or ceilings. The progress and copy schema adds 20 `tools/list`
-bytes and 8 tokens to the PR1676 baseline (2,729 to 2,749 model-visible bytes
-and 2,831 to 2,851 wire bytes). Those measured bytes await owner review.
+flow bytes or ceilings. The owner-approved progress and copy baseline measures
+2,749 model-visible bytes and 635 tokens. The typed reply schema raises
+`tools/list` to the approved 2,806 model-visible bytes and 647 tokens
+(2,908 wire bytes and 684 wire tokens).
 
 - `notification_choice` publishes Ship/Hold/Skip/Open, activates Skip through
   `SceneGraph::activate_notification` (the shared pointer/keyboard producer),

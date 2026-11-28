@@ -623,18 +623,17 @@ impl Compositor {
 
     pub(super) fn notification_action_layout(
         &self,
+        scene: &SceneGraph,
         zone: &str,
         record: &ZonePublishRecord,
         policy: &RenderingPolicy,
         width: f32,
     ) -> super::notification_layout::NotificationActionLayout {
-        self.notification_layouts.borrow_mut().resolve(
-            self.zone_tokens(zone),
-            zone,
-            record,
-            policy,
-            width,
-        )
+        let tokens = self.zone_tokens(zone);
+        self.notification_layouts
+            .borrow_mut()
+            .resolve(tokens, zone, record, policy, width)
+            .with_reply(scene, record, tokens)
     }
 
     /// Compute the [`ZoneSlotLayout`] for a Stack zone.
@@ -721,6 +720,7 @@ impl Compositor {
                         + layouts
                             .borrow_mut()
                             .resolve(token_map, zone_name, record, policy, card_w)
+                            .with_reply(scene, record, token_map)
                             .reserve()
                 }
                 _ => Self::stack_slot_height(policy, scale),
@@ -739,7 +739,17 @@ impl Compositor {
                 .zip(slot_heights.last())
                 .map_or(0.0, |(offset, h)| offset + h)
         } else {
-            zh
+            let open_field_bottom = scene
+                .overlay
+                .notification_reply
+                .as_ref()
+                .and_then(|reply| {
+                    ordered_refs
+                        .iter()
+                        .position(|record| record.publication_id == reply.publication_id)
+                })
+                .map_or(0.0, |index| slot_offsets[index] + slot_heights[index]);
+            zh.max(open_field_bottom)
         };
 
         super::ZoneSlotLayout {

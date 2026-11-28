@@ -2439,6 +2439,9 @@ impl WinitApp {
     ) {
         match outcome {
             tze_hud_scene::graph::NotificationActivation::Callback(wake) => wake.notify(),
+            tze_hud_scene::graph::NotificationActivation::Reply(region) => {
+                self.open_notification_reply(region);
+            }
             tze_hud_scene::graph::NotificationActivation::Copy {
                 text,
                 publication_id,
@@ -2774,7 +2777,7 @@ impl WinitApp {
     ) {
         self.panel_window_focus(secondary, focused);
         if focused {
-            self.state.keyboard_window = secondary;
+            self.select_text_input_window(secondary);
         }
         if !focused {
             // A key hold ends when the HUD loses keyboard focus.
@@ -2792,6 +2795,7 @@ impl WinitApp {
             } else {
                 self.state.answer_keyboard.focus = None;
                 self.state.answer_keyboard.return_key = None;
+                self.blur_notification_reply();
                 self.cancel_chrome_feedback();
             }
         }
@@ -3617,6 +3621,7 @@ impl WinitApp {
                             ZoneInteractionKind::DragHandle { .. } => {
                                 // Handled by the drag state machine below — not here.
                             }
+                            ZoneInteractionKind::ReplyField => {}
                             ZoneInteractionKind::DismissTile { tile_id } => {
                                 // Human override: reclaim the tile's lease on
                                 // this thread's own scene lock, so the tile is
@@ -3762,6 +3767,11 @@ impl WinitApp {
 
         // The accepted input is committed and both scene/state guards are gone.
         if take_text_focus {
+            self.blur_notification_reply();
+            if let Some(window) = self.state.press_window {
+                let secondary = super::displays::secondary_index(&self.state.secondaries, window);
+                self.select_text_input_window(secondary);
+            }
             let window = self
                 .state
                 .window
