@@ -76,3 +76,55 @@ decision = "hud-3n24e.32"
 target = "ui_and_shell"
 rust = 21
 rust_test = 43
+
+# hud-ljhku.11 typed reply: measured growth against origin/main 2a1ae936.
+[[inflight_allowances]]
+feature = "hud-ljhku.11"
+approval = "hud-ljhku.11 design field, owner-signed 2026-11-09, amended by hud-ohgc9.4 owner-signed 2026-11-20"
+signed_at = "2026-11-20"
+decision = "hud-3n24e.32"
+target = "core"
+rust = 235
+rust_test = 215
+
+[[inflight_allowances]]
+feature = "hud-ljhku.11"
+approval = "hud-ljhku.11 design field, owner-signed 2026-11-09, amended by hud-ohgc9.4 owner-signed 2026-11-20"
+signed_at = "2026-11-20"
+decision = "hud-3n24e.32"
+target = "render"
+rust = 320
+rust_test = 157
+
+[[inflight_allowances]]
+feature = "hud-ljhku.11"
+approval = "hud-ljhku.11 design field, owner-signed 2026-11-09, amended by hud-ohgc9.4 owner-signed 2026-11-20"
+signed_at = "2026-11-20"
+decision = "hud-3n24e.32"
+target = "ui_and_shell"
+rust = 754
+rust_test = 484
+
+[[inflight_allowances]]
+feature = "hud-ljhku.11"
+approval = "hud-ljhku.11 design field, owner-signed 2026-11-09, amended by hud-ohgc9.4 owner-signed 2026-11-20"
+signed_at = "2026-11-20"
+decision = "hud-3n24e.32"
+target = "api"
+rust_test = 297
+
+[[inflight_allowances]]
+feature = "hud-ljhku.11"
+approval = "hud-ljhku.11 design field, owner-signed 2026-11-09, amended by hud-ohgc9.4 owner-signed 2026-11-20"
+signed_at = "2026-11-20"
+decision = "hud-3n24e.32"
+target = "integration"
+rust_test = 93
+
+[[inflight_allowances]]
+feature = "hud-ljhku.11"
+approval = "hud-ljhku.11 design field, owner-signed 2026-11-09, amended by hud-ohgc9.4 owner-signed 2026-11-20"
+signed_at = "2026-11-20"
+decision = "hud-3n24e.32"
+target = "client_skills"
+markdown = 7
