@@ -289,7 +289,15 @@ rust_test = 2
 
 [[inflight_allowances]]
 feature = "hud-ljhku.15-switch-delay"
-approval = "hud-ljhku.15 design field, owner-signed 2026-11-10; owner polish request 2026-11-29"
+approval = "hud-ljhku.15 design field, owner-signed 2026-11-10; owner polish request 2026-11-29. Owner ruled 2026-11-29 that the 150 ms Switching delay falls within the 2026-11-10 hud-ljhku.15 signature."
+signed_at = "2026-11-10"
+decision = "hud-3n24e.32"
+target = "core"
+rust = 1
+
+[[inflight_allowances]]
+feature = "hud-ljhku.15-switch-delay"
+approval = "hud-ljhku.15 design field, owner-signed 2026-11-10; owner polish request 2026-11-29. Owner ruled 2026-11-29 that the 150 ms Switching delay falls within the 2026-11-10 hud-ljhku.15 signature."
 signed_at = "2026-11-10"
 decision = "hud-3n24e.32"
 target = "config"
@@ -297,9 +305,9 @@ rust = 5
 
 [[inflight_allowances]]
 feature = "hud-ljhku.15-switch-delay"
-approval = "hud-ljhku.15 design field, owner-signed 2026-11-10; owner polish request 2026-11-29"
+approval = "hud-ljhku.15 design field, owner-signed 2026-11-10; owner polish request 2026-11-29. Owner ruled 2026-11-29 that the 150 ms Switching delay falls within the 2026-11-10 hud-ljhku.15 signature."
 signed_at = "2026-11-10"
 decision = "hud-3n24e.32"
 target = "ui_and_shell"
-rust = 47
-rust_test = 35
+rust = 41
+rust_test = 34
