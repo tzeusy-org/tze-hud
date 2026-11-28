@@ -928,10 +928,11 @@ class Run:
             pass
         return status
 
-    def screen_grab(self, name: str) -> None:
-        """What a person would see: the whole desktop, not the HUD's own frame."""
+    def screen_grab(self, name: str, *, frame: tuple[int, int, bytes] | None = None) -> None:
+        """Save the whole desktop or a desktop sample already taken for an assertion."""
         if WINDOWS:
-            (self.out / f"{name}.desktop.png").write_bytes(encode_png_rgba(*WIN.desktop_rgba()))
+            capture = WIN.desktop_rgba() if frame is None else frame
+            (self.out / f"{name}.desktop.png").write_bytes(encode_png_rgba(*capture))
         elif shutil.which("ffmpeg"):
             subprocess.run(
                 ["ffmpeg", "-loglevel", "error", "-f", "x11grab", "-video_size", f"{SCREEN[0]}x{SCREEN[1]}",
@@ -2462,9 +2463,9 @@ def overlay_focus_etiquette(run: Run, notepad_pid: int, surface: str) -> None:
         run.expect("third-app test starts with a chord-focused card", lambda status: bool(
             (card := notification_entry(status, key)) and card["focus"] == 0
             and WIN.foreground_pid() == run.pid))
-        # The overlay is absent from the taskbar/Alt-Tab list. Depending on
-        # Windows' current selection, one switch reaches the editor or its
-        # immediately preceding owned helper; both requests use real Alt-Tab.
+        # Depending on Windows' current selection, one switch reaches the
+        # editor or its immediately preceding owned helper. This checks real
+        # Alt-Tab focus transfer without inspecting the switcher list.
         switches = []
         for attempt in (1, 2):
             switched = alt_tab_to_owned_editor(run, {notepad_pid, third.pid}, attempt)
@@ -2878,8 +2879,198 @@ def scenario_capture_exclusion(run: Run) -> None:
     run.step("ok restored: the desktop shows the HUD again")
 
 
+def scenario_overlay_shell(run: Run) -> None:
+    """Native overlay styles, focused Alt+F4 survival, capture affinity and desktop switching when available."""
+    editors = []
+    key = "gesture-overlay-shell"
+
+    def open_editor():
+        editor = subprocess.Popen(["notepad.exe"])
+        editors.append(editor)
+        run.helper_pids.append(editor.pid)
+
+        def foreground():
+            if WIN.foreground_pid() != editor.pid:
+                WIN.bring_to_front(editor.pid)
+            return WIN.foreground_pid() == editor.pid, WIN.foreground_pid()
+
+        wait_until(foreground, what="owned desktop test editor foreground", timeout_s=SETTLE_S)
+        return editor.pid
+
+    def style(capturing):
+        def observed():
+            state = WIN.pointer_capture_state(run.pid)
+            return (state["capturing"] is capturing and state["no_activate"] is True
+                    and state["tool_window"] is True and state["app_window"] is False), state
+
+        state, _ = wait_until(observed, what="native topmost tool-window policy",
+                              timeout_s=SETTLE_S)
+        run.step(f"ok topmost overlay styles, capturing={capturing}: {state}")
+
+    try:
+        original_desktop_editor = open_editor()
+        open_card(run, key)
+        style(False)
+        run.point(f"zone:notification-area/{key}/0")
+        run.inj.move_relative(1, 0)
+        style(True)
+        run.glide(1, 1)
+        style(False)
+        run.expect("admin status sees a visible topmost overlay", lambda st: bool(
+            (native := (st["displays"][0].get("window_state") or {}))
+            and native.get("topmost") is True and native.get("visible") is True))
+
+        run.key("ctrl+shift+F9")
+        run.expect("answer chord focuses the owned HUD card", lambda st: bool(
+            (card := notification_entry(st, key)) and card["focus"] == 0
+            and WIN.foreground_pid() == run.pid))
+        pid = run.pid
+        message = "close request ignored on an overlay; quit from the tray"
+        before = run.log.read_text(encoding="utf-8", errors="replace").count(message)
+        run.key("alt+F4")
+        run.expect("one overlay close ignored and the focused card stays", lambda st: bool(
+            st["pid"] == pid and (card := notification_entry(st, key))
+            and card["focus"] == 0 and WIN.foreground_pid() == pid
+            and run.log.read_text(encoding="utf-8", errors="replace").count(message) == before + 1))
+        run.key("Escape")
+        wait_until(lambda: (WIN.foreground_pid() == original_desktop_editor, WIN.foreground_pid()),
+                   what="outer Esc restores the owned editor", timeout_s=SETTLE_S)
+        overlay_shell_desktop_probe(run, key, original_desktop_editor, open_editor)
+
+        original_config = run.config.read_text(encoding="utf-8")
+        restore_error = None
+        try:
+            set_exclude_from_capture(run, original_config, True)
+            status = restart_owned(run)
+            report = status.get("capture_exclusion") or {}
+            if report.get("supported") is False or report.get("reason") == "remote":
+                run.step(f"limited capture-affinity proof on this session: {report}")
+            else:
+                run.expect("exclusion still applied after installing the tool-window policy", lambda st:
+                           (st.get("capture_exclusion") or {}).get("applied") is True)
+            style(False)
+        finally:
+            restore_error = restore_capture_setting(run, original_config)
+        if restore_error:
+            raise ScenarioFailed("overlay restarted with capture setting restored", {"error": restore_error})
+    finally:
+        for editor in reversed(editors):
+            kill_pid(editor.pid)
+            editor.wait(10)
+            run.helper_pids.remove(editor.pid)
+
+
+def prove_overlay_shell_desktop_baseline(run: Run, editor_pid: int,
+                                        editor_is_current: Callable[[], bool | None]) -> None:
+    observation = {"editor_pid": editor_pid, "compositor_pixels": colour_pixels(run.frame(), CAPTURE_RGB)}
+    if not observation["compositor_pixels"]:
+        raise ScenarioFailed("the HUD renders the test swatch before the desktop switch", observation)
+
+    if WIN.foreground_pid() != editor_pid and editor_is_current() is True:
+        WIN.bring_to_front(editor_pid)
+    capture = None
+
+    def observe():
+        nonlocal capture
+        foreground_before = WIN.foreground_pid()
+        capture = WIN.desktop_rgba()
+        foreground_after = WIN.foreground_pid()
+        desktop_pixels = colour_pixels(capture, CAPTURE_RGB)
+        observation.update(foreground_before=foreground_before, foreground_after=foreground_after,
+                           desktop_pixels=desktop_pixels)
+        return foreground_before == foreground_after == editor_pid and desktop_pixels > 0, observation
+
+    what = "the HUD test swatch is visible before the desktop switch"
+    try:
+        wait_until(observe, what=what, timeout_s=SETTLE_S, interval_s=0.1)
+    except AssertionError:
+        raise ScenarioFailed(what, observation) from None
+    finally:
+        if capture is not None:
+            run.screen_grab("overlay-shell.before-switch", frame=capture)
+    run.step(f"ok {what}: {observation}")
+
+
+def overlay_shell_desktop_probe(run: Run, card_key: str, original_editor: int, open_editor: Callable[[], int]) -> None:
+    """Prove a desktop switch on an ordinary owned HWND and HUD pixels on the physical display."""
+    original_window = WIN.owned_window_handle(original_editor)
+
+    def original_is_current() -> bool | None:
+        if original_window is None:
+            return None
+        return WIN.owned_window_on_current_desktop(original_editor, original_window)
+
+    def observe_original(wanted: bool) -> tuple[bool, bool | None]:
+        current = original_is_current()
+        return current is wanted, current
+
+    def observe_restored():
+        current, foreground = original_is_current(), WIN.foreground_pid()
+        return current is True and foreground == original_editor, (current, foreground)
+
+    if original_is_current() is not True:
+        run.step("limited desktop proof: the runner cannot identify the owned editor's active virtual desktop")
+        return
+    pip = "zone:pip"
+    r, g, b = (c / 255 for c in CAPTURE_RGB)
+    run.publish(pip, content={"type": "solid_color", "r": r, "g": g, "b": b})
+    run.settle()
+    prove_overlay_shell_desktop_baseline(run, original_editor, original_is_current)
+    if original_is_current() is not True:
+        run.step("limited desktop proof: the original virtual desktop could not be confirmed before switching")
+        return
+
+    switch_confirmed = False
+    try:
+        run.key("win+ctrl+d")
+        try:
+            wait_until(lambda: observe_original(False), what="owned editor is off the current desktop",
+                       timeout_s=3, interval_s=0.1)
+        except AssertionError:
+            pass
+        else:
+            switch_confirmed = True
+            wait_until(lambda: (colour_pixels(WIN.desktop_rgba(), CAPTURE_RGB) > 0, None),
+                       what="the HUD swatch is visible on the second desktop", timeout_s=SETTLE_S)
+            status = run.expect("the question remains live on the second desktop", lambda st: bool(
+                notification_entry(st, card_key)))
+            run.screen_grab("overlay-shell.second-desktop")
+            run.step(f"ok switched desktops and observed HUD pixels; window_state="
+                     f"{[d.get('window_state') for d in status['displays']]}")
+    finally:
+        current = original_is_current()
+        if current is None or (current is True and not switch_confirmed):
+            # The shell may process the new-desktop chord after the proof deadline.
+            try:
+                current, _ = wait_until(lambda: observe_original(False), what="late virtual desktop switch",
+                                        timeout_s=SETTLE_S, interval_s=0.1)
+            except AssertionError:
+                current = original_is_current()
+        try:
+            if current is None:
+                raise AssertionError("the original editor's desktop membership is unknown")
+            if current is False:
+                # Guard the cleanup chord with a new owned foreground on the switched desktop.
+                cleanup_editor = open_editor()
+                cleanup_window = WIN.owned_window_handle(cleanup_editor)
+                current = original_is_current()
+                if current is not True:
+                    if (current is not False or cleanup_window is None
+                            or WIN.owned_window_on_current_desktop(cleanup_editor, cleanup_window) is not True):
+                        raise AssertionError("could not identify an owned window on the switched desktop")
+                    run.key("win+ctrl+F4")
+                wait_until(lambda: observe_original(True), what="the original virtual desktop is active again",
+                           timeout_s=SETTLE_S)
+            WIN.bring_to_front(original_editor)
+            wait_until(observe_restored, what="original editor foreground restored", timeout_s=SETTLE_S)
+        except (AssertionError, Refused) as error:
+            raise ScenarioFailed("verify restoration of the original virtual desktop", str(error)) from error
+    if not switch_confirmed:
+        run.step("limited desktop proof: the runner did not establish a switch within the proof deadline")
+
+
 # Windows only: they need Win32 foreground/edit-control access or global hotkeys.
-OVERLAY_SCENARIOS = ("tray", "go-to-session", "overlay-pointer", "tray-answer")
+OVERLAY_SCENARIOS = ("tray", "go-to-session", "overlay-pointer", "tray-answer", "overlay-shell")
 TIER_W_ONLY = {*OVERLAY_SCENARIOS, "no-focus-steal", "safe-mode", "capture-exclusion"}
 
 SCENARIOS: dict[str, Callable[[Run], None]] = {
@@ -2916,6 +3107,7 @@ SCENARIOS: dict[str, Callable[[Run], None]] = {
     "tray": scenario_tray,                            # tier W, overlay only
     "tray-answer": scenario_tray_answer,              # tier W, overlay only, informational
     "overlay-pointer": scenario_overlay_pointer,      # 11 (tier W, overlay only)
+    "overlay-shell": scenario_overlay_shell,          # tier W, overlay only, informational
     "safe-mode": scenario_safe_mode,                  # 12 (tier W)
     "capture-exclusion": scenario_capture_exclusion,  # tier W, informational (restarts the HUD twice)
     "restart": scenario_restart,                      # 14 (last: replaces the HUD)
@@ -3028,10 +3220,11 @@ def main(argv: list[str] | None = None) -> int:
     # Real link handoffs ("portal-reading", "card-link") can let a browser take
     # the foreground seconds later, so they run after everything else that
     # injects input. "restart" replaces the HUD and only uses MCP; it stays last.
+    # "overlay-shell" may switch the runner's desktop, so it runs last in overlay mode.
     # Before those, required scenarios run first in the fresh HUD and
     # informational ones follow in the same boot. A list naming the other window
     # mode's scenarios only gates the ones this invocation runs.
-    trailing = [n for n in LINK_SCENARIOS + ("restart",) if n in names]
+    trailing = [n for n in LINK_SCENARIOS + ("overlay-shell", "restart") if n in names]
     required = set(names) if args.required is None else set(args.required).intersection(names)
     names = ([n for n in names if n in required and n not in trailing]
              + [n for n in names if n not in required and n not in trailing] + trailing)

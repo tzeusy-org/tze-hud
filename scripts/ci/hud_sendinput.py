@@ -19,6 +19,7 @@ import json
 import ntpath
 import subprocess
 import time
+import uuid
 from ctypes import wintypes
 from typing import Callable
 
@@ -105,19 +106,20 @@ class INPUT(ctypes.Structure):
 MOUSE_MOVE, LEFT_DOWN, LEFT_UP, WHEEL, ABSOLUTE = 0x1, 0x2, 0x4, 0x800, 0x8000
 RIGHT_DOWN, RIGHT_UP = 0x8, 0x10
 GWL_EXSTYLE, WS_EX_TOPMOST, WS_EX_TRANSPARENT = -20, 0x8, 0x20
-WS_EX_NOACTIVATE = 0x08000000
+WS_EX_TOOLWINDOW, WS_EX_APPWINDOW, WS_EX_NOACTIVATE = 0x80, 0x40000, 0x08000000
 HWND_TOP = 0
 SWP_NOSIZE, SWP_NOMOVE, SWP_NOACTIVATE, SWP_NOOWNERZORDER, SWP_ASYNCWINDOWPOS = 1, 2, 0x10, 0x200, 0x4000
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 KEY_UP, KEY_UNICODE = 0x2, 0x4
 WHEEL_DELTA = 120
 
-VK = {"ctrl": 0x11, "control": 0x11, "shift": 0x10, "alt": 0x12, "tab": 0x09, "return": 0x0D,
+VK = {"ctrl": 0x11, "control": 0x11, "shift": 0x10, "alt": 0x12, "win": 0x5B,
+      "tab": 0x09, "return": 0x0D,
       "enter": 0x0D, "escape": 0x1B, "space": 0x20, "minus": 0xBD, "equal": 0xBB, "plus": 0xBB,
       "backspace": 0x08, "home": 0x24, "end": 0x23, "prior": 0x21, "next": 0x22,
       "left": 0x25, "up": 0x26, "right": 0x27, "down": 0x28}
 VK.update({f"f{n}": 0x6F + n for n in range(1, 25)})
-EXTENDED = {0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28}  # navigation keys, not their numpad twins
+EXTENDED = {0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x5B}
 KEY_EXTENDED = 0x1
 
 
@@ -350,10 +352,51 @@ def pointer_capture_state(pid: int) -> dict:
                 if window["rect"] == [0, 0, width, height] and window["style_ex"] & WS_EX_TOPMOST]
     # winit's set_cursor_hittest(false) sets WS_EX_TRANSPARENT. Observe the
     # actual native switch, rather than assuming a hover implies capture.
-    capturing = not bool(overlays[0]["style_ex"] & WS_EX_TRANSPARENT) if len(overlays) == 1 else None
-    no_activate = bool(overlays[0]["style_ex"] & WS_EX_NOACTIVATE) if len(overlays) == 1 else None
-    return {"capturing": capturing, "no_activate": no_activate,
+    style = overlays[0]["style_ex"] if len(overlays) == 1 else None
+    return {"capturing": not bool(style & WS_EX_TRANSPARENT) if style is not None else None,
+            "no_activate": bool(style & WS_EX_NOACTIVATE) if style is not None else None,
+            "tool_window": bool(style & WS_EX_TOOLWINDOW) if style is not None else None,
+            "app_window": bool(style & WS_EX_APPWINDOW) if style is not None else None,
             "matching_overlays": len(overlays), "windows": windows}
+
+
+def owned_window_handle(pid: int) -> int | None:
+    """Resolve one visible top-level HWND before a desktop transition."""
+    windows = _windows_of(pid)
+    return windows[0] if len(windows) == 1 else None
+
+
+def owned_window_on_current_desktop(pid: int, hwnd: int) -> bool | None:
+    """Query a previously resolved HWND even when its desktop is inactive."""
+    owner = wintypes.DWORD()
+    if not user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner)) or owner.value != pid:
+        return None
+    ole32 = ctypes.OleDLL("ole32")
+    guid = ctypes.c_uint32 * 4
+    clsid = guid.from_buffer_copy(uuid.UUID("aa509086-5ca9-4c25-8f95-589d3c07b48a").bytes_le)
+    iid = guid.from_buffer_copy(uuid.UUID("a5cd92ff-29be-454c-8d04-d82879fb3f1b").bytes_le)
+    manager = ctypes.c_void_p()
+    try:
+        ole32.CoInitializeEx(None, wintypes.DWORD(2))  # STA on the calling thread.
+    except OSError:
+        return None
+    try:
+        ole32.CoCreateInstance(ctypes.byref(clsid), None, wintypes.DWORD(1),
+                               ctypes.byref(iid), ctypes.byref(manager))
+        vtable = ctypes.cast(manager, ctypes.POINTER(ctypes.POINTER(ctypes.c_void_p)))[0]
+        release = ctypes.WINFUNCTYPE(wintypes.ULONG, ctypes.c_void_p)(vtable[2])
+        on_current = ctypes.WINFUNCTYPE(wintypes.LONG, ctypes.c_void_p, wintypes.HWND,
+                                       ctypes.POINTER(wintypes.BOOL))(vtable[3])
+        try:
+            present = wintypes.BOOL()
+            hr = on_current(manager, hwnd, ctypes.byref(present))
+            return bool(present.value) if hr == 0 else None
+        finally:
+            release(manager)
+    except OSError:
+        return None
+    finally:
+        ole32.CoUninitialize()
 
 
 def maximize(pid: int) -> None:

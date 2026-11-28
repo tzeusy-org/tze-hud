@@ -610,9 +610,8 @@ pub(super) fn overlay_window_attributes(title: String, spec: &MonitorSpec) -> Wi
     #[cfg(target_os = "windows")]
     {
         use winit::platform::windows::WindowAttributesExtWindows;
-        // Hidden from the taskbar and alt-tab. Shell/display changes can
-        // still minimize it; WS_EX_NOREDIRECTIONBITMAP lets DWM present the
-        // swapchain directly with per-pixel alpha.
+        // The native observer applies the tool-window styles before first show.
+        // WS_EX_NOREDIRECTIONBITMAP lets DWM present with per-pixel alpha.
         attrs
             .with_skip_taskbar(true)
             .with_no_redirection_bitmap(true)
@@ -1412,7 +1411,7 @@ impl super::WinitApp {
         };
         let surface = factory.create(Arc::clone(&window), width, height)?;
         if !chrome_observer.activation_ready() {
-            return Err("secondary overlay: native no-activate policy unavailable".into());
+            return Err("secondary overlay: native overlay styles unavailable".into());
         }
         window.set_visible(true);
         chrome_observer.publish();
