@@ -11,12 +11,15 @@ LINK = re.compile(r"^(?:\.\./)*[\w./-]+\.md(?:#[\w-]+)?$")
 
 
 def anchors(markdown):
-    """GitHub-style heading anchors of a Markdown document."""
-    return {
-        re.sub(r"[^\w\- ]", "", line.lstrip("#").strip().lower()).replace(" ", "-")
-        for line in markdown.splitlines()
-        if line.startswith("#")
-    }
+    """GitHub-style heading anchors of a Markdown document, outside code fences."""
+    found, fenced = set(), False
+    for line in markdown.splitlines():
+        if line.lstrip().startswith(("```", "~~~")):
+            fenced = not fenced
+        elif line.startswith("#") and not fenced:
+            title = line.lstrip("#").strip().lower()
+            found.add(re.sub(r"[^\w\- ]", "", title).replace(" ", "-"))
+    return found
 
 
 def problems(skill, intents):
@@ -25,8 +28,12 @@ def problems(skill, intents):
     found = []
     for entry in intents:
         marker = entry["marker"]
-        if marker not in body:
-            found.append(f"{skill}: '{entry['intent']}' marker {marker!r} missing from SKILL.md")
+        count = body.count(marker)
+        if count != 1:
+            # A repeated marker could not notice its own row being deleted.
+            found.append(
+                f"{skill}: '{entry['intent']}' marker {marker!r} appears {count} times in SKILL.md"
+            )
             continue
         if LINK.match(marker):
             target, _, anchor = marker.partition("#")
@@ -43,6 +50,8 @@ class SkillRoutingIntentTest(unittest.TestCase):
         fixture = json.loads(FIXTURE.read_text(encoding="utf-8"))
         skills = {k: v for k, v in fixture.items() if not k.startswith("_")}
         self.assertEqual(set(skills), {"th-hud-publish", "hud-projection"})
+        for skill, intents in skills.items():
+            self.assertTrue(intents, f"{skill} lists no intents")
         found = [p for skill, intents in sorted(skills.items()) for p in problems(skill, intents)]
         self.assertEqual(found, [])
 
@@ -50,9 +59,12 @@ class SkillRoutingIntentTest(unittest.TestCase):
         found = problems("hud-projection", [{"intent": "absent", "marker": "no such text"}])
         self.assertEqual(len(found), 1)
         self.assertIn("'absent'", found[0])
+        twice = problems("hud-projection", [{"intent": "twice", "marker": "portal:<id>"}])
+        self.assertIn("times in SKILL.md", twice[0])
         guide = (ROOT / ".claude/skills/hud-projection/references/guide.md").read_text(encoding="utf-8")
         self.assertIn("mcp-client", anchors(guide))
         self.assertNotIn("no-such-heading", anchors(guide))
+        self.assertNotIn("claude-code-run-with-run_in_background-it-exits-and-wakes-you-on-the", anchors(guide))
 
 
 if __name__ == "__main__":

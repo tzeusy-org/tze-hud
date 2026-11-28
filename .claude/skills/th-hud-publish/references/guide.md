@@ -138,7 +138,7 @@ another session on the pairing never receives or ACKs your answers, and a
 keyless clear removes only your cards. Through the stdio adapter your cards
 carry a caption with your folder name; `display_name` on a zone publish
 renames it. `wait_ms` defaults to 0 and caps at
-30000; a CLI/network timeout does not establish a user's answer.
+55000; a CLI/network timeout does not establish a user's answer.
 
 Unanswered questions appear before other cards in a regular notification stack;
 newest-first order is retained within each group. Answered cards lose that priority.

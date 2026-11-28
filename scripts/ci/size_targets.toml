@@ -128,3 +128,14 @@ signed_at = "2026-11-20"
 decision = "hud-3n24e.32"
 target = "client_skills"
 markdown = 7
+
+# hud-ljhku.6 skill diet: the old skill bodies move intact to references/guide.md
+# and each SKILL.md becomes a <= 1,000-token formula table; measured against
+# origin/main ef6827ac.
+[[inflight_allowances]]
+feature = "hud-ljhku.6"
+approval = "hud-ljhku.6 design field, owner-signed 2026-11-09 (funnel-6-client-layer-spec, option A)"
+signed_at = "2026-11-09"
+decision = "hud-3n24e.32"
+target = "client_skills"
+markdown = 107

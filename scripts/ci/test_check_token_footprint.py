@@ -410,7 +410,13 @@ class CandidatePacketTests(unittest.TestCase):
                     measurement_path.write_text(json.dumps(measurement), encoding="utf-8")
                     with mock.patch("sys.argv", args), mock.patch("sys.stdout"):
                         self.assertEqual(checker.main(), 1)
-                    self.assertEqual(json.loads(report_path.read_text())["status"], "failed")
+                    failed = json.loads(report_path.read_text())
+                    self.assertEqual(failed["status"], "failed")
+                    if mutation == "ceiling":
+                        self.assertIn(
+                            "skill body th-hud-publish is 1001 tokens, over the 1000-token ceiling",
+                            " ".join(failed["incompatibilities"]),
+                        )
 
     def test_owner_approval_makes_candidate_pass(self):
         approved = copy.deepcopy(self.candidate)

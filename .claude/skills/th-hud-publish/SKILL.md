@@ -12,28 +12,29 @@ metadata:
 
 # HUD Publish
 
-One call per intent. Tokens are measured model-visible costs (`docs/api.md`
-Token budgets). Detail for every row: [full guide](references/guide.md).
+One call per intent. Tokens are each canonical flow's model-visible cost
+(`docs/api.md`); keys and ids add a few. Detail: [full guide](references/guide.md).
 
-| Intent | Call | Tokens |
+| Intent | Call | Tokens (flow) |
 |---|---|--:|
-| What can I use? | `hud_surfaces {}` | 126 |
-| Notify | `hud_publish {"surface":"zone:notification-area","content":{"title":"Tests","body":"Passed","urgency":0},"key":"<session>:tests","ttl_ms":10000}` | 39 |
-| Ask, wait for the answer | add `"actions":[{"label":"Run","callback_id":"<session>:q1:run"},…]` to `content` and `"wait_ms":30000` | 77 |
+| What can I use? | `hud_surfaces {}` | 126 (discover) |
+| Notify | `hud_publish {"surface":"zone:notification-area","content":{"title":"Tests","body":"Passed","urgency":0},"key":"<session>:tests","ttl_ms":10000}` | 39 (zone_publish) |
+| Text, color | `content` is `"Build passed"`, or `{"r":0.05,"g":0.1,"b":0.2,"a":1.0}` on a color zone | — |
+| Ask, wait for the answer | `content.actions:[{"label":"Run","callback_id":"<session>:q1:run"},…]` plus top-level `"wait_ms":30000` | 77 (notification_choice_wait) |
 | Typed answer | an action `{"label":"Other…","reply":"<session>:q1:other"}` | — |
-| Progress / copy / link | `content.progress` 0–1; action `{"label":"Copy","copy":"…"}`; action `{"label":"PR","url":"https://…"}` | — |
-| Update a widget | `hud_publish {"surface":"widget:<name>","params":{…discovered params…}}` | 22 |
+| Progress, copy, link | `content.progress` 0–1; action `{"label":"Copy","copy":"…"}`; action `{"label":"PR","url":"https://…"}` | — |
+| Update a widget | `hud_publish {"surface":"widget:<name>","params":{…discovered params…}}` | 22 (widget_publish) |
 | Status entry | `{"entries":{"<session>":"testing"}}` on a status bar, with a `key` | — |
-| Extend | `hud_hold {"surface":"…","ttl_ms":15000}` | — |
-| Collect input | `hud_input {"wait_ms":30000}`, then `hud_input {"ack":["<id>"]}` | 114 for ask + answer + ACK |
+| Extend one card | republish its `key`. `hud_hold {"surface"…}` extends every card this agent holds there | — |
+| Collect input | `hud_input {"wait_ms":30000}`, then `hud_input {"ack":["<id>"]}` | 114 (notification_choice) |
 | Remove my card | `hud_clear {"surface":"zone:notification-area","key":"<session>:tests"}` | — |
 
 ## Routing
 
-- Start with `hud_surfaces`; zone, widget and param names are per instance.
-- Card = one milestone or one question, at most a couple of short lines. Put
-  depth in chat, a PR or an artifact, and link to it.
-- Use a widget only when it is allocated to this work.
+- Discover first: names are per instance. Use a widget only when it is
+  allocated to this work.
+- A card is one milestone or one question in a couple of short lines; link
+  to chat, a PR or an artifact for depth.
 - Session transcript, portal or replies → [hud-projection](../hud-projection/SKILL.md).
 - Screenshots, logs, updates, Windows validation → [user-test](../user-test/SKILL.md).
 - Tools absent → [connection setup](references/connection.md), or the
@@ -44,18 +45,19 @@ Token budgets). Detail for every row: [full guide](references/guide.md).
 
 ## Rules
 
-- At most four actions per card, one of them a reply. Callback ids name the
-  session, question and generation.
-- An answered `wait_ms` returns a consumed `action`, so don't ACK it.
-- A `gone` result, a timeout or a dismiss is not consent.
+- Offer buttons only when this session will consume and route the answer.
+- At most four actions per card, and at most one of them a reply. Callback
+  ids name the session, question and generation.
+- An answered `wait_ms` returns a consumed `action`, so don't ACK it. A
+  `gone` result, a timeout or a dismiss is not consent.
 - ACK each handled `hud_input` id once. Validate the callback generation even
   after the card is gone.
 - Never send a keyless `hud_clear` on a shared zone: it clears all of this
   agent's content there.
-- `hud_hold` has no key: it can extend sibling cards.
 - Set a finite `ttl_ms`. Send no heartbeats and no empty polling loops.
-- `clipped` in a reply: shorten and republish the same key, or link out.
-  `kind:"displaced"`: republish only if it still matters.
-- Errors are `{code,hint}`: follow the hint, rediscover on missing names, and
-  stop on `NOT_ALLOWED` or `SAFE_MODE_ACTIVE`.
+- If a reply carries `clipped`, shorten the text and republish the same key,
+  or link out. On `kind:"displaced"`, republish only if it still matters.
+- Errors are `{code,hint}`: follow the hint and rediscover on missing names.
+  Stop on `NOT_ALLOWED`. On `SAFE_MODE_ACTIVE`, stop mutating; polling still
+  works.
 - Never replay an uncertain publish blindly.
