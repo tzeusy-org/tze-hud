@@ -2287,4 +2287,65 @@ async fn notification_reply_draws_inline_with_a_clipped_draft_and_token_colors()
     assert!(contains(field, |rgb| rgb[0] > 200
         && (100..210).contains(&rgb[1])
         && rgb[2] < 10));
+
+    // A draft drawn with a system fallback face puts its caret at the end of
+    // the drawn glyphs, not where the bundled fonts' missing glyph would end.
+    let (source, _) =
+        crate::fonts::test_standins::standin_source(&crate::fonts::test_standins::all_standins());
+    *compositor
+        .text_rasterizer
+        .as_mut()
+        .unwrap()
+        .system_fallback_mut() = crate::fonts::SystemFallback::new(source);
+    let (wake, wakes) = std::sync::mpsc::channel();
+    compositor.set_font_fallback_wake(tze_hud_scene::render_wake::RenderWakeNotifier::new(
+        move || {
+            let _ = wake.send(());
+        },
+    ));
+    let draft = "完成かん".to_owned();
+    let mut caret_at = |compositor: &mut Compositor, cursor_byte: usize| {
+        scene.set_notification_reply_view(Some(NotificationReplyView {
+            publication_id: action.publication_id,
+            action_index: 0,
+            cursor_byte,
+            selection_anchor: cursor_byte,
+            text: draft.clone(),
+            at_capacity: false,
+        }));
+        compositor.prime_markdown_cache(&scene);
+        compositor.prime_truncation_cache(&scene);
+        compositor.render_frame_headless(&mut scene, &surface);
+        scene.overlay.notification_geometry[0]
+            .reply_caret
+            .unwrap()
+            .x
+    };
+    caret_at(&mut compositor, 0);
+    wakes
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .expect("the drawn draft must request its fallback face");
+    assert!(compositor.poll_font_fallback(), "fallback face installed");
+    let style = super::super::notification_reply::reply_style(&compositor.token_map);
+    let width = |fonts: &mut glyphon::FontSystem| {
+        crate::text::measure_editor_line(
+            fonts,
+            &draft,
+            style.font_size_px,
+            crate::text::LINE_HEIGHT_MULTIPLIER,
+        )
+        .x_at_cursor(draft.len())
+    };
+    let drawn = width(
+        compositor
+            .text_rasterizer
+            .as_mut()
+            .unwrap()
+            .font_system_mut(),
+    );
+    let bundled =
+        width(&mut crate::fonts::build_font_system(&crate::fonts::FontConfig::default()).0);
+    assert!((drawn - bundled).abs() > 1.0, "{drawn} vs {bundled}");
+    let start = caret_at(&mut compositor, 0);
+    close(caret_at(&mut compositor, draft.len()) - start, drawn);
 }

@@ -163,7 +163,10 @@ pub(super) struct NotificationLayoutCache {
     entries: HashMap<(String, SceneId), (LayoutInputs, NotificationActionLayout, bool)>,
     config: Option<crate::fonts::FontConfig>,
     fonts: Option<glyphon::FontSystem>,
-    reply_line: Option<(String, f32, tze_hud_input::ComposerVisualLayout)>,
+    /// The reply draft's glyph geometry, and whether it came from the
+    /// rasterizer's fonts: only those hold the lazily loaded system fallback
+    /// faces (CJK, emoji) the draft is drawn with.
+    reply_line: Option<(String, f32, tze_hud_input::ComposerVisualLayout, bool)>,
     pub(super) shapes: u64,
 }
 impl NotificationLayoutCache {
@@ -194,7 +197,7 @@ impl NotificationLayoutCache {
         if self
             .reply_line
             .as_ref()
-            .is_none_or(|(content, size, _)| content != text || *size != font_size)
+            .is_none_or(|(content, size, _, _)| content != text || *size != font_size)
         {
             let layout = crate::text::measure_editor_line(
                 self.fonts
@@ -204,9 +207,43 @@ impl NotificationLayoutCache {
                 font_size,
                 crate::text::LINE_HEIGHT_MULTIPLIER,
             );
-            self.reply_line = Some((text.to_owned(), font_size, layout));
+            self.reply_line = Some((text.to_owned(), font_size, layout, false));
         }
         &self.reply_line.as_ref().expect("reply layout primed").2
+    }
+
+    /// Measure the reply draft with the rasterizer's `fonts` before any caret,
+    /// hit-test or draw read, so the caret and IME area follow the glyphs as
+    /// drawn even when they come from a system fallback face.
+    pub(super) fn prime_reply_line(
+        &mut self,
+        tokens: &HashMap<String, String>,
+        text: &str,
+        font_size: f32,
+        fonts: &mut glyphon::FontSystem,
+    ) {
+        let config = crate::fonts::FontConfig::from_token_map(tokens).normalized();
+        if self.config.as_ref() != Some(&config) {
+            self.entries.clear();
+            self.fonts = None;
+            self.config = Some(config);
+        }
+        if self
+            .reply_line
+            .as_ref()
+            .is_some_and(|(content, size, _, actual)| {
+                *actual && content == text && *size == font_size
+            })
+        {
+            return;
+        }
+        let layout = crate::text::measure_editor_line(
+            fonts,
+            text,
+            font_size,
+            crate::text::LINE_HEIGHT_MULTIPLIER,
+        );
+        self.reply_line = Some((text.to_owned(), font_size, layout, true));
     }
     pub(super) fn resolve(
         &mut self,
