@@ -2396,10 +2396,12 @@ async fn dock_session_caption_follows_only_its_accepted_display() {
 
     // R10.2 S4: hiding the widgets class hides captions and rows together,
     // leaving the dock display as empty as the mirror that never had a dock.
-    assert!(scene.set_owner_hidden(tze_hud_scene::graph::SurfaceClasses {
-        widgets: true,
-        ..Default::default()
-    }));
+    assert!(
+        scene.set_owner_hidden(tze_hud_scene::graph::SurfaceClasses {
+            widgets: true,
+            ..Default::default()
+        })
+    );
     let hidden = build(&mut gpu.compositor, &mut scene);
     assert_eq!(
         named(&mut gpu.compositor, &hidden),
