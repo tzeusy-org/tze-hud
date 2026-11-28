@@ -158,7 +158,7 @@ impl DockConfig {
                     "accepts",
                     "dock text lines that fit one row",
                     name.clone(),
-                    "reduce type.body.m.line_height plus type.readout.line_height, or space.s",
+                    "reduce the type.body.m and type.readout sizes or line heights, or space.s",
                 )
             })
             .collect();

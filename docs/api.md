@@ -678,15 +678,16 @@ production discovery is unchanged.
   `motion.exit.easing` (a snap with Windows animations off); while the pointer
   is inside the column the move waits and the vacated slot stays reserved, so
   nothing moves under the pointer. A new row that would land past the
-  column's end closes those slots first unless the pointer is inside. The column starts at x 5%, y 12% of its
-  display, spans 73% of its height, and is as wide as the widest possible row
-  (caption plus one of each accepted type). If that exceeds 35% of the display
-  width the whole dock scales down uniformly (`/admin/status` `dock.scale`).
-  Sizes follow the display scale × the zoom (Windows text size × `ui.scale`).
-  Each instance has its own
+  column's end closes those slots at once, unless the pointer is inside. The
+  column starts at x 5%, y 12% of its display, spans 73% of its height, and
+  is as wide as the widest possible row (caption plus one of each accepted
+  type). If that exceeds 35% of the display width the whole dock scales down
+  uniformly (`/admin/status` `dock.scale`). Sizes follow the display scale ×
+  the zoom (Windows text size × `ui.scale`). Each instance has its own
   runtime hover, as a placed widget does. An empty dock draws nothing.
 - **Capacity.** As many rows as fit the column's height, at most `max_rows`.
-  A publish that needs a new row when none is free fails `CONTENT_REJECTED`
+  A publish that needs a new row when none is free (including slots held
+  vacant while the pointer is inside the column) fails `CONTENT_REJECTED`
   with `dock full; show this in a card` and changes nothing; a new instance in
   an existing row and updates always land. No instance is evicted to admit
   another session's. If a display or scale change later leaves too little
@@ -1266,7 +1267,8 @@ a bundle and pass the row-shape rule: its natural height (its dock
 presentation's, if it has one) is at most 4/3 of `dock.row.height`, so it
 draws at 75% or more of its designed size. An unknown type, a seventh entry
 or a failing type (the gauge or status-indicator) is a config error naming it
-and, for the shape rule, the height limit. `dock.row.height` (default 52) and
+and, for the shape rule, the height limit. So is a countdown whose type
+tokens or `space.s` leave its two dock text lines no room to draw. `dock.row.height` (default 52) and
 `dock.caption.width` (default 96) are logical-pixel tokens; the gaps use
 `space.s`. `[displays."<key>"] zones = ["dock"]` moves the column to that
 display like a zone (it stays on the primary when the key matches no

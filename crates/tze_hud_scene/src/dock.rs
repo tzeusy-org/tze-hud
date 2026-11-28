@@ -519,10 +519,17 @@ pub enum DockPublishError {
     Widget(#[from] ValidationError),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum DockRowAdmission {
     Existing(usize),
     New(usize),
 }
+
+/// The row a validated publish was admitted to. Admission can read the
+/// window loop's pointer contact, so a publish that follows validation under
+/// the same scene lock reuses this instead of deciding again.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DockAdmission(DockRowAdmission);
 
 struct DockPublishPlan<'a> {
     definition: &'a WidgetDefinition,
@@ -838,6 +845,7 @@ impl SceneGraph {
         widget_type: &str,
         params: &HashMap<String, WidgetParameterValue>,
         namespace: &str,
+        admitted: Option<DockAdmission>,
     ) -> Result<DockPublishPlan<'_>, DockPublishError> {
         let not_found = || ValidationError::WidgetNotFound {
             name: widget_type.into(),
@@ -845,9 +853,15 @@ impl SceneGraph {
         let dock = self.dock.as_ref().ok_or_else(not_found)?;
         let definition = self.dock_definition(widget_type).ok_or_else(not_found)?;
         let params = Self::validate_widget_params_for_definition(widget_type, definition, params)?;
-        let row = match dock.rows.iter().position(|row| row.namespace == namespace) {
-            Some(index) => DockRowAdmission::Existing(index),
-            None => DockRowAdmission::New(dock.next_row_slot().ok_or(DockPublishError::Full)?),
+        let row = match (
+            admitted,
+            dock.rows.iter().position(|row| row.namespace == namespace),
+        ) {
+            (Some(DockAdmission(row)), _) => row,
+            (None, Some(index)) => DockRowAdmission::Existing(index),
+            (None, None) => {
+                DockRowAdmission::New(dock.next_row_slot().ok_or(DockPublishError::Full)?)
+            }
         };
         Ok(DockPublishPlan {
             definition,
@@ -864,16 +878,40 @@ impl SceneGraph {
         widget_type: &str,
         params: &HashMap<String, WidgetParameterValue>,
         namespace: &str,
-    ) -> Result<(), DockPublishError> {
+    ) -> Result<DockAdmission, DockPublishError> {
         self.check_widget_publish_safe_mode(namespace)?;
-        self.plan_dock_publish(widget_type, params, namespace)
-            .map(|_| ())
+        self.plan_dock_publish(widget_type, params, namespace, None)
+            .map(|plan| DockAdmission(plan.row))
     }
 
     /// Publish immediately for a live, authenticated scope supplied by the caller.
     /// A zero requested lifetime uses the owner's finite cap.
     pub fn publish_to_dock(
         &mut self,
+        widget_type: &str,
+        params: HashMap<String, WidgetParameterValue>,
+        namespace: &str,
+        lease_id: Option<SceneId>,
+        transition_ms: u32,
+        ttl_ms: u64,
+    ) -> Result<SceneId, DockPublishError> {
+        self.publish_admitted_to_dock(
+            None,
+            widget_type,
+            params,
+            namespace,
+            lease_id,
+            transition_ms,
+            ttl_ms,
+        )
+    }
+
+    /// Publish to the row [`Self::validate_dock_publish`] admitted, with the
+    /// scene lock held since validation, so the two calls cannot disagree.
+    #[allow(clippy::too_many_arguments)]
+    pub fn publish_admitted_to_dock(
+        &mut self,
+        admitted: Option<DockAdmission>,
         widget_type: &str,
         params: HashMap<String, WidgetParameterValue>,
         namespace: &str,
@@ -890,7 +928,7 @@ impl SceneGraph {
             params,
             row,
             auto_clear_ms,
-        } = self.plan_dock_publish(widget_type, &params, namespace)?;
+        } = self.plan_dock_publish(widget_type, &params, namespace, admitted)?;
         let definition = definition.clone();
         let existing = self.dock_instance(namespace, widget_type).cloned();
         let is_new = existing.is_none();

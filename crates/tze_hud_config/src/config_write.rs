@@ -570,13 +570,12 @@ fn apply_dock_auto_clear(src: &str, ms: Option<u64>) -> Result<String, ConfigWri
     }
     let value = ms
         .map(|ms| {
-            i64::try_from(ms)
-                .ok()
-                .filter(|&value| value > 0)
-                .map(Value::from)
+            (1..=crate::dock::MAX_AUTO_CLEAR_MS)
+                .contains(&ms)
+                .then(|| Value::from(ms as i64))
                 .ok_or_else(|| ConfigWriteError::InvalidValue {
                     key: "dock.auto_clear_ms".into(),
-                    expected: "a positive duration in milliseconds".into(),
+                    expected: "1–3600000 ms (at most 1 h)".into(),
                     got: ms.to_string(),
                 })
         })
@@ -725,6 +724,8 @@ mod tests {
         let reset = apply_dock_auto_clear(&edited, None).unwrap();
         assert_eq!(reset, original);
         assert!(apply_dock_auto_clear(original, Some(0)).is_err());
+        assert!(apply_dock_auto_clear(original, Some(crate::dock::MAX_AUTO_CLEAR_MS)).is_ok());
+        assert!(apply_dock_auto_clear(original, Some(crate::dock::MAX_AUTO_CLEAR_MS + 1)).is_err());
         assert!(apply_dock_auto_clear("[runtime]\n", Some(300_000)).is_err());
     }
 

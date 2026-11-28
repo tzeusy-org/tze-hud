@@ -69,7 +69,9 @@ fn fits_label(svg: &str, label: &str, inset: f32, right: f32, line: Line) -> boo
         && bounds.bottom() <= line.top + line.height
 }
 
-type LabelFit = (String, usize, bool);
+/// The visible label, its prefix length and whether it was clipped; `None`
+/// when not even an ellipsis fits, so a misfit is not searched every tick.
+type LabelFit = Option<(String, usize, bool)>;
 
 /// Bounded: a few dock countdowns, each with one label at a time.
 const LABEL_FIT_CAPACITY: usize = 64;
@@ -126,10 +128,22 @@ fn geometry(svg: &str) -> Option<Geometry> {
         .then_some(g)
 }
 
-/// Whether the resolved dock countdown fits its row, so a token override that
-/// would hide it is a configuration error instead.
-pub fn compact_countdown_fits(svg: &str) -> bool {
-    geometry(svg).is_some()
+/// Whether the resolved dock countdown draws in its row, so a token override
+/// that would hide it is a configuration error instead. It lays out a label
+/// that cannot fit: drawing it needs at least the ellipsis, which every label
+/// can fall back to, and a warning readout that reserves its mark.
+pub fn compact_countdown_fits(svg: &str, bindings: &[WidgetBinding]) -> bool {
+    let probe = HashMap::from([
+        (
+            "label".to_owned(),
+            WidgetParameterValue::String("M".repeat(64)),
+        ),
+        (
+            "severity".to_owned(),
+            WidgetParameterValue::Enum("warning".into()),
+        ),
+    ]);
+    geometry(svg).is_some() && prepare(svg, bindings, &HashMap::new(), &probe).is_some()
 }
 
 pub(super) fn prepare(
@@ -214,9 +228,9 @@ pub(super) fn prepare(
     let key = (fit_key(svg), label.to_owned());
     let cached = LABEL_FITS.with(|fits| fits.borrow().get(&key).cloned());
     let (visible, prefix, clipped) = if let Some(fit) = cached {
-        fit
+        fit?
     } else if fits_label(&displayed, label, inset, right, body) {
-        remember_fit(key, (label.to_owned(), label.len(), false))
+        remember_fit(key, Some((label.to_owned(), label.len(), false)))?
     } else {
         // Labels have an existing 24-byte admission bound. Check complete
         // shaped prefix+ellipsis candidates, without assuming monotone widths
@@ -228,8 +242,8 @@ pub(super) fn prepare(
                 fitted = Some((candidate, end));
             }
         }
-        let (visible, prefix) = fitted?;
-        remember_fit(key, (visible, prefix, true))
+        let fit = fitted.map(|(visible, prefix)| (visible, prefix, true));
+        remember_fit(key, fit)?
     };
     displayed = apply_svg_attribute(&displayed, "label", "text-content", &escape_text(&visible));
     Some(PreparedCountdown {

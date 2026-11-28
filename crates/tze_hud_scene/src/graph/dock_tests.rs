@@ -478,7 +478,9 @@ fn dock_holds_live_sparse_slots_and_compacts_only_after_outside() {
     assert_eq!(slots(&scene, 0, &b), held);
     scene.clear_dock_widget("c", PROGRESS);
     assert_eq!(
-        scene.validate_dock_publish(PROGRESS, &level(0.4), "d"),
+        scene
+            .validate_dock_publish(PROGRESS, &level(0.4), "d")
+            .map(drop),
         Ok(())
     );
     scene
@@ -559,7 +561,9 @@ fn dock_admits_a_sparse_append_beyond_the_live_cap_ordinal() {
 
     let version = scene.version;
     assert_eq!(
-        scene.validate_dock_publish(PROGRESS, &level(0.4), "d"),
+        scene
+            .validate_dock_publish(PROGRESS, &level(0.4), "d")
+            .map(drop),
         Ok(())
     );
     assert_eq!(scene.version, version);
@@ -639,6 +643,45 @@ fn dock_closes_held_gaps_at_admission_unless_the_pointer_is_inside() {
 }
 
 #[test]
+fn dock_publish_keeps_the_admission_validation_granted() {
+    use crate::dock::DockPointer;
+
+    for pointer in [DockPointer::Outside, DockPointer::Unknown] {
+        let (mut scene, _) = setup(3);
+        let projection = named_projection(&scene, 360.0);
+        place(&mut scene, Some(projection.clone()));
+        for owner in ["a", "b", "c"] {
+            scene
+                .publish_to_dock(PROGRESS, level(0.3), owner, None, 0, 0)
+                .unwrap();
+        }
+        scene.certify_dock_passive_column("DOCK", projection.layout.display);
+        let column = scene.dock_passive_column().unwrap().clone();
+        column.observe(pointer);
+        scene.clear_dock_widget("a", PROGRESS);
+        scene
+            .publish_to_dock(PROGRESS, level(0.4), "d", None, 0, 0)
+            .unwrap();
+        scene.clear_dock_widget("b", PROGRESS);
+        let admitted = scene
+            .validate_dock_publish(PROGRESS, &level(0.5), "e")
+            .expect("held gaps close at admission while the pointer is not inside");
+        // The window loop sees the pointer enter between validation and publish.
+        assert!(column.observe(DockPointer::Inside));
+        assert_eq!(
+            scene.validate_dock_publish(PROGRESS, &level(0.5), "e"),
+            Err(DockPublishError::Full),
+            "a fresh decision now waits for the pointer"
+        );
+        scene
+            .publish_admitted_to_dock(Some(admitted), PROGRESS, level(0.5), "e", None, 0, 0)
+            .expect("publish keeps the validated admission");
+        let e = record(&scene, "e", PROGRESS).widget_name.clone();
+        assert_eq!(slots(&scene, 2, &e).0, projection.layout.caption(2));
+    }
+}
+
+#[test]
 fn dock_revokes_stale_samples_and_keeps_existing_rows_on_display_loss() {
     use crate::dock::DockPointer;
     use crate::graph::visibility::SurfaceClasses;
@@ -659,11 +702,15 @@ fn dock_revokes_stale_samples_and_keeps_existing_rows_on_display_loss() {
     let leases = scene.leases.clone();
     let progress = scene.dock_instance("a", PROGRESS).unwrap().id;
     assert_eq!(
-        scene.validate_dock_publish(PROGRESS, &level(0.4), "a"),
+        scene
+            .validate_dock_publish(PROGRESS, &level(0.4), "a")
+            .map(drop),
         Ok(())
     );
     assert_eq!(
-        scene.validate_dock_publish(COUNTDOWN, &HashMap::new(), "a"),
+        scene
+            .validate_dock_publish(COUNTDOWN, &HashMap::new(), "a")
+            .map(drop),
         Ok(())
     );
     assert!(matches!(

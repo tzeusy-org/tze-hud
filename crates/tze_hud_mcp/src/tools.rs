@@ -1258,13 +1258,14 @@ async fn publish_dock(ctx: &ToolCtx<'_>, kind: &str, p: PublishParams) -> McpRes
         .ok_or_else(|| unknown_dock_type(&scene))?;
     let typed =
         typed_widget_params(&params, Some(definition), &p.surface).map_err(dock_param_error)?;
-    scene
+    let admitted = scene
         .validate_dock_publish(kind, &typed, ctx.owner)
         .map_err(|e| dock_publish_error(&scene, e))?;
     let lease_id = ensure_lease(ctx, &mut scene)?;
     let transition_ms = widget_transition_ms(&scene, ctx);
     scene
-        .publish_to_dock(
+        .publish_admitted_to_dock(
+            Some(admitted),
             kind,
             typed,
             ctx.owner,

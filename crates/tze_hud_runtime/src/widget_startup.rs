@@ -200,7 +200,9 @@ fn countdown_misfit(
             svg_contents
                 .get(&layer.svg_file)
                 .and_then(|bytes| std::str::from_utf8(bytes).ok())
-                .is_none_or(|svg| !tze_hud_compositor::widget::compact_countdown_fits(svg))
+                .is_none_or(|svg| {
+                    !tze_hud_compositor::widget::compact_countdown_fits(svg, &layer.bindings)
+                })
         })
 }
 
@@ -773,17 +775,26 @@ mod tests {
         let mut live = SceneGraph::new(1920.0, 1080.0);
         init_widget_registry(&mut live, &raw, None, &HashMap::new(), &default_tokens())
             .expect("default tokens fit the countdown row");
+        // Line heights that overfill the row, and a glyph size its line
+        // height cannot hold, both leave the countdown nothing to draw.
+        for (token, value) in [
+            ("type.readout.line_height", "40"),
+            ("type.body.m.size", "40"),
+        ] {
+            let mut tokens = default_tokens();
+            tokens.insert(token.into(), value.into());
+            let mut scene = SceneGraph::new(1920.0, 1080.0);
+            let Err(DockValidationErrors(errors)) =
+                init_widget_registry(&mut scene, &raw, None, &HashMap::new(), &tokens)
+            else {
+                panic!("{token} = {value}: a countdown that would draw nothing is refused");
+            };
+            assert_eq!(errors.len(), 1);
+            assert_eq!(errors[0].got, "countdown");
+            assert_eq!(errors[0].expected, "dock text lines that fit one row");
+        }
         let mut tokens = default_tokens();
         tokens.insert("type.readout.line_height".into(), "40".into());
-        let mut scene = SceneGraph::new(1920.0, 1080.0);
-        let Err(DockValidationErrors(errors)) =
-            init_widget_registry(&mut scene, &raw, None, &HashMap::new(), &tokens)
-        else {
-            panic!("a countdown that would draw nothing is refused");
-        };
-        assert_eq!(errors.len(), 1);
-        assert_eq!(errors[0].got, "countdown");
-        assert_eq!(errors[0].expected, "dock text lines that fit one row");
         // A restyle to the same tokens refreshes the live alternate and is refused.
         let restyle =
             prepare_widget_restyle(&live, reload_widget_bundles(&[], &tokens), HashMap::new());
