@@ -458,6 +458,13 @@ jobs:
             --target "$GITHUB_SHA" \
             --title "dev ${GITHUB_SHA::7}" \
             --notes "Rolling build of main at ${GITHUB_SHA}. Verify: minisign -Vm tze_hud.exe -p minisign.pub"
+          # A draft is invisible to the HUD's self-update and to doctor. On
+          # 2026-11-28 a successful create still left the release a draft, so
+          # publish it explicitly and fail if it is still a draft.
+          if [ "$(gh release view dev --json isDraft -q .isDraft)" = true ]; then
+            gh release edit dev --draft=false --prerelease --latest=false
+          fi
+          test "$(gh release view dev --json isDraft -q .isDraft)" = false
 
       - name: Publish tagged release
         if: startsWith(github.ref, 'refs/tags/v')
