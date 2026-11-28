@@ -2083,9 +2083,8 @@ flow bytes or ceilings. The owner-approved progress and copy baseline measures
 `tools/list` to the approved 2,806 model-visible bytes and 647 tokens
 (2,908 wire bytes and 684 wire tokens).
 Naming the dock surface in `tools/list` ("Zone/widget/dock from
-hud_surfaces", "Widget/dock: typed params") moves it to 2,826 model-visible
-bytes and 655 tokens (2,928 wire bytes and 692 wire tokens), pending owner
-review; the
+hud_surfaces", "Widget/dock: typed params") moves it to the approved 2,826
+model-visible bytes and 655 tokens (2,928 wire bytes and 692 wire tokens). The
 other canonical flows keep identical bytes, and production discovery is
 unchanged because `production.toml` has no `[dock]` table.
 

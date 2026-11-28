@@ -428,8 +428,8 @@
     }
   },
   "approval": {
-    "status": "pending_owner_review",
-    "decision_reference": "hud-ljhku.10.1 R10.5 S2 and G6 (spec hud-ljhku.10, owner-signed 2026-11-10): the owner accepts the new tools/list bytes at review.",
+    "status": "owner_approved",
+    "decision_reference": "hud-ljhku.10.1 R10.5 S2 and G6 (spec hud-ljhku.10, owner-signed 2026-11-10): the owner accepted 2,826 model-visible bytes and 655 tokens for tools/list for PR #1797 in session on 2026-11-28T07:01:48Z (questionnaire item hud-ljhku.10.1-tools-list-bytes, option Accept).",
     "basis": "Two byte-identical measurements on the dock branch record tools/list 2,806 to 2,826 model-visible bytes / 647 to 655 tokens (wire 2,908 to 2,928 bytes / 684 to 692 tokens) from naming dock beside zone/widget in the surface description and the publish description. The other eight flow fingerprints and metrics, the action-limit error, the tokenizer and the ceilings are unchanged."
   },
   "previous_approval": {
