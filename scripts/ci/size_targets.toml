@@ -155,7 +155,7 @@ signed_at = "2026-11-10"
 decision = "hud-3n24e.32"
 target = "render"
 rust = 1195
-rust_test = 2990
+rust_test = 2992
 
 [[inflight_allowances]]
 feature = "hud-ljhku.10.1"
