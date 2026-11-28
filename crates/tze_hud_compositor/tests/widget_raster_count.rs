@@ -2393,6 +2393,26 @@ async fn dock_session_caption_follows_only_its_accepted_display() {
         1,
         "motion only repositions"
     );
+
+    // R10.2 S4: hiding the widgets class hides captions and rows together,
+    // leaving the dock display as empty as the mirror that never had a dock.
+    assert!(scene.set_owner_hidden(tze_hud_scene::graph::SurfaceClasses {
+        widgets: true,
+        ..Default::default()
+    }));
+    let hidden = build(&mut gpu.compositor, &mut scene);
+    assert_eq!(
+        named(&mut gpu.compositor, &hidden),
+        mirror_pixels,
+        "no caption or row draws while widgets are hidden"
+    );
+    assert!(scene.set_owner_hidden(Default::default()));
+    let shown = build(&mut gpu.compositor, &mut scene);
+    assert_eq!(
+        crop(&named(&mut gpu.compositor, &shown), 31),
+        row,
+        "showing widgets restores the caption and row"
+    );
 }
 
 #[tokio::test]

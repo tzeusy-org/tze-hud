@@ -634,15 +634,23 @@ Under load the runtime switches to Simplified rendering (downscaled textures,
 opaque fills, snapped animations). It never hides tiles, revokes leases, or
 mutates the scene. Enforced structurally: `DegradationController` has no
 scene access and `CompositorDegradationPolicy` carries no suppression set.
+Widget dock overflow follows the same rule: when a display or scale change
+leaves the column too short, the bottom rows stop drawing and are listed in
+`/admin/status` `dock.overflow`, but no publication is removed, updates
+keep landing, and the rows draw again when room returns.
 
 - `tze_hud_compositor` [`significant_degradation_preserves_hidden_tiles_and_opaques_visible_tiles`](../crates/tze_hud_compositor/src/renderer/tile_render.rs)
+- Dock overflow: `tze_hud_scene` [`dock_identity_and_order_survive_updates_and_rejected_admission`](../crates/tze_hud_scene/src/graph/dock_tests.rs)
+  and [`dock_revokes_stale_samples_and_keeps_existing_rows_on_display_loss`](../crates/tze_hud_scene/src/graph/dock_tests.rs),
+  `tze_hud_compositor` [`dock_draws_only_on_its_accepted_display_and_parks_overflow`](../crates/tze_hud_compositor/tests/widget_raster_count.rs),
+  `tze_hud_runtime` [`reports_dock_capacity_overflow_and_widget_session`](../crates/tze_hud_runtime/src/operator/surface_status.rs)
 - `tze_hud_runtime` [`degradation::tests::sustained_overload_does_not_escalate_past_simplified`](../crates/tze_hud_runtime/src/degradation.rs)
 
 ## 7. Agent-facing caps bound retained work
 
 gRPC session admission enforces separate resident and guest capacity pools. A full pool refuses a new session with its recovery hint. MCP bounds its scoped sessions per agent and releases the least recently used scope when it needs space.
 
-Zone admission honors the configured contention, publisher caps, and stack depth. A full stack follows its published trim policy and keeps a bounded set of cards. Portal publish bounds each payload and its retained transcript, and coalesces render work at its render interval. Its reply queue bounds count and bytes, refuses overflow, and keeps accepted replies until acknowledgement or expiry.
+Zone admission honors the configured contention, publisher caps, and stack depth. A full stack follows its published trim policy and keeps a bounded set of cards. The widget dock's `max_rows` is a hard cap on session rows, as is the number of rows its column fits: a publish that needs another row fails `CONTENT_REJECTED` and changes nothing, and no instance is evicted to admit another session's. Portal publish bounds each payload and its retained transcript, and coalesces render work at its render interval. Its reply queue bounds count and bytes, refuses overflow, and keeps accepted replies until acknowledgement or expiry.
 
 Resident resource upload enforces runtime-wide texture memory and resource count, per-resource raw and decoded size, concurrent upload slots, and the upload byte rate. A rejected resource adds no stored object, and its upload reservation is released on failed completion or abort. The upload lane applies byte-rate backpressure while the resident session can still acknowledge heartbeats.
 
@@ -669,6 +677,11 @@ scope owns state, it releases the least recently called scope overall.
   [`test_contention_zone_max_publishers_rejected`](../crates/tze_hud_scene/src/graph/tests.rs),
   [`test_contention_widget_max_publishers_rejected`](../crates/tze_hud_scene/src/graph/tests.rs)
   and [`full_stack_trims_oldest_status_and_keeps_the_question_on_both_planes`](../crates/tze_hud_scene/src/graph/stack_trim_tests.rs).
+- The dock row cap is covered by
+  [`dock_identity_and_order_survive_updates_and_rejected_admission`](../crates/tze_hud_scene/src/graph/dock_tests.rs),
+  [`dock_refusal_preserves_sparse_rows_and_mcp_leases`](../crates/tze_hud_mcp/src/server/tests/scopes.rs)
+  and, at both signed display sizes,
+  [`shipped_dock_fills_both_signed_display_capacities`](../crates/tze_hud_compositor/tests/widget_raster_count.rs).
 - Portal payload, retention and render pacing are covered by
   [`publish_attaches_implicitly_and_lists_for_owner_only`](../crates/tze_hud_portal/src/hub.rs),
   [`transcript_retention_trims_head_past_256k_keeps_16k_visible`](../crates/tze_hud_portal/src/hub.rs)
@@ -814,6 +827,9 @@ keep their absolute wall time but schedule no display-change wake; showing them
 refreshes once
 ([`elapsed_rasterizes_once_per_display_change_and_fits_its_longest_strings`](../crates/tze_hud_compositor/tests/widget_raster_count.rs)
 covers one raster per change).
+The widget dock belongs to the widgets class: hiding widgets, or Hide all,
+hides its rows, captions and tooltip, and its rows, capacity and overflow
+are unchanged.
 Leases, publications and agents are untouched and nothing tells an agent:
 publishes keep landing and draw, as they are now, when shown again. The one
 owner-approved exception is a hidden portal's native `unread` count (§3),
@@ -842,6 +858,14 @@ zone is shown again.
   [`hidden_content_animations_schedule_no_frames`](../crates/tze_hud_compositor/src/renderer/tests/idle_gate.rs),
   [`hidden_notification_sets_no_fade_deadline`](../crates/tze_hud_compositor/src/renderer/tests/idle_gate.rs),
   [`capture_leaves_the_closed_notice_out`](../crates/tze_hud_compositor/src/renderer/tests/control_panel.rs)
+- Dock: `tze_hud_compositor` [`builtin_compact_countdown_keeps_standalone_pixels_and_timer_cadence`](../crates/tze_hud_compositor/tests/widget_raster_count.rs)
+  (no raster or wake while hidden),
+  [`dock_session_caption_follows_only_its_accepted_display`](../crates/tze_hud_compositor/tests/widget_raster_count.rs)
+  (no caption or row draws while hidden), `tze_hud_runtime`
+  [`reports_dock_capacity_overflow_and_widget_session`](../crates/tze_hud_runtime/src/operator/surface_status.rs)
+  (state unchanged) and
+  [`clipped_visits_are_passive_and_require_current_presented_card`](../crates/tze_hud_runtime/src/windowed/dock_tooltip.rs)
+  (hiding ends the tooltip visit)
 - `integration` [`poc_agents_see_the_same_with_the_panel_open_or_content_hidden`](../tests/integration/poc_acceptance.rs)
 
 ## Deferred ideas (notes, not code)
