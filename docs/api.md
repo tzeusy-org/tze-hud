@@ -677,11 +677,13 @@ production discovery is unchanged.
   what follows moves up or left once over `motion.exit.ms` with
   `motion.exit.easing` (a snap with Windows animations off); while the pointer
   is inside the column the move waits and the vacated slot stays reserved, so
-  nothing moves under the pointer. The column starts at x 5%, y 12% of its
+  nothing moves under the pointer. A new row that would land past the
+  column's end closes those slots first unless the pointer is inside. The column starts at x 5%, y 12% of its
   display, spans 73% of its height, and is as wide as the widest possible row
   (caption plus one of each accepted type). If that exceeds 35% of the display
   width the whole dock scales down uniformly (`/admin/status` `dock.scale`).
-  Sizes follow the display scale × `ui.scale`. Each instance has its own
+  Sizes follow the display scale × the zoom (Windows text size × `ui.scale`).
+  Each instance has its own
   runtime hover, as a placed widget does. An empty dock draws nothing.
 - **Capacity.** As many rows as fit the column's height, at most `max_rows`.
   A publish that needs a new row when none is free fails `CONTENT_REJECTED`
@@ -1258,8 +1260,8 @@ keys no longer style subtitles. Owner policy overrides still win.
 
 The optional `[dock]` table turns on the [widget dock](#widget-dock):
 `accepts` (widget bundle type ids, at most 6), `max_rows` (default 16,
-1–32; a hard cap on session rows, invariant 7) and `auto_clear_ms` (a
-positive limit, default 900000 = 15 min). Each accepted type must load from
+1–32; a hard cap on session rows, invariant 7) and `auto_clear_ms` (1 ms
+to 1 h, default 900000 = 15 min). Each accepted type must load from
 a bundle and pass the row-shape rule: its natural height (its dock
 presentation's, if it has one) is at most 4/3 of `dock.row.height`, so it
 draws at 75% or more of its designed size. An unknown type, a seventh entry

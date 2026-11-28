@@ -31,6 +31,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex, OnceLock};
 
 mod compact_countdown;
+pub use compact_countdown::compact_countdown_fits;
 
 use ab_glyph::{Font, ScaleFont};
 use tze_hud_scene::dock::DockPresentation;

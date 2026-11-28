@@ -15,7 +15,7 @@ use crate::pipeline::HitTestSnapshot;
 
 #[derive(Default)]
 pub(super) struct DockTooltipVisit {
-    sample: Option<(DockPassiveColumn, (f32, f32))>,
+    sample: super::dock_param_hover::PassiveSample,
     visit: Option<Visit>,
     pub(super) deadline_changed: bool,
     repaint_owed: bool,
@@ -37,17 +37,7 @@ impl DockTooltipVisit {
         column: Option<&DockPassiveColumn>,
         point: Option<(f32, f32)>,
     ) {
-        let Some((column, point)) = column.zip(point) else {
-            self.sample = None;
-            return;
-        };
-        if let Some((previous, old_point)) = &mut self.sample
-            && previous.shares_attachment(column)
-        {
-            *old_point = point;
-        } else {
-            self.sample = Some((column.clone(), point));
-        }
+        self.sample.remember(column, point);
     }
 
     pub(super) fn reconcile(
@@ -56,7 +46,7 @@ impl DockTooltipVisit {
         presented: Option<&PresentedDockHover>,
         now: Instant,
     ) {
-        let candidate = self.sample.as_ref().and_then(|(sampled, (x, y))| {
+        let candidate = self.sample.get().and_then(|(sampled, (x, y))| {
             let current = snapshot.dock_hover.as_deref()?;
             let proof = presented.filter(|proof| proof.surface_epoch.load(Ordering::Acquire))?;
             if !sampled.shares_attachment(&current.column) {
@@ -153,7 +143,7 @@ impl DockTooltipVisit {
 impl super::WinitApp {
     pub(super) fn reconcile_dock_tooltip(&mut self, snapshot: &HitTestSnapshot, now: Instant) {
         let presented = snapshot.dock_hover.as_ref().and_then(|hover| {
-            self.state.dock_tooltip.sample.as_ref()?;
+            self.state.dock_tooltip.sample.get()?;
             self.presented_dock_hover(&hover.column)
         });
         self.state

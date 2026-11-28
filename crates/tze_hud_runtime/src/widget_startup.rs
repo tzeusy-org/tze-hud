@@ -189,10 +189,27 @@ fn dock_presentation(
 
 pub(crate) type DockExtents = HashMap<String, Option<(f32, f32)>>;
 
+/// The built-in compact countdown lays its two text lines out itself; a token
+/// override that leaves them no room would draw an empty row.
+fn countdown_misfit(
+    presentation: &DockPresentation,
+    svg_contents: &HashMap<String, Vec<u8>>,
+) -> bool {
+    presentation.uses_builtin_countdown_layout()
+        && presentation.layers.iter().any(|layer| {
+            svg_contents
+                .get(&layer.svg_file)
+                .and_then(|bytes| std::str::from_utf8(bytes).ok())
+                .is_none_or(|svg| !tze_hud_compositor::widget::compact_countdown_fits(svg))
+        })
+}
+
 pub(crate) struct WidgetRestyle {
     assets: Vec<WidgetSvgAsset>,
     alternates: Vec<(String, WidgetBundleOrigin, DockPresentation)>,
     pub(crate) dock_extents: DockExtents,
+    /// Refreshed dock alternates whose text cannot fit one row.
+    pub(crate) row_misfits: Vec<String>,
 }
 
 impl WidgetRestyle {
@@ -217,6 +234,7 @@ pub(crate) fn prepare_widget_restyle(
 ) -> WidgetRestyle {
     let mut assets = Vec::new();
     let mut alternates = Vec::new();
+    let mut row_misfits = Vec::new();
     for bundle in bundles {
         let widget_type = &bundle.definition.id;
         let registry = &scene.widget_registry;
@@ -243,6 +261,9 @@ pub(crate) fn prepare_widget_restyle(
         let retained_dock = registry.dock_presentation(widget_type);
         let selected_dock = if let Some(dock) = incoming_dock {
             let presentation = dock_presentation(dock, &bundle.origin, &bundle.svg_contents);
+            if countdown_misfit(&presentation, &bundle.svg_contents) {
+                row_misfits.push(widget_type.clone());
+            }
             let extent = Some((presentation.width, presentation.height));
             alternates.push((widget_type.clone(), bundle.origin, presentation));
             extent
@@ -287,6 +308,7 @@ pub(crate) fn prepare_widget_restyle(
         assets,
         alternates,
         dock_extents,
+        row_misfits,
     }
 }
 
@@ -314,6 +336,7 @@ pub(crate) fn init_widget_registry(
     let mut type_map: HashMap<String, LoadedWidgetType> = HashMap::new();
     let mut svg_assets: Vec<WidgetSvgAsset> = Vec::new();
     let mut dock_extents = HashMap::new();
+    let mut row_misfits = Vec::new();
 
     for (bundle_index, result) in scan_results.into_iter().enumerate() {
         match result {
@@ -361,12 +384,18 @@ pub(crate) fn init_widget_registry(
                     svg_count = bundle.svg_contents.len(),
                     "widget_startup: registered widget type"
                 );
+                let presentation = bundle
+                    .dock
+                    .map(|loaded| dock_presentation(loaded, &bundle.origin, &bundle.svg_contents));
+                if presentation.as_ref().is_some_and(|presentation| {
+                    countdown_misfit(presentation, &bundle.svg_contents)
+                }) {
+                    row_misfits.push(name.clone());
+                }
                 scene.widget_registry.set_dock_presentation(
                     &name,
                     bundle.origin.clone(),
-                    bundle.dock.map(|loaded| {
-                        dock_presentation(loaded, &bundle.origin, &bundle.svg_contents)
-                    }),
+                    presentation,
                 );
                 scene.widget_registry.register_definition(bundle.definition);
             }
@@ -386,6 +415,7 @@ pub(crate) fn init_widget_registry(
             token_map.get(ROW_HEIGHT_TOKEN).map(String::as_str),
             &dock_extents,
         )?;
+        dock.validate_row_text(&row_misfits)?;
     }
 
     tracing::info!(
@@ -729,6 +759,41 @@ mod tests {
         assert_eq!(errors.len(), 1);
         assert_eq!(errors[0].field_path, "dock.accepts");
         assert_eq!(errors[0].got, "countdown (64.125 dp, limit 64.000 dp)");
+    }
+
+    #[test]
+    fn dock_countdown_text_that_cannot_fit_a_row_is_a_config_error() {
+        let raw = RawConfig {
+            dock: Some(tze_hud_config::dock::DockConfig {
+                accepts: vec!["countdown".into()],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let mut live = SceneGraph::new(1920.0, 1080.0);
+        init_widget_registry(&mut live, &raw, None, &HashMap::new(), &default_tokens())
+            .expect("default tokens fit the countdown row");
+        let mut tokens = default_tokens();
+        tokens.insert("type.readout.line_height".into(), "40".into());
+        let mut scene = SceneGraph::new(1920.0, 1080.0);
+        let Err(DockValidationErrors(errors)) =
+            init_widget_registry(&mut scene, &raw, None, &HashMap::new(), &tokens)
+        else {
+            panic!("a countdown that would draw nothing is refused");
+        };
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].got, "countdown");
+        assert_eq!(errors[0].expected, "dock text lines that fit one row");
+        // A restyle to the same tokens refreshes the live alternate and is refused.
+        let restyle =
+            prepare_widget_restyle(&live, reload_widget_bundles(&[], &tokens), HashMap::new());
+        assert_eq!(restyle.row_misfits, ["countdown"]);
+        assert!(
+            raw.dock
+                .unwrap()
+                .validate_row_text(&restyle.row_misfits)
+                .is_err()
+        );
     }
 
     #[test]

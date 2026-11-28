@@ -69,25 +69,83 @@ fn fits_label(svg: &str, label: &str, inset: f32, right: f32, line: Line) -> boo
         && bounds.bottom() <= line.top + line.height
 }
 
+type LabelFit = (String, usize, bool);
+
+/// Bounded: a few dock countdowns, each with one label at a time.
+const LABEL_FIT_CAPACITY: usize = 64;
+
+thread_local! {
+    static LABEL_FITS: std::cell::RefCell<HashMap<(u64, String), LabelFit>> =
+        std::cell::RefCell::new(HashMap::new());
+}
+
+/// The shaping inputs: the widget font set and the resolved template.
+fn fit_key(svg: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    super::widget_fonts().id.hash(&mut hasher);
+    svg.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn remember_fit(key: (u64, String), fit: LabelFit) -> LabelFit {
+    LABEL_FITS.with(|fits| {
+        let mut fits = fits.borrow_mut();
+        if fits.len() >= LABEL_FIT_CAPACITY {
+            fits.clear();
+        }
+        fits.insert(key, fit.clone());
+    });
+    fit
+}
+
+/// The dock artwork's own size and line metrics (dock.svg), validated so the
+/// two text lines fit inside it.
+struct Geometry {
+    inset: f32,
+    body_height: f32,
+    readout_height: f32,
+    width: f32,
+    height: f32,
+}
+
+fn geometry(svg: &str) -> Option<Geometry> {
+    let attrs = parse_tag_attrs(find_start_tag(svg, "svg")?);
+    let get = |name| parse_f32_attr(&attrs, name);
+    let g = Geometry {
+        inset: get("data-inset")?,
+        body_height: get("data-body-line-height")?,
+        readout_height: get("data-readout-line-height")?,
+        width: get("width")?,
+        height: get("height")?,
+    };
+    let positive = [g.inset, g.body_height, g.readout_height, g.width, g.height]
+        .iter()
+        .all(|v| v.is_finite() && *v > 0.0);
+    (positive && g.inset * 2.0 < g.width && g.body_height + g.readout_height <= g.height)
+        .then_some(g)
+}
+
+/// Whether the resolved dock countdown fits its row, so a token override that
+/// would hide it is a configuration error instead.
+pub fn compact_countdown_fits(svg: &str) -> bool {
+    geometry(svg).is_some()
+}
+
 pub(super) fn prepare(
     svg: &str,
     bindings: &[WidgetBinding],
     constraints: &HashMap<String, (f32, f32)>,
     params: &HashMap<String, WidgetParameterValue>,
 ) -> Option<PreparedCountdown> {
-    let attrs = parse_tag_attrs(find_start_tag(svg, "svg")?);
-    let inset = parse_f32_attr(&attrs, "data-inset")?;
-    let body_height = parse_f32_attr(&attrs, "data-body-line-height")?;
-    let readout_height = parse_f32_attr(&attrs, "data-readout-line-height")?;
-    if ![inset, body_height, readout_height]
-        .iter()
-        .all(|v| v.is_finite() && *v > 0.0)
-        || inset * 2.0 >= 160.0
-        || body_height + readout_height > 52.0
-    {
-        return None;
-    }
-    let top = (52.0 - body_height - readout_height) * 0.5;
+    let Geometry {
+        inset,
+        body_height,
+        readout_height,
+        width,
+        height,
+    } = geometry(svg)?;
+    let top = (height - body_height - readout_height) * 0.5;
     let body = Line {
         top,
         height: body_height,
@@ -108,7 +166,7 @@ pub(super) fn prepare(
         displayed = apply_svg_attribute(&displayed, id, "y", &y.to_string());
     }
     // One line-height is reserved at the end; the actual mark is smaller.
-    let mark_x = 160.0 - inset - readout_height * 0.5;
+    let mark_x = width - inset - readout_height * 0.5;
     let mark_y = readout.top + readout_height * 0.5;
     let transform = format!(
         "translate({mark_x} {mark_y}) scale({})",
@@ -130,7 +188,7 @@ pub(super) fn prepare(
             }
             _ => 0.0,
         };
-        let end = 160.0 - inset - reserve;
+        let end = width - inset - reserve;
         let (logical, ink) = text_bounds(&displayed, "value")?;
         let rightmost = logical.right().max(ink.right());
         if rightmost > end {
@@ -149,9 +207,16 @@ pub(super) fn prepare(
         Some(WidgetParameterValue::String(label)) => label.as_str(),
         _ => "",
     };
-    let right = 160.0 - inset;
-    let (visible, prefix, clipped) = if fits_label(&displayed, label, inset, right, body) {
-        (label.to_owned(), label.len(), false)
+    let right = width - inset;
+    // The label's fit depends only on the fonts, the resolved template and
+    // the label: the readout and severity bind other elements. Reuse it
+    // across ticks.
+    let key = (fit_key(svg), label.to_owned());
+    let cached = LABEL_FITS.with(|fits| fits.borrow().get(&key).cloned());
+    let (visible, prefix, clipped) = if let Some(fit) = cached {
+        fit
+    } else if fits_label(&displayed, label, inset, right, body) {
+        remember_fit(key, (label.to_owned(), label.len(), false))
     } else {
         // Labels have an existing 24-byte admission bound. Check complete
         // shaped prefix+ellipsis candidates, without assuming monotone widths
@@ -164,7 +229,7 @@ pub(super) fn prepare(
             }
         }
         let (visible, prefix) = fitted?;
-        (visible, prefix, true)
+        remember_fit(key, (visible, prefix, true))
     };
     displayed = apply_svg_attribute(&displayed, "label", "text-content", &escape_text(&visible));
     Some(PreparedCountdown {
@@ -839,6 +904,29 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn compact_label_fit_is_shaped_once_per_label_across_readout_ticks() {
+        let bundle = bundle("tonal-glass", &[]);
+        let label = "Deploy the staging cluster";
+        LABEL_FITS.with(|fits| fits.borrow_mut().clear());
+        let first = prepare_bundle(&bundle, &params(label, "info", 24));
+        assert!(first.clipped, "the long label needs fitting");
+        let fits = || LABEL_FITS.with(|fits| fits.borrow().len());
+        assert_eq!(fits(), 1);
+        for hours in [25, 26] {
+            let tick = prepare_bundle(&bundle, &params(label, "warning", hours));
+            assert_eq!(text(&tick.svg, "label"), text(&first.svg, "label"));
+            assert_eq!(
+                (tick.clipped, tick.prefix_chars),
+                (first.clipped, first.prefix_chars)
+            );
+            assert_ne!(text(&tick.svg, "value"), text(&first.svg, "value"));
+        }
+        assert_eq!(fits(), 1, "readout and severity ticks reuse the fit");
+        prepare_bundle(&bundle, &params("Deploy", "info", 24));
+        assert_eq!(fits(), 2, "a new label is fitted on its own");
     }
 
     #[test]

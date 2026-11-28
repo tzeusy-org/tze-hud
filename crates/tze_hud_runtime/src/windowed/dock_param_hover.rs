@@ -10,6 +10,32 @@ use tze_hud_scene::{LeaseState, SceneGraph, SceneId, WidgetParamAudience, Widget
 
 use crate::pipeline::HitTestSnapshot;
 
+/// The latest pointer point over one passive column attachment, shared by
+/// the dock tooltip and authored-hover visits. A new attachment replaces it.
+#[derive(Default)]
+pub(super) struct PassiveSample(Option<(DockPassiveColumn, (f32, f32))>);
+
+impl PassiveSample {
+    pub(super) fn remember(
+        &mut self,
+        column: Option<&DockPassiveColumn>,
+        point: Option<(f32, f32)>,
+    ) {
+        let Some((column, point)) = column.zip(point) else {
+            self.0 = None;
+            return;
+        };
+        match &mut self.0 {
+            Some((previous, old_point)) if previous.shares_attachment(column) => *old_point = point,
+            _ => self.0 = Some((column.clone(), point)),
+        }
+    }
+
+    pub(super) fn get(&self) -> Option<&(DockPassiveColumn, (f32, f32))> {
+        self.0.as_ref()
+    }
+}
+
 #[derive(Clone)]
 struct Target {
     frame: Arc<DockHoverFrame>,
@@ -63,7 +89,7 @@ struct LocalWrite {
 /// Desired writes survive contention independently of what was actually applied.
 #[derive(Default)]
 pub(super) struct DockParamHover {
-    sample: Option<(DockPassiveColumn, (f32, f32))>,
+    sample: PassiveSample,
     visit: Option<Visit>,
     writes: HashMap<(SceneId, String), LocalWrite>,
     pub(super) deadline_changed: bool,
@@ -75,17 +101,7 @@ impl DockParamHover {
         column: Option<&DockPassiveColumn>,
         point: Option<(f32, f32)>,
     ) {
-        let Some((column, point)) = column.zip(point) else {
-            self.sample = None;
-            return;
-        };
-        if let Some((previous, old_point)) = &mut self.sample
-            && previous.shares_attachment(column)
-        {
-            *old_point = point;
-        } else {
-            self.sample = Some((column.clone(), point));
-        }
+        self.sample.remember(column, point);
     }
 
     pub(super) fn reconcile(
@@ -94,7 +110,7 @@ impl DockParamHover {
         presented: Option<&PresentedDockHover>,
         now: Instant,
     ) {
-        let candidate = self.sample.as_ref().and_then(|(column, (x, y))| {
+        let candidate = self.sample.get().and_then(|(column, (x, y))| {
             let frame = snapshot.dock_hover.as_ref()?;
             if !column.shares_attachment(&frame.column) {
                 return None;

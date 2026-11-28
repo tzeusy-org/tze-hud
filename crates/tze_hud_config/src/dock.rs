@@ -10,6 +10,8 @@ pub const CAPTION_WIDTH_TOKEN: &str = "dock.caption.width";
 pub const DEFAULT_ROW_HEIGHT_DP: f32 = 52.0;
 pub const DEFAULT_CAPTION_WIDTH_DP: f32 = 96.0;
 pub const DEFAULT_AUTO_CLEAR_MS: u64 = 900_000;
+/// The longest dock lifetime, so a crashed session's row always frees.
+pub const MAX_AUTO_CLEAR_MS: u64 = 3_600_000;
 const MAX_ACCEPTS: usize = 6;
 
 /// Errors validating dock configuration against the selected widget bundles.
@@ -68,12 +70,12 @@ impl DockConfig {
                 "set dock.max_rows to a value from 1 to 32",
             ));
         }
-        if self.auto_clear_ms == 0 {
+        if !(1..=MAX_AUTO_CLEAR_MS).contains(&self.auto_clear_ms) {
             errors.push(error(
                 "auto_clear_ms",
-                "a positive duration in milliseconds",
-                "0".into(),
-                "set the time to clear a widget after its last publish",
+                "1–3600000 ms (at most 1 h)",
+                self.auto_clear_ms.to_string(),
+                "set the time to clear a widget after its last publish, at most 1 h",
             ));
         }
     }
@@ -135,6 +137,31 @@ impl DockConfig {
                 )),
             }
         }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(DockValidationErrors(errors))
+        }
+    }
+}
+
+impl DockConfig {
+    /// Refuse accepted types whose resolved dock artwork cannot draw its text
+    /// lines inside one row, instead of letting the row draw nothing.
+    pub fn validate_row_text(&self, misfits: &[String]) -> Result<(), DockValidationErrors> {
+        let errors: Vec<_> = self
+            .accepts
+            .iter()
+            .filter(|name| misfits.contains(name))
+            .map(|name| {
+                error(
+                    "accepts",
+                    "dock text lines that fit one row",
+                    name.clone(),
+                    "reduce type.body.m.line_height plus type.readout.line_height, or space.s",
+                )
+            })
+            .collect();
         if errors.is_empty() {
             Ok(())
         } else {
@@ -208,6 +235,23 @@ mod tests {
                     .iter()
                     .any(|e| e.field_path == "dock.max_rows"),
                 accepted,
+            );
+        }
+        for (ms, accepted) in [
+            (1, true),
+            (MAX_AUTO_CLEAR_MS, true),
+            (MAX_AUTO_CLEAR_MS + 1, false),
+            (i64::MAX as u64, false),
+        ] {
+            let config =
+                TzeHudConfig::parse(&format!("{base}[dock]\nauto_clear_ms = {ms}")).unwrap();
+            assert_eq!(
+                !config
+                    .validate()
+                    .iter()
+                    .any(|e| e.field_path == "dock.auto_clear_ms"),
+                accepted,
+                "{ms} ms",
             );
         }
     }

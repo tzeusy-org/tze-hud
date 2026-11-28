@@ -348,9 +348,13 @@ impl DockState {
     }
 
     fn reset_motion(&mut self) {
+        self.reset_motion_keep_pointer();
+        self.pointer = None;
+    }
+
+    fn reset_motion_keep_pointer(&mut self) {
         self.needs_compaction = false;
         self.motion = None;
-        self.pointer = None;
     }
 
     fn normalize(&mut self) {
@@ -366,11 +370,34 @@ impl DockState {
             return (self.rows.len() < self.capacity).then_some(self.rows.len());
         }
         let layout = &projection.layout;
+        if self.rows.len() >= layout.max_rows {
+            return None;
+        }
         let slot = self.rows.last().map_or(0, |row| row.slot + 1);
-        (self.rows.len() < layout.max_rows && slot < layout.physical_capacity).then_some(slot)
+        if slot < layout.physical_capacity {
+            return Some(slot);
+        }
+        // Held gaps must not refuse a row the column has room for. Close them
+        // at admission unless the pointer is known to be inside the column,
+        // where rows may not move under it (R10.3 S3).
+        (self.rows.len() < layout.physical_capacity && !self.pointer_inside())
+            .then_some(self.rows.len())
     }
 
-    fn append(&mut self, admission: DockRowAdmission, namespace: &str, mut widget: DockWidget) {
+    fn pointer_inside(&self) -> bool {
+        self.pointer.as_ref().is_some_and(|column| {
+            column.contact.load(Ordering::Relaxed) & 3 == DockPointer::Inside as u64
+        })
+    }
+
+    /// Returns true when admission first closed held gaps, moving rows.
+    fn append(
+        &mut self,
+        admission: DockRowAdmission,
+        namespace: &str,
+        mut widget: DockWidget,
+    ) -> bool {
+        let mut compacted = false;
         match admission {
             DockRowAdmission::Existing(index) => {
                 let row = &mut self.rows[index];
@@ -384,6 +411,10 @@ impl DockState {
                 row.widgets.push(widget);
             }
             DockRowAdmission::New(slot) => {
+                if self.rows.last().is_some_and(|row| row.slot >= slot) {
+                    compacted = self.compact(1.0, true);
+                    self.reset_motion_keep_pointer();
+                }
                 let projection = self.projection.as_ref().expect("admitted dock projection");
                 let first = projection.first_widget_x();
                 widget.x = projection.fits(first, &widget.widget_type).then_some(first);
@@ -395,6 +426,7 @@ impl DockState {
                 });
             }
         }
+        compacted
     }
 
     fn has_gap(&self) -> bool {
@@ -925,10 +957,14 @@ impl SceneGraph {
         });
         self.commit_widget_publication(instance, &definition, record)?;
         if let Some(widget) = new_widget {
-            self.dock
+            let compacted = self
+                .dock
                 .as_mut()
                 .expect("configured dock")
                 .append(row, namespace, widget);
+            if compacted {
+                self.bump_geometry_epoch();
+            }
         }
         Ok(id)
     }

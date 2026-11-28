@@ -580,6 +580,65 @@ fn dock_admits_a_sparse_append_beyond_the_live_cap_ordinal() {
 }
 
 #[test]
+fn dock_closes_held_gaps_at_admission_unless_the_pointer_is_inside() {
+    use crate::dock::DockPointer;
+
+    // The column fits one more row than the live cap, so two held gaps reach
+    // its physical end while only two rows are live.
+    for inside in [false, true] {
+        let (mut scene, _) = setup(3);
+        let projection = named_projection(&scene, 360.0);
+        place(&mut scene, Some(projection.clone()));
+        for owner in ["a", "b", "c"] {
+            scene
+                .publish_to_dock(PROGRESS, level(0.3), owner, None, 0, 0)
+                .unwrap();
+        }
+        // A fresh certification has not observed the pointer yet.
+        scene.certify_dock_passive_column("DOCK", projection.layout.display);
+        if inside {
+            assert!(
+                scene
+                    .dock_passive_column()
+                    .unwrap()
+                    .observe(DockPointer::Inside)
+            );
+        }
+        scene.clear_dock_widget("a", PROGRESS);
+        scene
+            .publish_to_dock(PROGRESS, level(0.4), "d", None, 0, 0)
+            .unwrap();
+        scene.clear_dock_widget("b", PROGRESS);
+        assert_eq!(scene.dock_rows().len(), 2);
+        let survivors = ["c", "d"].map(|owner| record(&scene, owner, PROGRESS).widget_name.clone());
+        let held = [
+            slots(&scene, 0, &survivors[0]),
+            slots(&scene, 1, &survivors[1]),
+        ];
+        let geometry = scene.geometry_epoch;
+        let admitted = scene.publish_to_dock(PROGRESS, level(0.5), "e", None, 0, 0);
+        if inside {
+            assert_eq!(admitted.unwrap_err(), DockPublishError::Full);
+            assert_eq!(
+                [
+                    slots(&scene, 0, &survivors[0]),
+                    slots(&scene, 1, &survivors[1])
+                ],
+                held,
+                "rows never move under the pointer"
+            );
+            continue;
+        }
+        admitted.unwrap();
+        assert!(scene.geometry_epoch > geometry);
+        let e = record(&scene, "e", PROGRESS).widget_name.clone();
+        for (row, name) in [&survivors[0], &survivors[1], &e].into_iter().enumerate() {
+            assert_eq!(slots(&scene, row, name).0, projection.layout.caption(row));
+        }
+    }
+}
+
+#[test]
 fn dock_revokes_stale_samples_and_keeps_existing_rows_on_display_loss() {
     use crate::dock::DockPointer;
     use crate::graph::visibility::SurfaceClasses;

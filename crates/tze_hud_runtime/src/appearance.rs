@@ -375,6 +375,7 @@ impl Appearance {
                             .map(String::as_str),
                         &widgets.dock_extents,
                     )
+                    .and_then(|()| dock.config.validate_row_text(&widgets.row_misfits))
                     .map_err(|error| error.to_string())?;
                 dock.extents.clone_from(&widgets.dock_extents);
                 dock.project(&mut scene, &resolved, applied.displays.dock.as_ref());
