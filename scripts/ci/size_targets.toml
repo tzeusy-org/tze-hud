@@ -192,3 +192,14 @@ signed_at = "2026-11-09"
 decision = "hud-3n24e.32"
 target = "client_skills"
 markdown = 107
+
+# hud-ljhku.15 Go to session, owner-check correction (2026-11-28): a classic
+# console window is matched by conhost.exe. Measured growth against origin/main.
+[[inflight_allowances]]
+feature = "hud-ljhku.15"
+approval = "hud-ljhku.15 design field, owner-signed 2026-11-10 (funnel-15-go-to-session-spec option A)"
+signed_at = "2026-11-10"
+decision = "hud-3n24e.32"
+target = "ui_and_shell"
+rust = 15
+rust_test = 6
