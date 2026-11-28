@@ -364,8 +364,8 @@ class CandidatePacketTests(unittest.TestCase):
         }
         measurement["client_layer"] = {
             "skill_bodies": {
-                "th-hud-publish": {"bytes": 8000, "tokens": 2001},
-                "hud-projection": {"bytes": 9000, "tokens": 2501},
+                "th-hud-publish": {"bytes": 4000, "tokens": 1000},
+                "hud-projection": {"bytes": 3000, "tokens": 900},
             },
             "model_turns": {
                 name: 0 if name == "tools_list" else len(flow["operations"])
@@ -387,14 +387,14 @@ class CandidatePacketTests(unittest.TestCase):
                     actual = json.loads(report_path.read_text(encoding="utf-8"))
                     self.assertEqual(actual["status"], expected if exit_code == 0 else "failed")
                     self.assertEqual(actual["client_layer"], {
-                        "report_only": True, **measurement["client_layer"]
+                        "skill_body_ceiling": 1000, **measurement["client_layer"]
                     })
 
-            # Report-only means costs above the later 1000-token target pass;
-            # it does not permit missing or malformed measurement evidence.
+            # A body at the ceiling passes (above); one token over fails, as
+            # does missing or malformed measurement evidence.
             measurement["notification_action_limit_error"]["result_text"]["tokens"] = 60
             valid = copy.deepcopy(measurement["client_layer"])
-            for mutation in ("missing", "skill", "turn", "coverage"):
+            for mutation in ("missing", "skill", "turn", "coverage", "ceiling"):
                 with self.subTest(client_layer=mutation):
                     measurement["client_layer"] = copy.deepcopy(valid)
                     if mutation == "missing":
@@ -403,12 +403,20 @@ class CandidatePacketTests(unittest.TestCase):
                         measurement["client_layer"]["skill_bodies"]["hud-projection"]["tokens"] = None
                     elif mutation == "turn":
                         measurement["client_layer"]["model_turns"]["discover"] = True
+                    elif mutation == "ceiling":
+                        measurement["client_layer"]["skill_bodies"]["th-hud-publish"]["tokens"] = 1001
                     else:
                         del measurement["client_layer"]["model_turns"]["discover"]
                     measurement_path.write_text(json.dumps(measurement), encoding="utf-8")
                     with mock.patch("sys.argv", args), mock.patch("sys.stdout"):
                         self.assertEqual(checker.main(), 1)
-                    self.assertEqual(json.loads(report_path.read_text())["status"], "failed")
+                    failed = json.loads(report_path.read_text())
+                    self.assertEqual(failed["status"], "failed")
+                    if mutation == "ceiling":
+                        self.assertIn(
+                            "skill body th-hud-publish is 1001 tokens, over the 1000-token ceiling",
+                            " ".join(failed["incompatibilities"]),
+                        )
 
     def test_owner_approval_makes_candidate_pass(self):
         approved = copy.deepcopy(self.candidate)

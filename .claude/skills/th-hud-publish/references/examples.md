@@ -18,7 +18,8 @@ This is one behavioral gate; there is no parallel source-grep check.
 
 The token-footprint artifact also reports the full two `SKILL.md` files' UTF-8
 bytes and pinned o200k tokens, including frontmatter, plus model tool calls per
-canonical flow. These measurements are report-only until the later skill diet.
+canonical flow. Each `SKILL.md` has a ceiling of 1,000 tokens (`docs/api.md`
+Token budgets); the detail lives in `references/`.
 Protocol `tools/list` counts zero model tool calls; each `tools/call` counts one.
 
 The gate follows CommonMark fenced blocks, including longer backtick fences,

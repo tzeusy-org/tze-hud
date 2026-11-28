@@ -20,7 +20,7 @@ the test and supported by discovery. Substitute the requested test content.
 
 Zone content can be plain text or a typed object. Widget values must match the
 discovered types and ranges. Use a finite, top-level `ttl_ms` for test content.
-See [HUD Publish](../../th-hud-publish/SKILL.md) for content shapes, keyed
+See [HUD Publish](../../th-hud-publish/references/guide.md) for content shapes, keyed
 notifications, and input ownership if a test needs buttons.
 
 For runs without a screenshot, `--cleanup-on-exit` checks that batch widget

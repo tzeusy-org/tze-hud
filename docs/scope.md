@@ -102,9 +102,9 @@ tier-W results narrow them but do not close them.
   - Five-hour usage gauge: genuine Claude recordings and Windows
     fill/readout/hover/caution/clear and status-line latency (`hud-o4ixb.3`).
   - Overlay shell hygiene: virtual desktops, Alt+Tab, Alt+F4 (`hud-66nb0.1`).
-  - Client layer (`hud-ljhku.6`): skill diet, the `install-tze-hud.sh` run from
-    ai-bootstrap (PR63 merged), the fresh five-tool cross-repo discovery check,
-    and MCP adapter acceptance.
+  - Client layer (`hud-ljhku.6`): the skill diet is in source. Still pending:
+    the `install-tze-hud.sh` run from ai-bootstrap (PR63 merged), the fresh
+    five-tool cross-repo discovery check, and MCP adapter acceptance.
 - **Time-based.** Sleep/wake, hot-plug and overnight leases.
 - **Measurement holds.** Publish-to-present on the Windows host
   (`hud-ddm2g`) and the delayed-subtitle witness (`hud-rnq52`, `hud-q26ya`).

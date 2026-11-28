@@ -1,0 +1,223 @@
+{
+  "_comment": "Intents each HUD skill body must route: those in the bodies before the hud-ljhku.6 skill diet (origin/main ef6827ac), plus new routes to existing references. Each marker must appear exactly once in that SKILL.md; a marker that is a relative link must resolve. The PR reviewer ticks each intent.",
+  "th-hud-publish": [
+    {
+      "intent": "discover allowed surfaces and typed params",
+      "marker": "hud_surfaces {}"
+    },
+    {
+      "intent": "publish a keyed notification with a finite TTL",
+      "marker": "\"key\":\"<session>:tests\",\"ttl_ms\":10000"
+    },
+    {
+      "intent": "ask with fixed answers and wait in one call",
+      "marker": "top-level `\"wait_ms\":30000`"
+    },
+    {
+      "intent": "short typed answer",
+      "marker": "\"reply\":"
+    },
+    {
+      "intent": "progress on a long job",
+      "marker": "content.progress"
+    },
+    {
+      "intent": "copy button",
+      "marker": "\"copy\":"
+    },
+    {
+      "intent": "link to a PR or artifact",
+      "marker": "\"url\":"
+    },
+    {
+      "intent": "update an allocated widget",
+      "marker": "\"surface\":\"widget:<name>\""
+    },
+    {
+      "intent": "status bar entry",
+      "marker": "\"entries\":"
+    },
+    {
+      "intent": "extend a holding",
+      "marker": "`hud_hold {\"surface\"…}` extends every card"
+    },
+    {
+      "intent": "collect and ACK input",
+      "marker": "\"ack\":"
+    },
+    {
+      "intent": "clear only my keyed card",
+      "marker": "hud_clear {\"surface\":\"zone:notification-area\",\"key\":"
+    },
+    {
+      "intent": "never broad-clear a shared zone",
+      "marker": "keyless `hud_clear`"
+    },
+    {
+      "intent": "four actions, one reply; callback generation",
+      "marker": "At most four actions"
+    },
+    {
+      "intent": "timeout, gone or dismiss is not consent",
+      "marker": "is not consent"
+    },
+    {
+      "intent": "clipped and displaced receipts",
+      "marker": "`clipped`"
+    },
+    {
+      "intent": "errors: follow the hint, stop on NOT_ALLOWED / safe mode",
+      "marker": "SAFE_MODE_ACTIVE"
+    },
+    {
+      "intent": "tools absent: connection setup",
+      "marker": "references/connection.md"
+    },
+    {
+      "intent": "tools absent: CLI fallback",
+      "marker": "references/guide.md#cli-fallback"
+    },
+    {
+      "intent": "HUD unreachable: continue in chat",
+      "marker": "continue in chat"
+    },
+    {
+      "intent": "transcripts and replies go to hud-projection",
+      "marker": "../hud-projection/SKILL.md"
+    },
+    {
+      "intent": "screenshots, logs and Windows validation go to user-test",
+      "marker": "../user-test/SKILL.md"
+    },
+    {
+      "intent": "owner presentation rules win",
+      "marker": "../../../AGENTS.md"
+    },
+    {
+      "intent": "full detail on demand",
+      "marker": "[full guide](references/guide.md)"
+    },
+    {
+      "intent": "plain text and color content",
+      "marker": "\"Build passed\""
+    },
+    {
+      "intent": "extend one card by republishing its key",
+      "marker": "republish its `key`"
+    },
+    {
+      "intent": "offer buttons only with an active consumer",
+      "marker": "Offer buttons only when this session will consume"
+    },
+    {
+      "intent": "safe mode: stop mutating, polling works",
+      "marker": "polling still"
+    }
+  ],
+  "hud-projection": [
+    {
+      "intent": "attach and publish",
+      "marker": "\"status\":\"active\""
+    },
+    {
+      "intent": "arm the reply composer",
+      "marker": "\"expects_reply\":true"
+    },
+    {
+      "intent": "collect replies",
+      "marker": "| `hud_input {\"wait_ms\":30000}` |"
+    },
+    {
+      "intent": "ACK while polling",
+      "marker": "hud_input {\"ack\":[\"i7\"]}"
+    },
+    {
+      "intent": "hold while quiet",
+      "marker": "hud_hold {\"surface\":\"portal:<id>\""
+    },
+    {
+      "intent": "detach",
+      "marker": "hud_clear {\"surface\":\"portal:<id>\"}"
+    },
+    {
+      "intent": "wait in the background without model calls",
+      "marker": "references/guide.md#waiting-for-a-human-reply"
+    },
+    {
+      "intent": "background ask",
+      "marker": "references/background-ask.md"
+    },
+    {
+      "intent": "one-shot cards go to th-hud-publish",
+      "marker": "../th-hud-publish/SKILL.md"
+    },
+    {
+      "intent": "pairing and HUD_HOST",
+      "marker": "references/guide.md#connect"
+    },
+    {
+      "intent": "MCP stdio adapter",
+      "marker": "references/guide.md#mcp-client"
+    },
+    {
+      "intent": "CLI client without MCP",
+      "marker": "references/guide.md#deterministic-client"
+    },
+    {
+      "intent": "Claude Code hook mirroring",
+      "marker": "references/claude-code-hooks.md"
+    },
+    {
+      "intent": "usage gauge",
+      "marker": "references/claude-code-usage.md"
+    },
+    {
+      "intent": "Windows Go to",
+      "marker": "**Go to**"
+    },
+    {
+      "intent": "code owners and wiring",
+      "marker": "references/mcp-facade.md"
+    },
+    {
+      "intent": "not terminal capture",
+      "marker": "not PTY, tmux, shell or terminal capture"
+    },
+    {
+      "intent": "append only new text; key replaces",
+      "marker": "`content` appends"
+    },
+    {
+      "intent": "long reports via a link",
+      "marker": "publish\n  its link"
+    },
+    {
+      "intent": "check unread before notifying",
+      "marker": "unread:N"
+    },
+    {
+      "intent": "degrade, reclaim and reattach",
+      "marker": "reattached"
+    },
+    {
+      "intent": "no secrets",
+      "marker": "Never publish secrets"
+    },
+    {
+      "intent": "NOT_ALLOWED means allow lacks portal",
+      "marker": "NOT_ALLOWED"
+    },
+    {
+      "intent": "one consumer at a time",
+      "marker": "Never run a background waiter and model polling at once"
+    },
+    {
+      "intent": "portal keyed by agent identity, no token",
+      "marker": "keyed by your agent identity (the PSK):\nno call carries a token"
+    },
+    {
+      "intent": "NOT_ALLOWED: another session owns the id, or allow lacks portal",
+      "marker": "another of your sessions owns this id"
+    }
+  ]
+}

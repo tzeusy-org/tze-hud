@@ -322,8 +322,13 @@ def check_notification_error_result(measurement, baseline, report):
             report["status"] = "failed"
 
 
+# Each complete SKILL.md, frontmatter included, in o200k tokens. Owner decision
+# funnel-6-client-layer-spec = A (2026-11-09): armed by the skill diet.
+SKILL_BODY_CEILING = 1000
+
+
 def report_client_layer(measurement, report):
-    """Report teaching and model-call costs without arming skill ceilings.
+    """Check teaching costs against the skill-body ceiling; report model calls.
 
     These are additional measurements, not canonical MCP payloads: existing
     baseline fingerprints, comparison metrics and budgets remain unchanged.
@@ -341,7 +346,13 @@ def report_client_layer(measurement, report):
             reasons.append("client_layer needs both skill bodies")
         else:
             for name, counts in sorted(skills.items()):
-                reasons.extend(_validate_counts(counts, f"client_layer.skill_bodies.{name}"))
+                invalid = _validate_counts(counts, f"client_layer.skill_bodies.{name}")
+                reasons.extend(invalid)
+                if not invalid and counts["tokens"] > SKILL_BODY_CEILING:
+                    reasons.append(
+                        f"skill body {name} is {counts['tokens']} tokens, over the "
+                        f"{SKILL_BODY_CEILING}-token ceiling: move detail to references/"
+                    )
         turns = client.get("model_turns")
         flows = measurement.get("flows")
         if not isinstance(turns, dict) or not isinstance(flows, dict) or set(turns) != set(flows):
@@ -356,7 +367,9 @@ def report_client_layer(measurement, report):
             report["status"] = "failed"
     else:
         report["client_layer"] = {
-            "report_only": True, "skill_bodies": skills, "model_turns": turns
+            "skill_body_ceiling": SKILL_BODY_CEILING,
+            "skill_bodies": skills,
+            "model_turns": turns,
         }
 
 
