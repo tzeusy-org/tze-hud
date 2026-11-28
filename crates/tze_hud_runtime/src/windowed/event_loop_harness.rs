@@ -6745,6 +6745,7 @@ mod tests {
                     .is_some_and(|state| state.available)
             });
 
+            let pressed = std::time::Instant::now();
             if hide {
                 let point = go_to_point(&harness, card).unwrap();
                 click_at(&mut harness, point);
@@ -6764,10 +6765,29 @@ mod tests {
                 harness.press_named_key("Enter");
             }
             started_rx.recv_timeout(SCENE_WAIT).unwrap();
-            assert_eq!(
-                harness.scene().overlay.notification_go_to[&card].cue,
-                Some(GoToCue::Switching)
+            let delay = std::time::Duration::from_millis(150);
+            let [due] = harness.app.state.window_go_to.switching_at_for_test()[..] else {
+                panic!("one Switching wake per press")
+            };
+            assert!(pressed + delay <= due && due <= std::time::Instant::now() + delay);
+            assert_eq!(harness.app.state.window_go_to.next_deadline(), Some(due));
+            let cue =
+                |h: &HeadlessEventLoopHarness| h.scene().overlay.notification_go_to[&card].cue;
+            harness
+                .app
+                .settle_go_to(due - std::time::Duration::from_millis(1));
+            assert_eq!(cue(&harness), None, "the label stays Go to until the delay");
+            assert!(harness.app.settle_go_to(due));
+            assert_eq!(cue(&harness), Some(GoToCue::Switching));
+            assert!(
+                harness
+                    .app
+                    .state
+                    .window_go_to
+                    .switching_at_for_test()
+                    .is_empty()
             );
+            assert!(harness.app.state.window_go_to.next_deadline().unwrap() > due);
             if hide {
                 harness.scene().set_owner_hidden(SurfaceClasses {
                     zones: true,
@@ -6953,7 +6973,6 @@ mod tests {
     #[test]
     fn go_to_counts_success_only_after_observing_the_destination_foreground() {
         use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering::SeqCst};
-        use tze_hud_scene::graph::overlay::GoToCue;
 
         let mut harness = approve_reject_notification_harness();
         let card = publish_go_to_card(&mut harness, "go-to", "observed");
@@ -6982,22 +7001,38 @@ mod tests {
                 .get(&card)
                 .is_some_and(|state| state.available)
         });
+        // A long delay keeps this deterministic: success lands before it.
+        harness
+            .app
+            .state
+            .global_tokens
+            .insert("notification.goto.switching.ms".into(), "60000".into());
         let point = go_to_point(&harness, card).unwrap();
         click_at(&mut harness, point);
         wait_for_go_to(&mut harness, |_| requested.load(SeqCst));
         assert_eq!(harness.app.state.window_go_to.activations, 0);
-        assert_eq!(
-            harness.scene().overlay.notification_go_to[&card].cue,
-            Some(GoToCue::Switching)
-        );
+        let cue = |h: &HeadlessEventLoopHarness| h.scene().overlay.notification_go_to[&card].cue;
+        assert_eq!(cue(&harness), None);
+        let [due] = harness.app.state.window_go_to.switching_at_for_test()[..] else {
+            panic!("one Switching wake per press")
+        };
 
         let check = harness.app.state.window_go_to.next_deadline().unwrap();
+        assert!(check < due, "the handoff check runs first");
         foreground.store(1, SeqCst);
         harness.app.settle_go_to(check);
         assert_eq!(harness.app.state.window_go_to.activations, 1);
-        wait_for_go_to(&mut harness, |scene| {
-            scene.overlay.notification_go_to[&card].cue.is_none()
-        });
+        harness.app.settle_go_to(check);
+        assert!(
+            harness
+                .app
+                .state
+                .window_go_to
+                .switching_at_for_test()
+                .is_empty()
+        );
+        assert_eq!(harness.app.state.window_go_to.next_deadline(), None);
+        assert_eq!(cue(&harness), None);
         assert!(harness.scene().pending_actions.is_empty());
     }
 

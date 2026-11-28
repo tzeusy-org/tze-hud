@@ -301,7 +301,9 @@ with the same cancellation and idle semantics as a `hud_input` wait.
   characters outside `[A-Za-z0-9._-]`. Unscoped or gRPC cards, alert banners
   without a caption row and labels cut at 32 bytes have no Go to control.
   The card presents immediately and the result stays fixed until replacement.
-  A click or Enter/Space on the focused control repeats the lookup. One
+  A click or Enter/Space on the focused control repeats the lookup; it reads
+  Switching… only if still pending after `notification.goto.switching.ms`
+  (default 150). One
   matched window can be foregrounded and restored from minimized to its own
   placement. The card, its TTL and its actions stay, and success clears any
   saved foreground for the card keyboard visit. Digits still pick publisher

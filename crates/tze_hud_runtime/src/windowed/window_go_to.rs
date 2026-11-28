@@ -110,6 +110,9 @@ pub(super) struct WindowGoTo {
     feedback: Vec<(Press, Feedback)>,
     pub(super) pointer_foreground: Option<Option<isize>>,
     cue_deadlines: HashMap<SceneId, (u64, Instant)>,
+    /// A press still pending at this time shows Switching…; a faster result
+    /// keeps the plain Go to label.
+    switching_at: HashMap<SceneId, (u64, Instant)>,
     #[cfg(test)]
     test_activate: Option<Box<dyn FnMut(Target) -> bool>>,
     #[cfg(test)]
@@ -181,6 +184,7 @@ impl WindowGoTo {
     pub(super) fn next_deadline(&self) -> Option<Instant> {
         self.cue_deadlines
             .values()
+            .chain(self.switching_at.values())
             .map(|(_, due)| *due)
             .chain(
                 self.presses
@@ -190,6 +194,11 @@ impl WindowGoTo {
             )
             .chain(self.handoffs.iter().map(|pending| pending.next_check))
             .min()
+    }
+
+    #[cfg(test)]
+    pub(super) fn switching_at_for_test(&self) -> Vec<Instant> {
+        self.switching_at.values().map(|(_, due)| *due).collect()
     }
 
     #[cfg(test)]
@@ -259,6 +268,12 @@ impl WinitApp {
         bounds: Rect,
         origin: GoToOrigin,
     ) {
+        let delay = self
+            .state
+            .global_tokens
+            .get("notification.goto.switching.ms")
+            .and_then(|value| value.trim().parse::<u32>().ok())
+            .unwrap_or(150);
         let state = &mut self.state.window_go_to;
         let Some(inspector) = state.inspector.clone() else {
             return;
@@ -283,12 +298,17 @@ impl WinitApp {
                 move || inspector.matches(&(inspector.windows)(), &lookup_token),
                 wake,
             ) {
-                Ok(worker) => state.presses.push(PendingPress {
-                    press,
-                    worker,
-                    token,
-                    timed_out: false,
-                }),
+                Ok(worker) => {
+                    state
+                        .switching_at
+                        .insert(id, (stamp, now + Duration::from_millis(delay.into())));
+                    state.presses.push(PendingPress {
+                        press,
+                        worker,
+                        token,
+                        timed_out: false,
+                    });
+                }
                 Err(_) => state
                     .feedback
                     .push((press, Feedback::Cue(GoToCue::Blocked))),
@@ -311,7 +331,11 @@ impl WinitApp {
                 .iter()
                 .all(|pending| pending.next_check > now)
             && state.feedback.is_empty()
-            && !state.cue_deadlines.values().any(|(_, at)| now >= *at)
+            && !state
+                .cue_deadlines
+                .values()
+                .chain(state.switching_at.values())
+                .any(|(_, at)| now >= *at)
         {
             return false;
         }
@@ -451,6 +475,29 @@ impl WinitApp {
                 true
             });
         }
+        // One wake per press: reveal Switching only while its lookup or
+        // foreground handoff is still pending, and forget it otherwise.
+        state.switching_at.retain(|id, (stamp, due)| {
+            let this = |press: &Press| press.id == *id && press.stamp == *stamp;
+            let pending = state
+                .presses
+                .iter()
+                .any(|pending| !pending.timed_out && this(&pending.press))
+                || state.handoffs.iter().any(|pending| this(&pending.press))
+                || completed.iter().any(|(press, _, _)| this(press));
+            if pending && now < *due {
+                return true;
+            }
+            if pending
+                && let Some(control) = scene.overlay.notification_go_to.get_mut(id)
+                && control.attempted_at_mono_us == Some(*stamp)
+                && control.cue.is_none()
+            {
+                control.cue = Some(GoToCue::Switching);
+                changed = true;
+            }
+            false
+        });
         if changed {
             scene.bump_geometry_epoch();
         }
