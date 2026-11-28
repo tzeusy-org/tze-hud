@@ -299,8 +299,9 @@ Activating a reply action gives the inline field keyboard focus on its display.
 The compositor publishes the drawn caret position for native IME placement.
 Committed text enters the card's local draft. Escape first clears selection,
 then collapses the field, returns focus and keeps the draft for that exact
-card. Safe mode suspends editing and submission. A focused nonempty field
-defers expiry without changing the original deadline. Leaving the field after
+card. Safe mode suspends editing and submission. A focused nonempty field,
+or one opened by a press that held the card past its deadline, defers expiry
+without changing the original deadline. Leaving the field after
 that deadline expires the card. Replacement, clear, trim and dismissal drop
 the exact card's draft.
 
