@@ -310,7 +310,7 @@ class DockProgressWitnessTests(unittest.TestCase):
                   mock.patch.object(g.sys, "platform", "linux"), mock.patch.object(g, "WINDOWS", False),
                   mock.patch.object(g, "git_sha", return_value="c" * 12), mock.patch.object(g.Run, "start"),
                   mock.patch.object(g.Run, "status", return_value={}),
-                  mock.patch.object(g, "run_scenarios", return_value=[{"scenario": name, "outcome": "PASS"}]) as play,
+                  mock.patch.object(g, "run_scenarios", return_value=[{"scenario": name, "outcome": "PASS", "seconds": 0.1}]) as play,
                   contextlib.redirect_stdout(io.StringIO())):
                 out = Path(temp) / "absent"
                 argv = ["--exe", "fake-hud", "--out", str(out), *identity, name]
