@@ -852,6 +852,11 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         default_value: "1200",
     },
     CanonicalToken {
+        key: "notification.goto.switching.ms",
+        description: "How long a pending Go to switch waits before showing Switching… (ms)",
+        default_value: "150",
+    },
+    CanonicalToken {
         key: "notification.copy.feedback.ms",
         description: "How long a notification button shows its copy result (ms)",
         default_value: "1200",

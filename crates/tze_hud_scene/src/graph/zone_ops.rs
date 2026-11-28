@@ -1556,8 +1556,9 @@ impl SceneGraph {
                     return None;
                 }
                 state.attempted_at_mono_us = Some(mono);
-                state.cue = Some(super::overlay::GoToCue::Switching);
-                self.bump_geometry_epoch();
+                if state.cue.take().is_some() {
+                    self.bump_geometry_epoch();
+                }
                 return Some(super::NotificationActivation::GoTo {
                     publication_id: key,
                     token,
