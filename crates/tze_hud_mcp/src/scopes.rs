@@ -118,7 +118,8 @@ impl Scopes {
 
     /// The live scope `id` of `agent`, marked as just called. Another
     /// agent's id is unknown to this one.
-    pub fn touch(&self, agent: &str, id: &str) -> Option<Arc<Scope>> {
+    #[cfg(test)]
+    pub(crate) fn touch(&self, agent: &str, id: &str) -> Option<Arc<Scope>> {
         let scope = self.find(agent, id)?;
         self.record_call(&scope);
         Some(scope)

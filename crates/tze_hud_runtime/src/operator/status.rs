@@ -503,13 +503,13 @@ impl StatusSource {
         let mut siblings = HashMap::new();
         for (s, holdings) in live.into_iter().zip(held) {
             let row = json!({
-                    "agent": s.agent,
-                    "label": s.label,
-                    "holdings": holdings,
-                    "last_call_ms": s.last_call_ms,
-                    "state": s.presence.map(|presence| presence.state),
-                    "reason": s.presence.and_then(|presence| presence.reason),
-                    "since_ms": s.presence.map(|presence| presence.since_ms),
+                "agent": s.agent,
+                "label": s.label,
+                "holdings": holdings,
+                "last_call_ms": s.last_call_ms,
+                "state": s.presence.map(|presence| presence.state),
+                "reason": s.presence.and_then(|presence| presence.reason),
+                "since_ms": s.presence.map(|presence| presence.since_ms),
             });
             if let Some(parent) = s.parent_namespace {
                 siblings.insert(parent, row);
