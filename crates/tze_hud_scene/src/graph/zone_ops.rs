@@ -435,12 +435,13 @@ impl SceneGraph {
             })
             .collect();
         let label = self.session_labels.get(publisher_namespace);
+        // Only a card with actions and an expiry (set below once measured)
+        // can use the owner's answer window.
         let answer_window = answer_window
-            && effective_expires_at.is_some()
             && matches!(&content, ZoneContent::Notification(n) if !n.actions.is_empty());
         let record = ZonePublishRecord {
             publication_id,
-            answer_window,
+            answer_window: false,
             zone_name: zone_name.to_string(),
             publisher_namespace: publisher_namespace.to_string(),
             content,
@@ -502,6 +503,7 @@ impl SceneGraph {
             record.expires_at_wall_us =
                 ttl_us.map(|ttl| record.published_at_wall_us.saturating_add(ttl));
         }
+        record.answer_window = answer_window && record.expires_at_wall_us.is_some();
         let now_us = record.published_at_wall_us;
         let expires_at = record.expires_at_wall_us;
         let mut new_records = Vec::new();
