@@ -877,8 +877,10 @@ async fn publish_zone<'a>(
     }
     // Read the owner default exactly once, after resolving the content. Explicit
     // zero remains held; ordinary zone content keeps its historical default.
+    let answer_window = p.ttl_ms.is_none()
+        && matches!(&content, ZoneContent::Notification(n) if !n.actions.is_empty());
     let ttl_ms = p.ttl_ms.unwrap_or_else(|| {
-        if matches!(&content, ZoneContent::Notification(n) if !n.actions.is_empty()) {
+        if answer_window {
             u64::from(ctx.publication_defaults.answer_window_ms())
         } else {
             DEFAULT_ZONE_TTL_MS
@@ -947,6 +949,7 @@ async fn publish_zone<'a>(
             content_classification: None,
             breakpoints: Vec::new(),
             held: expires_at.is_none(),
+            answer_window,
         };
         let batch_id = if let Some(claim) = &claim {
             scene.schedule_notification(present_at, publisher, publication, claim.id)
@@ -980,6 +983,7 @@ async fn publish_zone<'a>(
                 p.key,
                 ttl_us,
                 claim.as_ref().map(|claim| claim.id),
+                answer_window,
                 &mut measure,
             )
             .map_err(|error| refused(&mut scene, &error))?

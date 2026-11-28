@@ -1726,6 +1726,7 @@ fn test_update_publication_animations_seeds_fresh_state() {
 
     // No expiry: held, not the zone auto_clear_ms.
     let record_no_ttl = ZonePublishRecord {
+        answer_window: false,
         publication_id: SceneId::new(),
         lease_id: None,
         resident_raster: None,

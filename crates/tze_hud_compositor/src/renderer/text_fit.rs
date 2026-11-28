@@ -113,6 +113,7 @@ impl tze_hud_scene::TextFit for TextFitMeasurer {
         // Measure intrinsic text fit in one card; stack visibility is a
         // separate question from whether its text fits inside that card.
         let record = ZonePublishRecord {
+            answer_window: false,
             publication_id: SceneId::new(),
             zone_name: zone.to_owned(),
             publisher_namespace: String::new(),
@@ -327,6 +328,7 @@ impl tze_hud_scene::TextFit for TextFitMeasurer {
             .cloned()
             .unwrap_or_default();
         let record = ZonePublishRecord {
+            answer_window: false,
             publication_id: SceneId::new(),
             zone_name: zone.to_owned(),
             publisher_namespace: String::new(),
@@ -734,6 +736,7 @@ mod tests {
         let alone = fit.status_bar(&scene, "status-bar", &status(&[("build", value)]), None);
         assert_eq!(alone.len(), 1, "{alone:?}");
         let old = |key: &str| ZonePublishRecord {
+            answer_window: false,
             publication_id: SceneId::new(),
             zone_name: "status-bar".into(),
             publisher_namespace: String::new(),

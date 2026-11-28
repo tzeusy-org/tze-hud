@@ -497,6 +497,7 @@ fn test_latest_wins_two_distinct_publishers() {
         content_classification: None,
         breakpoints: Vec::new(),
         held: false,
+        answer_window: false,
     };
     scene
         .publish(&Publisher::namespace("agent-alpha"), &publication)
@@ -524,6 +525,7 @@ fn test_latest_wins_two_distinct_publishers() {
         content_classification: None,
         breakpoints: Vec::new(),
         held: false,
+        answer_window: false,
     };
     scene
         .publish(&Publisher::namespace("agent-beta"), &publication)

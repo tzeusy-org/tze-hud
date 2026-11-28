@@ -1253,3 +1253,81 @@ async fn idle_destructive_card_renders_only_during_hold_or_drain() {
     clock.advance(100);
     assert!(idle(&compositor, &scene), "a landed drain idles");
 }
+
+/// A card held past its answer-window deadline by a press in progress is
+/// drawn fully shown: a press that begins mid-fade restores full opacity,
+/// and the hold schedules no fade wake. When the press ends the card leaves.
+#[tokio::test]
+async fn a_press_held_card_does_not_fade() {
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+    use tze_hud_scene::clock::TestClock;
+    use tze_hud_scene::types::{Rect, ZoneHitRegion, ZoneInteractionKind};
+
+    let mut now = Instant::now();
+    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(320, 200).await);
+    compositor.set_token_map(HashMap::from([("motion.exit.ms".into(), "240".into())]));
+    let clock = Arc::new(TestClock::new(1_000));
+    let mut scene =
+        countdown_notification_scene_on(SceneGraph::new_with_clock(1280.0, 720.0, clock.clone()));
+    let region = {
+        let deadline = scene.now_wall_us() + 1_000_000;
+        let record = &mut scene
+            .zone_registry
+            .active_publishes
+            .get_mut("notification-area")
+            .unwrap()[0];
+        // The owner's answer window, as admission marks it.
+        record.expires_at_wall_us = Some(deadline);
+        record.answer_window = true;
+        ZoneHitRegion {
+            publication_id: record.publication_id,
+            zone_name: record.zone_name.clone(),
+            published_at_wall_us: record.published_at_wall_us,
+            publisher_namespace: record.publisher_namespace.clone(),
+            bounds: Rect::new(0.0, 0.0, 10.0, 10.0),
+            kind: ZoneInteractionKind::Dismiss,
+            interaction_id: "zone:notification-area:dismiss".into(),
+            tab_order: 0,
+        }
+    };
+    let opacity = |c: &Compositor, scene: &SceneGraph, now| {
+        c.pub_opacity_at(
+            "notification-area",
+            &scene.zone_registry.active_publishes["notification-area"][0],
+            now,
+        )
+    };
+    compositor.update_publication_animations_at(&scene, now);
+    // The 240 ms fade starts at 760 ms; 120 ms later it is under way.
+    for step in [760, 120] {
+        clock.advance(step);
+        now += Duration::from_millis(step);
+        compositor.update_publication_animations_at(&scene, now);
+    }
+    assert!(opacity(&compositor, &scene, now) < 1.0, "fading");
+
+    scene.begin_notification_press(&region);
+    compositor.update_publication_animations_at(&scene, now);
+    assert_eq!(opacity(&compositor, &scene, now), 1.0, "restored");
+    assert!(!compositor.has_inflight_animation_at(&scene, now));
+    assert_eq!(compositor.next_animation_deadline_at(now), None);
+
+    // Past the deadline it stays fully shown.
+    clock.advance(1_000);
+    now += Duration::from_millis(1_000);
+    assert_eq!(scene.drain_expired_zone_publications(), 0);
+    compositor.update_publication_animations_at(&scene, now);
+    assert_eq!(opacity(&compositor, &scene, now), 1.0);
+    assert!(!compositor.has_inflight_animation_at(&scene, now));
+
+    // Released elsewhere: it expires at once.
+    assert!(scene.end_notification_press());
+    assert!(
+        scene
+            .zone_registry
+            .active_publishes
+            .get("notification-area")
+            .is_none_or(Vec::is_empty)
+    );
+}

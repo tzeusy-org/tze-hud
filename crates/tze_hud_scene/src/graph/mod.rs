@@ -215,7 +215,11 @@ pub use contention::apply_contention;
 
 pub mod overlay;
 pub use agents::{AgentHoldings, AgentReclaim};
-pub use overlay::{NotificationHold, NotificationHoldDrain, RuntimeOverlayState};
+pub use overlay::{
+    NotificationHold, NotificationHoldDrain, NotificationPress, RuntimeOverlayState,
+};
+pub mod press_hold;
+pub use press_hold::NOTIFICATION_PRESS_HOLD_MAX_US;
 
 pub mod budget;
 pub mod holdings;
@@ -474,6 +478,8 @@ mod dock_tests;
 mod limits_tests;
 #[cfg(test)]
 mod portal_tests;
+#[cfg(test)]
+mod press_hold_tests;
 #[cfg(test)]
 mod stack_trim_tests;
 #[cfg(test)]

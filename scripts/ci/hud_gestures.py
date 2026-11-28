@@ -2254,6 +2254,63 @@ def scenario_held_press(run: Run) -> None:
     held_press_on_retired_card(run, cleared, clear, "a keyed clear")
 
 
+PRESS_HOLD_WINDOW_MS = 4000
+
+
+def press_across_answer_window(run: Run, key: str, release_on_button: bool) -> None:
+    """Press a question that uses the owner's answer window, keep the button
+    down past the deadline, then release on the button or off the card."""
+    run.glide(1, 1)
+    published = time.monotonic()
+    run.publish("zone:notification-area", key=key,  # no ttl_ms: the answer window
+                content={"body": "Owned gesture check", "actions": [
+                    {"label": "First", "callback_id": f"{key}-first"},
+                    {"label": "Second", "callback_id": f"{key}-second"}]})
+    run.expect(f"card {key} geometry", lambda s: bool(
+        (card := notification_entry(s, key)) and card["state"] != "exiting"))
+    run.point(f"zone:notification-area/{key}/0")
+    run.mark()
+    run.inj.button(True)
+    run.step("button down (held)")
+    try:
+        late = PRESS_HOLD_WINDOW_MS / 1000 + 0.6 - (time.monotonic() - published)
+        if late <= 0.6:
+            raise ScenarioFailed("the press began well before the deadline", {"left_s": late - 0.6})
+        time.sleep(late)
+        run.expect(f"card {key} held past its deadline", lambda s: bool(
+            (card := notification_entry(s, key)) and card["state"] != "exiting"))
+        if not release_on_button:
+            run.glide(1, 1)
+    finally:
+        run.mark()
+        run.inj.button(False)
+        run.step("button up")
+
+
+def scenario_press_hold(run: Run) -> None:
+    """hud-ohgc9.13: a press begun before a short answer window's deadline
+    keeps the card; releasing on the button answers, releasing off it
+    expires the card at once with nothing sent."""
+    original = run.config.read_text(encoding="utf-8")
+    run.config.write_text(original.replace(
+        "[runtime]\n", f"[runtime]\nanswer_window_ms = {PRESS_HOLD_WINDOW_MS}\n", 1), encoding="utf-8")
+    run.step(f"config answer_window_ms = {PRESS_HOLD_WINDOW_MS}")
+    try:
+        restart_owned(run)
+        key = "gesture-press-hold"
+        press_across_answer_window(run, key, release_on_button=True)
+        take_card_answer(run, key, f"{key}-first")
+        off = "gesture-press-hold-off"
+        press_across_answer_window(run, off, release_on_button=False)
+        run.expect(f"card {off} expired at release", lambda st: notification_entry(st, off) is None)
+        if items := run.inputs(wait_ms=500):
+            raise ScenarioFailed("a release off the card sends nothing", {"items": items, "status": run.status()})
+    finally:
+        run.config.write_text(original, encoding="utf-8")
+        run.step("config restored")
+        restart_owned(run)
+
+
 def scenario_card_hold(run: Run) -> None:
     """A destructive action ignores a tap and fires once when held past
     `notification.action.hold.ms` (default 600 ms)."""
@@ -3954,6 +4011,7 @@ SCENARIOS: dict[str, Callable[[Run], None]] = {
     "foreign-publisher": scenario_foreign_publisher,
     "sessions": scenario_sessions,
     "held-press": scenario_held_press,
+    "press-hold": scenario_press_hold,
     "card-link": scenario_card_link,
     "card-copy": scenario_card_copy,
     "card-reply": scenario_card_reply,

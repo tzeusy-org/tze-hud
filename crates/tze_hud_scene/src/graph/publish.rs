@@ -27,6 +27,9 @@ pub enum Publication {
         /// No expiry at all: a notification skips its urgency-derived default
         /// and stays until cleared. Ignored when `expires_at_wall_us` is set.
         held: bool,
+        /// `expires_at_wall_us` is the owner's answer window, not an agent
+        /// expiry ([`crate::types::ZonePublishRecord::answer_window`]).
+        answer_window: bool,
     },
     Widget {
         widget_name: String,
@@ -252,6 +255,7 @@ impl SceneGraph {
                 content_classification,
                 breakpoints,
                 held,
+                answer_window,
             } => {
                 let breakpoints = if matches!(content, ZoneContent::StreamText(_)) {
                     breakpoints.clone()
@@ -271,6 +275,7 @@ impl SceneGraph {
                     !*held,
                     notification_id,
                     publisher.resident_raster.clone(),
+                    *answer_window,
                 )
             }
             Publication::Widget {
@@ -315,6 +320,7 @@ mod tests {
             content_classification: None,
             breakpoints: Vec::new(),
             held: false,
+            answer_window: false,
         }
     }
 

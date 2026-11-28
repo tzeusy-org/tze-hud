@@ -208,6 +208,11 @@ pub struct RuntimeOverlayState {
     /// The open reply field. This local presentation never enters snapshots.
     #[serde(skip, default)]
     pub notification_reply: Option<NotificationReplyView>,
+    /// The card whose reply field a press held past its deadline opened.
+    /// That field keeps the card even while empty (docs/invariants.md §1:
+    /// the press's own activation is accepted) until it closes.
+    #[serde(skip, default)]
+    pub notification_reply_press_opened: Option<SceneId>,
     /// The destructive action being held, if any ([`NotificationHold`]).
     /// Local only: the agent sees nothing until the hold completes.
     #[serde(skip, default)]
@@ -224,6 +229,10 @@ pub struct RuntimeOverlayState {
     /// leaving causes is the owner's own and starts no press guard.
     #[serde(skip, default)]
     pub notification_owner_activated: Option<SceneId>,
+    /// The primary pointer press in progress on a notification control
+    /// ([`NotificationPress`]); the runtime begins and ends it.
+    #[serde(skip, default)]
+    pub notification_press: Option<NotificationPress>,
     /// Set of element_ids that are currently being actively dragged.
     ///
     /// Written by the input processor on DragActivated and cleared on
@@ -442,7 +451,10 @@ impl RuntimeOverlayState {
     pub(super) fn notification_reply_holding_expiry(&self) -> Option<SceneId> {
         self.notification_reply
             .as_ref()
-            .filter(|reply| !reply.text.is_empty())
+            .filter(|reply| {
+                !reply.text.is_empty()
+                    || self.notification_reply_press_opened == Some(reply.publication_id)
+            })
             .map(|reply| reply.publication_id)
     }
 }
@@ -459,6 +471,18 @@ pub struct NotificationHold {
     pub key: Option<String>,
     /// Scene monotonic time of the press.
     pub started_mono_us: u64,
+}
+
+/// An accepted primary pointer press on a notification's action or ×, still
+/// down. A card using the owner's answer window that it began on before the
+/// deadline is not removed until the press ends, at most
+/// [`super::NOTIFICATION_PRESS_HOLD_MAX_US`] past that deadline.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NotificationPress {
+    /// The exact control pressed.
+    pub region: ZoneHitRegion,
+    /// Scene wall-clock time of the press.
+    pub began_wall_us: u64,
 }
 
 /// An early-released hold whose fill drains back to rest.

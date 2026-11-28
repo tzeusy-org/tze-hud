@@ -284,6 +284,7 @@ mod tests {
                 true,
                 None,
                 None,
+                false,
             )
             .unwrap();
         assert!(scene.orphan_publications(origin, 1, 60_000));
@@ -318,6 +319,7 @@ mod tests {
                 content_classification: None,
                 breakpoints: Vec::new(),
                 held: false,
+                answer_window: false,
             },
         );
 
@@ -511,6 +513,7 @@ mod tests {
                 content_classification: None,
                 breakpoints: Vec::new(),
                 held: false,
+                answer_window: false,
             },
         );
         let wait = SceneId::new();

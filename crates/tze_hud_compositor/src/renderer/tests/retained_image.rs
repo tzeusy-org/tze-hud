@@ -154,6 +154,7 @@ async fn resident_raster_scene(
         content_classification: None,
         breakpoints: Vec::new(),
         held: false,
+        answer_window: false,
     };
     scene
         .publish(
@@ -261,6 +262,7 @@ async fn resident_raster_uses_store_pixels_without_generic_image_authority() {
                 content_classification: None,
                 breakpoints: Vec::new(),
                 held: false,
+                answer_window: false,
             },
         )
         .unwrap();
@@ -354,6 +356,7 @@ async fn resident_raster_stale_draw_denies_revoked_source_with_live_same_hash_pe
                 content_classification: None,
                 breakpoints: Vec::new(),
                 held: false,
+                answer_window: false,
             },
         )
         .unwrap();

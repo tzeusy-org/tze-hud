@@ -740,6 +740,7 @@ fn test_lease_expiry() {
         content_classification: None,
         breakpoints: Vec::new(),
         held: false,
+        answer_window: false,
     };
     scene.publish(&publisher, &publication).unwrap();
     let now = scene.now_millis();
@@ -1940,6 +1941,7 @@ fn test_notification_expiry_follows_held_flag() {
             content_classification: None,
             breakpoints: Vec::new(),
             held,
+            answer_window: false,
         };
         scene.publish(&publisher, &publication).unwrap();
         let record = &scene.zone_registry.active_for_zone("alert-banner")[0];
@@ -1969,6 +1971,7 @@ fn active_zone_clear_does_not_cancel_later_pending_publish() {
             content_classification: None,
             breakpoints: Vec::new(),
             held: true,
+            answer_window: false,
         },
     );
     scene.clear_zone_for_publisher("subtitle", "agent").unwrap();

@@ -323,7 +323,8 @@ fn publish_zone(
     if let Some((code, hint)) = timing_error(publish, now, zone, zone_exists) {
         return fail(seq, code, hint);
     }
-    let expiry = expires_at_wall_us(publish, now).or_else(|| {
+    let explicit_expiry = expires_at_wall_us(publish, now);
+    let expiry = explicit_expiry.or_else(|| {
         matches!(&content, tze_hud_scene::ZoneContent::Notification(n) if !n.actions.is_empty())
             .then(|| {
                 publish.present_at_us.max(now).saturating_add(
@@ -359,6 +360,8 @@ fn publish_zone(
         content_classification: None,
         breakpoints: publish.breakpoints.clone(),
         held: false,
+        // The owner's answer window, not an agent expiry.
+        answer_window: explicit_expiry.is_none() && expiry.is_some(),
     };
     // present_at in the future: hold the publish until due (invariant 1).
     present_or_schedule(

@@ -33,9 +33,9 @@ pub(super) fn needs_hold(
 }
 
 impl WinitApp {
-    /// Cancel a hold whose pointer press or key is no longer down (or that
-    /// safe mode interrupts), then fire a hold that has lasted long enough.
-    /// Returns whether the scene changed.
+    /// End the scene's record of a pointer press that is no longer down (or
+    /// that safe mode interrupts); cancel a hold likewise, then fire a hold
+    /// that has lasted long enough. Returns whether the scene changed.
     pub(super) fn settle_notification_hold(&mut self) -> bool {
         let mut activation = None;
         let changed = {
@@ -45,17 +45,28 @@ impl WinitApp {
             let Ok(mut scene) = shared.scene.try_lock() else {
                 return false;
             };
-            if scene.overlay.notification_hold.is_none() {
-                self.state.answer_keyboard.hold_key = None;
-                return false;
-            }
-            let before = scene.geometry_epoch;
-            scene.prune_notification_feedback();
-            let tokens = &self.state.global_tokens;
             let safe_mode = self
                 .state
                 .safe_mode_atomic
                 .load(std::sync::atomic::Ordering::Acquire);
+            // Capture loss, focus loss and safe mode disarm the press without
+            // an Up: a card it held past its deadline expires now.
+            let press_ended = scene
+                .overlay
+                .notification_press
+                .as_ref()
+                .is_some_and(|press| {
+                    safe_mode
+                        || self.state.zone_press.as_deref() != Some(&press.region.interaction_id)
+                })
+                && scene.end_notification_press();
+            if scene.overlay.notification_hold.is_none() {
+                self.state.answer_keyboard.hold_key = None;
+                return press_ended;
+            }
+            let before = scene.geometry_epoch;
+            scene.prune_notification_feedback();
+            let tokens = &self.state.global_tokens;
             let held = scene
                 .overlay
                 .notification_hold
@@ -70,7 +81,13 @@ impl WinitApp {
             let (hold_ms, _) = hold_timing(tokens);
             if let Some(hold) = scene.take_completed_notification_hold(hold_ms) {
                 let exit_ms = notification_exit_ms(&scene, &hold.region.zone_name, tokens);
-                activation = scene.activate_notification(&hold.region, exit_ms);
+                // A pointer hold is the press's own activation; a keyboard
+                // hold is not.
+                activation = if hold.key.is_none() {
+                    scene.activate_pressed_notification(&hold.region, exit_ms)
+                } else {
+                    scene.activate_notification(&hold.region, exit_ms)
+                };
                 match hold.key {
                     // The release that follows must not press anything again.
                     None => self.state.zone_press = None,
@@ -88,7 +105,7 @@ impl WinitApp {
             if scene.overlay.notification_hold.is_none() {
                 self.state.answer_keyboard.hold_key = None;
             }
-            scene.geometry_epoch != before
+            press_ended || scene.geometry_epoch != before
         };
         if let Some(activation) = activation {
             self.deliver_notification_activation(

@@ -267,6 +267,7 @@ pub struct HeadlessEventLoopHarness {
         tze_hud_compositor::HeadlessSurface,
     )>,
     last_turn_submitted: bool,
+    next_frame_wall_us: Option<u64>,
     offscreen_work: (u64, u64),
     offscreen_tokens_seen: u64,
     mcp_addr: Option<SocketAddr>,
@@ -552,6 +553,7 @@ impl HeadlessEventLoopHarness {
             frame_turn: crate::pipeline::FrameTurnState::default(),
             offscreen: None,
             last_turn_submitted: false,
+            next_frame_wall_us: None,
             offscreen_work: (0, 0),
             offscreen_tokens_seen: 0,
             mcp_addr: Some(mcp_addr),
@@ -988,6 +990,11 @@ impl HeadlessEventLoopHarness {
         self.offscreen.as_ref().map(|_| self.last_turn_submitted)
     }
 
+    /// The wall-clock wake the last production frame turn scheduled.
+    pub fn next_frame_wall_us(&self) -> Option<u64> {
+        self.next_frame_wall_us
+    }
+
     /// Run the real main-thread settle followed by the production frame turn.
     /// A missing renderer is explicit and never acknowledges a successful frame.
     /// Returns false on lock contention or deferred settle work, including
@@ -1070,6 +1077,7 @@ impl HeadlessEventLoopHarness {
             },
         );
         self.last_turn_submitted = turn.submitted;
+        self.next_frame_wall_us = turn.next_wall_us;
         if turn.work.is_none() {
             // GPU-free callers need approximate notification geometry, but do
             // not claim render/snapshot/presentation evidence.
@@ -1354,6 +1362,7 @@ impl HeadlessEventLoopHarness {
             frame_turn: crate::pipeline::FrameTurnState::default(),
             offscreen: None,
             last_turn_submitted: false,
+            next_frame_wall_us: None,
             offscreen_work: (0, 0),
             offscreen_tokens_seen: 0,
             mcp_addr: None,
@@ -1545,6 +1554,7 @@ mod tests {
 
     mod hold;
     mod press_guard;
+    mod press_hold;
     mod question_displays;
     use tze_hud_input::{KeyboardModifiers, RawCharacterEvent, RawKeyDownEvent, RawKeyUpEvent};
     use tze_hud_scene::MonoUs;
@@ -3847,6 +3857,7 @@ mod tests {
                             content_classification: None,
                             breakpoints: Vec::new(),
                             held: false,
+                            answer_window: false,
                         },
                     ));
                 }

@@ -23,15 +23,31 @@ impl SceneGraph {
     /// Open, redraw, or collapse the owner-local reply field. Closing a field
     /// that held its card past the original deadline expires it in this turn.
     pub fn set_notification_reply_view(&mut self, view: Option<NotificationReplyView>) -> bool {
+        self.set_notification_reply_view_from(view, false)
+    }
+
+    /// [`Self::set_notification_reply_view`]; `pressed` (the press's own
+    /// activation of this reply action) also opens the field on a card that
+    /// press holds past its deadline, and that field then keeps the card.
+    pub(super) fn set_notification_reply_view_from(
+        &mut self,
+        view: Option<NotificationReplyView>,
+        pressed: bool,
+    ) -> bool {
         if self.overlay.notification_reply == view {
             return true;
         }
+        let mut press_opened = false;
         if let Some(view) = &view
             && (self.owner_hidden().zones
                 || self.overlay.notification_choices.contains_key(&view.publication_id)
                 || !self.zone_registry.active_publishes.values().flatten().any(|record| {
+                    let held = pressed
+                        && record.expires_at_wall_us.is_some_and(|end| end <= self.now_wall_us())
+                        && self.notification_press_holds(record);
+                    press_opened |= record.publication_id == view.publication_id && held;
                     record.publication_id == view.publication_id
-                        && self.zone_publication_expiry(record).is_none_or(|end| end > self.now_wall_us())
+                        && (held || self.zone_publication_expiry(record).is_none_or(|end| end > self.now_wall_us()))
                         && matches!(&record.content, ZoneContent::Notification(card)
                             if card.actions.get(view.action_index).is_some_and(|action| action.reply.is_some()))
                 }))
@@ -39,6 +55,13 @@ impl SceneGraph {
             return false;
         }
         let previous_hold = self.overlay.notification_reply_holding_expiry();
+        if press_opened {
+            self.overlay.notification_reply_press_opened = view.as_ref().map(|v| v.publication_id);
+        } else if view.as_ref().map(|v| v.publication_id)
+            != self.overlay.notification_reply_press_opened
+        {
+            self.overlay.notification_reply_press_opened = None;
+        }
         self.overlay.notification_reply = view;
         self.version += 1;
         if previous_hold.is_some()
@@ -92,6 +115,7 @@ mod tests {
                 false,
                 Some(id),
                 None,
+                false,
             )
             .unwrap();
     }

@@ -1,4 +1,3 @@
-use super::notification_reply::zone_publication_expiry;
 use super::notification_wait::is_unanswered_question;
 use super::*;
 use std::collections::hash_map::Entry;
@@ -307,6 +306,7 @@ impl SceneGraph {
             true,
             None,
             None,
+            false,
         )
     }
 
@@ -327,6 +327,7 @@ impl SceneGraph {
         urgency_default: bool,
         publication_id: Option<SceneId>,
         resident_raster: Option<std::sync::Arc<ResidentRasterSource>>,
+        answer_window: bool,
     ) -> Result<(), ValidationError> {
         self.publish_to_zone_with_timing(
             zone_name,
@@ -339,6 +340,7 @@ impl SceneGraph {
             publication_origin,
             publication_id,
             resident_raster,
+            answer_window,
             AdmissionTiming::Absolute {
                 expiry: expires_at_wall_us,
                 urgency_default,
@@ -360,6 +362,7 @@ impl SceneGraph {
         publication_origin: Option<SceneId>,
         publication_id: Option<SceneId>,
         resident_raster: Option<std::sync::Arc<ResidentRasterSource>>,
+        answer_window: bool,
         timing: AdmissionTiming<'_>,
     ) -> Result<(u64, Option<u64>), ValidationError> {
         // Check zone exists and content type is accepted
@@ -431,8 +434,13 @@ impl SceneGraph {
             })
             .collect();
         let label = self.session_labels.get(publisher_namespace);
+        // Only a card with actions and an expiry (set below once measured)
+        // can use the owner's answer window.
+        let answer_window = answer_window
+            && matches!(&content, ZoneContent::Notification(n) if !n.actions.is_empty());
         let record = ZonePublishRecord {
             publication_id,
+            answer_window: false,
             zone_name: zone_name.to_string(),
             publisher_namespace: publisher_namespace.to_string(),
             content,
@@ -494,6 +502,7 @@ impl SceneGraph {
             record.expires_at_wall_us =
                 ttl_us.map(|ttl| record.published_at_wall_us.saturating_add(ttl));
         }
+        record.answer_window = answer_window && record.expires_at_wall_us.is_some();
         let now_us = record.published_at_wall_us;
         let expires_at = record.expires_at_wall_us;
         let mut new_records = Vec::new();
@@ -669,10 +678,13 @@ impl SceneGraph {
             false,
             None,
             None,
+            false,
         )
     }
 
-    /// Admit an MCP question under a pre-reserved, runtime-only identity.
+    /// Admit an MCP notification under a pre-reserved, runtime-only identity.
+    /// `answer_window`: `expiry` is the owner's answer window, not the
+    /// agent's ([`ZonePublishRecord::answer_window`]).
     #[allow(clippy::too_many_arguments)]
     pub fn publish_notification_until_with_id(
         &mut self,
@@ -683,6 +695,7 @@ impl SceneGraph {
         key: Option<String>,
         expiry: Option<u64>,
         id: SceneId,
+        answer_window: bool,
     ) -> Result<(), ValidationError> {
         self.check_zone_publish_lease(namespace, lease)?;
         self.publish_to_zone_inner(
@@ -698,11 +711,14 @@ impl SceneGraph {
             false,
             Some(id),
             None,
+            answer_window,
         )
     }
 
     /// Place an immediate MCP publication and measure it before presentation.
     /// Returns the presentation time and optional absolute expiry in wall µs.
+    /// `answer_window`: `ttl_us` is the owner's answer window
+    /// ([`ZonePublishRecord::answer_window`]).
     #[allow(clippy::too_many_arguments)]
     pub fn publish_to_zone_with_measurement<'measure>(
         &mut self,
@@ -713,6 +729,7 @@ impl SceneGraph {
         key: Option<String>,
         ttl_us: Option<u64>,
         publication_id: Option<SceneId>,
+        answer_window: bool,
         measure: &'measure mut AdmissionMeasure<'measure>,
     ) -> Result<(u64, Option<u64>), ValidationError> {
         self.check_zone_publish_lease(namespace, lease)?;
@@ -727,6 +744,7 @@ impl SceneGraph {
             None,
             publication_id,
             None,
+            answer_window,
             AdmissionTiming::AfterMeasurement { ttl_us, measure },
         )
     }
@@ -1172,6 +1190,7 @@ impl SceneGraph {
                 continue;
             }
             r.expires_at_wall_us = expires_at_wall_us;
+            r.answer_window = false;
             held = true;
         }
         if held {
@@ -1445,7 +1464,13 @@ impl SceneGraph {
         })
     }
 
-    fn live_notification_control(&self, region: &ZoneHitRegion) -> Option<&ZonePublishRecord> {
+    /// The live record behind `region`. `pressed` (the press in progress began
+    /// on this control) also admits a card that press holds past its deadline.
+    fn live_notification_control(
+        &self,
+        region: &ZoneHitRegion,
+        pressed: bool,
+    ) -> Option<&ZonePublishRecord> {
         if !self
             .overlay
             .zone_hit_regions
@@ -1468,23 +1493,53 @@ impl SceneGraph {
             .find(|record| {
                 record.publication_id == region.publication_id
                     && record.publisher_namespace == region.publisher_namespace
-                    && self
+                    && (self
                         .zone_publication_expiry(record)
                         .is_none_or(|expiry| expiry > now)
+                        || pressed && self.notification_press_holds(record))
             })
     }
 
-    /// Activate one exact, visible and unexpired notification control. Pointer
-    /// releases and keyboard activation both enter here. The FIFO remains the
+    /// Activate one exact, visible and unexpired notification control by
+    /// keyboard (answer chord digit or Enter). The FIFO remains the
     /// authoritative answer; its readiness callback must run after unlocking.
     pub fn activate_notification(
         &mut self,
         region: &ZoneHitRegion,
         exit_ms: u32,
     ) -> Option<super::NotificationActivation> {
+        self.activate_notification_from(region, exit_ms, false)
+    }
+
+    /// [`Self::activate_notification`] by the pointer press in progress: its
+    /// release on the control, or its completed destructive hold. Only this
+    /// path is the press's own activation, so only it can answer a card the
+    /// press holds past its deadline.
+    pub fn activate_pressed_notification(
+        &mut self,
+        region: &ZoneHitRegion,
+        exit_ms: u32,
+    ) -> Option<super::NotificationActivation> {
+        self.activate_notification_from(region, exit_ms, true)
+    }
+
+    fn activate_notification_from(
+        &mut self,
+        region: &ZoneHitRegion,
+        exit_ms: u32,
+        from_press: bool,
+    ) -> Option<super::NotificationActivation> {
         self.prune_notification_feedback();
         let key = region.publication_id;
-        let record = self.live_notification_control(region)?;
+        // Past its deadline, a card held by a press takes only that press's
+        // own activation of its own control.
+        let pressed = from_press
+            && self
+                .overlay
+                .notification_press
+                .as_ref()
+                .is_some_and(|press| press.region.interaction_id == region.interaction_id);
+        let record = self.live_notification_control(region, pressed)?;
         let ZoneContent::Notification(payload) = &record.content else {
             return None;
         };
@@ -1520,16 +1575,17 @@ impl SceneGraph {
                         .notification_reply
                         .as_ref()
                         .is_none_or(|reply| reply.publication_id != key)
-                        && !self.set_notification_reply_view(Some(
-                            super::overlay::NotificationReplyView {
+                        && !self.set_notification_reply_view_from(
+                            Some(super::overlay::NotificationReplyView {
                                 publication_id: key,
                                 action_index: *index,
                                 text: String::new(),
                                 cursor_byte: 0,
                                 selection_anchor: 0,
                                 at_capacity: false,
-                            },
-                        ))
+                            }),
+                            pressed,
+                        )
                     {
                         return None;
                     }
@@ -1588,7 +1644,7 @@ impl SceneGraph {
         let ZoneInteractionKind::Action { index } = region.kind else {
             return None;
         };
-        let record = self.live_notification_control(region)?;
+        let record = self.live_notification_control(region, false)?;
         let ZoneContent::Notification(payload) = &record.content else {
             return None;
         };
@@ -1613,7 +1669,6 @@ impl SceneGraph {
     ) -> Option<RenderWakeNotifier> {
         let key = region.publication_id;
         let now = self.now_wall_us();
-        let was_holding_expiry = self.overlay.notification_reply_holding_expiry() == Some(key);
         if self
             .overlay
             .notification_reply
@@ -1621,6 +1676,7 @@ impl SceneGraph {
             .is_some_and(|reply| reply.publication_id == key)
         {
             self.overlay.notification_reply = None;
+            self.overlay.notification_reply_press_opened = None;
         }
         self.finish_notification_wait(key, super::NotificationOutcome::Answered);
         if matches!(region.kind, ZoneInteractionKind::Dismiss) || exit_ms == 0 {
@@ -1644,10 +1700,12 @@ impl SceneGraph {
                         && r.publisher_namespace == region.publisher_namespace
                 })?;
             let exit_at = now.saturating_add(u64::from(exit_ms) * 1_000);
+            // A card held past its deadline (by its reply field or a press)
+            // leaves by the answered exit.
             record.expires_at_wall_us = Some(
                 record
                     .expires_at_wall_us
-                    .filter(|expiry| !was_holding_expiry || *expiry > now)
+                    .filter(|expiry| *expiry > now)
                     .map_or(exit_at, |expiry| expiry.min(exit_at)),
             );
             self.overlay
@@ -1704,15 +1762,24 @@ impl SceneGraph {
             })
         {
             self.overlay.notification_reply = None;
+            self.overlay.notification_reply_press_opened = None;
             self.version += 1;
         }
-        let reply_holding_expiry = self.overlay.notification_reply_holding_expiry();
+        // Showing publications, including one a reply field or a press holds
+        // past its deadline.
+        let live_ids: std::collections::HashSet<SceneId> = self
+            .zone_registry
+            .active_publishes
+            .values()
+            .flatten()
+            .filter(|r| self.publication_live(r, now))
+            .map(|r| r.publication_id)
+            .collect();
         let live = |zone: &str, id: SceneId, publisher: &str| {
             self.zone_registry.active_for_zone(zone).iter().any(|r| {
                 r.publication_id == id
                     && r.publisher_namespace == publisher
-                    && zone_publication_expiry(r, reply_holding_expiry)
-                        .is_none_or(|expiry| expiry > now)
+                    && self.publication_live(r, now)
             })
         };
         let keys: std::collections::HashSet<_> = self
@@ -1754,11 +1821,7 @@ impl SceneGraph {
                     .active_publishes
                     .values()
                     .flatten()
-                    .any(|r| {
-                        r.publication_id == *id
-                            && zone_publication_expiry(r, reply_holding_expiry)
-                                .is_none_or(|expiry| expiry > now)
-                    })
+                    .any(|r| r.publication_id == *id && live_ids.contains(id))
                     && !keys.contains(id)
             });
         self.overlay.notification_go_to.retain(|id, _| {
@@ -1768,11 +1831,7 @@ impl SceneGraph {
                     .active_publishes
                     .values()
                     .flatten()
-                    .any(|record| {
-                        record.publication_id == *id
-                            && zone_publication_expiry(record, reply_holding_expiry)
-                                .is_none_or(|expiry| expiry > now)
-                    })
+                    .any(|record| record.publication_id == *id && live_ids.contains(id))
         });
         self.overlay
             .notification_choices
@@ -1789,11 +1848,7 @@ impl SceneGraph {
                     .active_publishes
                     .values()
                     .flatten()
-                    .any(|record| {
-                        record.publication_id == id
-                            && zone_publication_expiry(record, reply_holding_expiry)
-                                .is_none_or(|expiry| expiry > now)
-                    })
+                    .any(|record| record.publication_id == id && live_ids.contains(&id))
         });
         if self.overlay.notification_reveal.is_some_and(|request| {
             !self
@@ -2074,20 +2129,16 @@ impl SceneGraph {
     /// Call this once per frame before rendering (Stage 4: Scene Commit).
     pub fn drain_expired_zone_publications(&mut self) -> usize {
         let now_us = self.clock.now_us();
-        let reply_holding_expiry = self.overlay.notification_reply_holding_expiry();
         let mut total_removed = 0usize;
         let expired: Vec<_> = self
             .zone_registry
             .active_publishes
             .values()
             .flatten()
-            .filter(|r| {
-                zone_publication_expiry(r, reply_holding_expiry)
-                    .is_some_and(|expiry| expiry <= now_us)
-            })
+            .filter(|r| !self.publication_live(r, now_us))
             .map(|r| r.publication_id)
             .collect();
-        for id in expired {
+        for &id in &expired {
             self.finish_notification_wait(
                 id,
                 super::NotificationOutcome::Gone(super::NotificationGone::Expired),
@@ -2096,9 +2147,7 @@ impl SceneGraph {
 
         for publishes in self.zone_registry.active_publishes.values_mut() {
             let before = publishes.len();
-            publishes.retain(|r| {
-                zone_publication_expiry(r, reply_holding_expiry).is_none_or(|end| end > now_us)
-            });
+            publishes.retain(|r| !expired.contains(&r.publication_id));
             total_removed += before - publishes.len();
         }
 
@@ -2123,7 +2172,7 @@ impl SceneGraph {
             .active_publishes
             .values()
             .flatten()
-            .filter_map(|record| self.zone_publication_expiry(record))
+            .filter_map(|record| self.publication_due_wall_us(record))
             .min();
         let widget_expiry = self
             .widget_registry

@@ -24,6 +24,19 @@ panel changes only affect later accepted publications, never existing cards.
 `hud_publish` and `hud_surfaces` report that stored lifetime, including delay.
 The setting itself neither polls nor wakes the renderer.
 
+Exception: a notification with actions that uses the owner's answer window (no
+explicit expiry) is not removed while a pointer press that began on one of its
+controls before its deadline is still down. The press's own activation on that
+control (its release, or a completed destructive hold) is accepted; any other
+ending — release elsewhere, cancel, or 5 s after the deadline — expires the
+card at once. Hover and keyboard focus never hold a card; explicit expiry,
+replace, clear and trim win immediately, and a later `hud_hold` retimes it as
+usual. Tests: `answer_window_press_holds_card_until_release`,
+`press_hold_release_off_control_expires_card`,
+`hud_hold_retimes_a_press_held_card`,
+`armed_wait_returns_action_for_press_held_past_deadline`,
+`press_held_across_answer_window_deadline_answers_on_release`.
+
 Zone/widget Hold accepts the full unsigned 64-bit millisecond range using
 saturating duration and absolute-expiry arithmetic; positive TTLs cannot wrap to
 an immediate expiry. Zero remains indefinite and widget owner caps still apply.
@@ -286,8 +299,9 @@ Activating a reply action gives the inline field keyboard focus on its display.
 The compositor publishes the drawn caret position for native IME placement.
 Committed text enters the card's local draft. Escape first clears selection,
 then collapses the field, returns focus and keeps the draft for that exact
-card. Safe mode suspends editing and submission. A focused nonempty field
-defers expiry without changing the original deadline. Leaving the field after
+card. Safe mode suspends editing and submission. A focused nonempty field,
+or one opened by a press that held the card past its deadline, defers expiry
+without changing the original deadline. Leaving the field after
 that deadline expires the card. Replacement, clear, trim and dismissal drop
 the exact card's draft.
 

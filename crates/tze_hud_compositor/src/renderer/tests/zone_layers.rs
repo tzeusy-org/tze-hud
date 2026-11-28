@@ -708,6 +708,7 @@ fn test_publication_ttl_ms_uses_expires_at_wall_us() {
     // Warning notification (urgency 2): published at t=0, expires at t=15s.
     // Expected: 15_000 ms - 150 ms fade = 14_850 ms until fade starts.
     let record_warning = ZonePublishRecord {
+        answer_window: false,
         publication_id: SceneId::new(),
         lease_id: None,
         resident_raster: None,
@@ -746,6 +747,7 @@ fn test_publication_ttl_ms_uses_expires_at_wall_us() {
     // Critical notification (urgency 3): published at t=0, expires at t=30s.
     // Expected: 30_000 ms - 150 ms fade = 29_850 ms until fade starts.
     let record_critical = ZonePublishRecord {
+        answer_window: false,
         publication_id: SceneId::new(),
         lease_id: None,
         resident_raster: None,
@@ -784,6 +786,7 @@ fn test_publication_ttl_ms_uses_expires_at_wall_us() {
     // expires_at_wall_us takes priority over per-notification ttl_ms.
     // published=1s, expires=16s → duration=15s → 15_000 - 150 = 14_850 ms until fade.
     let record_both = ZonePublishRecord {
+        answer_window: false,
         publication_id: SceneId::new(),
         lease_id: None,
         resident_raster: None,
@@ -821,6 +824,7 @@ fn test_publication_ttl_ms_uses_expires_at_wall_us() {
 
     // No expires_at: held until cleared, whatever the payload ttl_ms says.
     let record_info = ZonePublishRecord {
+        answer_window: false,
         publication_id: SceneId::new(),
         lease_id: None,
         resident_raster: None,
