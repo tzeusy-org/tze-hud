@@ -762,6 +762,18 @@ fn leave_event_loop(event_loop: &impl LoopExit) {
 }
 
 impl WinitApp {
+    fn handle_close_request(&self, event_loop: &impl LoopExit, windows: bool) {
+        if windows && self.state.effective_mode == WindowMode::Overlay {
+            tracing::info!("close request ignored on an overlay; quit from the tray");
+            return;
+        }
+        tracing::info!("main thread: window close requested");
+        self.state
+            .shutdown
+            .trigger(crate::threads::ShutdownReason::Clean);
+        leave_event_loop(event_loop);
+    }
+
     /// Leave the event loop if shutdown was requested; true when it did.
     fn leave_if_shutdown(&self, event_loop: &impl LoopExit) -> bool {
         if !self.state.shutdown.is_triggered() {
@@ -1368,7 +1380,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                 );
             }
             if !chrome_observer.activation_ready() {
-                tracing::error!("overlay: native no-activate policy unavailable");
+                tracing::error!("overlay: native overlay styles unavailable");
                 leave_event_loop(event_loop);
                 return;
             }
@@ -2293,11 +2305,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         match event {
             // ── Close ──────────────────────────────────────────────────────
             WindowEvent::CloseRequested => {
-                tracing::info!("main thread: window close requested");
-                self.state
-                    .shutdown
-                    .trigger(crate::threads::ShutdownReason::Clean);
-                leave_event_loop(event_loop);
+                self.handle_close_request(event_loop, cfg!(target_os = "windows"));
             }
 
             // ── Monitor layout may have changed (hud-1pt5h) ───────────────

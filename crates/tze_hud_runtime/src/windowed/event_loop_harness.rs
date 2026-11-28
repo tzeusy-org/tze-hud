@@ -10636,8 +10636,8 @@ mod tests {
     /// A quit must leave winit's loop without another OS message: winit on
     /// Windows checks `exit()` only after the wait that follows
     /// `about_to_wait`, so the exit must also stop that wait.
-    #[test]
-    fn shutdown_leaves_the_event_loop_without_waiting_for_a_message() {
+    #[tokio::test]
+    async fn overlay_close_is_ignored_but_tray_quit_and_dev_close_exit() {
         use std::cell::RefCell;
         use winit::event_loop::ControlFlow;
 
@@ -10652,21 +10652,47 @@ mod tests {
             }
         }
 
-        let harness = HeadlessEventLoopHarness::new();
+        let mut harness = HeadlessEventLoopHarness::with_network(
+            super::super::WindowedConfig::default(),
+            Arc::new(tze_hud_scene::TestClock::new(1000)),
+        )
+        .await
+        .expect("start the headless panel and network");
+        harness.app.state.effective_mode = crate::window::WindowMode::Overlay;
         let idle = Recorder::default();
+        harness.app.handle_close_request(&idle, true);
+        assert!(!harness.app.state.shutdown.is_triggered());
         assert!(!harness.app.leave_if_shutdown(&idle));
         assert!(
             idle.0.borrow().is_empty(),
             "no shutdown: the loop is untouched"
         );
 
-        harness
-            .app
-            .state
-            .shutdown
-            .trigger(crate::threads::ShutdownReason::Clean);
+        let shutdown = harness.app.state.shutdown.clone();
+        let mut reasons = shutdown.subscribe();
+        harness.control_panel().set_quit(Arc::new(move || {
+            shutdown.trigger(crate::threads::ShutdownReason::Clean);
+        }));
+        harness.tray_command("quit");
+        let reason = tokio::time::timeout(std::time::Duration::from_secs(2), reasons.recv())
+            .await
+            .expect("tray Quit requests shutdown")
+            .expect("shutdown reason");
+        assert!(matches!(reason, crate::threads::ShutdownReason::Clean));
         let quitting = Recorder::default();
         assert!(harness.app.leave_if_shutdown(&quitting));
         assert_eq!(*quitting.0.borrow(), [Some(ControlFlow::Poll), None]);
+
+        for (mode, windows) in [
+            (crate::window::WindowMode::Fullscreen, true),
+            (crate::window::WindowMode::Overlay, false),
+        ] {
+            let mut dev = HeadlessEventLoopHarness::new();
+            dev.app.state.effective_mode = mode;
+            let closing = Recorder::default();
+            dev.app.handle_close_request(&closing, windows);
+            assert!(dev.app.state.shutdown.is_triggered());
+            assert_eq!(*closing.0.borrow(), [Some(ControlFlow::Poll), None]);
+        }
     }
 }

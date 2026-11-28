@@ -67,3 +67,12 @@ markdown = 900
 # and positive line counts for the metrics above their ceilings. Section
 # "Git / GitHub Workflow" in AGENTS.md gives the cutoff and review procedure.
 # Later comparisons keep the original entry as evidence and apply no credit.
+
+[[inflight_allowances]]
+feature = "hud-66nb0.1"
+approval = "hud-66nb0.1 design field: owner-signed spec, questionnaire item funnel-r4-1-overlay-shell-spec (packet tze-hud-2026-11-21-funnel, option A)"
+signed_at = "2026-11-21"
+decision = "hud-3n24e.32"
+target = "ui_and_shell"
+rust = 21
+rust_test = 43

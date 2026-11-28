@@ -866,8 +866,9 @@ agents until one is paired.
   observed state and queues a no-activate visibility/topmost reassertion on the
   window thread when it drifts. Display changes, system resume and console
   display power-on also trigger that check; there is no per-frame polling.
-  Shell cloaking can remain after reassertion and is still reported; a present
-  counter or compositor screenshot does not establish owner-visible pixels.
+  Shell cloaking can remain after reassertion and is still reported. Confirm
+  visibility on a virtual desktop by looking at the physical display. DWM
+  cloaking, present counters and compositor screenshots are diagnostic signals.
   Ordinary presentation retains an image deferred by an in-flight encode until
   it presents or is explicitly invalidated. Each window registers one coalesced
   encoding-completion wake; this does not create a scene mutation or periodic
@@ -1217,6 +1218,8 @@ agents; Resume closes it and resumes them. These commands run on the network
 runtime like global chords, independently of the window event loop or agents.
 Quit uses the normal clean shutdown path, without confirmation; relaunch
 through Win+R `tze_hud` when installed, or its executable.
+Windows overlays use the tool-window style to stay out of Alt+Tab and ignore
+close requests such as Alt+F4. Use **Quit** from the tray.
 
 The glyph shows paused, hidden, questions waiting, or normal, in that priority.
 Its contrast follows the Windows taskbar's light/dark setting rather than the

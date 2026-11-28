@@ -236,8 +236,12 @@ as status labels. Discovery includes caller-owned scheduled zone holdings.
 
 Owner decision (2026-10-07): freeze promise removed; safe mode already pauses agents; updates during a pause are rejected, not buffered.
 
-All Windows overlay HWNDs start inactive and preserve `WS_EX_NOACTIVATE` across
-cursor hit-test changes. `WM_MOUSEACTIVATE` keeps ordinary clicks local without
+Each Windows overlay starts hidden and requires `WS_EX_NOACTIVATE` and
+`WS_EX_TOOLWINDOW` with `WS_EX_APPWINDOW` clear before its first show. The native
+observer preserves those bits across extended-style changes, including cursor
+hit-test changes. Windows overlay close requests leave the runtime running.
+Tray Quit and development window close use the normal shutdown path.
+`WM_MOUSEACTIVATE` keeps ordinary clicks local without
 activation; an accepted composer or panel text-field hit, or the start of a
 portal OUTPUT selection (so Ctrl+C can copy it), explicitly takes focus
 outside scene guards. Each explicit take records one outer external foreground;

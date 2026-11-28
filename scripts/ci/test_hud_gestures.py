@@ -18,6 +18,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import hud_gestures as g  # noqa: E402
 import windows_overlay_gestures as overlay  # noqa: E402
+from windows_smoke import wait_until  # noqa: E402
 
 STATUS = {
     "pid": 4242,
@@ -950,17 +951,25 @@ class WindowsGuardTests(unittest.TestCase):
                         self.assertEqual(timeline["mouse_receipts"]["capture_status"], "unavailable")
                     selected = scenarios.call_args.args[1]
                     self.assertEqual("overlay-pointer" in selected, mode == "overlay")
+                    self.assertEqual("overlay-shell" in selected, mode == "overlay")
                     self.assertEqual("tray" in selected, mode == "overlay")
                     self.assertEqual("tray-answer" in selected, mode == "overlay")
                     self.assertEqual("go-to-session" in selected, mode == "overlay")
                     self.assertEqual("card-copy" in selected, mode == "fullscreen")
                     self.assertEqual("card-reveal" in selected, mode == "fullscreen")
-                    self.assertEqual(len(selected), 4 if mode == "overlay" else 32)
+                    self.assertEqual(len(selected), len(g.OVERLAY_SCENARIOS) if mode == "overlay" else 32)
                     # Real link handoffs can foreground a browser late, so they run
                     # after every other injecting scenario; MCP-only restart stays last.
                     self.assertEqual(selected[-3:] == ["portal-reading", "card-link", "restart"],
                                      mode == "fullscreen")
-            for mode, scenario in (("fullscreen", "overlay-pointer"), ("overlay", "composer")):
+                    if mode == "overlay":
+                        self.assertEqual(g.main(["--exe", "unused.exe", "--injector", "sendinput",
+                                                 "--window-mode", mode, "--out", directory,
+                                                 "overlay-shell", "tray", "overlay-pointer", "go-to-session"]), 0)
+                        self.assertEqual(scenarios.call_args.args[1],
+                                         ["tray", "overlay-pointer", "go-to-session", "overlay-shell"])
+            for mode, scenario in (("fullscreen", "overlay-pointer"), ("fullscreen", "overlay-shell"),
+                                   ("overlay", "composer")):
                 with mock.patch.object(g, "WINDOWS", True), contextlib.redirect_stderr(io.StringIO()), \
                         self.assertRaises(SystemExit) as failure:
                     g.main(["--exe", "unused.exe", "--injector", "sendinput", "--window-mode", mode, scenario])
@@ -1068,7 +1077,8 @@ class RequiredGateTests(unittest.TestCase):
                     self.assertEqual(overlay.main(["--exe", "x.exe", "--out", directory, *gate]), 0)
                     argv = scenarios.call_args.args[0]
                     self.assertEqual(argv[argv.index("--out") + 2:],
-                                     [*gate, "tray", "go-to-session", "overlay-pointer", "tray-answer"])
+                                     [*gate, "tray", "go-to-session", "overlay-pointer", "tray-answer",
+                                      "overlay-shell"])
 
 
 class OverlayInstallerTests(unittest.TestCase):
@@ -1136,6 +1146,125 @@ class OverlayInstallerTests(unittest.TestCase):
                         self.assertEqual(values[name], 0)
                     self.assertNotIn(name, values)
                 self.assertEqual(values["foreign-driver.json"], 0)
+
+
+class OverlayShellDesktopTests(unittest.TestCase):
+    def test_desktop_switch_requires_a_fresh_owned_capture_and_a_compositor_swatch(self) -> None:
+        dark = (1, 1, bytes((0, 0, 0, 255)))
+        magenta = (1, 1, bytes((255, 0, 255, 255)))
+        for case in ("delayed-desktop", "desktop-blind", "foreign-after-capture", "no-compositor"):
+            with self.subTest(case=case):
+                clock = 0.0
+                run = mock.Mock()
+                run.frame.return_value = dark if case == "no-compositor" else magenta
+                run.key.side_effect = OSError("test ends at the first switch chord")
+
+                def sleep(seconds):
+                    nonlocal clock
+                    clock += seconds
+
+                def wait(probe, **kwargs):
+                    return wait_until(probe, **kwargs, clock=lambda: clock, sleep=sleep)
+
+                def desktop():
+                    if case == "desktop-blind" or (case == "delayed-desktop"
+                                                   and win.desktop_rgba.call_count == 1):
+                        return dark
+                    return magenta
+
+                def foreground():
+                    return 303 if case == "foreign-after-capture" and win.desktop_rgba.called else 101
+
+                with mock.patch.object(g, "WIN") as win, mock.patch.object(g, "wait_until", side_effect=wait):
+                    win.owned_window_handle.return_value = 1001
+                    win.owned_window_on_current_desktop.return_value = True
+                    win.desktop_rgba.side_effect = desktop
+                    win.foreground_pid.side_effect = foreground
+                    if case == "delayed-desktop":
+                        with self.assertRaisesRegex(OSError, "test ends at the first switch chord"):
+                            g.overlay_shell_desktop_probe(run, "card", 101, mock.Mock())
+                        run.key.assert_called_once_with("win+ctrl+d")
+                        self.assertEqual(win.desktop_rgba.call_count, 2)
+                        run.screen_grab.assert_called_once_with("overlay-shell.before-switch", frame=magenta)
+                    elif case == "desktop-blind":
+                        # A stable owned foreground with no desktop swatch is a recorded limit, not a switch.
+                        g.overlay_shell_desktop_probe(run, "card", 101, mock.Mock())
+                        run.key.assert_not_called()
+                        run.screen_grab.assert_called_once_with("overlay-shell.before-switch", frame=dark)
+                        self.assertIn("limited desktop proof", run.step.call_args.args[0])
+                    else:
+                        with self.assertRaises(g.ScenarioFailed) as failure:
+                            g.overlay_shell_desktop_probe(run, "card", 101, mock.Mock())
+                        run.key.assert_not_called()
+                        if case == "no-compositor":
+                            self.assertEqual(failure.exception.last["compositor_pixels"], 0)
+                            win.desktop_rgba.assert_not_called()
+                        else:
+                            self.assertEqual(failure.exception.last["foreground_after"], 303)
+                            self.assertGreater(failure.exception.last["desktop_pixels"], 0)
+                            run.screen_grab.assert_called_once_with("overlay-shell.before-switch", frame=magenta)
+
+    def test_switch_cleanup_covers_late_observations_and_reports_unknown_restoration(self) -> None:
+        for case in ("no-probe", "no-switch", "late-switch", "injection-error", "unknown", "close-unverified"):
+            with self.subTest(case=case):
+                clock = 0.0
+                run = mock.Mock()
+                run.expect.return_value = {"displays": []}
+                open_editor = mock.Mock(return_value=202)
+
+                def sleep(seconds):
+                    nonlocal clock
+                    clock += seconds
+
+                def wait(probe, **kwargs):
+                    return wait_until(probe, **kwargs, clock=lambda: clock, sleep=sleep)
+
+                def inject(chord):
+                    if case == "injection-error" and chord == "win+ctrl+d":
+                        raise OSError("input failed after the shell received the chord")
+
+                def membership(pid, hwnd=None):
+                    if pid == 202:
+                        self.assertEqual(hwnd, 2002)
+                        return True
+                    if not run.key.called:
+                        return None if case == "no-probe" else True
+                    if run.key.call_args == mock.call("win+ctrl+F4"):
+                        return case != "close-unverified"
+                    if case == "unknown":
+                        return None
+                    if case in {"late-switch", "injection-error"}:
+                        return clock < 3.5
+                    return case != "close-unverified"
+
+                run.key.side_effect = inject
+                with mock.patch.object(g, "WIN") as win, mock.patch.object(g, "wait_until", side_effect=wait), \
+                        mock.patch.object(g, "colour_pixels", return_value=5):
+                    win.owned_window_handle.side_effect = {101: 1001, 202: 2002}.__getitem__
+                    win.owned_window_on_current_desktop.side_effect = membership
+                    win.foreground_pid.return_value = 101
+                    if case in {"unknown", "close-unverified"}:
+                        with self.assertRaisesRegex(g.ScenarioFailed, "verify restoration"):
+                            g.overlay_shell_desktop_probe(run, "card", 101, open_editor)
+                    elif case == "injection-error":
+                        with self.assertRaisesRegex(OSError, "after the shell received"):
+                            g.overlay_shell_desktop_probe(run, "card", 101, open_editor)
+                    else:
+                        g.overlay_shell_desktop_probe(run, "card", 101, open_editor)
+
+                expected = [] if case == "no-probe" else [mock.call("win+ctrl+d")]
+                if case in {"late-switch", "injection-error", "close-unverified"}:
+                    expected.append(mock.call("win+ctrl+F4"))
+                    open_editor.assert_called_once_with()
+                else:
+                    open_editor.assert_not_called()
+                self.assertEqual(run.key.call_args_list, expected)
+                if case in {"late-switch", "injection-error"}:
+                    run.screen_grab.assert_called_once_with("overlay-shell.before-switch",
+                                                            frame=win.desktop_rgba.return_value)
+                    win.bring_to_front.assert_called_once_with(101)
+                    self.assertTrue(all(call.args == (101, 1001) for call in
+                                        win.owned_window_on_current_desktop.call_args_list if call.args[0] == 101))
 
 
 class TargetTests(unittest.TestCase):

@@ -509,6 +509,19 @@ fn chrome_native_loss(registration: &ChromeNativeRegistration) {
     }
 }
 
+#[cfg(any(target_os = "windows", test))]
+fn overlay_extended_style(style: u32) -> u32 {
+    // Win32 WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW, and WS_EX_APPWINDOW.
+    const REQUIRED: u32 = 0x0800_0080;
+    const APP_WINDOW: u32 = 0x0004_0000;
+    (style | REQUIRED) & !APP_WINDOW
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn overlay_extended_style_ready(style: u32) -> bool {
+    style == overlay_extended_style(style)
+}
+
 #[cfg(target_os = "windows")]
 unsafe extern "system" fn chrome_capture_subclass(
     hwnd: windows::Win32::Foundation::HWND,
@@ -534,7 +547,6 @@ unsafe extern "system" fn chrome_capture_subclass(
         use windows::Win32::Foundation::LRESULT;
         use windows::Win32::UI::WindowsAndMessaging::{
             GWL_EXSTYLE, MA_NOACTIVATE, STYLESTRUCT, WM_MOUSEACTIVATE, WM_STYLECHANGING,
-            WS_EX_NOACTIVATE,
         };
         if message == WM_MOUSEACTIVATE {
             // Deliver the click without automatic activation. The ordinary
@@ -547,7 +559,10 @@ unsafe extern "system" fn chrome_capture_subclass(
             // Preserve this policy before application, leaving all proposed
             // TRANSPARENT/LAYERED and other bits intact. No runtime lock here.
             // SAFETY: WM_STYLECHANGING supplies a live writable STYLESTRUCT.
-            unsafe { (*(lparam.0 as *mut STYLESTRUCT)).styleNew |= WS_EX_NOACTIVATE.0 };
+            unsafe {
+                let style = &mut (*(lparam.0 as *mut STYLESTRUCT)).styleNew;
+                *style = overlay_extended_style(*style);
+            }
         }
     }
     let edge = match message {
@@ -1017,13 +1032,13 @@ impl ChromeWindowObserver {
             }
             if overlay {
                 use windows::Win32::UI::WindowsAndMessaging::{
-                    GWL_EXSTYLE, GetWindowLongW, SetWindowLongW, WS_EX_NOACTIVATE,
+                    GWL_EXSTYLE, GetWindowLongW, SetWindowLongW,
                 };
                 // SAFETY: this live HWND belongs to the current UI thread;
-                // the installed subclass preserves the bit on later rewrites.
+                // the installed subclass reapplies the policy on later rewrites.
                 unsafe {
                     let style = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
-                    SetWindowLongW(hwnd, GWL_EXSTYLE, (style | WS_EX_NOACTIVATE.0) as i32);
+                    SetWindowLongW(hwnd, GWL_EXSTYLE, overlay_extended_style(style) as i32);
                 }
             }
             Self {
@@ -1038,19 +1053,18 @@ impl ChromeWindowObserver {
         }
     }
 
-    /// A Windows overlay stays hidden if its native activation policy could
+    /// A Windows overlay stays hidden if its native overlay styles could
     /// not be installed. Fullscreen and other platforms retain their policy.
     pub(super) fn activation_ready(&self) -> bool {
         #[cfg(target_os = "windows")]
         {
-            use windows::Win32::UI::WindowsAndMessaging::{
-                GWL_EXSTYLE, GetWindowLongW, WS_EX_NOACTIVATE,
-            };
+            use windows::Win32::UI::WindowsAndMessaging::{GWL_EXSTYLE, GetWindowLongW};
             self.registration.as_ref().is_some_and(|registration| {
                 !registration.overlay
                     || unsafe {
-                        GetWindowLongW(registration.hwnd, GWL_EXSTYLE) as u32 & WS_EX_NOACTIVATE.0
-                            != 0
+                        overlay_extended_style_ready(
+                            GetWindowLongW(registration.hwnd, GWL_EXSTYLE) as u32
+                        )
                     }
             })
         }
@@ -4247,6 +4261,23 @@ mod tests {
     use tokio::sync::Mutex;
 
     use super::*;
+
+    #[test]
+    fn overlay_extended_style_requires_toolwindow_and_noactivate_without_appwindow() {
+        const NOACTIVATE: u32 = 0x0800_0000;
+        const TOOLWINDOW: u32 = 0x0000_0080;
+        const APPWINDOW: u32 = 0x0004_0000;
+        // Topmost, transparent, layered, no-redirection bitmap.
+        const UNRELATED: u32 = 0x0028_0028;
+        let ready = UNRELATED | NOACTIVATE | TOOLWINDOW;
+
+        assert_eq!(overlay_extended_style(UNRELATED | APPWINDOW), ready);
+        assert_eq!(overlay_extended_style(ready), ready);
+        assert!(overlay_extended_style_ready(ready));
+        assert!(!overlay_extended_style_ready(ready & !NOACTIVATE));
+        assert!(!overlay_extended_style_ready(ready & !TOOLWINDOW));
+        assert!(!overlay_extended_style_ready(ready | APPWINDOW));
+    }
 
     #[test]
     fn outer_focus_return_preserves_origin_and_user_switches() {
