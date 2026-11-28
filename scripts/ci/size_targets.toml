@@ -132,43 +132,43 @@ markdown = 7
 # hud-ljhku.10.1 widget dock mechanism: measured growth against origin/main ef6827ac.
 [[inflight_allowances]]
 feature = "hud-ljhku.10.1"
-approval = "hud-ljhku.10 design field, owner-signed 2026-11-10 (funnel-10-dock-spec, option A); dock countdown layout owner-signed 2026-11-26T17:30:37Z"
+approval = "hud-ljhku.10 design field, owner-signed 2026-11-10 (funnel-10-dock-spec, option A); dock countdown layout owner-signed 2026-11-26"
 signed_at = "2026-11-10"
 decision = "hud-3n24e.32"
 target = "core"
-rust = 1102
-rust_test = 731
+rust = 1138
+rust_test = 790
 
 [[inflight_allowances]]
 feature = "hud-ljhku.10.1"
-approval = "hud-ljhku.10 design field, owner-signed 2026-11-10 (funnel-10-dock-spec, option A); dock countdown layout owner-signed 2026-11-26T17:30:37Z"
+approval = "hud-ljhku.10 design field, owner-signed 2026-11-10 (funnel-10-dock-spec, option A); dock countdown layout owner-signed 2026-11-26"
 signed_at = "2026-11-10"
 decision = "hud-3n24e.32"
 target = "config"
-rust = 208
-rust_test = 132
+rust = 235
+rust_test = 149
 
 [[inflight_allowances]]
 feature = "hud-ljhku.10.1"
-approval = "hud-ljhku.10 design field, owner-signed 2026-11-10 (funnel-10-dock-spec, option A); dock countdown layout owner-signed 2026-11-26T17:30:37Z"
+approval = "hud-ljhku.10 design field, owner-signed 2026-11-10 (funnel-10-dock-spec, option A); dock countdown layout owner-signed 2026-11-26"
 signed_at = "2026-11-10"
 decision = "hud-3n24e.32"
 target = "render"
-rust = 1195
-rust_test = 2992
+rust = 1261
+rust_test = 3015
 
 [[inflight_allowances]]
 feature = "hud-ljhku.10.1"
-approval = "hud-ljhku.10 design field, owner-signed 2026-11-10 (funnel-10-dock-spec, option A); dock countdown layout owner-signed 2026-11-26T17:30:37Z"
+approval = "hud-ljhku.10 design field, owner-signed 2026-11-10 (funnel-10-dock-spec, option A); dock countdown layout owner-signed 2026-11-26"
 signed_at = "2026-11-10"
 decision = "hud-3n24e.32"
 target = "ui_and_shell"
-rust = 1620
-rust_test = 2399
+rust = 1657
+rust_test = 2434
 
 [[inflight_allowances]]
 feature = "hud-ljhku.10.1"
-approval = "hud-ljhku.10 design field, owner-signed 2026-11-10 (funnel-10-dock-spec, option A); dock countdown layout owner-signed 2026-11-26T17:30:37Z"
+approval = "hud-ljhku.10 design field, owner-signed 2026-11-10 (funnel-10-dock-spec, option A); dock countdown layout owner-signed 2026-11-26"
 signed_at = "2026-11-10"
 decision = "hud-3n24e.32"
 target = "api"
@@ -176,7 +176,7 @@ rust_test = 719
 
 [[inflight_allowances]]
 feature = "hud-ljhku.10.1"
-approval = "hud-ljhku.10 design field, owner-signed 2026-11-10 (funnel-10-dock-spec, option A); dock countdown layout owner-signed 2026-11-26T17:30:37Z"
+approval = "hud-ljhku.10 design field, owner-signed 2026-11-10 (funnel-10-dock-spec, option A); dock countdown layout owner-signed 2026-11-26"
 signed_at = "2026-11-10"
 decision = "hud-3n24e.32"
 target = "integration"
