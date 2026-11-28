@@ -6522,6 +6522,8 @@ mod tests {
         click_at(&mut harness, point);
         wait_for_go_to(&mut harness, |scene| cue(scene) == Some(GoToCue::NotFound));
         assert_eq!(looks.load(SeqCst), 2, "one lookup for two close presses");
+        let switching = harness.app.state.window_go_to.switching_at_for_test();
+        assert!(switching.is_empty(), "a result drops the Switching wake");
         let until = harness.app.state.window_go_to.next_deadline().unwrap();
         assert!(
             !harness
@@ -7001,7 +7003,7 @@ mod tests {
                 .get(&card)
                 .is_some_and(|state| state.available)
         });
-        // A long delay keeps this deterministic: success lands before it.
+        // A long delay keeps this deterministic: the lookup lands before it.
         harness
             .app
             .state
@@ -7013,16 +7015,7 @@ mod tests {
         assert_eq!(harness.app.state.window_go_to.activations, 0);
         let cue = |h: &HeadlessEventLoopHarness| h.scene().overlay.notification_go_to[&card].cue;
         assert_eq!(cue(&harness), None);
-        let [due] = harness.app.state.window_go_to.switching_at_for_test()[..] else {
-            panic!("one Switching wake per press")
-        };
-
-        let check = harness.app.state.window_go_to.next_deadline().unwrap();
-        assert!(check < due, "the handoff check runs first");
-        foreground.store(1, SeqCst);
-        harness.app.settle_go_to(check);
-        assert_eq!(harness.app.state.window_go_to.activations, 1);
-        harness.app.settle_go_to(check);
+        // The finished lookup drops its wake; the handoff never shows Switching.
         assert!(
             harness
                 .app
@@ -7031,6 +7024,12 @@ mod tests {
                 .switching_at_for_test()
                 .is_empty()
         );
+
+        let check = harness.app.state.window_go_to.next_deadline().unwrap();
+        foreground.store(1, SeqCst);
+        harness.app.settle_go_to(check);
+        assert_eq!(harness.app.state.window_go_to.activations, 1);
+        harness.app.settle_go_to(check);
         assert_eq!(harness.app.state.window_go_to.next_deadline(), None);
         assert_eq!(cue(&harness), None);
         assert!(harness.scene().pending_actions.is_empty());

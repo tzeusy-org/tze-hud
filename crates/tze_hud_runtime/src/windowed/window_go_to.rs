@@ -475,28 +475,22 @@ impl WinitApp {
                 true
             });
         }
-        // One wake per press: reveal Switching only while its lookup or
-        // foreground handoff is still pending, and forget it otherwise.
+        // One wake per press: only a window lookup still pending at its
+        // deadline shows Switching. A finished lookup's result wins, and the
+        // handoff is bounded by FOREGROUND_CONFIRM_TIMEOUT.
         state.switching_at.retain(|id, (stamp, due)| {
-            let this = |press: &Press| press.id == *id && press.stamp == *stamp;
-            let pending = state
-                .presses
-                .iter()
-                .any(|pending| !pending.timed_out && this(&pending.press))
-                || state.handoffs.iter().any(|pending| this(&pending.press))
-                || completed.iter().any(|(press, _, _)| this(press));
-            if pending && now < *due {
-                return true;
-            }
-            if pending
+            let looking = state.presses.iter().any(|pending| {
+                !pending.timed_out && pending.press.id == *id && pending.press.stamp == *stamp
+            });
+            if looking
+                && now >= *due
                 && let Some(control) = scene.overlay.notification_go_to.get_mut(id)
                 && control.attempted_at_mono_us == Some(*stamp)
-                && control.cue.is_none()
             {
                 control.cue = Some(GoToCue::Switching);
                 changed = true;
             }
-            false
+            looking && now < *due
         });
         if changed {
             scene.bump_geometry_epoch();
