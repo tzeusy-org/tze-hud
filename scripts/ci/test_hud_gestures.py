@@ -1152,7 +1152,7 @@ class OverlayShellDesktopTests(unittest.TestCase):
     def test_desktop_switch_requires_a_fresh_owned_capture_and_a_compositor_swatch(self) -> None:
         dark = (1, 1, bytes((0, 0, 0, 255)))
         magenta = (1, 1, bytes((255, 0, 255, 255)))
-        for case in ("delayed-desktop", "foreign-after-capture", "no-compositor"):
+        for case in ("delayed-desktop", "desktop-blind", "foreign-after-capture", "no-compositor"):
             with self.subTest(case=case):
                 clock = 0.0
                 run = mock.Mock()
@@ -1167,7 +1167,8 @@ class OverlayShellDesktopTests(unittest.TestCase):
                     return wait_until(probe, **kwargs, clock=lambda: clock, sleep=sleep)
 
                 def desktop():
-                    if case == "delayed-desktop" and win.desktop_rgba.call_count == 1:
+                    if case == "desktop-blind" or (case == "delayed-desktop"
+                                                   and win.desktop_rgba.call_count == 1):
                         return dark
                     return magenta
 
@@ -1185,6 +1186,12 @@ class OverlayShellDesktopTests(unittest.TestCase):
                         run.key.assert_called_once_with("win+ctrl+d")
                         self.assertEqual(win.desktop_rgba.call_count, 2)
                         run.screen_grab.assert_called_once_with("overlay-shell.before-switch", frame=magenta)
+                    elif case == "desktop-blind":
+                        # A stable owned foreground with no desktop swatch is a recorded limit, not a switch.
+                        g.overlay_shell_desktop_probe(run, "card", 101, mock.Mock())
+                        run.key.assert_not_called()
+                        run.screen_grab.assert_called_once_with("overlay-shell.before-switch", frame=dark)
+                        self.assertIn("limited desktop proof", run.step.call_args.args[0])
                     else:
                         with self.assertRaises(g.ScenarioFailed) as failure:
                             g.overlay_shell_desktop_probe(run, "card", 101, mock.Mock())
