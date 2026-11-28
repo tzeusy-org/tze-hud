@@ -53,6 +53,18 @@ fn matches_title(title: &str, token: &str) -> bool {
         })
 }
 
+/// The image a window is matched by. Windows reports a classic console
+/// window as owned by its shell (`cmd.exe`, `pwsh.exe`), not by the
+/// `conhost.exe` that draws it, so the console class names conhost.
+#[cfg_attr(not(any(target_os = "windows", test)), allow(dead_code))]
+fn window_image(class: &str, process_image: String) -> String {
+    if class == "ConsoleWindowClass" {
+        "conhost.exe".to_owned()
+    } else {
+        process_image
+    }
+}
+
 fn eligible(window: &Window, current_pid: u32, apps: &[String], token: &str) -> bool {
     window.visible
         && !window.owned
@@ -191,8 +203,8 @@ pub(super) mod native {
         QueryFullProcessImageNameW,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
-        EnumWindows, GW_OWNER, GWL_EXSTYLE, GetWindow, GetWindowLongW, GetWindowTextW,
-        GetWindowThreadProcessId, IsIconic, IsWindowVisible, WS_EX_TOOLWINDOW,
+        EnumWindows, GW_OWNER, GWL_EXSTYLE, GetClassNameW, GetWindow, GetWindowLongW,
+        GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindowVisible, WS_EX_TOOLWINDOW,
     };
     use windows::core::PWSTR;
 
@@ -263,6 +275,9 @@ pub(super) mod native {
             result.ok()?;
             let path = String::from_utf16_lossy(&caption[..size as usize]);
             let image = path.rsplit(['\\', '/']).next()?.to_owned();
+            let mut class = [0u16; 64];
+            let class_len = GetClassNameW(hwnd, &mut class).max(0) as usize;
+            let image = super::window_image(&String::from_utf16_lossy(&class[..class_len]), image);
             let target = Target {
                 hwnd: hwnd.0 as isize,
                 pid,
@@ -337,8 +352,14 @@ mod tests {
         ] {
             assert_eq!(find(&[candidate(title)], token), Match::None, "{title}");
         }
+        let mut console = candidate("tzgo-7f3a");
+        console.image = window_image("ConsoleWindowClass", "cmd.exe".into());
+        assert!(
+            matches!(find(&[console], "tzgo-7f3a"), Match::One(_)),
+            "classic console"
+        );
         let mut browser = candidate("tzgo-7f3a · GitHub");
-        browser.image = "chrome.exe".into();
+        browser.image = window_image("Chrome_WidgetWin_1", "chrome.exe".into());
         let mut hidden = candidate("tzgo-7f3a");
         hidden.visible = false;
         let mut owned = candidate("tzgo-7f3a");
