@@ -2625,8 +2625,8 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                 let logical_key_str = logical_key_to_str(&event.logical_key);
                 let mods = winit_mods_to_keyboard_modifiers(self.state.modifiers);
                 let timestamp_mono_us = tze_hud_scene::MonoUs(nanoseconds_since_start() / 1_000);
+                // Held Ctrl+V pastes again on each key repeat, like Windows fields.
                 let paste_shortcut_pressed = event.state == ElementState::Pressed
-                    && !event.repeat
                     && (mods.ctrl || mods.meta)
                     && !mods.alt
                     && logical_key_str.eq_ignore_ascii_case("v");
