@@ -1,17 +1,22 @@
 //! Layout: where each widget sits and how long its content stays up, both
 //! live and saved to its `[[tabs.widgets]]` entry, and which zones a
 //! `[displays."<key>"]` table sends to another monitor, and where new
-//! questions appear (`[runtime] question_placement`).
+//! questions appear (`[runtime] question_placement`). Also shows the dock
+//! roster and edits its clear delay when configured.
 
 use std::collections::HashMap;
+use std::num::NonZeroU64;
 use std::sync::{Arc, Mutex as StdMutex};
 
 use tokio::sync::Mutex;
+use tze_hud_config::dock::DEFAULT_AUTO_CLEAR_MS;
 use tze_hud_config::{RuntimeUpdate, WidgetUpdate};
 use tze_hud_scene::QuestionPlacement;
 use tze_hud_scene::graph::SceneGraph;
 use tze_hud_scene::render_wake::RenderWakeNotifier;
 use tze_hud_scene::types::GeometryPolicy;
+
+use crate::appearance::Appearance;
 
 use super::super::displays::DisplayControl;
 use super::super::row::{BoxFuture, Control, Edit, Row, Section};
@@ -43,6 +48,7 @@ pub(crate) struct LayoutSection {
     display_options: StdMutex<HashMap<String, Vec<Option<String>>>>,
     /// Live and saved question placement (`None`: no runtime settings).
     runtime: Option<RuntimeControl>,
+    appearance: Option<Arc<Appearance>>,
 }
 
 /// One widget as the rows need it.
@@ -58,6 +64,8 @@ impl LayoutSection {
     const GEOMETRY: &'static str = ".geometry";
     const CLEAR: &'static str = ".clear";
     const ZONE: &'static str = "layout.zone.";
+    const DOCK_ACCEPTS: &'static str = "layout.dock_accepts";
+    const DOCK_CLEAR: &'static str = "layout.dock_auto_clear";
     pub(crate) const QUESTIONS: &'static str = "layout.question_placement";
 
     pub(crate) fn new(
@@ -77,12 +85,86 @@ impl LayoutSection {
             main_wake,
             display_options: StdMutex::default(),
             runtime: None,
+            appearance: None,
         }
     }
 
     pub(crate) fn with_runtime(mut self, runtime: Option<RuntimeControl>) -> Self {
         self.runtime = runtime;
         self
+    }
+
+    pub(crate) fn with_appearance(mut self, appearance: Option<Arc<Appearance>>) -> Self {
+        self.appearance = appearance;
+        self
+    }
+
+    fn dock_rows(&self, scene: &SceneGraph) -> Option<[Row; 2]> {
+        let current = scene.dock_auto_clear_ms()?;
+        let accepts: Vec<_> = scene.dock_types().map(|(name, _)| name).collect();
+        let options = dock_clear_options(current);
+        let selected = options.iter().position(|ms| *ms == current).unwrap();
+        Some([
+            Row::new(
+                Self::DOCK_ACCEPTS,
+                "Dock accepts",
+                Control::ReadOnly {
+                    text: if accepts.is_empty() {
+                        "None configured".into()
+                    } else {
+                        accepts.join(", ")
+                    },
+                    mono: false,
+                },
+            ),
+            Row::new(
+                Self::DOCK_CLEAR,
+                "Dock clears after",
+                Control::Choice {
+                    selected,
+                    options: options
+                        .iter()
+                        .map(|ms| clear_label(Some(ms.get())))
+                        .collect(),
+                },
+            )
+            .detail(
+                if self
+                    .runtime
+                    .as_ref()
+                    .is_some_and(|r| r.config_path.is_some())
+                {
+                    "Applies on the next publish · Saved to config"
+                } else {
+                    "Applies on the next publish · No config file; lasts until restart"
+                },
+            )
+            .resettable(current.get() != DEFAULT_AUTO_CLEAR_MS),
+        ])
+    }
+
+    async fn apply_dock_clear(&self, edit: Edit) -> Result<(), String> {
+        let appearance = self.appearance.as_ref().ok_or("No appearance settings")?;
+        let current = self
+            .scene
+            .lock()
+            .await
+            .dock_auto_clear_ms()
+            .ok_or("Dock is not configured")?;
+        let cap = match edit {
+            Edit::Choose(index) => *dock_clear_options(current)
+                .get(index)
+                .ok_or("No such duration")?,
+            Edit::Reset => NonZeroU64::new(DEFAULT_AUTO_CLEAR_MS).unwrap(),
+            _ => return Err("Choose a duration or Reset".into()),
+        };
+        appearance.set_dock_auto_clear_ms(cap).await?;
+        if let Some(path) = self.runtime.as_ref().and_then(|r| r.config_path.as_ref()) {
+            let saved = (cap.get() != DEFAULT_AUTO_CLEAR_MS).then_some(cap.get());
+            tze_hud_config::set_dock_auto_clear(path, saved)
+                .map_err(|e| format!("Applied until restart; not saved: {e}"))?;
+        }
+        Ok(())
     }
 
     fn question_row(&self) -> Option<Row> {
@@ -138,12 +220,12 @@ impl LayoutSection {
         Ok(())
     }
 
-    async fn widgets(&self) -> Vec<Widget> {
-        let scene = self.scene.lock().await;
+    fn widgets(scene: &SceneGraph) -> Vec<Widget> {
         let registry = &scene.widget_registry;
         let mut widgets: Vec<Widget> = registry
             .instances
             .values()
+            .filter(|i| !scene.is_dock_widget(&i.instance_name))
             .map(|i| Widget {
                 name: i.instance_name.clone(),
                 tab: scene
@@ -182,8 +264,8 @@ impl LayoutSection {
     }
 
     async fn find(&self, name: &str) -> Result<Widget, String> {
-        self.widgets()
-            .await
+        let scene = self.scene.lock().await;
+        Self::widgets(&scene)
             .into_iter()
             .find(|w| w.name == name)
             .ok_or_else(|| format!("No widget {name}"))
@@ -284,6 +366,19 @@ fn clear_options(current: Option<u64>) -> Vec<Option<u64>> {
     options
 }
 
+/// Keep preset indexes stable, with a custom current value at the end.
+fn dock_clear_options(current: NonZeroU64) -> Vec<NonZeroU64> {
+    let mut options: Vec<_> = CLEAR_CHOICES
+        .into_iter()
+        .flatten()
+        .filter_map(NonZeroU64::new)
+        .collect();
+    if !options.contains(&current) {
+        options.push(current);
+    }
+    options
+}
+
 impl Section for LayoutSection {
     fn id(&self) -> &'static str {
         "layout"
@@ -296,7 +391,12 @@ impl Section for LayoutSection {
     fn rows(&self) -> BoxFuture<'_, Vec<Row>> {
         Box::pin(async move {
             let mut rows: Vec<Row> = self.question_row().into_iter().collect();
-            for widget in self.widgets().await {
+            let (dock_rows, widgets) = {
+                let scene = self.scene.lock().await;
+                (self.dock_rows(&scene), Self::widgets(&scene))
+            };
+            rows.extend(dock_rows.into_iter().flatten());
+            for widget in widgets {
                 let id = format!("{}{}", Self::PREFIX, widget.name);
                 rows.push(
                     Row::new(
@@ -411,6 +511,9 @@ impl Section for LayoutSection {
             let unsupported = || format!("{row} does not support {described}");
             if row == Self::QUESTIONS {
                 return self.apply_question(edit);
+            }
+            if row == Self::DOCK_CLEAR {
+                return self.apply_dock_clear(edit).await;
             }
             if let Some(zone_row) = row.strip_prefix(Self::ZONE) {
                 let Edit::Choose(index) = edit else {
@@ -591,6 +694,197 @@ mod tests {
         );
         // Without runtime settings there is no row.
         assert!(section().question_row().is_none());
+    }
+
+    #[tokio::test]
+    async fn dock_clears_after_saves_next_publish_and_resets() {
+        use super::super::super::runtime::tests::fake;
+        use crate::appearance::DisplayReport;
+        use crate::scene_startup::{DockDisplay, run_scene_startup};
+        use tze_hud_config::raw::RawConfig;
+        use tze_hud_config::tokens::OsPreferences;
+        use tze_hud_scene::{Rect, TestClock};
+
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().join("tze_hud.toml");
+        let control = fake(&config, Arc::default(), None);
+        let src = r#"
+[runtime]
+profile = "full-display"
+[dock]
+accepts = ["progress-bar", "countdown", "progress-bar"] # keep roster
+auto_clear_ms = 8000
+[[tabs]]
+name = "Main"
+[[tabs.widgets]]
+widget_type = "progress-bar"
+instance_id = "dock"
+"#;
+        std::fs::write(&config, src).unwrap();
+        let raw: RawConfig = toml::from_str(src).unwrap();
+        let shared = Arc::new(Mutex::new(SceneGraph::new_with_clock(
+            1920.0,
+            1080.0,
+            Arc::new(TestClock::new(1_000)),
+        )));
+        let layout = LayoutSection::new(
+            shared.clone(),
+            Default::default(),
+            None,
+            None,
+            None,
+            Default::default(),
+        )
+        .with_runtime(Some(control));
+        assert!(layout.rows().await.iter().all(
+            |row| row.id != LayoutSection::DOCK_ACCEPTS && row.id != LayoutSection::DOCK_CLEAR
+        ));
+
+        let startup = {
+            let mut scene = shared.lock().await;
+            run_scene_startup(&raw, Some(dir.path()), &mut scene, OsPreferences::default()).unwrap()
+        };
+        let appearance = Arc::new(
+            Appearance::for_startup(
+                Some(&raw),
+                Some(&config),
+                startup.global_tokens,
+                shared.clone(),
+                Default::default(),
+                Default::default(),
+                OsPreferences::default,
+            )
+            .with_dock_policy(startup.dock),
+        );
+        let layout = layout.with_appearance(Some(appearance.clone()));
+        assert!(shared.lock().await.dock_projection().is_none());
+        let rows = layout.rows().await;
+        let row = |id| rows.iter().find(|row| row.id == id).unwrap();
+        let accepts = row(LayoutSection::DOCK_ACCEPTS);
+        let clear = row(LayoutSection::DOCK_CLEAR);
+        assert_eq!(accepts.label, "Dock accepts");
+        assert_eq!(
+            accepts.control,
+            Control::ReadOnly {
+                text: "progress-bar, countdown".into(),
+                mono: false,
+            }
+        );
+        assert!(layout.apply(&accepts.id, Edit::Reset).await.is_err());
+        assert_eq!(clear.label, "Dock clears after");
+        assert_eq!(
+            clear.control,
+            Control::Choice {
+                options: [
+                    "5 s", "10 s", "30 s", "1 min", "5 min", "15 min", "1 h", "8 s"
+                ]
+                .map(str::to_owned)
+                .to_vec(),
+                selected: 7,
+            }
+        );
+        assert!(clear.reset);
+        assert!(clear.detail.as_deref().unwrap().contains("Saved to config"));
+
+        let report = |target: &str, x| DisplayReport {
+            dock: Some(DockDisplay {
+                target: target.into(),
+                rect: Rect::new(x, 0.0, 1920.0, 1080.0),
+                scale: 1.0,
+            }),
+            ..Default::default()
+        };
+        appearance.queue_display_report(report("ONE", 0.0));
+        assert!(appearance.apply_display_report().await);
+        let publish = |scene: &mut SceneGraph| {
+            scene
+                .publish_to_dock("progress-bar", Default::default(), "agent", None, 0, 0)
+                .unwrap()
+        };
+        let expiry = |scene: &SceneGraph| {
+            let instance = scene.dock_instance("agent", "progress-bar").unwrap();
+            let record = &scene.widget_registry.active_publishes[&instance.instance_name][0];
+            scene.widget_expiry(record).unwrap() - record.published_at_wall_us
+        };
+        let (id, version) = {
+            let mut scene = shared.lock().await;
+            let id = publish(&mut scene);
+            assert_eq!(expiry(&scene), 8_000_000);
+            (id, scene.version)
+        };
+        let rows = layout.rows().await;
+        assert!(rows.iter().any(|row| row.id == "layout.dock.clear"));
+        assert!(!rows.iter().any(|row| row.id.starts_with("layout.dock:")));
+
+        layout
+            .apply(LayoutSection::DOCK_CLEAR, Edit::Choose(4))
+            .await
+            .unwrap();
+        let saved = || std::fs::read_to_string(&config).unwrap();
+        let saved_ms = || {
+            toml::from_str::<RawConfig>(&saved())
+                .unwrap()
+                .dock
+                .unwrap()
+                .auto_clear_ms
+        };
+        assert_eq!(saved_ms(), 300_000);
+        assert!(
+            saved().contains(
+                r#"accepts = ["progress-bar", "countdown", "progress-bar"] # keep roster"#
+            )
+        );
+        {
+            let mut scene = shared.lock().await;
+            assert_eq!(scene.version, version);
+            assert_eq!(expiry(&scene), 8_000_000);
+            assert!(scene.hold_dock_widget("agent", "progress-bar", 0));
+            assert_eq!(expiry(&scene), 8_000_000);
+            assert_eq!(publish(&mut scene), id);
+            assert_eq!(expiry(&scene), 300_000_000);
+        }
+        appearance.queue_display_report(report("TWO", -1920.0));
+        assert!(appearance.apply_display_report().await);
+        assert!(
+            appearance
+                .apply(HashMap::from([("dock.caption.width".into(), "100".into())]))
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            shared.lock().await.dock_auto_clear_ms().unwrap().get(),
+            300_000
+        );
+        layout
+            .apply(LayoutSection::DOCK_CLEAR, Edit::Reset)
+            .await
+            .unwrap();
+        assert!(!saved().contains("auto_clear_ms"));
+        assert_eq!(saved_ms(), DEFAULT_AUTO_CLEAR_MS);
+        assert!(
+            !layout
+                .rows()
+                .await
+                .iter()
+                .find(|row| row.id == LayoutSection::DOCK_CLEAR)
+                .unwrap()
+                .reset
+        );
+        {
+            let mut scene = shared.lock().await;
+            assert_eq!(expiry(&scene), 300_000_000);
+            assert_eq!(publish(&mut scene), id);
+            assert_eq!(expiry(&scene), DEFAULT_AUTO_CLEAR_MS * 1_000);
+        }
+        std::fs::write(&config, "[runtime]\nprofile = \"full-display\"\n").unwrap();
+        let error = layout
+            .apply(LayoutSection::DOCK_CLEAR, Edit::Choose(0))
+            .await
+            .unwrap_err();
+        assert!(error.starts_with("Applied until restart; not saved:"));
+        let scene = shared.lock().await;
+        assert_eq!(scene.dock_auto_clear_ms().unwrap().get(), 5_000);
+        assert_eq!(expiry(&scene), DEFAULT_AUTO_CLEAR_MS * 1_000);
     }
 
     #[test]

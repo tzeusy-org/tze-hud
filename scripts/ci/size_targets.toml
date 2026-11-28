@@ -129,6 +129,59 @@ decision = "hud-3n24e.32"
 target = "client_skills"
 markdown = 7
 
+# hud-ljhku.10.1 widget dock mechanism: measured growth against origin/main ef6827ac.
+[[inflight_allowances]]
+feature = "hud-ljhku.10.1"
+approval = "hud-ljhku.10 design field, owner-signed 2026-11-10 (funnel-10-dock-spec, option A); dock countdown layout owner-signed 2026-11-26T17:30:37Z"
+signed_at = "2026-11-10"
+decision = "hud-3n24e.32"
+target = "core"
+rust = 1186
+rust_test = 837
+
+[[inflight_allowances]]
+feature = "hud-ljhku.10.1"
+approval = "hud-ljhku.10 design field, owner-signed 2026-11-10 (funnel-10-dock-spec, option A); dock countdown layout owner-signed 2026-11-26T17:30:37Z"
+signed_at = "2026-11-10"
+decision = "hud-3n24e.32"
+target = "config"
+rust = 234
+rust_test = 151
+
+[[inflight_allowances]]
+feature = "hud-ljhku.10.1"
+approval = "hud-ljhku.10 design field, owner-signed 2026-11-10 (funnel-10-dock-spec, option A); dock countdown layout owner-signed 2026-11-26T17:30:37Z"
+signed_at = "2026-11-10"
+decision = "hud-3n24e.32"
+target = "render"
+rust = 1279
+rust_test = 3015
+
+[[inflight_allowances]]
+feature = "hud-ljhku.10.1"
+approval = "hud-ljhku.10 design field, owner-signed 2026-11-10 (funnel-10-dock-spec, option A); dock countdown layout owner-signed 2026-11-26T17:30:37Z"
+signed_at = "2026-11-10"
+decision = "hud-3n24e.32"
+target = "ui_and_shell"
+rust = 1659
+rust_test = 2445
+
+[[inflight_allowances]]
+feature = "hud-ljhku.10.1"
+approval = "hud-ljhku.10 design field, owner-signed 2026-11-10 (funnel-10-dock-spec, option A); dock countdown layout owner-signed 2026-11-26T17:30:37Z"
+signed_at = "2026-11-10"
+decision = "hud-3n24e.32"
+target = "api"
+rust_test = 719
+
+[[inflight_allowances]]
+feature = "hud-ljhku.10.1"
+approval = "hud-ljhku.10 design field, owner-signed 2026-11-10 (funnel-10-dock-spec, option A); dock countdown layout owner-signed 2026-11-26T17:30:37Z"
+signed_at = "2026-11-10"
+decision = "hud-3n24e.32"
+target = "integration"
+rust_test = 355
+
 # hud-ljhku.6 skill diet: the old skill bodies move intact to references/guide.md
 # and each SKILL.md becomes a <= 1,000-token formula table; measured against
 # origin/main ef6827ac.

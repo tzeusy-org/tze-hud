@@ -731,7 +731,7 @@ impl SceneGraph {
         )
     }
 
-    fn check_zone_publish_lease(
+    pub(crate) fn check_zone_publish_lease(
         &self,
         publisher_namespace: &str,
         lease_id: SceneId,
@@ -873,26 +873,8 @@ impl SceneGraph {
         lease_id: Option<SceneId>,
         publication_origin: Option<SceneId>,
     ) -> Result<bool, ValidationError> {
-        // ── Step 0: Safe mode ────────────────────────────────────────────────
-        // A Suspended lease means the human paused this agent; widget publishes
-        // are refused like zone publishes. (No lease at all is allowed here.)
-        if self.resolve_lease_state_for_namespace(publisher_namespace)
-            == Some(LeaseState::Suspended)
-        {
-            return Err(ValidationError::ZonePublishSafeModeActive {
-                namespace: publisher_namespace.to_string(),
-            });
-        }
-        // ── Step 1: Resolve the widget instance ──────────────────────────────
-        let instance_name = widget_name;
-        let instance = self
-            .widget_registry
-            .instances
-            .get(instance_name)
-            .ok_or_else(|| ValidationError::WidgetNotFound {
-                name: widget_name.to_string(),
-            })?
-            .clone();
+        self.check_widget_publish_safe_mode(publisher_namespace)?;
+        let instance = self.named_widget_instance(widget_name)?.clone();
 
         let definition = self
             .widget_registry
@@ -903,18 +885,48 @@ impl SceneGraph {
             })?
             .clone();
 
-        let is_ephemeral = definition.ephemeral;
+        let record = WidgetPublishRecord {
+            ttl_paused_us: 0,
+            widget_name: widget_name.to_string(),
+            publisher_namespace: publisher_namespace.to_string(),
+            params: Self::validate_widget_params_for_definition(widget_name, &definition, &params)?,
+            published_at_wall_us: self.now_wall_us(),
+            merge_key,
+            expires_at_wall_us,
+            transition_ms,
+            lease_id,
+            publication_origin: publication_origin.filter(|_| lease_id.is_none()),
+        };
+        self.commit_widget_publication(instance, &definition, record)
+    }
 
-        // Validate the whole map before recording or changing current_params.
-        let mut validated_params = self.validate_widget_params(widget_name, &params)?;
+    pub(crate) fn check_widget_publish_safe_mode(
+        &self,
+        publisher_namespace: &str,
+    ) -> Result<(), ValidationError> {
+        // A suspended lease means the human paused this agent. A caller can
+        // also publish without a lease.
+        if self.resolve_lease_state_for_namespace(publisher_namespace)
+            == Some(LeaseState::Suspended)
+        {
+            return Err(ValidationError::ZonePublishSafeModeActive {
+                namespace: publisher_namespace.to_string(),
+            });
+        }
+        Ok(())
+    }
 
-        // ── Step 3: Apply contention policy and record publication ────────────
+    pub(crate) fn commit_widget_publication(
+        &mut self,
+        mut instance: WidgetInstance,
+        definition: &WidgetDefinition,
+        mut record: WidgetPublishRecord,
+    ) -> Result<bool, ValidationError> {
+        let widget_name = &instance.instance_name;
         let contention_policy = instance
             .contention_override
             .unwrap_or(definition.default_contention_policy);
         let max_publishers = definition.max_publishers;
-
-        let now_us = self.clock.now_us();
 
         // Preserve an omitted deadline only within this publication's owner/key.
         // Store it in the record too, so later expiry/clear recomputation cannot
@@ -925,10 +937,10 @@ impl SceneGraph {
             .get(widget_name)
             .and_then(|records| {
                 records.iter().rev().find(|r| {
-                    r.publisher_namespace == publisher_namespace
-                        && r.merge_key == merge_key
-                        && r.lease_id == lease_id
-                        && r.publication_origin == publication_origin.filter(|_| lease_id.is_none())
+                    r.publisher_namespace == record.publisher_namespace
+                        && r.merge_key == record.merge_key
+                        && r.lease_id == record.lease_id
+                        && r.publication_origin == record.publication_origin
                 })
             });
         // Partial updates belong to this publication, not the shared instance.
@@ -944,7 +956,8 @@ impl SceneGraph {
                     continue;
                 }
                 if let Some(value) = previous.params.get(&decl.name) {
-                    validated_params
+                    record
+                        .params
                         .entry(decl.name.clone())
                         .or_insert_with(|| value.clone());
                 }
@@ -956,50 +969,41 @@ impl SceneGraph {
             {
                 continue;
             }
-            if let Some(WidgetParameterValue::Deadline(d)) = validated_params.get_mut(&decl.name) {
-                d.snapshot(now_us);
+            if let Some(WidgetParameterValue::Deadline(d)) = record.params.get_mut(&decl.name) {
+                d.snapshot(record.published_at_wall_us);
             } else if let Some(WidgetParameterValue::Deadline(d)) =
                 previous.and_then(|r| r.params.get(&decl.name))
             {
-                validated_params
+                record
+                    .params
                     .insert(decl.name.clone(), WidgetParameterValue::Deadline(d.clone()));
             } else if let WidgetParameterValue::Deadline(mut d) = decl.default_value.clone() {
                 d.counts_up = decl.deadline_counts_up();
-                d.snapshot(now_us);
-                validated_params.insert(decl.name.clone(), WidgetParameterValue::Deadline(d));
+                d.snapshot(record.published_at_wall_us);
+                record
+                    .params
+                    .insert(decl.name.clone(), WidgetParameterValue::Deadline(d));
             }
         }
-
-        let record = crate::types::WidgetPublishRecord {
-            ttl_paused_us: 0,
-            widget_name: widget_name.to_string(),
-            publisher_namespace: publisher_namespace.to_string(),
-            params: validated_params.clone(),
-            published_at_wall_us: now_us,
-            merge_key: merge_key.clone(),
-            expires_at_wall_us,
-            transition_ms,
-            lease_id,
-            publication_origin: publication_origin.filter(|_| lease_id.is_none()),
-        };
 
         let mut new_records = Vec::new();
         let mut slot = self
             .widget_registry
             .active_publishes
-            .entry(widget_name.to_string());
+            .entry(widget_name.clone());
         let publishes = match &mut slot {
             Entry::Occupied(entry) => entry.get_mut(),
             Entry::Vacant(_) => &mut new_records,
         };
 
+        let validated_params = record.params.clone();
         apply_contention(
             publishes,
             record,
             contention_policy,
             max_publishers,
             |max| ValidationError::WidgetMaxPublishersReached {
-                widget: widget_name.to_string(),
+                widget: widget_name.clone(),
                 max,
             },
             |_| false,
@@ -1009,23 +1013,16 @@ impl SceneGraph {
             entry.insert(new_records);
         }
 
-        // ── Step 4: Update current_params on the instance ─────────────────────
-        // Merge new validated params over existing current_params.
-        {
-            let inst = self
-                .widget_registry
-                .instances
-                .get_mut(instance_name)
-                .expect("instance_name existence verified above");
-            for (k, v) in &validated_params {
-                inst.current_params.insert(k.clone(), v.clone());
-            }
+        instance.current_params.extend(validated_params);
+        if let Some(current) = self.widget_registry.instances.get_mut(widget_name) {
+            *current = instance;
+        } else {
+            self.widget_registry.register_instance(instance);
         }
-
         self.prune_publication_orphans();
         self.version += 1;
         // Return true for durable, false for ephemeral (caller decides whether to send ack)
-        Ok(!is_ephemeral)
+        Ok(!definition.ephemeral)
     }
 
     /// Set a widget instance parameter from runtime-local behavior (non-agent publication).
@@ -1091,14 +1088,30 @@ impl SceneGraph {
         widget_name: &str,
         params: &std::collections::HashMap<String, WidgetParameterValue>,
     ) -> Result<std::collections::HashMap<String, WidgetParameterValue>, ValidationError> {
+        let instance = self.named_widget_instance(widget_name)?;
         let definition = self
             .widget_registry
-            .instances
-            .get(widget_name)
-            .and_then(|i| self.widget_registry.definitions.get(&i.widget_type_name))
+            .definitions
+            .get(&instance.widget_type_name)
             .ok_or_else(|| ValidationError::WidgetNotFound {
                 name: widget_name.to_string(),
             })?;
+        Self::validate_widget_params_for_definition(widget_name, definition, params)
+    }
+
+    fn named_widget_instance(&self, name: &str) -> Result<&WidgetInstance, ValidationError> {
+        self.widget_registry
+            .instances
+            .get(name)
+            .filter(|_| !self.is_dock_widget(name))
+            .ok_or_else(|| ValidationError::WidgetNotFound { name: name.into() })
+    }
+
+    pub(crate) fn validate_widget_params_for_definition(
+        widget_name: &str,
+        definition: &WidgetDefinition,
+        params: &HashMap<String, WidgetParameterValue>,
+    ) -> Result<HashMap<String, WidgetParameterValue>, ValidationError> {
         params
             .iter()
             .map(|(name, value)| {
@@ -1170,6 +1183,18 @@ impl SceneGraph {
 
     /// Widget counterpart of [`Self::hold_zone_publications`].
     pub fn hold_widget_publications(
+        &mut self,
+        widget: &str,
+        publisher_namespace: &str,
+        expires_at_wall_us: Option<u64>,
+    ) -> bool {
+        if self.is_dock_widget(widget) {
+            return false;
+        }
+        self.hold_widget_publications_inner(widget, publisher_namespace, expires_at_wall_us)
+    }
+
+    pub(crate) fn hold_widget_publications_inner(
         &mut self,
         widget: &str,
         publisher_namespace: &str,
@@ -1973,11 +1998,16 @@ impl SceneGraph {
         widget_name: &str,
         publisher_namespace: &str,
     ) -> Result<(), ValidationError> {
-        if !self.widget_registry.instances.contains_key(widget_name) {
-            return Err(ValidationError::WidgetNotFound {
-                name: widget_name.to_string(),
-            });
-        }
+        self.named_widget_instance(widget_name)?;
+        self.clear_widget_for_publisher_inner(widget_name, publisher_namespace);
+        Ok(())
+    }
+
+    pub(crate) fn clear_widget_for_publisher_inner(
+        &mut self,
+        widget_name: &str,
+        publisher_namespace: &str,
+    ) {
         if self.cancel_scheduled_widget_publishes(widget_name, publisher_namespace) > 0 {
             self.version += 1;
         }
@@ -1993,10 +2023,22 @@ impl SceneGraph {
                 self.version += 1;
             }
         }
-        Ok(())
     }
 
     pub(crate) fn refresh_widget_current_params(&mut self, widget_name: &str) {
+        if self
+            .widget_registry
+            .active_publishes
+            .get(widget_name)
+            .is_none_or(Vec::is_empty)
+            && self
+                .dock
+                .as_mut()
+                .is_some_and(|dock| dock.remove_instance(widget_name))
+        {
+            self.widget_registry.instances.remove(widget_name);
+            return;
+        }
         let tab_id = match self.widget_registry.instances.get(widget_name) {
             Some(instance) => instance.tab_id,
             None => return,
@@ -2135,6 +2177,9 @@ impl SceneGraph {
         instance_name: &str,
         auto_clear_ms: Option<u64>,
     ) -> bool {
+        if self.is_dock_widget(instance_name) {
+            return false;
+        }
         let Some(instance) = self.widget_registry.instances.get_mut(instance_name) else {
             return false;
         };

@@ -10,13 +10,17 @@ import hashlib
 import importlib.util
 import io
 import json
+import socket
 import tempfile
+import time
+import tomllib
 import unittest
 from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import hud_gestures as g  # noqa: E402
+import hud_x11_capture as x11  # noqa: E402
 import windows_overlay_gestures as overlay  # noqa: E402
 from windows_smoke import wait_until  # noqa: E402
 
@@ -48,6 +52,561 @@ STATUS["widgets"] = [{"s": "widget:main-status", "rect": {"x": 10, "y": 500, "w"
                       "hover_target": {"x": 290, "y": 500, "w": 40, "h": 32}, "tooltip_visible": False}]
 OWNED = dict(started_display=":91", target_display=":91", owned_pid=4242, status_pid=4242,
              url="http://127.0.0.1:5555/mcp")
+
+
+class DockTooltipWitnessTests(unittest.TestCase):
+    def test_scope_and_scratch_configuration(self) -> None:
+        self.assertNotIn(g.DOCK_TOOLTIP_SCENARIO, g.SCENARIOS)
+        self.assertEqual(list(g.EXPLICIT_SCENARIOS), [g.DOCK_TOOLTIP_SCENARIO, g.DOCK_PROGRESS_SCENARIO])
+        self.assertEqual(g.OVERLAY_SCENARIOS, ("tray", "go-to-session", "overlay-pointer", "tray-answer", "overlay-shell"))
+        original = g.CONFIG.read_text(encoding="utf-8")
+        scratch = tomllib.loads(g.dock_tooltip_config(original))
+        self.assertNotIn("dock", tomllib.loads(original))
+        self.assertEqual(scratch["dock"], {"accepts": ["countdown"], "max_rows": 2})
+        self.assertEqual(scratch["design_tokens"]["opacity.surface"], "1")
+        self.assertEqual(scratch["design_tokens"]["color.surface.container.high"], "#FFD000")
+        with self.assertRaises(g.Refused):
+            g.dock_tooltip_config(g.dock_tooltip_config(original))
+
+    def test_refuses_missing_binding_mixed_suite_empty_gate_and_nonlinux_before_start(self) -> None:
+        scenario = g.DOCK_TOOLTIP_SCENARIO
+        identity = ["--expected-dock-build-sha", "a" * 40]
+        cases = [
+            ("linux", [scenario]),
+            ("linux", [*identity, scenario, "portal-reading"]),
+            ("linux", [*identity, "--required=", scenario]),
+            ("linux", [*identity, "--window-mode", "overlay", scenario]),
+            ("linux", [*identity, "--mouse-receipt-diagnostics", scenario]),
+            ("linux", identity),
+            ("win32", [*identity, scenario]),
+        ]
+        for platform, args in cases:
+            with (self.subTest(platform=platform, args=args), mock.patch.object(g.sys, "platform", platform),
+                  mock.patch.object(g.Run, "start") as start, contextlib.redirect_stderr(io.StringIO())):
+                with self.assertRaises(SystemExit) as err:
+                    g.main(["--exe", "fake-hud", *args])
+                self.assertEqual(err.exception.code, 2)
+                start.assert_not_called()
+
+    def test_x11_reply_binds_fresh_request_and_live_processes(self) -> None:
+        capture = x11.Capture.__new__(x11.Capture)
+        capture.seq = 0
+        capture.pipe = mock.Mock()
+        capture.xvfb = mock.Mock()
+        capture.proc = mock.Mock()
+        capture.xvfb.poll.return_value = capture.proc.poll.return_value = None
+        rect, point = (0, 0, 1, 1), (10, 10)
+        reply = {"id": 1, "rect": list(rect), "pointer": list(point), "bytes": 4,
+                 "pointer_ns": [101, 102], "acquisition_ns": [103, 104]}
+        capture.receive = mock.Mock(return_value=(reply, b"1234"))
+        with (mock.patch.object(x11, "send") as send,
+              mock.patch.object(x11.time, "monotonic_ns", side_effect=[100, 105])):
+            self.assertEqual(capture.sample(rect, point, 120), (reply, b"1234"))
+            send.assert_called_once_with(capture.pipe, {"id": 1, "rect": rect, "point": point}, 120)
+        capture.receive.return_value = ({**reply, "id": 2}, b"1234")
+        with (mock.patch.object(x11, "send"), mock.patch.object(x11.time, "monotonic_ns", return_value=107)):
+            with self.assertRaisesRegex(x11.CaptureError, "timestamps"):
+                capture.sample(rect, point, 120)
+        capture.xvfb.poll.return_value = 1
+        with mock.patch.object(x11, "send") as send, self.assertRaisesRegex(x11.CaptureError, "owner"):
+            capture.sample(rect, point, 120)
+        send.assert_not_called()
+
+    def test_x11_readback_discards_padding_and_requires_complete_rows(self) -> None:
+        raw = bytes([3, 2, 1, 0, 9, 8, 7, 6, 123, 45, 67, 89])
+        self.assertEqual(x11.bgrx_to_rgba(raw, 2, 1, 12), bytes([1, 2, 3, 255, 7, 8, 9, 255]))
+        with self.assertRaises(x11.CaptureError):
+            x11.bgrx_to_rgba(raw, 2, 2, 12)
+        with self.assertRaises(x11.CaptureError):
+            x11.bgrx_to_rgba(raw, 2, 1, 6)
+
+    def test_x11_packet_deadline_and_malformed_length(self) -> None:
+        one, two = socket.socketpair()
+        with one, two:
+            now = time.monotonic_ns()
+            x11.send(one, {"id": 1}, now + x11.NS, b"test")
+            self.assertEqual(x11.packet(two, now + x11.NS), ({"id": 1}, b"test"))
+            with self.assertRaises(TimeoutError):
+                x11.packet(two, now)
+            one.sendall(x11.HEADER.pack(1, x11.MAX_PIXELS + 1))
+            with self.assertRaisesRegex(x11.CaptureError, "packet lengths"):
+                x11.packet(two, now + x11.NS)
+
+    def test_early_sample_requires_owned_arrival_clear_pixels_and_distinct_deadline(self) -> None:
+        move = (1_000_000_000, 1_030_000_000)
+        image = {"pointer_ns": [1_031_000_000, 1_032_000_000],
+                 "acquisition_ns": [1_034_000_000, 1_149_000_000], "popup": [True, False]}
+        self.assertTrue(g.dock_early_observation(image, move, 1))
+        self.assertFalse(g.dock_early_observation(image, move, 0))
+        self.assertFalse(g.dock_early_observation({**image, "popup": [True, None]}, move, 1))
+        self.assertFalse(g.dock_early_observation({**image, "pointer_ns": [1_029_000_000, 1_032_000_000]}, move, 1))
+        self.assertFalse(g.dock_early_observation({**image, "acquisition_ns": [1_034_000_000, 1_151_000_000]}, move, 1))
+
+    def test_joint_read_separates_real_popup_from_single_pixels_or_another_row(self) -> None:
+        fill = bytes((*g.DOCK_POPUP_RGB, 255))
+        ink = bytes((*g.DOCK_INK_RGB, 255))
+        width, height = 80, 48
+        frame = (20, 30, width, height)
+        pixels = bytearray(b"\x21\x29\x30\xff" * width * height)
+        one = (20, 30, width, 24)
+        two = (20, 54, width, 24)
+
+        def measure():
+            return [g.dock_popup_pixels(g.dock_crop(pixels, frame, roi), width)[0] for roi in (one, two)]
+
+        self.assertEqual(measure(), [False, False])
+        pixels[:4] = fill
+        self.assertEqual(measure(), [None, False])
+        for y in range(26, 45):
+            start = 4 * (y * width + 8)
+            pixels[start:start + 4 * 64] = fill * 64
+        self.assertEqual(measure(), [None, None])
+        for y in range(33, 37):
+            start = 4 * (y * width + 29)
+            pixels[start:start + 4 * 14] = ink * 14
+        self.assertEqual(measure(), [None, True])
+        verdict, evidence = g.dock_popup_pixels(g.dock_crop(pixels, frame, two), width)
+        self.assertIs(verdict, True)
+        self.assertEqual(evidence["ink"], 56)
+        self.assertEqual(len(evidence["ink_mask_sha256"]), 64)
+
+
+class PrivateDockClientTests(unittest.TestCase):
+    WINDOW = "2097154"
+
+    @staticmethod
+    def geometry(width, height):
+        return f"WINDOW=2097154\nX=0\nY=0\nWIDTH={width}\nHEIGHT={height}\nSCREEN=0\n"
+
+    def run_fixture(self):
+        run = object.__new__(g.Run)
+        run.owned_pids = [4242]
+        run.xvfb = mock.Mock(pid=3131)
+        run.xauthority = Path("/scratch/dock/Xauthority-91")
+        run.display = ":91"
+        run.dock_build_sha = "a" * 40
+        run.guard = mock.Mock()
+        run.expect = mock.Mock()
+        return run
+
+    def test_fits_only_the_owned_window_before_accepting_status(self):
+        run = self.run_fixture()
+        replies = [self.WINDOW + "\n", self.geometry(800, 600), "", "", "", self.geometry(1280, 800)]
+        outputs = [mock.Mock(stdout=reply) for reply in replies]
+        with mock.patch("hud_x11_capture.Capture") as capture, mock.patch.object(
+            g.subprocess, "run", side_effect=outputs
+        ) as command:
+            capture.return_value.close.return_value = {"returncode": 0, "forced": False, "reaped": True}
+            run.fit_private_dock_client()
+
+        capture.assert_called_once_with(run.xvfb, run.display, run.xauthority, configure=True)
+        capture.return_value.publish_client_geometry.assert_called_once_with(int(self.WINDOW), 4242)
+        capture.return_value.close.assert_called_once_with()
+        self.assertEqual([call.args[0] for call in command.call_args_list], [
+            ["xdotool", "search", "--onlyvisible", "--pid", "4242"],
+            ["xdotool", "getwindowgeometry", "--shell", self.WINDOW],
+            ["xdotool", "windowsize", "--sync", self.WINDOW, "1280", "800"],
+            ["xdotool", "windowmove", "--sync", self.WINDOW, "1", "1"],
+            ["xdotool", "windowmove", "--sync", self.WINDOW, "0", "0"],
+            ["xdotool", "getwindowgeometry", "--shell", self.WINDOW],
+        ])
+        self.assertEqual(run.guard.call_count, 1 + len(replies))
+        for call in command.call_args_list:
+            self.assertEqual(call.kwargs["env"]["DISPLAY"], run.display)
+            self.assertEqual(call.kwargs["env"]["XAUTHORITY"], str(run.xauthority))
+            self.assertEqual(call.kwargs["timeout"], 2)
+        reported = run.expect.call_args.args[1]
+        display = {"x": 0, "y": 0, "width": 1280, "height": 800, "primary": True}
+        actual = {"pid": 4242, "sha": run.dock_build_sha, "displays": [display]}
+        self.assertTrue(reported(actual))
+        self.assertFalse(reported({**actual, "pid": 1111}))
+        self.assertFalse(reported({**actual, "displays": [{**display, "width": 800}]}))
+
+    def test_ambiguous_client_refuses_before_resize_and_closes_the_probe(self):
+        run = self.run_fixture()
+        with mock.patch("hud_x11_capture.Capture") as capture, mock.patch.object(
+            g.subprocess, "run", return_value=mock.Mock(stdout="2097154\n2097155\n")
+        ) as command:
+            capture.return_value.close.return_value = {"returncode": 0, "forced": False, "reaped": True}
+            with self.assertRaisesRegex(g.Refused, "one visible X11 window"):
+                run.fit_private_dock_client()
+        command.assert_called_once()
+        capture.return_value.publish_client_geometry.assert_not_called()
+        capture.return_value.close.assert_called_once_with()
+        run.expect.assert_not_called()
+
+    def test_synthetic_geometry_targets_only_the_verified_client(self):
+        import hud_x11_capture as x11
+
+        client, root, pid, display = int(self.WINDOW), 1293, 4242, 123
+        item = ctypes.c_ulong(pid)
+        lib = mock.Mock()
+        lib.XInternAtom.return_value = 205
+
+        def property_reply(*args):
+            for field, value in zip(args[-5:], (6, 32, 1, 0, ctypes.addressof(item))):
+                field._obj.value = value
+            return 0
+
+        def geometry_reply(*args):
+            for field, value in zip(args[-7:], (root, 0, 0, 1280, 800, 0, 24)):
+                field._obj.value = value
+            return 1
+
+        lib.XGetWindowProperty.side_effect = property_reply
+        lib.XGetGeometry.side_effect = geometry_reply
+        lib.XTranslateCoordinates.return_value = 1
+        lib.XSendEvent.return_value = 1
+        x11.notify_client_geometry(lib, display, root, client, pid)
+
+        sent_display, window, propagate, mask, event = lib.XSendEvent.call_args.args
+        self.assertEqual((sent_display, window, propagate, mask), (display, client, 0, 1 << 17))
+        configure = event._obj.configure
+        self.assertEqual((configure.type, configure.send_event, configure.event, configure.window,
+                          configure.x, configure.y, configure.width, configure.height),
+                         (22, 1, client, client, 0, 0, 1280, 800))
+        lib.XSync.assert_called_once_with(display, 0)
+        lib.XSendEvent.reset_mock()
+        with self.assertRaisesRegex(x11.CaptureError, "matching client PID"):
+            x11.notify_client_geometry(lib, display, root, client, pid + 1)
+        lib.XSendEvent.assert_not_called()
+
+
+class DockProgressWitnessTests(unittest.TestCase):
+    def test_config_preserves_the_shipped_theme_and_other_tables(self) -> None:
+        original = g.CONFIG.read_text(encoding="utf-8")
+        changed = g.dock_progress_config(original)
+        self.assertTrue(changed.startswith(original))
+        scratch = tomllib.loads(changed)
+        self.assertEqual(scratch.pop("dock"), {"accepts": ["progress-bar"], "max_rows": 2})
+        self.assertEqual(scratch, tomllib.loads(original))
+        self.assertNotIn(g.DOCK_PROGRESS_SCENARIO, g.SCENARIOS)
+        with self.assertRaises(g.Refused):
+            g.dock_progress_config(changed)
+
+    def test_requires_explicit_linux_binding_and_dispatches_only_the_selected_witness(self) -> None:
+        progress, tooltip = g.DOCK_PROGRESS_SCENARIO, g.DOCK_TOOLTIP_SCENARIO
+        identity = ["--expected-dock-build-sha", "c" * 40]
+        cases = [
+            ("linux", [progress]),
+            ("linux", [*identity, progress, tooltip]),
+            ("linux", [*identity, "--required", tooltip, progress]),
+            ("linux", [*identity, "--required=", progress]),
+            ("linux", [*identity, "--injector", "sendinput", progress]),
+            ("linux", [*identity, "--window-mode", "overlay", progress]),
+            ("linux", [*identity, "--mouse-receipt-diagnostics", progress]),
+            ("win32", [*identity, "--injector", "xtest", progress]),
+        ]
+        for platform, args in cases:
+            with (self.subTest(platform=platform, args=args), mock.patch.object(g.sys, "platform", platform),
+                  mock.patch.object(g.Run, "start") as start, contextlib.redirect_stderr(io.StringIO())):
+                with self.assertRaises(SystemExit) as err:
+                    g.main(["--exe", "fake-hud", *args])
+                self.assertEqual(err.exception.code, 2)
+                start.assert_not_called()
+
+        for name in (progress, tooltip):
+            with (self.subTest(name=name), tempfile.TemporaryDirectory() as temp,
+                  mock.patch.object(g.sys, "platform", "linux"), mock.patch.object(g, "WINDOWS", False),
+                  mock.patch.object(g, "git_sha", return_value="c" * 12), mock.patch.object(g.Run, "start"),
+                  mock.patch.object(g.Run, "status", return_value={}),
+                  mock.patch.object(g, "run_scenarios", return_value=[{"scenario": name, "outcome": "PASS", "seconds": 0.1}]) as play,
+                  contextlib.redirect_stdout(io.StringIO())):
+                out = Path(temp) / "absent"
+                argv = ["--exe", "fake-hud", "--out", str(out), *identity, name]
+                self.assertEqual(g.main(argv), 0)
+                run, selected = play.call_args.args
+                self.assertEqual(selected, [name])
+                self.assertEqual((run.dock_scenario, run.dock_build_sha), (name, "c" * 40))
+                self.assertEqual(json.loads((out / "verdict.json").read_text())["required"], [name])
+
+    def test_tint_requires_paired_rgb_direction(self) -> None:
+        dark = bytes([22, 26, 32, 255])
+        bright = bytes([36, 40, 45, 255])
+        red_only = bytes([45, 26, 32, 255])
+        alpha_only = bytes([22, 26, 32, 240])
+        self.assertEqual(g.dock_progress_tint(dark * 4, bright + red_only + alpha_only + dark), (1, 4))
+        self.assertEqual(g.dock_progress_tint(dark * 4, bright * 4), (4, 4))
+        with self.assertRaises(ValueError):
+            g.dock_progress_tint(dark, bright[:3])
+
+    def test_real_scenario_oracles_with_mocked_native_and_transport_boundaries(self) -> None:
+        screen = (400, 300)
+        frame = (50, 60, 128, 48)
+        blank, card, tint = (bytes(rgb) for rgb in ([63, 63, 89, 255], [22, 26, 32, 255], [39, 43, 49, 255]))
+        background = blank * 128 * 8
+        baseline = card * 128 * 20 + background + card * 128 * 20
+        hovered = tint * 128 * 20 + background + card * 128 * 20
+        removed = blank * 128 * 20 + background + card * 128 * 20
+        sha = "c" * 40
+
+        def status(rows, *, lit=False, b_identity="widget:b"):
+            b = {"session": "dock-progress-b", "s": b_identity, "display": 0,
+                 "rect": {"x": 50, "y": 88, "w": 128, "h": 20}, "tooltip_visible": False}
+            a = {"session": "dock-progress-a", "s": "widget:a", "display": 0,
+                 "rect": {"x": 50, "y": 60, "w": 128, "h": 20}, "tooltip_visible": lit}
+            return {"pid": 4242, "sha": sha, "displays": [{"primary": True, "x": 0, "y": 0,
+                    "width": screen[0], "height": screen[1]}], "window_activations": 0,
+                    "dock": {"rows": rows, "capacity": 2, "overflow": [], "scale": 1},
+                    "widgets": {0: [], 1: [b], 2: [a, b]}[rows]}
+
+        faults = {
+            "pass": None,
+            "early": "early sample was late or changed",
+            "premature": "changed before its authored dwell",
+            "peer_pixels": "changed the peer B card pixels",
+            "short_a_ttl": "natural expiry could overlap",
+            "short_b_ttl": "natural expiry could overlap",
+            "slow_delete": "DELETE did not complete within one second",
+            "peer_identity": "preserve B's exact drawn identity",
+        }
+        for fault, expected_failure in faults.items():
+            with self.subTest(fault=fault), tempfile.TemporaryDirectory() as temp:
+                out = Path(temp)
+                run = mock.Mock()
+                run.out, run.pid, run.dock_build_sha, run.display = out, 4242, sha, ":91"
+                run.exe = out / "fake-hud"
+                run.exe.write_bytes(b"pure synthetic binary identity")
+                binary_hash = hashlib.sha256(run.exe.read_bytes()).hexdigest()
+                run.hud.poll.return_value = None
+                run.settle.side_effect = [status(0), status(2)]
+                run.status.side_effect = [status(2, lit=True),
+                                          status(1, b_identity="widget:new" if fault == "peer_identity" else "widget:b")]
+                run.inj.calls = 2
+                clock = 1_000_000_000
+                motion = 0
+
+                def monotonic_ns():
+                    nonlocal clock
+                    clock += 1_000_000
+                    return clock
+
+                def move(x, y):
+                    nonlocal motion
+                    if (x, y) != (10, 10):
+                        motion = clock
+
+                def release_a():
+                    nonlocal clock
+                    if fault == "slow_delete":
+                        clock += x11.NS
+                    return 202
+
+                run.glide.side_effect = move
+                a, b = mock.Mock(session="temporary-auth-a"), mock.Mock(session="temporary-auth-b")
+                a.call.return_value = False, {"ok": True,
+                                              "expires_in_ms": 1000 if fault == "short_a_ttl" else 60_000}
+                b.call.return_value = False, {"ok": True,
+                                              "expires_in_ms": 1000 if fault == "short_b_ttl" else 60_000}
+                a.end.side_effect = release_a
+                b.end.return_value = 202
+                capture = mock.Mock(ready={"peer": {"pid": 2479}, "root": 3})
+                capture.close.return_value = {"returncode": 0, "forced": False, "reaped": True}
+                images = iter(("blank", "baseline", "early", "due", "released"))
+
+                def sample(rect, point, _deadline):
+                    nonlocal clock
+                    phase = next(images)
+                    points = {"blank": (10, 10), "baseline": (10, 10)}
+                    self.assertEqual(point, points.get(phase, (114, 70)))
+                    self.assertEqual(rect, (0, 0, *screen) if phase == "blank" else frame)
+                    if phase == "due":
+                        clock = motion + (160_000_000 if fault == "premature" else 220_000_000)
+                    pixels = {"blank": blank * screen[0] * screen[1], "baseline": baseline,
+                              "early": hovered if fault == "early" else baseline,
+                              "due": hovered[:-4] + tint if fault == "peer_pixels" else hovered,
+                              "released": removed}[phase]
+                    pointer_at = monotonic_ns()
+                    return {"pointer_ns": [pointer_at, pointer_at + 10],
+                            "acquisition_ns": [pointer_at + 20, pointer_at + 30]}, pixels
+
+                capture.sample.side_effect = sample
+                with (mock.patch.object(g, "SCREEN", screen), mock.patch.object(g.time, "monotonic_ns", monotonic_ns),
+                      mock.patch.object(g, "dock_build_evidence", return_value={"exe_sha256": binary_hash}),
+                      mock.patch.object(g, "SessionSmoke", side_effect=[a, b]),
+                      mock.patch.object(x11, "Capture", return_value=capture)):
+                    if expected_failure is None:
+                        g.scenario_dock_progress_hover(run)
+                        self.assertEqual(run.glide.call_args_list, [mock.call(10, 10), mock.call(114, 70)])
+                    else:
+                        with self.assertRaisesRegex(g.ScenarioFailed, expected_failure):
+                            g.scenario_dock_progress_hover(run)
+                a.end.assert_called_once_with()
+                b.end.assert_called_once_with()
+                capture.close.assert_called_once_with()
+                raw = (out / f"{g.DOCK_PROGRESS_SCENARIO}.json").read_text()
+                self.assertNotIn("temporary-auth", raw)
+                self.assertNotIn("widget:b", raw)
+                report = json.loads(raw)
+                self.assertEqual(report["verdict"], "PASS" if expected_failure is None else "FAIL")
+                if expected_failure is None:
+                    self.assertTrue(report["same_b_instance_and_rect"])
+                    self.assertEqual(report["cleanup"]["sessions"], [202, 202])
+                    self.assertIn("a-exit", report["images"])
+                    self.assertLess(report["exit_deadline_ns"], report["earliest_expiry_bound_ns"])
+                if fault in {"short_a_ttl", "short_b_ttl"}:
+                    self.assertNotIn("a_delete", report)
+                    self.assertNotIn("a-exit", report["images"])
+                    self.assertGreaterEqual(report["exit_deadline_ns"], report["earliest_expiry_bound_ns"])
+
+
+class WindowsDockProgressWitnessTests(unittest.TestCase):
+    def test_windows_explicit_route_and_host_refusal(self) -> None:
+        name, sha = g.DOCK_PROGRESS_SCENARIO, "b" * 40
+        binding = ["--expected-dock-build-sha", sha]
+        with (mock.patch.object(g, "WINDOWS", True), mock.patch.object(g.sys, "platform", "win32"),
+              mock.patch.object(g, "WIN", mock.Mock()), mock.patch.object(g.Run, "start") as start,
+              contextlib.redirect_stderr(io.StringIO()), contextlib.redirect_stdout(io.StringIO())):
+            for flags in ([name], [*binding, "--required=", name], [*binding, name, "portal-reading"],
+                          [*binding, "--window-mode", "overlay", name], [*binding, g.DOCK_TOOLTIP_SCENARIO],
+                          [*binding, "--mouse-receipt-diagnostics", name]):
+                with self.subTest(flags=flags), self.assertRaises(SystemExit) as error:
+                    g.main(["--exe", "fake", *flags])
+                self.assertEqual(error.exception.code, 2)
+            start.assert_not_called()
+            with (tempfile.TemporaryDirectory() as tmp, mock.patch.object(g, "git_sha", return_value=sha[:12]),
+                  mock.patch.object(g.Run, "status", return_value={"pid": 4242}),
+                  mock.patch.object(g, "scenario_windows_dock_progress_hover") as proof):
+                out = Path(tmp) / "absent"
+                g.WIN.screen_size.return_value = (1024, 768)
+                self.assertEqual(g.main(["--exe", "fake", "--out", str(out), *binding, name]), 0)
+                selected = proof.call_args.args[0]
+                self.assertEqual((selected.injector, selected.dock_scenario, selected.dock_build_sha),
+                                 ("sendinput", name, sha))
+                timeline = json.loads((out / "timeline.json").read_text())
+                self.assertEqual(timeline["screen"], [1024, 768])
+                self.assertEqual([(item["scenario"], item["outcome"]) for item in timeline["results"]], [(name, "PASS")])
+        with (mock.patch.object(g, "WINDOWS", True),
+              mock.patch.dict(g.os.environ, {"GITHUB_ACTIONS": "true", "RUNNER_ENVIRONMENT": "self-hosted"}),
+              mock.patch.object(g.tempfile, "mkdtemp") as scratch):
+            run = g.Run(Path("unused"), Path("unused"), injector="sendinput", dock_build_sha=sha, dock_scenario=name)
+            with self.assertRaisesRegex(g.Refused, "GitHub-hosted"):
+                run.start()
+            scratch.assert_not_called()
+
+    def test_windows_progress_teardown_leaves_unowned_process_alone(self) -> None:
+        run = g.Run(Path("unused"), Path("unused"), injector="sendinput", dock_build_sha="c" * 40)
+        run.hud = mock.Mock()
+        run.hud.poll.return_value = 0
+        run.owned_pids = [4242]
+        with (mock.patch.object(run, "_strays", return_value=[2525]),
+              mock.patch.object(g, "kill_pid") as kill, mock.patch.object(g, "pid_alive") as pid_alive):
+            self.assertEqual(run.stop(), ["unexpected unowned HUD"])
+            kill.assert_not_called()
+            pid_alive.assert_not_called()
+
+    def test_windows_progress_requires_native_ownership_and_independent_live_state(self) -> None:
+        sha = "c" * 40
+        owner = {"pid": 4242, "hwnd": 111}
+        screen = (1024, 768)
+        outside, inside = (10, 10), (273, 113)
+        fit = 0.35 * screen[0] / (96 + 8 + 52 * 6.4)
+
+        def status(rows, *, a_active=False, b_active=False, peer="widget:b", present=2):
+            a = {"session": "dock-progress-a", "s": "widget:a", "display": 0,
+                 "rect": {"x": 137, "y": 92, "w": 273, "h": 43}, "tooltip_visible": a_active}
+            b = {"session": "dock-progress-b", "s": peer, "display": 0,
+                 "rect": {"x": 137, "y": 141, "w": 273, "h": 43}, "tooltip_visible": b_active}
+            return {"pid": 4242, "sha": sha, "displays": [{"primary": True, "x": 0, "y": 0,
+                    "width": 1024, "height": 768}], "window_activations": 0, "frames_presented": present,
+                    "dock": {"rows": rows, "capacity": 2, "overflow": [], "scale": fit},
+                    "widgets": {0: [], 1: [b], 2: [a, b]}[rows]}
+
+        faults = {
+            "pass": None,
+            "wrong_build": "PID, build or display changed",
+            "wrong_geometry": "PID, build or display changed",
+            "wrong_fit": "measured capacity and fit",
+            "foreign_point": "before SendInput",
+            "lost_point_after_send": "before cursor arrival|verified physical cursor arrival",
+            "zero_move": "submitted once in full",
+            "shared_scope": "shared a scope",
+            "shared_instance": "independently scoped",
+            "peer_lit": "changed B",
+            "no_presentation": "never presented an A-only hover",
+            "short_ttl": "natural expiry could overlap",
+            "late_delete": "DELETE in one second",
+            "replaced_peer": "changed the peer or cursor",
+            "no_exit_presentation": "exit left A drawn",
+        }
+        for fault, failure in faults.items():
+            with self.subTest(fault=fault), tempfile.TemporaryDirectory() as tmp:
+                out = Path(tmp)
+                run = mock.Mock(pid=4242, dock_build_sha=sha, out=out, exe=out / "fake.exe")
+                run.exe.write_bytes(b"fake exact executable")
+                run.hud.poll.return_value = None
+                run.inj.calls = []
+                win = mock.Mock()
+                win.screen_size.return_value, win.fullscreen_window.return_value = screen, owner["hwnd"]
+                win.system_dpi.return_value, win.foreground_identity.return_value = 96, owner
+                win.cursor_position.return_value = outside
+                win.window_at.side_effect = lambda p: None if p == inside and (fault == "foreign_point" or (
+                    fault == "lost_point_after_send" and len(run.inj.calls) == 2)) else owner
+                a = mock.Mock(session="private-a")
+                b = mock.Mock(session=a.session if fault == "shared_scope" else "private-b")
+                for session in (a, b):
+                    session.call.return_value = False, {"ok": True, "expires_in_ms": 1000 if fault == "short_ttl" else 60_000}
+                    session.end.return_value = 202
+                empty = status(0)
+                if fault == "wrong_build":
+                    empty["sha"] = "d" * 40
+                if fault == "wrong_geometry":
+                    empty["displays"][0]["width"] = 1280
+                if fault == "wrong_fit":
+                    empty["dock"]["scale"] = 1.0
+                run.settle.side_effect = [empty, status(2, peer="widget:a" if fault == "shared_instance" else "widget:b")]
+                hover = status(2, a_active=True, b_active=fault == "peer_lit", present=2 if fault == "no_presentation" else 3)
+                released = status(1, peer="widget:new-b" if fault == "replaced_peer" else "widget:b",
+                                  present=3 if fault == "no_exit_presentation" else 4)
+                observed = [hover, released]
+                if fault == "no_exit_presentation":
+                    observed += [released] * 100
+                run.status.side_effect = None if fault == "no_presentation" else observed
+                run.status.return_value = hover
+                clock = 10_000_000_000
+
+                def advance(seconds):
+                    nonlocal clock
+                    clock += int(seconds * 1_000_000_000)
+
+                def move(x, y, *, before_send):
+                    before_send()
+                    run.inj.calls.append({"what": f"move {x},{y}", "requested": 1,
+                                          "sent": 0 if fault == "zero_move" else 1})
+                    win.cursor_position.return_value = (x, y)
+                    advance(0.01)
+
+                def release():
+                    if fault == "late_delete":
+                        advance(1.001)
+                    return 202
+
+                run.inj.move_abs.side_effect = move
+                a.end.side_effect = release
+                with (mock.patch.object(g, "WIN", win), mock.patch.object(g, "SessionSmoke", side_effect=[a, b]),
+                      mock.patch.object(g.time, "monotonic_ns", side_effect=lambda: clock),
+                      mock.patch.object(g.time, "sleep", side_effect=advance)):
+                    if failure is None:
+                        g.scenario_windows_dock_progress_hover(run)
+                    else:
+                        with self.assertRaisesRegex(g.ScenarioFailed, failure):
+                            g.scenario_windows_dock_progress_hover(run)
+                raw = (out / f"{g.DOCK_PROGRESS_SCENARIO}.json").read_text()
+                self.assertNotIn("private-a", raw)
+                self.assertNotIn("widget:b", raw)
+                report = json.loads(raw)
+                self.assertEqual(report["verdict"], "FAIL" if failure else "PASS")
+                if failure is None:
+                    self.assertEqual([entry["point"] for entry in report["moves"]], [list(outside), list(inside)])
+                    self.assertEqual(report["hover_flags"], [True, False])
+                    self.assertEqual(report["deletes"], [202, 202])
+                    self.assertEqual((report["hover_presented"], report["exit_presented"]), (3, 4))
+                    self.assertLess(report["exit_deadline_ns"], report["earliest_expiry_bound_ns"])
+                    self.assertTrue(report["same_b_instance_and_rect"])
+                if fault in {"short_ttl", "no_presentation"}:
+                    self.assertNotIn("a_delete", report)
+                if fault == "foreign_point":
+                    self.assertEqual(len(run.inj.calls), 1)
 
 
 class GuardTests(unittest.TestCase):

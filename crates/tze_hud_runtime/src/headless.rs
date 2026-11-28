@@ -249,7 +249,23 @@ impl HeadlessRuntime {
                         None,
                         &mut scene,
                         tze_hud_config::tokens::OsPreferences::default(),
-                    );
+                    )?;
+                    if let Some(dock) = &startup_result.dock {
+                        let display = crate::scene_startup::DockDisplay {
+                            target: "HEADLESS".into(),
+                            rect: scene.display_area,
+                            scale: 1.0,
+                        };
+                        compositor.set_display_layout(tze_hud_compositor::DisplayLayout::new(
+                            vec![tze_hud_compositor::DisplayRect {
+                                name: display.target.clone(),
+                                rect: display.rect,
+                                primary: true,
+                            }],
+                            &Default::default(),
+                        ));
+                        dock.project(&mut scene, &startup_result.global_tokens, Some(&display));
+                    }
                     // Register widget SVG assets with the headless widget renderer,
                     // mirroring the windowed runtime so bundled SVG-based widgets render correctly.
                     process_pending_widget_svgs(

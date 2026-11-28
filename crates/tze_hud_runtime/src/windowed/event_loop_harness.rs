@@ -143,6 +143,8 @@ impl WindowedRuntimeState {
             overlay_capturing: false,
             static_hit_regions: Vec::new(),
             widget_hover_trackers: HashMap::new(),
+            dock_tooltip: super::dock_tooltip::DockTooltipVisit::default(),
+            dock_param_hover: super::dock_param_hover::DockParamHover::default(),
             pending_widget_svgs: Vec::new(),
             startup_diagnostics: None,
             text_fit: Default::default(),
@@ -323,7 +325,7 @@ impl HeadlessEventLoopHarness {
             .as_ref()
             .map(tze_hud_config::displays::zone_display_assignments)
             .unwrap_or_default();
-        let global_tokens = match &raw {
+        let (global_tokens, dock_policy) = match &raw {
             Some(raw) => {
                 let config_parent = cfg
                     .config_file_path
@@ -334,18 +336,18 @@ impl HeadlessEventLoopHarness {
                     config_parent,
                     &mut scene,
                     tze_hud_config::tokens::OsPreferences::default(),
-                );
+                )?;
                 for (widget_type, svg_file, svg) in &startup.widget_svg_assets {
                     state
                         .text_fit
                         .register_widget_svg(widget_type, svg_file, svg);
                 }
                 state.pending_widget_svgs.extend(startup.widget_svg_assets);
-                startup.global_tokens
+                (startup.global_tokens, startup.dock)
             }
             None => {
                 scene.zone_registry = tze_hud_scene::types::ZoneRegistry::with_defaults();
-                std::collections::HashMap::new()
+                (std::collections::HashMap::new(), None)
             }
         };
         let scene_handle = {
@@ -446,16 +448,19 @@ impl HeadlessEventLoopHarness {
         );
 
         let panel_scene = Arc::clone(&state.shared_state.lock().await.scene);
-        let appearance = Arc::new(crate::appearance::Appearance::for_startup(
-            raw.as_ref(),
-            cfg.config_file_path.as_deref().map(std::path::Path::new),
-            global_tokens.clone(),
-            Arc::clone(&panel_scene),
-            render_wake.clone(),
-            state.wake.main_work_notifier(),
-            // Harnesses never depend on the host's Windows preferences.
-            tze_hud_config::tokens::OsPreferences::default,
-        ));
+        let appearance = Arc::new(
+            crate::appearance::Appearance::for_startup(
+                raw.as_ref(),
+                cfg.config_file_path.as_deref().map(std::path::Path::new),
+                global_tokens.clone(),
+                Arc::clone(&panel_scene),
+                render_wake.clone(),
+                state.wake.main_work_notifier(),
+                // Harnesses never depend on the host's Windows preferences.
+                tze_hud_config::tokens::OsPreferences::default,
+            )
+            .with_dock_policy(dock_policy),
+        );
         state.appearance = Some(Arc::clone(&appearance));
         let clipboard: Arc<std::sync::Mutex<Vec<String>>> = Arc::default();
         let effects: Arc<std::sync::Mutex<Vec<String>>> = Arc::default();
@@ -690,20 +695,33 @@ impl HeadlessEventLoopHarness {
         &mut self,
         monitors: Vec<(tze_hud_compositor::DisplayRect, String)>,
     ) {
+        self.set_display_topology_with_scales(
+            monitors
+                .into_iter()
+                .map(|(rect, key)| (rect, key, 1.0))
+                .collect(),
+        );
+    }
+
+    fn set_display_topology_with_scales(
+        &mut self,
+        monitors: Vec<(tze_hud_compositor::DisplayRect, String, f64)>,
+    ) {
         use super::displays::{KeyedMonitor, MonitorSpec};
         use super::monitor_identity::DisplayKey;
-        assert_eq!(monitors.iter().filter(|(m, _)| m.primary).count(), 1);
+        assert_eq!(monitors.iter().filter(|(m, _, _)| m.primary).count(), 1);
         let mut keyed = Vec::new();
         let mut primary = None;
         let mut secondaries = Vec::new();
-        for (monitor, key) in monitors {
+        for (monitor, key, scale) in monitors {
             let spec = MonitorSpec {
                 name: monitor.name.clone(),
                 x: monitor.rect.x as i32,
                 y: monitor.rect.y as i32,
                 width: monitor.rect.width as u32,
                 height: monitor.rect.height as u32,
-                scale: 1.0,
+                scale,
+                dock_bounds_observed: true,
             };
             keyed.push(KeyedMonitor {
                 name: monitor.name,
@@ -1361,6 +1379,7 @@ impl HeadlessEventLoopHarness {
             width: 1920,
             height: 1080,
             scale: 1.0,
+            dock_bounds_observed: true,
         };
         self.app.state.zone_displays = configured;
         self.app
@@ -1529,6 +1548,400 @@ mod tests {
     mod question_displays;
     use tze_hud_input::{KeyboardModifiers, RawCharacterEvent, RawKeyDownEvent, RawKeyUpEvent};
     use tze_hud_scene::MonoUs;
+
+    #[tokio::test]
+    async fn network_startup_rejects_dock_types_that_cannot_fit() {
+        use tze_hud_config::dock::DockValidationErrors;
+        use tze_hud_scene::config::ConfigErrorCode;
+
+        let config = r#"
+            [runtime]
+            profile = "overlay"
+            [dock]
+            accepts = ["gauge", "status-indicator", "unloaded-type"]
+            [[tabs]]
+            name = "Main"
+        "#;
+        for (overrides, gauge_height) in [
+            ("", 132),
+            (
+                "[design_tokens]\n\"gauge.width\" = '72'\n\"gauge.height\" = '224'\n",
+                224,
+            ),
+        ] {
+            let cfg = super::super::WindowedConfig {
+                config_toml: Some(format!("{config}{overrides}")),
+                ..Default::default()
+            };
+            let Err(error) = HeadlessEventLoopHarness::with_network(
+                cfg,
+                Arc::new(tze_hud_scene::TestClock::new(1_000)),
+            )
+            .await
+            else {
+                panic!("invalid dock selection reached network startup");
+            };
+            let errors = &error.downcast_ref::<DockValidationErrors>().unwrap().0;
+            assert_eq!(errors.len(), 3);
+            assert_eq!(errors[2].code, ConfigErrorCode::UnknownWidgetType);
+            for (error, got) in errors.iter().zip([
+                format!("gauge ({gauge_height} dp, limit 69.333 dp)"),
+                "status-indicator (124 dp, limit 69.333 dp)".into(),
+                "unloaded-type".into(),
+            ]) {
+                assert_eq!(error.field_path, "dock.accepts");
+                assert_eq!(error.got, got);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn dock_mcp_routes_follow_the_accepted_monitor() {
+        use serde_json::{Value, json};
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tze_hud_scene::{Rect, TestClock, WidgetParameterValue};
+
+        async fn call(addr: SocketAddr, name: &str, arguments: Value) -> (Value, bool) {
+            let body = json!({
+                "jsonrpc":"2.0", "id":1, "method":"tools/call", "params":{"name":name, "arguments":arguments}
+            })
+            .to_string();
+            let mut conn = tokio::net::TcpStream::connect(addr).await.unwrap();
+            let request = format!(
+                "POST / HTTP/1.0\r\nContent-Type: application/json\r\nAuthorization: Bearer dock-fixture-key\r\nContent-Length: {}\r\n\r\n{body}",
+                body.len()
+            );
+            conn.write_all(request.as_bytes()).await.unwrap();
+            let mut response = String::new();
+            tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                conn.read_to_string(&mut response),
+            )
+            .await
+            .expect("loopback MCP responds")
+            .unwrap();
+            let response: Value =
+                serde_json::from_str(response.split_once("\r\n\r\n").unwrap().1).unwrap();
+            let result = &response["result"];
+            let text = result["content"][0]["text"]
+                .as_str()
+                .expect("MCP tool result");
+            (
+                serde_json::from_str(text).unwrap(),
+                result["isError"] == true,
+            )
+        }
+
+        let cfg = super::super::WindowedConfig {
+            config_toml: Some(
+                r#"
+                [dock]
+                accepts = ["countdown", "progress-bar", "countdown"]
+                [[tabs]]
+                name = "Main"
+                "#
+                .into(),
+            ),
+            agents: tze_hud_config::agents_file::AgentsFile::default()
+                .with_agent("dock-fixture", "dock-fixture-key", &["widget:*"])
+                .directory()
+                .unwrap()
+                .shared(),
+            ..Default::default()
+        };
+        let clock = Arc::new(TestClock::new(1_000));
+        let mut hud = HeadlessEventLoopHarness::with_network(cfg, clock.clone())
+            .await
+            .unwrap();
+        let addr = hud.mcp_addr();
+        let (listed, error) = call(addr, "hud_surfaces", json!({})).await;
+        assert!(!error, "{listed}");
+        let entries = listed["surfaces"].as_array().unwrap();
+        let dock = entries
+            .iter()
+            .filter(|entry| entry["s"].as_str().unwrap().starts_with("dock:"))
+            .collect::<Vec<_>>();
+        assert_eq!(dock.len(), 2);
+        assert_eq!(dock[0]["s"], "dock:countdown");
+        assert_eq!(dock[1]["s"], "dock:progress-bar");
+        assert_eq!(dock[0]["params"]["ends_in_ms"], "deadline<=24h");
+        assert!(dock[0].get("held").is_none());
+        assert!(dock[0]["params"].get("tooltip_visible").is_none());
+        assert!(!entries.iter().any(|entry| entry["s"] == "zone:dock"));
+
+        let label = "WWWWWWWWWWWWWWWWWWWWWWWA";
+        let publish = json!({
+            "surface":"dock:countdown","params":{"label":label, "ends_in_ms":30_000}
+        });
+        let version = {
+            let scene = hud.scene();
+            assert!(scene.dock_projection().is_none());
+            scene.version
+        };
+        let (full, error) = call(addr, "hud_publish", publish.clone()).await;
+        assert!(error);
+        assert_eq!(
+            full,
+            json!({"code":"CONTENT_REJECTED", "hint":"dock full; show this in a card"})
+        );
+        {
+            let scene = hud.scene();
+            assert_eq!(scene.version, version);
+            assert!(scene.leases.is_empty());
+            assert!(scene.dock_rows().is_empty());
+        }
+
+        hud.set_display_topology_with_scales(vec![(
+            tze_hud_compositor::DisplayRect {
+                name: "PRIMARY".into(),
+                rect: Rect::new(0.0, 0.0, 1920.0, 1080.0),
+                primary: true,
+            },
+            "MAIN".into(),
+            1.0,
+        )]);
+        let appearance = hud.app.state.appearance.as_ref().unwrap().clone();
+        assert!(appearance.apply_display_report().await);
+        let (published, error) = call(addr, "hud_publish", publish).await;
+        assert!(!error, "{published}");
+        assert_eq!(
+            published["expires_in_ms"],
+            tze_hud_config::dock::DEFAULT_AUTO_CLEAR_MS
+        );
+        let drawn = published["clipped"]["label"]
+            .as_u64()
+            .expect("selected compact label is clipped");
+        assert!((1..label.len() as u64).contains(&drawn), "{published}");
+        let (id, deadline) = {
+            let scene = hud.scene();
+            let instance = scene.dock_instance("dock-fixture", "countdown").unwrap();
+            assert_eq!(
+                instance.current_params["label"],
+                WidgetParameterValue::String(label.into())
+            );
+            (instance.id, instance.current_params["ends_in_ms"].clone())
+        };
+
+        clock.advance(500);
+        let (patched, error) = call(
+            addr,
+            "hud_publish",
+            json!({"surface":"dock:countdown","params":{"severity":"warning"}}),
+        )
+        .await;
+        assert!(!error, "{patched}");
+        assert!(patched.get("clipped").is_none(), "{patched}");
+        let scene = hud.scene();
+        let instance = scene.dock_instance("dock-fixture", "countdown").unwrap();
+        assert_eq!(instance.id, id);
+        assert_eq!(instance.current_params["ends_in_ms"], deadline);
+    }
+
+    #[tokio::test]
+    async fn dock_admission_follows_the_accepted_monitor_and_committed_appearance() {
+        use tze_hud_compositor::DisplayRect;
+        use tze_hud_scene::dock::DockPublishError;
+        use tze_hud_scene::validation::ValidationError;
+
+        let cfg = super::super::WindowedConfig {
+            config_toml: Some(
+                r#"
+                [dock]
+                accepts = ["progress-bar", "countdown"]
+                max_rows = 32
+                [displays."SCREEN@LEFT"]
+                zones = ["dock"]
+                [[tabs]]
+                name = "Main"
+            "#
+                .into(),
+            ),
+            ..Default::default()
+        };
+        let mut hud = HeadlessEventLoopHarness::with_network(
+            cfg,
+            Arc::new(tze_hud_scene::TestClock::new(1_000)),
+        )
+        .await
+        .unwrap();
+        let appearance = hud.app.state.appearance.as_ref().unwrap().clone();
+        let publish = |scene: &mut SceneGraph, index, kind| {
+            scene.publish_to_dock(
+                kind,
+                Default::default(),
+                &format!("owner-{index}"),
+                None,
+                0,
+                1_000,
+            )
+        };
+        assert!(hud.scene().dock_projection().is_none());
+        assert!(publish(&mut hud.scene(), 0, "progress-bar").is_err());
+
+        let placeholder = super::super::displays::MonitorSpec {
+            name: "PRIMARY".into(),
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 1080,
+            scale: 1.0,
+            dock_bounds_observed: false,
+        };
+        hud.app.publish_displays_for(&placeholder, &[]);
+        assert!(!appearance.apply_display_report().await);
+        assert!(hud.scene().dock_projection().is_none());
+
+        let rect = |name: &str, x, y, width, height, primary| DisplayRect {
+            name: name.into(),
+            rect: tze_hud_scene::Rect::new(x, y, width, height),
+            primary,
+        };
+        let primary = || {
+            (
+                rect("PRIMARY", 0.0, 0.0, 1920.0, 1080.0, true),
+                "RIGHT".into(),
+                1.0,
+            )
+        };
+        let secondary = |y| {
+            (
+                rect("LEFT", -3840.0, y, 3840.0, 2160.0, false),
+                "SCREEN@LEFT".into(),
+                1.5,
+            )
+        };
+        hud.set_display_topology_with_scales(vec![primary()]);
+        assert!(appearance.apply_display_report().await);
+        {
+            let mut scene = hud.scene();
+            let projected = scene.dock_projection().unwrap();
+            assert_eq!(projected.target.as_deref(), Some("PRIMARY"));
+            assert_eq!(projected.layout.capacity, 13);
+            assert!(!scene.zone_registry.zones.contains_key("dock"));
+            assert!(matches!(
+                scene.publish_to_zone(
+                    "dock",
+                    tze_hud_scene::types::ZoneContent::StreamText("x".into()),
+                    "owner",
+                    None,
+                    None,
+                    None
+                ),
+                Err(ValidationError::ZoneNotFound { .. })
+            ));
+            publish(&mut scene, 0, "progress-bar").unwrap();
+            let serialized = serde_json::to_value(&*scene).unwrap();
+            assert_eq!(serialized["dock"]["capacity"], 13);
+            assert!(serialized["dock"].get("projection").is_none());
+            let mut restored: SceneGraph = serde_json::from_value(serialized).unwrap();
+            assert_eq!(restored.dock_rows().len(), 1);
+            assert_eq!(
+                publish(&mut restored, 1, "progress-bar"),
+                Err(DockPublishError::Full)
+            );
+            for index in 1..13 {
+                publish(&mut scene, index, "progress-bar").unwrap();
+            }
+            let before = scene.version;
+            assert_eq!(
+                publish(&mut scene, 13, "progress-bar"),
+                Err(DockPublishError::Full)
+            );
+            assert_eq!(scene.version, before);
+        }
+
+        hud.set_display_topology_with_scales(vec![primary(), secondary(240.0)]);
+        assert!(appearance.apply_display_report().await);
+        let layout = {
+            let mut scene = hud.scene();
+            let projected = scene.dock_projection().unwrap();
+            assert_eq!(projected.target.as_deref(), Some("LEFT"));
+            assert_eq!(projected.layout.capacity, 17);
+            assert_eq!(projected.layout.caption(0).height, 78.0);
+            assert_eq!(projected.aspect_ratios[0].0, "progress-bar");
+            assert_eq!(projected.aspect_ratios[0].1, 320.0 / 50.0);
+            let layout = projected.layout;
+            for index in 13..17 {
+                publish(&mut scene, index, "progress-bar").unwrap();
+            }
+            let before = scene.version;
+            assert_eq!(
+                publish(&mut scene, 17, "progress-bar"),
+                Err(DockPublishError::Full)
+            );
+            assert_eq!(scene.version, before);
+            layout
+        };
+        hud.set_display_topology_with_scales(vec![primary(), secondary(340.0)]);
+        assert!(appearance.apply_display_report().await);
+        assert_eq!(
+            hud.scene().dock_projection().unwrap().layout.column.y,
+            layout.column.y + 100.0
+        );
+        let version = hud.scene().version;
+        hud.set_display_topology_with_scales(vec![primary(), secondary(340.0)]);
+        assert!(!appearance.apply_display_report().await);
+        assert_eq!(hud.scene().version, version);
+
+        let publications = hud.scene().widget_registry.active_publishes.clone();
+        let last_table = appearance.live.table();
+        hud.retain_display_overlays(&[]);
+        let rejected = std::collections::HashMap::from([("dock.row.height".into(), "20".into())]);
+        assert!(
+            appearance
+                .apply(rejected)
+                .await
+                .unwrap_err()
+                .contains("progress-bar")
+        );
+        assert_eq!(appearance.live.table(), last_table);
+        assert!(
+            !appearance.apply_display_report().await,
+            "the pending report was committed"
+        );
+        {
+            let mut scene = hud.scene();
+            let projected = scene.dock_projection().unwrap();
+            assert_eq!(projected.target.as_deref(), Some("PRIMARY"));
+            assert_eq!(projected.layout.capacity, 13);
+            assert_eq!(scene.dock_rows().len(), 17);
+            assert_eq!(scene.widget_registry.active_publishes, publications);
+            assert!(
+                scene.drain_pending_widget_svg_assets().is_empty(),
+                "no refused art was queued"
+            );
+            assert_eq!(
+                publish(&mut scene, 17, "progress-bar"),
+                Err(DockPublishError::Full)
+            );
+            let original = scene.dock_instance("owner-0", "progress-bar").unwrap().id;
+            assert_eq!(publish(&mut scene, 0, "progress-bar"), Ok(original));
+            publish(&mut scene, 0, "countdown").unwrap();
+        }
+        hud.app.publish_displays_for(&placeholder, &[]);
+        assert!(appearance.apply_display_report().await);
+        {
+            let mut scene = hud.scene();
+            assert!(scene.dock_projection().is_none());
+            assert_eq!(scene.dock_rows().len(), 17);
+            assert_eq!(
+                publish(&mut scene, 17, "progress-bar"),
+                Err(DockPublishError::Full)
+            );
+        }
+        hud.set_display_topology_with_scales(vec![primary(), secondary(340.0)]);
+        assert!(appearance.apply_display_report().await);
+        assert_eq!(hud.scene().dock_projection().unwrap().layout.capacity, 17);
+        assert_eq!(hud.scene().dock_rows().len(), 17);
+
+        let wider = std::collections::HashMap::from([("dock.caption.width".into(), "1000".into())]);
+        assert_eq!(appearance.apply(wider).await, Ok(true));
+        let scene = hud.scene();
+        let projected = scene.dock_projection().unwrap();
+        assert!(projected.layout.scale < 1.0);
+        assert!((projected.layout.column.width - 3840.0 * 0.35).abs() < 0.01);
+        assert_eq!(scene.dock_rows().len(), 17);
+    }
 
     #[tokio::test]
     async fn production_turn_skips_idle_and_renders_scene_changes_and_animation() {
@@ -2804,6 +3217,120 @@ mod tests {
         assert!(runtime.events.scene().pending_actions.is_empty());
     }
 
+    #[tokio::test]
+    async fn dock_terminal_pose_stays_owed_after_failed_submit_and_capture() {
+        use crate::operator::screenshot::capture_channel;
+        use tze_hud_scene::clock::TestClock;
+        use tze_hud_scene::dock::{DockLayout, DockMetrics, DockPointer, DockProjection};
+
+        let _gpu = crate::test_support::lock_headless_runtime().await;
+        let clock = Arc::new(TestClock::new(1_000));
+        let mut cfg = super::super::WindowedConfig {
+            config_toml: Some("[[tabs]]\nname = 'Main'".into()),
+            ..Default::default()
+        };
+        cfg.window.width = 320;
+        cfg.window.height = 200;
+        let mut runtime = CaptureRenderHarness::boot(cfg, clock.clone()).await;
+        let queued = Arc::new(tokio::sync::Notify::new());
+        let (endpoint, inbox) = capture_channel({
+            let queued = Arc::clone(&queued);
+            move || queued.notify_one()
+        });
+        runtime.events.app.state.capture_inbox = inbox;
+        let display = Rect::new(0.0, 0.0, 320.0, 200.0);
+        runtime
+            .compositor
+            .set_display_layout(tze_hud_compositor::DisplayLayout::new(
+                vec![tze_hud_compositor::DisplayRect {
+                    name: "PRIMARY".into(),
+                    rect: display,
+                    primary: true,
+                }],
+                &Default::default(),
+            ));
+        let mut tokens = runtime.events.app.state.global_tokens.clone();
+        tokens.insert("motion.exit.ms".into(), "120".into());
+        runtime.compositor.set_token_map(tokens);
+        let layout = DockLayout::new(
+            display,
+            2,
+            DockMetrics {
+                row_height: 40.0,
+                caption_width: 40.0,
+                gap: 4.0,
+            },
+            [1.0],
+        );
+        assert_eq!(layout.capacity, 2);
+        let pointer = {
+            let mut scene = runtime.events.scene();
+            scene.set_dock_projection(
+                &["progress-bar".into()],
+                Some(DockProjection {
+                    target: Some("PRIMARY".into()),
+                    layout,
+                    pixels_per_dp: 1.0,
+                    aspect_ratios: vec![("progress-bar".into(), 1.0)],
+                }),
+                std::num::NonZeroU64::new(5_000).unwrap(),
+            );
+            for owner in ["first", "second"] {
+                scene
+                    .publish_to_dock("progress-bar", Default::default(), owner, None, 0, 0)
+                    .unwrap();
+            }
+            scene.certify_dock_passive_column("PRIMARY", display);
+            scene.dock_passive_column().unwrap().clone()
+        };
+        assert!(pointer.observe(DockPointer::Inside));
+        assert!(runtime.turn(true));
+        runtime
+            .events
+            .scene()
+            .clear_dock_widget("first", "progress-bar");
+        assert!(
+            runtime.turn(true),
+            "draw clears first instance but keeps the second slot"
+        );
+        assert_eq!(
+            runtime.events.scene().dock_caption_rect(0),
+            Some(layout.caption(1))
+        );
+        assert!(!runtime.turn(true), "held geometry settles to idle");
+
+        assert!(pointer.observe(DockPointer::Outside));
+        assert!(
+            runtime.turn(true),
+            "outside starts the existing animation cadence"
+        );
+        let before_terminal = runtime.frames.last_rendered();
+        let ordinary_counters = runtime.events.app.state.wake.counters().snapshot();
+        clock.advance(120);
+        let capture = tokio::spawn(async move { endpoint.capture_frame(0).await });
+        queued.notified().await;
+        assert!(
+            runtime.turn(false),
+            "terminal geometry asks for ordinary submission"
+        );
+        let (frame, permit) = capture.await.unwrap().unwrap();
+        assert_eq!((frame.width, frame.height), (320, 200));
+        drop(permit);
+        assert_eq!(runtime.frames.last_rendered(), before_terminal);
+        assert_eq!(
+            runtime.events.app.state.wake.counters().snapshot(),
+            ordinary_counters
+        );
+        {
+            let scene = runtime.events.scene();
+            assert_eq!(scene.version, before_terminal.0);
+            assert_eq!(scene.geometry_epoch, before_terminal.1 + 1);
+            assert_eq!(scene.dock_caption_rect(0), Some(layout.caption(0)));
+        }
+        assert!(runtime.turn(true), "terminal geometry is still owed");
+        assert!(!runtime.turn(true), "successful retry restores idle");
+    }
+
     /// Moves the former compositor build-only gate onto the runtime's actual
     /// capture drain, idle ledger, submission counters and main-thread present
     /// consumer. A failed ordinary acquire exposes capture advancing the ledger
@@ -3522,6 +4049,10 @@ mod tests {
                     (
                         "card.svg",
                         include_bytes!("../../../../assets/widget_bundles/countdown/card.svg"),
+                    ),
+                    (
+                        "dock.svg",
+                        include_bytes!("../../../../assets/widget_bundles/countdown/dock.svg"),
                     ),
                 ],
                 &tokens,
@@ -10826,6 +11357,388 @@ mod tests {
             "released scene lock must drain FIFO work"
         );
         assert_eq!(harness.composer_draft().as_deref(), Some("x"));
+    }
+
+    /// Scene/publication and Winit callbacks are real; the native presentation
+    /// receipt and validated pointer sample are injected, not OS evidence.
+    fn dock_hover_harness() -> (
+        HeadlessEventLoopHarness,
+        Arc<tze_hud_compositor::renderer::DockHoverFrame>,
+        tze_hud_compositor::renderer::PresentedDockHover,
+    ) {
+        use super::super::dock_param_hover::tests::{fixture, proof, snapshot};
+        let (scene, _, frame) = fixture();
+        let mut harness = HeadlessEventLoopHarness::new();
+        *harness
+            .app
+            .state
+            .shared_state
+            .blocking_lock()
+            .scene
+            .blocking_lock() = scene;
+        harness.app.state.effective_mode = crate::window::WindowMode::Overlay;
+        harness
+            .app
+            .state
+            .pipeline
+            .hit_test_snapshot
+            .store(Arc::new(snapshot(&frame)));
+        let presented = proof(&frame);
+        (harness, frame, presented)
+    }
+
+    #[test]
+    fn dock_runtime_hover_direct_target_switch_escapes_quiet() {
+        use super::super::dock_param_hover::tests::snapshot;
+        use super::super::wake::CursorEntryTurn;
+        use tze_hud_scene::WidgetParameterValue as Value;
+        let (mut harness, frame, presented) = dock_hover_harness();
+        let now = std::time::Instant::now();
+        let point = |index: usize| {
+            let bounds = frame.runtime_targets[index].bounds;
+            (bounds.x + 1.0, bounds.y + 1.0)
+        };
+        let observe = |harness: &mut HeadlessEventLoopHarness, index, at| {
+            let hover = &mut harness.app.state.dock_param_hover;
+            hover.remember(Some(&frame.column), Some(point(index)));
+            hover.reconcile(&snapshot(&frame), Some(&presented), at);
+        };
+        observe(&mut harness, 0, now);
+        let due = harness.app.state.dock_param_hover.next_due().unwrap();
+        let wake = harness.app.state.wake.clone();
+        let before = wake.main_work_generation();
+        harness.app.state.scheduled_main_deadline = Some(super::super::wake::Deadline::new(
+            due,
+            crate::idle_efficiency::RuntimeWakeupSource::AnimationDeadline,
+        ));
+        harness.app.on_resume_time_reached(due);
+        assert!(harness.app.state.scheduled_main_deadline.is_none());
+        assert_eq!(wake.main_work_generation(), before + 1);
+        harness.app.state.dock_param_hover.expire_dwell(due);
+        assert!(harness.app.apply_dock_param_hover());
+        assert!(wake.finish_main_work_after_settle(wake.main_work_checkpoint(), true));
+        harness.app.state.dock_param_hover.deadline_changed = false;
+        harness.app.state.cursor_entry.signature = Some(harness.app.cursor_entry_signature());
+        observe(&mut harness, 1, due);
+        assert_eq!(
+            harness.app.cursor_entry_turn_after_refresh(false),
+            CursorEntryTurn::FullTurn
+        );
+        let b_due = harness.app.state.dock_param_hover.next_due().unwrap();
+        assert_eq!(
+            b_due.duration_since(due),
+            std::time::Duration::from_millis(180)
+        );
+        assert!(
+            harness.app.apply_dock_param_hover(),
+            "hide A immediately, B waits its own dwell"
+        );
+        let a = &frame.runtime_targets[0];
+        let b = &frame.runtime_targets[1];
+        assert_eq!(
+            harness.scene().widget_registry.instances[&a.instance_name].current_params["tooltip_visible"],
+            Value::F32(0.0)
+        );
+        assert_eq!(
+            harness.scene().widget_registry.instances[&b.instance_name].current_params["tooltip_visible"],
+            Value::F32(0.0)
+        );
+        harness.app.state.dock_param_hover.expire_dwell(b_due);
+        assert!(harness.app.apply_dock_param_hover());
+        assert_eq!(
+            harness.scene().widget_registry.instances[&b.instance_name].current_params["tooltip_visible"],
+            Value::F32(1.0)
+        );
+        assert!(!harness.app.cursor_entry_signature().capture);
+        {
+            let mut scene = harness.scene();
+            let mut standalone = scene.widget_registry.instances[&a.instance_name].clone();
+            standalone.id = SceneId::new();
+            standalone.instance_name = "standalone-progress".into();
+            scene.widget_registry.register_instance(standalone);
+        }
+        harness.app.refresh_widget_hover_tracking();
+        assert_eq!(harness.app.state.widget_hover_trackers.len(), 1);
+        assert!(
+            harness
+                .app
+                .state
+                .widget_hover_trackers
+                .contains_key("standalone-progress"),
+            "only ordinary standalone geometry remains on the legacy route"
+        );
+        harness.app.state.dock_param_hover.deadline_changed = false;
+        harness.app.state.cursor_entry.signature = Some(harness.app.cursor_entry_signature());
+        assert_eq!(
+            harness.app.cursor_entry_turn_after_refresh(false),
+            CursorEntryTurn::Quiet { next: None }
+        );
+        // A new authoritative pointer sample at expiry overrides the old target.
+        harness.app.state.dock_param_hover.remember(None, None);
+        harness
+            .app
+            .state
+            .dock_param_hover
+            .reconcile(&snapshot(&frame), Some(&presented), b_due);
+        assert!(harness.app.apply_dock_param_hover());
+        assert_eq!(
+            harness.scene().widget_registry.instances[&b.instance_name].current_params["tooltip_visible"],
+            Value::F32(0.0)
+        );
+        assert!(!harness.app.state.dock_param_hover.has_debt());
+    }
+
+    #[test]
+    fn dock_runtime_hover_debt_waits_for_scene_availability() {
+        use super::super::dock_param_hover::tests::snapshot;
+        use tze_hud_scene::WidgetParameterValue as Value;
+        for shared_lock in [false, true] {
+            let (mut harness, frame, presented) = dock_hover_harness();
+            let now = std::time::Instant::now();
+            let observe = |harness: &mut HeadlessEventLoopHarness, index: usize, at| {
+                let target = &frame.runtime_targets[index];
+                let hover = &mut harness.app.state.dock_param_hover;
+                hover.remember(
+                    Some(&frame.column),
+                    Some((target.bounds.x + 1.0, target.bounds.y + 1.0)),
+                );
+                hover.reconcile(&snapshot(&frame), Some(&presented), at);
+            };
+            let wake = harness.app.state.wake.clone();
+            let wait = |before| {
+                let end = std::time::Instant::now() + SCENE_WAIT;
+                while wake.main_work_generation() == before {
+                    assert!(
+                        std::time::Instant::now() < end,
+                        "dock availability completion missing"
+                    );
+                    std::thread::yield_now();
+                }
+            };
+            observe(&mut harness, 0, now);
+            let due = harness.app.state.dock_param_hover.next_due().unwrap();
+            harness.app.state.dock_param_hover.expire_dwell(due);
+            let shared = harness.shared_state();
+            let scene = shared.blocking_lock().scene.clone();
+            let held_shared = shared_lock.then(|| shared.blocking_lock());
+            let held_scene = (!shared_lock).then(|| scene.blocking_lock());
+            let before = wake.main_work_generation();
+            assert!(!harness.app.apply_dock_param_hover());
+            assert!(harness.app.state.dock_param_hover.has_debt());
+            assert!(harness.app.has_deferred_scene_work(
+                &crate::windowed::PortalProjectionDrain::Completed {
+                    scene_changed: false
+                }
+            ));
+            assert!(harness.app.state.dock_param_hover.next_due().is_none());
+            harness.app.schedule_shared_scene_availability_wake();
+            assert_eq!(wake.main_work_generation(), before);
+            drop(held_scene);
+            drop(held_shared);
+            wait(before);
+            assert!(harness.app.apply_dock_param_hover());
+            assert!(!harness.app.state.dock_param_hover.has_debt());
+            let a = &frame.runtime_targets[0];
+            let b = &frame.runtime_targets[1];
+            assert_eq!(
+                harness.scene().widget_registry.instances[&a.instance_name].current_params["tooltip_visible"],
+                Value::F32(1.0)
+            );
+            // Retain an applied hide, but cancel B's not-yet-applied positive
+            // when the cursor leaves while both writes are blocked.
+            let held = scene.blocking_lock();
+            observe(&mut harness, 1, due);
+            harness
+                .app
+                .state
+                .dock_param_hover
+                .expire_dwell(harness.app.state.dock_param_hover.next_due().unwrap());
+            assert!(!harness.app.apply_dock_param_hover());
+            harness.app.state.dock_param_hover.remember(None, None);
+            harness
+                .app
+                .state
+                .dock_param_hover
+                .reconcile(&snapshot(&frame), Some(&presented), due);
+            assert!(harness.app.state.dock_param_hover.has_debt());
+            let before = wake.main_work_generation();
+            harness.app.schedule_shared_scene_availability_wake();
+            drop(held);
+            wait(before);
+            assert!(harness.app.apply_dock_param_hover());
+            assert!(!harness.app.state.dock_param_hover.has_debt());
+            for target in [a, b] {
+                assert_eq!(
+                    harness.scene().widget_registry.instances[&target.instance_name].current_params
+                        ["tooltip_visible"],
+                    Value::F32(0.0)
+                );
+            }
+            // On a later availability turn next_due is already consumed. The
+            // final post-present cursor check is still required before commit.
+            observe(&mut harness, 0, due + std::time::Duration::from_secs(1));
+            let next = harness.app.state.dock_param_hover.next_due().unwrap();
+            harness.app.state.dock_param_hover.expire_dwell(next);
+            let held = scene.blocking_lock();
+            assert!(!harness.app.apply_dock_param_hover());
+            assert!(harness.app.state.dock_param_hover.next_due().is_none());
+            assert!(
+                harness
+                    .app
+                    .state
+                    .dock_param_hover
+                    .needs_positive_sample(next)
+            );
+            let before = wake.main_work_generation();
+            harness.app.schedule_shared_scene_availability_wake();
+            drop(held);
+            wait(before);
+            // This uses the incumbent invalid-point observation path that a
+            // fresh native read failure also takes; no Windows input is faked.
+            harness.app.invalidate_dock_cursor();
+            assert!(!harness.app.apply_dock_param_hover());
+            assert!(!harness.app.state.dock_param_hover.has_debt());
+            assert!(
+                !harness
+                    .app
+                    .state
+                    .dock_param_hover
+                    .needs_positive_sample(next)
+            );
+            assert_eq!(
+                harness.scene().widget_registry.instances[&a.instance_name].current_params["tooltip_visible"],
+                Value::F32(0.0)
+            );
+        }
+    }
+
+    #[test]
+    fn dock_passive_cursor_stays_quiet_under_held_scene_and_rejects_stale_mapping() {
+        use super::super::displays::{MonitorSpec, dock_cursor_matches_projection};
+        use super::super::hittest::observe_dock_point;
+        use super::super::wake::CursorEntryTurn;
+        use tze_hud_scene::dock::{DockLayout, DockMetrics, DockProjection};
+
+        let mut harness = HeadlessEventLoopHarness::new();
+        harness.app.state.effective_mode = crate::window::WindowMode::Overlay;
+        let primary = MonitorSpec {
+            name: "PRIMARY".into(),
+            x: 700,
+            y: -400,
+            width: 1920,
+            height: 1080,
+            scale: 1.0,
+            dock_bounds_observed: true,
+        };
+        let selected = MonitorSpec {
+            name: "SELECTED".into(),
+            x: -1260,
+            y: -320,
+            ..primary.clone()
+        };
+        let mirror = MonitorSpec {
+            name: "MIRROR".into(),
+            ..selected.clone()
+        };
+        let display = selected.scene_rect(&primary);
+        let column = {
+            let shared = harness.shared_state();
+            let guard = shared.try_lock().expect(BUSY);
+            let mut scene = guard.scene.try_lock().expect(BUSY);
+            let aspect_ratios = vec![("progress-bar".into(), 2.0)];
+            let metrics = DockMetrics {
+                row_height: 52.0,
+                caption_width: 96.0,
+                gap: 8.0,
+            };
+            let layout = DockLayout::new(display, 3, metrics, [2.0]);
+            crate::scene_startup::run_scene_startup(
+                &Default::default(),
+                None,
+                &mut scene,
+                tze_hud_config::tokens::OsPreferences::default(),
+            )
+            .unwrap();
+            scene.set_dock_projection(
+                &["progress-bar".into()],
+                Some(DockProjection {
+                    target: Some(selected.name.clone()),
+                    layout,
+                    pixels_per_dp: 1.0,
+                    aspect_ratios,
+                }),
+                std::num::NonZeroU64::new(5_000).unwrap(),
+            );
+            scene
+                .publish_to_dock("progress-bar", Default::default(), "agent", None, 0, 0)
+                .unwrap();
+            scene.certify_dock_passive_column(&selected.name, display);
+            harness.app.state.pipeline.hit_test_snapshot.store(Arc::new(
+                crate::pipeline::HitTestSnapshot::from_scene(&scene),
+            ));
+            scene.dock_passive_column().unwrap().clone()
+        };
+        assert!(display.x < 0.0);
+        let inside = (column.column.x + 1.0, column.column.y + 1.0);
+        let mut moved = selected.clone();
+        moved.x += 12;
+        let sample = |point, spec: &MonitorSpec, realized| {
+            observe_dock_point(&column, point, || {
+                realized && dock_cursor_matches_projection(&column, &primary, spec)
+            })
+        };
+        assert!(sample(Some(inside), &selected, true));
+        assert!(!sample(Some(inside), &selected, true));
+        assert!(
+            sample(Some(inside), &mirror, true),
+            "untrusted mirror retires Inside"
+        );
+        assert!(!sample(Some(inside), &moved, true));
+        assert!(
+            !sample(Some(inside), &selected, false),
+            "pending native refit stays Unknown"
+        );
+        assert!(
+            !sample(None, &selected, true),
+            "failed fresh cursor read stays Unknown"
+        );
+        assert!(sample(Some((0.0, 0.0)), &selected, true));
+        assert!(
+            sample(None, &selected, true),
+            "read failure retires known Outside"
+        );
+        assert!(sample(Some(inside), &selected, true));
+        harness.app.state.cursor_entry.signature = Some(harness.app.cursor_entry_signature());
+        assert!(!harness.app.cursor_entry_signature().capture);
+        let wake = harness.app.state.wake.clone();
+        let compositor_before = wake.compositor().checkpoint();
+        let main_before = wake.main_work_generation();
+        let counters_before = wake.counters().snapshot();
+        let shared = harness.shared_state();
+        let guard = shared.try_lock().expect(BUSY);
+        let _held_scene = guard.scene.try_lock().expect(BUSY);
+        for _ in 0..100 {
+            let changed = sample(Some(inside), &selected, true);
+            assert!(!changed);
+            assert_eq!(
+                harness.app.cursor_entry_turn_after_refresh(changed),
+                CursorEntryTurn::Quiet { next: None }
+            );
+        }
+        assert_eq!(wake.counters().snapshot(), counters_before);
+        assert_eq!(wake.main_work_generation(), main_before);
+        assert_eq!(wake.compositor().checkpoint(), compositor_before);
+
+        let changed = sample(Some((0.0, 0.0)), &selected, true);
+        assert!(changed);
+        assert_eq!(
+            harness.app.cursor_entry_turn_after_refresh(changed),
+            CursorEntryTurn::FullTurn
+        );
+        assert!(wake.finish_main_work(wake.main_work_checkpoint()));
+        assert_eq!(wake.main_work_generation(), main_before + 1);
+        assert_eq!(wake.compositor().checkpoint(), compositor_before + 1);
+        assert!(!harness.app.cursor_entry_signature().capture);
     }
 
     #[test]

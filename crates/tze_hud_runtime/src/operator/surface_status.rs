@@ -22,6 +22,7 @@ pub(crate) struct SurfaceSnapshot {
     pub(crate) portals: Value,
     pub(crate) notifications: Value,
     pub(crate) widgets: Value,
+    pub(crate) dock: Option<Value>,
     pub(crate) link_launches: u64,
     /// The overlaid display showing the open control panel.
     pub(crate) panel_display: Option<String>,
@@ -122,6 +123,7 @@ pub(crate) fn probe(
                     portals: portals_json(&scene, &ui, &displays),
                     notifications: notifications_json(&scene, &displays),
                     widgets: widgets_json(&scene, &ui, &displays),
+                    dock: dock_json(&scene),
                     panel_display: ui.panel_display,
                     link_launches: link_launches.load(Ordering::Relaxed),
                     window_activations: ui.window_activations,
@@ -267,18 +269,47 @@ fn notifications_json(scene: &SceneGraph, displays: &[Rect]) -> Value {
     json!(entries)
 }
 
+fn dock_json(scene: &SceneGraph) -> Option<Value> {
+    scene.dock_auto_clear_ms()?;
+    let rows = scene.dock_rows();
+    let projection = scene.dock_projection();
+    let overflow: Vec<_> = rows
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| scene.dock_caption_rect(*index).is_none())
+        .map(|(_, row)| {
+            json!({
+                "agent": tze_hud_scene::scope::owner_agent(&row.namespace),
+                "session": scene.dock_caption(&row.namespace),
+            })
+        })
+        .collect();
+    Some(json!({
+        "rows": rows.len(),
+        "capacity": projection.map_or(0, |p| p.layout.capacity),
+        "overflow": overflow,
+        "scale": projection.map(|p| p.layout.scale),
+    }))
+}
+
 fn widgets_json(scene: &SceneGraph, ui: &UiMirror, displays: &[Rect]) -> Value {
     let entries: Vec<Value> = scene.overlay.widget_geometry.iter().filter_map(|geometry| {
         let instance = scene.widget_registry.instances.get(&geometry.instance_name)?;
         let visible = instance.current_params.get("tooltip_visible")
             .is_some_and(|p| matches!(p, tze_hud_scene::WidgetParameterValue::F32(value) if *value >= 0.5));
-        Some(json!({
+        let mut entry = json!({
             "s": format!("widget:{}", geometry.instance_name),
             "rect": rect_json(geometry.bounds),
             "display": display_index(geometry.bounds, displays),
             "hover_target": ui.hover_targets.get(&geometry.instance_name).copied().map(rect_json),
             "tooltip_visible": visible,
-        }))
+        });
+        if let Some(row) = scene.dock_rows().iter().find(|row| {
+            row.widgets.iter().any(|widget| widget.instance_name == geometry.instance_name)
+        }) {
+            entry["session"] = json!(scene.dock_caption(&row.namespace));
+        }
+        Some(entry)
     }).collect();
     json!(entries)
 }
@@ -552,6 +583,147 @@ mod tests {
             interaction_id: format!("jump-to-latest:{tile_id}"),
             tab_order: 0,
         }
+    }
+
+    #[test]
+    fn reports_dock_capacity_overflow_and_widget_session() {
+        use crate::scene_startup::{DockDisplay, run_scene_startup};
+        use tze_hud_scene::dock::DockWidgetSlot;
+        use tze_hud_scene::graph::{SurfaceClasses, overlay::WidgetGeometry};
+        use tze_hud_scene::scope::scoped_namespace;
+
+        let raw = toml::from_str(
+            r#"
+[dock]
+accepts = ["countdown"]
+max_rows = 4
+[[tabs]]
+name = "Main"
+[[tabs.widgets]]
+widget_type = "countdown"
+instance_id = "dock"
+"#,
+        )
+        .unwrap();
+        let mut scene = SceneGraph::new_with_clock(
+            1920.0,
+            1080.0,
+            Arc::new(tze_hud_scene::TestClock::new(1_000)),
+        );
+        assert_eq!(dock_json(&scene), None);
+        let startup = run_scene_startup(&raw, None, &mut scene, Default::default()).unwrap();
+        let policy = startup.dock.unwrap();
+        assert_eq!(
+            dock_json(&scene),
+            Some(json!({
+                "rows": 0, "capacity": 0, "overflow": [], "scale": null,
+            }))
+        );
+
+        let display = |rect, scale| DockDisplay {
+            target: "DOCK".into(),
+            rect,
+            scale,
+        };
+        let install = |scene: &mut SceneGraph, display: Option<DockDisplay>| {
+            assert!(policy.project(scene, &startup.global_tokens, display.as_ref()));
+        };
+        let full = Rect::new(0.0, 0.0, 1920.0, 1080.0);
+        install(&mut scene, Some(display(full, 1.0)));
+        for (owner, label) in [
+            (scoped_namespace("alpha", "private-a"), Some("work")),
+            (scoped_namespace("alpha", "private-b"), Some("work (2)")),
+            (scoped_namespace("beta", "private-c"), Some("review")),
+            ("script".to_owned(), Some("ignored unscoped label")),
+        ] {
+            scene.set_session_label(&owner, label.map(str::to_owned));
+            scene
+                .publish_to_dock("countdown", Default::default(), &owner, None, 0, 0)
+                .unwrap();
+            let instance_name = scene
+                .dock_instance(&owner, "countdown")
+                .unwrap()
+                .instance_name
+                .clone();
+            let DockWidgetSlot::Placed(bounds) = scene.dock_widget_slot(&instance_name) else {
+                panic!("full display must place all four publications");
+            };
+            scene.overlay.widget_geometry.push(WidgetGeometry {
+                instance_name,
+                bounds,
+            });
+        }
+        let standalone = Rect::new(8.0, 10.0, 160.0, 52.0);
+        scene.overlay.widget_geometry.push(WidgetGeometry {
+            instance_name: "dock".into(),
+            bounds: standalone,
+        });
+        let widgets = |scene: &SceneGraph| widgets_json(scene, &UiMirror::default(), &[full]);
+        let drawn = widgets(&scene);
+        assert_eq!(drawn[0]["session"], "work");
+        assert_eq!(drawn[1]["session"], "work (2)");
+        assert_eq!(drawn[3].get("session"), Some(&Value::Null));
+        assert_eq!(
+            drawn[4],
+            json!({
+                "s": "widget:dock", "rect": rect_json(standalone), "display": 0,
+                "hover_target": null, "tooltip_visible": false,
+            })
+        );
+        scene.set_session_label(
+            &scoped_namespace("alpha", "private-b"),
+            Some("renamed".into()),
+        );
+        assert_eq!(widgets(&scene)[1]["session"], "renamed");
+
+        let records = serde_json::to_value(&scene.widget_registry.active_publishes).unwrap();
+        let short = display(Rect::new(0.0, 0.0, 1920.0, 200.0), 1.0);
+        install(&mut scene, Some(short));
+        let overflow =
+            json!([{"agent": "beta", "session": "review"}, {"agent": "script", "session": null}]);
+        let expected = json!({"rows": 4, "capacity": 2, "overflow": overflow, "scale": 1.0});
+        assert_eq!(dock_json(&scene), Some(expected.clone()));
+        assert!(scene.set_owner_hidden(SurfaceClasses {
+            widgets: true,
+            ..SurfaceClasses::NONE
+        }));
+        assert_eq!(dock_json(&scene), Some(expected.clone()));
+        let shared = Arc::new(tokio::sync::Mutex::new(scene));
+        let version = shared.try_lock().unwrap().version;
+        let observation = probe(shared.clone(), Default::default(), Default::default());
+        assert_eq!(observation.read().dock, Some(expected));
+        let mut scene = shared.try_lock().unwrap();
+        assert_eq!(scene.version, version);
+
+        install(&mut scene, None);
+        let unavailable = dock_json(&scene).unwrap();
+        assert_eq!(unavailable["capacity"], 0);
+        assert_eq!(unavailable["scale"], Value::Null);
+        assert_eq!(unavailable["overflow"].as_array().unwrap().len(), 4);
+        assert!(!unavailable.to_string().contains("private-"));
+        let narrow = display(Rect::new(0.0, 0.0, 600.0, 1080.0), 1.5);
+        install(&mut scene, Some(narrow));
+        let projection = scene.dock_projection().unwrap();
+        let expected_scale = projection.layout.scale;
+        assert!(expected_scale < 1.0 && projection.pixels_per_dp == 1.5);
+        assert!(scene.set_owner_hidden(SurfaceClasses::NONE));
+        assert!(
+            scene
+                .dock_rows()
+                .iter()
+                .enumerate()
+                .all(|(index, _)| scene.dock_caption_rect(index).is_some())
+        );
+        assert_eq!(
+            dock_json(&scene),
+            Some(json!({
+                "rows": 4, "capacity": 4, "overflow": [], "scale": expected_scale,
+            }))
+        );
+        assert_eq!(
+            serde_json::to_value(&scene.widget_registry.active_publishes).unwrap(),
+            records
+        );
     }
 
     #[test]

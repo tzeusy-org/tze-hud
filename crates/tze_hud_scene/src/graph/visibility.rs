@@ -56,6 +56,9 @@ impl SceneGraph {
         if self.overlay.owner_hidden == hidden {
             return false;
         }
+        if self.overlay.owner_hidden.widgets != hidden.widgets {
+            self.revoke_dock_passive_column();
+        }
         self.overlay.owner_hidden = hidden;
         self.prune_notification_feedback();
         self.version += 1;

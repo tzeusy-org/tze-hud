@@ -1,12 +1,10 @@
 //! POC acceptance (`docs/scope.md`): the Portal and Zones bullets, end to end.
 //!
-//! Each test boots the runtime from `app/tze_hud_app/config/production.toml`
-//! in the GPU-free event-loop harness, calls the real MCP server over loopback
-//! HTTP, synthesizes the user's clicks and keystrokes through the windowed
-//! input path, and advances one injected `TestClock` (invariant 9: no
-//! wall-clock sleeps). Every MCP call's model-visible tokens are counted the
-//! way `token_footprint` counts them and checked against `docs/api.md`
-//! "Token budgets".
+//! The GPU-free event-loop harness runs the real MCP server over loopback
+//! HTTP, drives windowed input and advances an injected `TestClock`. Most
+//! tests use `app/tze_hud_app/config/production.toml` and check model-visible
+//! costs against `docs/api.md` "Token budgets". The stdio dock lifecycle
+//! witness uses a private dock config and measures actual adapter shutdown.
 //!
 //! This file is the MCP-level regression guard for the T7 portal rewrite, so
 //! it observes only what an agent or a user can: MCP results, and what is on
@@ -3054,4 +3052,361 @@ async fn poc_sessions_on_one_pairing_end_independently() {
     assert_eq!(poc.shown(NOTIFICATION), 2);
     poc.advance(1).await;
     assert_eq!(poc.shown(NOTIFICATION), 0);
+}
+
+// The shipped stdio adapter requires Linux pidfds and parent-death signals.
+#[cfg(target_os = "linux")]
+mod dock_adapter {
+    use std::fs::{DirBuilder, OpenOptions};
+    use std::io::{self, Write as _};
+    use std::os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _, symlink};
+    use std::path::Path;
+    use std::process::{ExitStatus, Stdio};
+
+    use tokio::io::{AsyncBufReadExt as _, BufReader};
+    use tokio::process::{Child, ChildStdout, Command};
+    use tokio::time::timeout;
+
+    use super::*;
+
+    const CAP_MS: u64 = 5_000;
+    const IO_WAIT: Duration = Duration::from_secs(5);
+
+    struct Adapter {
+        child: Child,
+        output: BufReader<ChildStdout>,
+        _home: tempfile::TempDir,
+    }
+
+    impl Adapter {
+        fn spawn(addr: std::net::SocketAddr, label: &str) -> Self {
+            assert!(addr.ip().is_loopback());
+            let home = tempfile::tempdir().expect("private adapter home");
+            let project = home.path().join(label);
+            let config = home.path().join(".config/tze-hud");
+            DirBuilder::new()
+                .recursive(true)
+                .mode(0o700)
+                .create(&config)
+                .unwrap();
+            std::fs::create_dir(&project).unwrap();
+            let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+            symlink(repo.join(".claude"), project.join(".claude")).unwrap();
+            writeln!(
+                OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .mode(0o600)
+                    .open(config.join(format!("{}.psk", addr.ip())))
+                    .unwrap(),
+                "{CLAUDE_PSK}"
+            )
+            .unwrap();
+            let registry: Value = serde_json::from_str(include_str!("../../.mcp.json")).unwrap();
+            let entry = &registry["mcpServers"]["tze-hud"];
+            let mut child = Command::new(entry["command"].as_str().unwrap())
+                .args(
+                    entry["args"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .map(|v| v.as_str().unwrap()),
+                )
+                .env_clear()
+                .env("PATH", "/usr/local/bin:/usr/bin:/bin")
+                .env("HOME", home.path())
+                .env("CLAUDE_PROJECT_DIR", &project)
+                .env("HUD_HOST", addr.to_string())
+                .env("PYTHONDONTWRITEBYTECODE", "1")
+                .current_dir(&project)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .kill_on_drop(true)
+                .spawn()
+                .expect("start the shipped stdio adapter");
+            let output = BufReader::new(child.stdout.take().expect("adapter stdout"));
+            Self {
+                child,
+                output,
+                _home: home,
+            }
+        }
+
+        async fn send(&mut self, request: Value) {
+            let mut frame = serde_json::to_vec(&request).unwrap();
+            frame.push(b'\n');
+            timeout(
+                IO_WAIT,
+                self.child
+                    .stdin
+                    .as_mut()
+                    .expect("adapter stdin")
+                    .write_all(&frame),
+            )
+            .await
+            .expect("adapter stdin deadline")
+            .expect("write adapter request");
+        }
+
+        async fn rpc(&mut self, id: u64, method: &str, params: Value) -> Value {
+            self.send(json!({"jsonrpc":"2.0", "id":id, "method":method, "params":params}))
+                .await;
+            let mut line = String::new();
+            timeout(IO_WAIT, self.output.read_line(&mut line))
+                .await
+                .expect("adapter response deadline")
+                .expect("read adapter response");
+            let reply: Value = serde_json::from_str(&line).expect("adapter JSON-RPC response");
+            assert_eq!(reply["id"], id);
+            assert!(reply["error"].is_null(), "{reply}");
+            reply["result"].clone()
+        }
+
+        async fn initialize(&mut self) {
+            let result = self
+                .rpc(
+                    1,
+                    "initialize",
+                    json!({
+                        "protocolVersion":"2025-06-18", "capabilities":{},
+                        "clientInfo":{"name":"dock-lifecycle-fixture", "version":"1"},
+                    }),
+                )
+                .await;
+            assert_eq!(result["protocolVersion"], "2025-06-18");
+            self.send(json!({"jsonrpc":"2.0", "method":"notifications/initialized"}))
+                .await;
+        }
+
+        async fn publish(&mut self, id: u64, kind: &str, params: Value) {
+            let result = self
+                .rpc(
+                    id,
+                    "tools/call",
+                    json!({
+                        "name":"hud_publish",
+                        "arguments":{"surface":format!("dock:{kind}"), "ttl_ms":0, "params":params},
+                    }),
+                )
+                .await;
+            let body: Value = serde_json::from_str(result["content"][0]["text"].as_str().unwrap())
+                .expect("dock publish result");
+            assert_ne!(
+                result["isError"], true,
+                "adapter publish {kind} (request {id}) refused with {}",
+                body["code"]
+            );
+            assert_eq!(body["ok"], true);
+            assert_eq!(body["expires_in_ms"], CAP_MS);
+        }
+
+        async fn wait(&mut self) -> io::Result<ExitStatus> {
+            timeout(IO_WAIT, self.child.wait())
+                .await
+                .map_err(|_| io::Error::other("stdio adapter did not exit before deadline"))?
+        }
+
+        async fn kill_and_reap(&mut self) -> io::Result<ExitStatus> {
+            if self.child.try_wait()?.is_none() {
+                self.child.start_kill()?;
+            }
+            self.wait().await
+        }
+    }
+
+    async fn status(poc: &Poc) -> Value {
+        timeout(IO_WAIT, async {
+            let mut tcp = TcpStream::connect(poc.hud.mcp_addr()).await.unwrap();
+            tcp.write_all(
+                format!(
+                    "GET /admin/status?cpu=0 HTTP/1.0\r\nAuthorization: Bearer {CLAUDE_PSK}\r\n\r\n"
+                )
+                .as_bytes(),
+            )
+            .await
+            .unwrap();
+            let mut response = String::new();
+            tcp.read_to_string(&mut response).await.unwrap();
+            let (headers, body) = response.split_once("\r\n\r\n").unwrap();
+            assert_eq!(headers.split_whitespace().nth(1), Some("200"));
+            serde_json::from_str(body).expect("admin status JSON")
+        })
+        .await
+        .expect("admin status deadline")
+    }
+
+    fn session_status<'a>(status: &'a Value, label: &str) -> Option<&'a Value> {
+        status["sessions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["label"] == label)
+    }
+
+    async fn exercise(a: &mut Option<Adapter>, b: &mut Option<Adapter>) {
+        use std::os::unix::process::ExitStatusExt as _;
+
+        let config = WindowedConfig {
+            config_toml: Some(format!(
+                "[dock]\naccepts = ['progress-bar', 'countdown']\nauto_clear_ms = {CAP_MS}\n\n[[tabs]]\nname = 'Main'\n"
+            )),
+            agents: tze_hud_config::AgentsFile::default()
+                .with_agent("claude", CLAUDE_PSK, &["*", "admin"])
+                .directory()
+                .unwrap()
+                .shared(),
+            ..WindowedConfig::default()
+        };
+        let mut poc = Poc::boot_from(config, None).await;
+        poc.hud.set_display_topology(vec![(
+            tze_hud_compositor::DisplayRect {
+                name: "DOCK-FIXTURE".into(),
+                rect: tze_hud_scene::Rect::new(0.0, 0.0, 1920.0, 1080.0),
+                primary: true,
+            },
+            "DOCK-FIXTURE".into(),
+        )]);
+        timeout(IO_WAIT, async {
+            // The GPU-free loop has no production display-report worker.
+            // A real Appearance edit applies the pending report before restyling.
+            poc.open_panel().await;
+            poc.click("appearance.subtitle_backdrop").await;
+            loop {
+                poc.hud.tick();
+                if status(&poc).await["dock"]["capacity"]
+                    .as_u64()
+                    .is_some_and(|n| n >= 2)
+                {
+                    break;
+                }
+                tokio::time::sleep(POLL).await;
+            }
+            poc.hud.press_chord(tze_hud_scene::config::ChordRole::Panel);
+            poc.wait_for("the panel closes before adapter startup", |hud| {
+                !hud.control_panel_open()
+            })
+            .await;
+        })
+        .await
+        .expect("dock lifecycle setup: commit monitor capacity and close the panel");
+
+        let addr = poc.hud.mcp_addr();
+        *a = Some(Adapter::spawn(addr, "dock-a"));
+        *b = Some(Adapter::spawn(addr, "dock-b"));
+        let adapter_a = a.as_mut().unwrap();
+        let adapter_b = b.as_mut().unwrap();
+        adapter_a.initialize().await;
+        adapter_b.initialize().await;
+        let progress = |value| json!({"progress":value});
+        adapter_a.publish(2, "progress-bar", progress(0.25)).await;
+        adapter_b.publish(2, "progress-bar", progress(0.75)).await;
+        let before = status(&poc).await;
+        assert_eq!(before["dock"]["rows"], 2);
+        assert_eq!(session_status(&before, "dock-a").unwrap()["holdings"], 1);
+        let b_before = session_status(&before, "dock-b").unwrap();
+        assert_eq!(b_before["holdings"], 1);
+
+        let eof = Instant::now();
+        drop(
+            adapter_a
+                .child
+                .stdin
+                .take()
+                .expect("close A's stdin to send EOF"),
+        );
+        let after = timeout(Duration::from_secs(1), async {
+            loop {
+                poc.hud.tick();
+                let snapshot = status(&poc).await;
+                if snapshot["dock"]["rows"] == 1 && session_status(&snapshot, "dock-a").is_none() {
+                    break snapshot;
+                }
+                tokio::time::sleep(POLL).await;
+            }
+        })
+        .await
+        .expect("A's actual dock row must leave within one second of EOF");
+        let elapsed = eof.elapsed();
+        assert!(
+            elapsed <= Duration::from_secs(1),
+            "EOF to row removal: {elapsed:?}"
+        );
+        assert_eq!(session_status(&after, "dock-b"), Some(b_before));
+        eprintln!("dock adapter EOF to observed row removal: {elapsed:?}");
+        assert!(adapter_a.wait().await.unwrap().success());
+
+        *a = Some(Adapter::spawn(addr, "dock-a"));
+        let adapter_a = a.as_mut().unwrap();
+        adapter_a.initialize().await;
+        adapter_a.publish(2, "progress-bar", progress(0.25)).await;
+        poc.advance(100).await;
+        adapter_a
+            .publish(
+                3,
+                "countdown",
+                json!({"label":"crash fixture", "ends_in_ms":30_000}),
+            )
+            .await;
+        poc.advance(100).await;
+        adapter_a.publish(4, "progress-bar", progress(0.5)).await;
+        poc.advance(100).await;
+        adapter_b.publish(3, "progress-bar", progress(0.75)).await;
+        let before_crash = status(&poc).await;
+        assert_eq!(before_crash["dock"]["rows"], 2);
+        assert_eq!(
+            session_status(&before_crash, "dock-a").unwrap()["holdings"],
+            2
+        );
+        let b_before = session_status(&before_crash, "dock-b").unwrap();
+        assert_eq!(b_before["holdings"], 1);
+        assert_eq!(adapter_a.kill_and_reap().await.unwrap().signal(), Some(9));
+
+        // Initial progress expiry changes nothing because A refreshed it.
+        // Countdown goes first at its cap, then progress at its new cap.
+        for (advance, a_holdings) in [(0, 2), (CAP_MS - 300, 2), (99, 2), (1, 1), (99, 1), (1, 0)] {
+            poc.advance(advance).await;
+            let snapshot = status(&poc).await;
+            let rows = if a_holdings == 0 { 1 } else { 2 };
+            assert_eq!(snapshot["dock"]["rows"], rows, "clock step {advance}");
+            assert_eq!(
+                session_status(&snapshot, "dock-a").unwrap()["holdings"],
+                a_holdings
+            );
+            assert_eq!(session_status(&snapshot, "dock-b"), Some(b_before));
+        }
+        drop(adapter_b.child.stdin.take().expect("close B's stdin"));
+        assert!(adapter_b.wait().await.unwrap().success());
+    }
+
+    #[test]
+    fn poc_dock_rows_follow_stdio_adapter_exit_and_crash_expiry() {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .unwrap();
+        let mut a = None;
+        let mut b = None;
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            runtime.block_on(exercise(&mut a, &mut b));
+        }));
+        // Keep the runtime and private homes live until both children are reaped,
+        // including if a witness assertion panics.
+        let cleanup = runtime.block_on(async {
+            let mut first_error = None;
+            for adapter in [&mut a, &mut b].into_iter().flatten() {
+                if let Err(error) = adapter.kill_and_reap().await {
+                    first_error.get_or_insert(error);
+                }
+            }
+            first_error
+        });
+        if let Err(payload) = outcome {
+            if let Some(error) = cleanup {
+                eprintln!("adapter cleanup failed after witness failure: {error}");
+            }
+            std::panic::resume_unwind(payload);
+        }
+        assert!(cleanup.is_none(), "adapter cleanup failed: {cleanup:?}");
+    }
 }

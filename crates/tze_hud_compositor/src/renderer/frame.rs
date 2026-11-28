@@ -27,7 +27,7 @@ struct TargetView<'a> {
     system_card_vertices: &'a [RectVertex],
     system_card_rounded_rects: &'a [RoundedRectDrawCmd],
     panel_here: bool,
-    widget_quads: &'a [crate::widget::WidgetDrawQuad],
+    widget_quads: [&'a [crate::widget::WidgetDrawQuad]; 2],
 }
 
 /// Final chrome already laid out in the chosen secondary's pixel space.
@@ -121,7 +121,7 @@ pub struct WindowedFrameBuild {
     panel_on_primary: bool,
     secondary_panel: Option<SecondaryPanel>,
     /// Precomputed per-instance widget draw quads.
-    widget_quads: Vec<crate::widget::WidgetDrawQuad>,
+    widgets: super::widgets::WidgetDraws,
     /// Card identities correlated with the completed per-display texture.
     notification_candidates: Vec<NotificationPresentation>,
     /// Wall-clock start of the frame, for the total frame-time telemetry.
@@ -135,6 +135,10 @@ struct NotificationPresentation {
 }
 
 impl WindowedFrameBuild {
+    pub fn dock_hover(&self) -> Option<&std::sync::Arc<super::DockHoverFrame>> {
+        self.widgets.dock_hover()
+    }
+
     /// Bind the compositor's just-built card geometry to this frame before
     /// releasing the scene lock. Only candidates with a caption can match.
     pub fn bind_notification_candidates(&mut self, scene: &SceneGraph) {
@@ -666,7 +670,7 @@ impl Compositor {
         // SVG rasterization can be slow; if a resize event arrives while we hold
         // the surface texture, the texture is destroyed and queue.submit panics.
         // Kept in the build phase (under the lock) since it reads scene state.
-        self.sync_widget_textures(scene, self.degradation_level);
+        let mut widgets = self.prepare_widget_draws(scene, self.degradation_level, surf_w, surf_h);
         telemetry.widget_rasterized = self
             .widget_renderer
             .as_ref()
@@ -682,29 +686,12 @@ impl Compositor {
         let encode_sources = self.collect_encode_sources(scene, surf_w, surf_h, panel_on_primary);
         self.publish_portal_document_layouts(scene);
 
-        // ── Widget draw geometry (precomputed from the registry) ─────────────
-        let widget_quads = self.collect_widget_draw_geometry(scene, sw, sh);
-        scene.overlay.widget_geometry = widget_quads
-            .iter()
-            .filter_map(|quad| {
-                let texture = self
-                    .widget_renderer
-                    .as_ref()?
-                    .texture_entry(&quad.instance_name)?;
-                let (x, y, width, height) = crate::widget::snap_composite_rect(
-                    quad.raw_x,
-                    quad.raw_y,
-                    texture.width as f32,
-                    texture.height as f32,
-                    sw,
-                    sh,
-                );
-                Some(tze_hud_scene::graph::overlay::WidgetGeometry {
-                    instance_name: quad.instance_name.clone(),
-                    bounds: Rect::new(x, y, width, height),
-                })
-            })
-            .collect();
+        widgets.publish_geometry(
+            self.widget_renderer.as_ref(),
+            scene,
+            Some(FrameTarget::primary(surf_w, surf_h)),
+        );
+        self.prepare_dock_tooltip(scene, &mut widgets);
 
         // ── Keyboard focus ring (chrome layer) ───────────────────
         let mut focus_ring_vertices: Vec<RectVertex> = Vec::new();
@@ -760,7 +747,7 @@ impl Compositor {
             notice_shapes,
             panel_on_primary,
             secondary_panel,
-            widget_quads,
+            widgets,
             notification_candidates: Vec::new(),
             frame_start,
         }
@@ -805,6 +792,17 @@ impl Compositor {
         target: &FrameTarget,
         surface: &dyn CompositorSurface,
     ) -> WindowedPresentOutcome {
+        self.present_windowed_display(build, target, None, surface)
+    }
+
+    /// Present with the verified name of a secondary display, when applicable.
+    pub fn present_windowed_display(
+        &mut self,
+        build: &WindowedFrameBuild,
+        target: &FrameTarget,
+        display: Option<&str>,
+        surface: &dyn CompositorSurface,
+    ) -> WindowedPresentOutcome {
         // Acquire frame through the surface trait (surface-agnostic).
         // The CompositorFrame._guard keeps the backing resource alive until drop.
         // Returns None when the swapchain is temporarily unavailable (double
@@ -827,7 +825,7 @@ impl Compositor {
         let surface_acquired = frame.acquisition.is_fresh();
 
         let (encoder, encode_us, signature_current) =
-            self.encode_windowed_passes(build, target, &frame.view, true);
+            self.encode_windowed_passes(build, target, display, &frame.view, true);
         let frame_start = build.frame_start;
         let mut telemetry = build.telemetry.clone();
         telemetry.stage6_render_encode_us = encode_us;
@@ -854,6 +852,17 @@ impl Compositor {
                 self.device.poll(wgpu::Maintain::Wait);
             }))
         });
+        if present_result.is_ok() && signature_current {
+            frame.record_dock_hover(
+                build.widgets.presented_dock_hover(target, display),
+                build
+                    .widgets
+                    .tooltip_for_target(target, display)
+                    .map(|paint| paint.request.clone()),
+            );
+        } else {
+            frame.invalidate_dock_hover();
+        }
         if present_result.is_ok() && !build.notification_candidates.is_empty() {
             frame.record_notification_candidates(
                 build
@@ -904,10 +913,11 @@ impl Compositor {
         &mut self,
         build: &WindowedFrameBuild,
         target: &FrameTarget,
+        display: Option<&str>,
         view: &wgpu::TextureView,
         include_panel: bool,
     ) -> (wgpu::CommandEncoder, u64, bool) {
-        let mut tv = self.target_view(build, target);
+        let mut tv = self.target_view(build, target, display);
         if tv.panel_here && !include_panel {
             tv.card_items = &[];
             tv.system_card_vertices = &[];
@@ -1000,13 +1010,45 @@ impl Compositor {
     /// Map a canvas-space build onto one display window (see
     /// [`crate::display`]). The primary window borrows the build unchanged;
     /// any other window gets translated copies and its own safe-mode overlay
-    /// or control panel. Widgets and the system card belong to the primary.
+    /// or control panel. Standalone widgets and the system card belong to
+    /// the primary; the dock belongs to its verified target.
     fn target_view<'a>(
         &self,
         build: &'a WindowedFrameBuild,
         target: &FrameTarget,
+        display: Option<&str>,
     ) -> TargetView<'a> {
+        let mut view = self.target_view_base(build, target, display);
+        if let Some(tooltip) = build.widgets.tooltip_for_target(target, display) {
+            view.affordance_items.to_mut().push(tooltip.text.clone());
+            view.affordance_rects
+                .to_mut()
+                .push(tooltip.backdrop.clone());
+        }
+        view
+    }
+
+    fn target_view_base<'a>(
+        &self,
+        build: &'a WindowedFrameBuild,
+        target: &FrameTarget,
+        display: Option<&str>,
+    ) -> TargetView<'a> {
+        let (widget_quads, dock_captions) = build.widgets.for_target(target, display);
         if target.primary && target.is_canvas(build.surf_w, build.surf_h) {
+            let text_items = if dock_captions.is_empty() {
+                Cow::Borrowed(build.encode_sources.text_items.as_slice())
+            } else {
+                Cow::Owned(
+                    build
+                        .encode_sources
+                        .text_items
+                        .iter()
+                        .chain(dock_captions)
+                        .cloned()
+                        .collect(),
+                )
+            };
             return TargetView {
                 width: build.surf_w,
                 height: build.surf_h,
@@ -1015,7 +1057,7 @@ impl Compositor {
                 rr_background: Cow::Borrowed(&build.encode_sources.rr_background),
                 rr_content: Cow::Borrowed(&build.encode_sources.rr_content),
                 rr_post: Cow::Borrowed(&build.encode_sources.rr_post),
-                text_items: Cow::Borrowed(&build.encode_sources.text_items),
+                text_items,
                 affordance_items: Cow::Borrowed(&build.encode_sources.affordance_items),
                 affordance_rects: Cow::Borrowed(&build.encode_sources.affordance_rects),
                 card_items: &build.encode_sources.card_items,
@@ -1028,7 +1070,7 @@ impl Compositor {
                 system_card_vertices: &build.system_card_vertices,
                 system_card_rounded_rects: &build.system_card_rounded_rects,
                 panel_here: build.panel_on_primary,
-                widget_quads: &build.widget_quads,
+                widget_quads,
             };
         }
         let (tw, th) = (target.width.max(1), target.height.max(1));
@@ -1079,7 +1121,9 @@ impl Compositor {
                 })
                 .collect()
         };
-        let text_items = shift_text(&build.encode_sources.text_items);
+        let mut text_items = shift_text(&build.encode_sources.text_items);
+        // Dock captions are already local to the matched display.
+        text_items.extend_from_slice(dock_captions);
         let textured_cmds = build
             .textured_cmds
             .iter()
@@ -1150,11 +1194,7 @@ impl Compositor {
                 &[]
             },
             panel_here,
-            widget_quads: if target.primary {
-                &build.widget_quads
-            } else {
-                &[]
-            },
+            widget_quads,
         }
     }
 
@@ -1202,8 +1242,18 @@ impl Compositor {
     /// present. Used for non-primary windows; the primary presents every
     /// rendered frame.
     pub fn frame_signature(&self, build: &WindowedFrameBuild, target: &FrameTarget) -> u64 {
+        self.display_frame_signature(build, target, None)
+    }
+
+    /// Signature for a secondary with its verified name.
+    pub fn display_frame_signature(
+        &self,
+        build: &WindowedFrameBuild,
+        target: &FrameTarget,
+        display: Option<&str>,
+    ) -> u64 {
         use std::hash::{Hash, Hasher};
-        let tv = self.target_view(build, target);
+        let tv = self.target_view(build, target, display);
         let (w, h) = (tv.width as f32, tv.height as f32);
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         // Pixel-identical replacements on this display still have a new card
@@ -1316,6 +1366,46 @@ impl Compositor {
         {
             // Every TextItem field affects pixels; Debug covers them all.
             format!("{item:?}").hash(&mut hasher);
+        }
+        if let Some(wr) = &self.widget_renderer {
+            let [_, dock_quads] = tv.widget_quads;
+            for quad in dock_quads {
+                if let Some((entry, bounds)) = wr.drawable_widget(quad, w, h) {
+                    0xA9u8.hash(&mut hasher);
+                    hash_f32s(
+                        &mut hasher,
+                        &[bounds.x, bounds.y, bounds.width, bounds.height],
+                    );
+                    entry.dock_pixels.hash(&mut hasher);
+                }
+            }
+        }
+        // Runtime hover proof has semantic identity as well as pixels. A new
+        // instance with identical RGBA still needs its own native receipt.
+        if let Some(frame) = build.widgets.presented_dock_hover(target, display) {
+            for target in &frame.runtime_targets {
+                0xA8u8.hash(&mut hasher);
+                target.instance.hash(&mut hasher);
+                target.instance_name.hash(&mut hasher);
+                let hover = &target.behavior;
+                hover.visibility_param.hash(&mut hasher);
+                hover.delay_ms.hash(&mut hasher);
+                hash_f32s(
+                    &mut hasher,
+                    &[
+                        target.scene_bounds.x,
+                        target.scene_bounds.y,
+                        target.scene_bounds.width,
+                        target.scene_bounds.height,
+                        target.trigger.x,
+                        target.trigger.y,
+                        target.trigger.width,
+                        target.trigger.height,
+                        hover.hidden_value,
+                        hover.visible_value,
+                    ],
+                );
+            }
         }
         hasher.finish()
     }
@@ -1447,7 +1537,7 @@ impl Compositor {
         drag_highlight_cmds.extend(self.drag_pill_cmds(scene, &drag_handles));
 
         // ── Widget texture sync before frame acquisition (same as windowed path).
-        self.sync_widget_textures(scene, self.degradation_level);
+        let widgets = self.prepare_widget_draws(scene, self.degradation_level, surf_w, surf_h);
         telemetry.widget_rasterized = self
             .widget_renderer
             .as_ref()
@@ -1470,6 +1560,8 @@ impl Compositor {
         let (context_menu_vertices, context_menu_text) = self.collect_context_menu(scene, sw, sh);
         let render_menu_text = self.prepare_menu_text(&context_menu_text, surf_w, surf_h);
 
+        let (widget_quads, dock_captions) =
+            widgets.for_target(&FrameTarget::primary(surf_w, surf_h), None);
         // Headless never uses overlay mode — pass false for the pipeline selector.
         let (mut encoder, encode_us, encode_inputs, _) = self.encode_frame(
             &vertices,
@@ -1481,6 +1573,7 @@ impl Compositor {
             false,
             bg_vertex_count,
             chrome_vertex_start,
+            dock_captions,
         );
         telemetry.stage6_render_encode_us = encode_us;
 
@@ -1488,9 +1581,8 @@ impl Compositor {
         self.encode_image_pass(&mut encoder, &frame.view, &textured_cmds, sw, sh, None);
 
         // ── Widget pass: composite pre-synced textures above zone content ────
-        if scene.widgets_shown() {
-            self.encode_widget_pass(&mut encoder, &frame.view, &scene.widget_registry, sw, sh);
-        }
+        widgets.publish_geometry(self.widget_renderer.as_ref(), scene, None);
+        self.encode_widget_pass_prepared(&mut encoder, &frame.view, widget_quads, sw, sh);
         self.encode_rounded_rect_pass(&mut encoder, &frame.view, &drag_highlight_cmds, sw, sh);
         self.encode_drag_handle_pass(&mut encoder, &frame.view, &drag_handle_vertices);
 

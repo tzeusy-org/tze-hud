@@ -37,8 +37,8 @@ Surfaces on that lifecycle, in priority order:
    program composes and updates over gRPC. Removed 2026-10-14 for lack of a
    user; spec and entry criterion in hud-x1wuq.
 4. **SVG widgets.** User-authored templates with typed parameters (`f32`,
-   `color`, `enum`, `string`, `deadline`) the model sets; the runtime rasterizes and
-   animates.
+   `color`, `enum`, `string`, `deadline`) the model sets, placed by the owner,
+   or one per session in the dock; the runtime rasterizes and animates.
 
 ## Design principles
 

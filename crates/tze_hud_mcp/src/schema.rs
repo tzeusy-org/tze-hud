@@ -27,7 +27,7 @@ pub fn initialize_result() -> Value {
 
 /// Build the `tools/list` result.
 pub fn tools_list_result() -> Value {
-    let surface = json!({"type": "string", "description": "Zone/widget from hud_surfaces; portal:<your-id> attaches"});
+    let surface = json!({"type": "string", "description": "Zone/widget/dock from hud_surfaces; portal:<your-id> attaches"});
     let ttl = json!({"type": "integer", "minimum": 0, "description": "0 = until cleared"});
     json!({ "tools": [
         {
@@ -39,7 +39,7 @@ pub fn tools_list_result() -> Value {
         {
             "name": "hud_publish",
             "description": "Zone: publish text or a structured object; notification is \
-                {title?,body,urgency?:0-3,progress?:0..1,actions?:[{label,callback_id?|url|copy|reply,role?:destructive}]}. One reply callback per card; answers include text. Widget: typed params from hud_surfaces. \
+                {title?,body,urgency?:0-3,progress?:0..1,actions?:[{label,callback_id?|url|copy|reply,role?:destructive}]}. One reply callback per card; answers include text. Widget/dock: typed params from hud_surfaces. \
                 Portal: choose portal:<id>; first publish attaches, even without content. \
                 Send only new output text: content appends; same key replaces the newest matching output. \
                 Returns reattached and pending_input; poll hud_input for replies.",

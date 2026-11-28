@@ -14,6 +14,7 @@
 //! with the bundled faces).
 
 use std::collections::HashMap;
+use std::num::NonZeroU64;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
@@ -25,6 +26,8 @@ use tze_hud_config::tokens::{DesignTokenMap, OsPreferences};
 use tze_hud_scene::graph::SceneGraph;
 use tze_hud_scene::render_wake::RenderWakeNotifier;
 use tze_hud_scene::types::ZoneRegistry;
+
+use crate::scene_startup::{DockDisplay, DockPolicy};
 
 /// The resolved tokens now, and the `[design_tokens]` table they came from.
 pub(crate) struct LiveTokens {
@@ -107,7 +110,8 @@ pub struct Appearance {
     /// The on-disk widget bundles, re-read to re-resolve their SVGs.
     bundle_roots: Vec<PathBuf>,
     /// One apply at a time, so the newest table always wins.
-    applying: Mutex<()>,
+    applying: Mutex<AppliedAppearance>,
+    has_dock: bool,
     reload: std::sync::Mutex<Option<ReloadStatus>>,
     /// The `[design_tokens]` the config file holds, as far as this process
     /// knows: a reload that finds the same table is not an edit, so it never
@@ -115,10 +119,8 @@ pub struct Appearance {
     file_table: std::sync::Mutex<DesignTokenMap>,
     /// File reloads attempted, changed or not.
     reloads: AtomicU64,
-    /// The monitors' Windows scale factors, for dp → px.
-    scales: std::sync::Mutex<DisplayScales>,
-    /// The latest monitor report not yet applied.
-    newest_scales: std::sync::Mutex<Option<DisplayScales>>,
+    /// Latest ordered report from the window thread, awaiting application.
+    newest_display: std::sync::Mutex<Option<DisplayReport>>,
     /// Reads the Windows preferences on each restyle ("Show animations",
     /// hud-ljhku.13; text size and caret blink):
     /// `os_prefs::read` in the HUD, a pinned value in harnesses and tests.
@@ -141,6 +143,18 @@ impl Default for DisplayScales {
             zones: HashMap::new(),
         }
     }
+}
+
+#[derive(Debug, Default, PartialEq)]
+pub(crate) struct DisplayReport {
+    pub(crate) scales: DisplayScales,
+    pub(crate) dock: Option<DockDisplay>,
+}
+
+#[derive(Default)]
+struct AppliedAppearance {
+    displays: DisplayReport,
+    dock: Option<DockPolicy>,
 }
 
 impl std::fmt::Debug for Appearance {
@@ -166,11 +180,11 @@ impl Appearance {
             scene,
             config_parent,
             bundle_roots,
-            applying: Mutex::new(()),
+            applying: Mutex::new(AppliedAppearance::default()),
+            has_dock: false,
             reload: std::sync::Mutex::new(None),
             reloads: AtomicU64::new(0),
-            scales: std::sync::Mutex::new(DisplayScales::default()),
-            newest_scales: std::sync::Mutex::new(None),
+            newest_display: std::sync::Mutex::new(None),
         }
     }
 
@@ -203,77 +217,121 @@ impl Appearance {
         )
     }
 
-    /// Restyle the HUD with `table` as its `[design_tokens]`. Refused (and
-    /// nothing changes) when config loading would refuse it. Returns whether
-    /// anything changed.
+    pub(crate) fn with_dock_policy(mut self, dock: Option<DockPolicy>) -> Self {
+        self.has_dock = dock.is_some();
+        self.applying.get_mut().dock = dock;
+        self
+    }
+
+    pub(crate) fn has_dock(&self) -> bool {
+        self.has_dock
+    }
+
+    /// Keep the next publication's cap through subsequent display and appearance changes.
+    pub(crate) async fn set_dock_auto_clear_ms(&self, cap: NonZeroU64) -> Result<(), String> {
+        let mut applied = self.applying.lock().await;
+        let dock = applied.dock.as_mut().ok_or("Dock is not configured")?;
+        let mut scene = self.scene.lock().await;
+        if !scene.set_dock_auto_clear_ms(cap) {
+            return Err("Dock is not configured".into());
+        }
+        dock.config.auto_clear_ms = cap.get();
+        Ok(())
+    }
+
+    /// Restyle the HUD with `table` as its `[design_tokens]`. Refuses invalid
+    /// proposals before changing the committed tokens or artwork.
     pub(crate) async fn apply(&self, table: DesignTokenMap) -> Result<bool, String> {
         check_design_tokens(&table)?;
-        let _one_at_a_time = self.applying.lock().await;
+        let mut applied = self.applying.lock().await;
         if table == self.live.table() {
             return Ok(false);
         }
-        self.restyle(table).await
+        self.restyle(table, &mut applied).await
     }
 
-    /// The monitors' scale factors changed (startup, a DPI change, a monitor
-    /// plugged in): re-derive every size. Returns whether anything changed.
-    ///
-    /// Reports may overlap: whichever call takes the lock applies the newest
-    /// one, and a later call finds nothing left to do.
-    pub(crate) async fn set_display_scales(&self, scales: DisplayScales) -> Result<bool, String> {
-        *self.newest_scales.lock().unwrap_or_else(|e| e.into_inner()) = Some(scales);
-        let _one_at_a_time = self.applying.lock().await;
-        let Some(scales) = self
-            .newest_scales
+    /// The main thread records reports in publication order before spawning a
+    /// worker. Whichever worker applies first takes the newest report.
+    pub(crate) fn queue_display_report(&self, report: DisplayReport) {
+        *self
+            .newest_display
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = Some(report);
+    }
+
+    pub(crate) async fn apply_display_report(&self) -> bool {
+        let mut applied = self.applying.lock().await;
+        let mut scene = self.scene.lock().await;
+        self.apply_pending_display(&mut applied, &mut scene)
+    }
+
+    /// Display changes apply to the last valid appearance, independently of
+    /// any proposed file or preference restyle.
+    fn apply_pending_display(
+        &self,
+        applied: &mut AppliedAppearance,
+        scene: &mut SceneGraph,
+    ) -> bool {
+        let Some(report) = self
+            .newest_display
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .take()
         else {
-            return Ok(false);
+            return false;
         };
-        let previous = std::mem::replace(
-            &mut *self.scales.lock().unwrap_or_else(|e| e.into_inner()),
-            scales.clone(),
-        );
-        if previous == scales {
-            return Ok(false);
+        if report == applied.displays {
+            return false;
         }
-        tracing::info!(?scales, "appearance: display scale changed");
-        let outcome = self.restyle(self.live.table()).await;
-        if outcome.is_err() {
-            // Not applied: the same report again must retry.
-            *self.scales.lock().unwrap_or_else(|e| e.into_inner()) = previous;
+        let previous = self.live.resolved();
+        let mut tokens = (*previous).clone();
+        scale_tokens(&mut tokens, &report.scales);
+        let dock_changed = applied
+            .dock
+            .as_ref()
+            .is_some_and(|dock| dock.project(scene, &tokens, report.dock.as_ref()));
+        applied.displays = report;
+        let tokens_changed = tokens != *previous;
+        if tokens_changed {
+            restyle_zones(&mut scene.zone_registry, &tokens);
+            scene.version += 1;
+            self.live.publish(self.live.table(), tokens);
+        } else if dock_changed {
+            self.live.compositor_wake.notify();
+            self.live.main_wake.notify();
         }
-        outcome
+        dock_changed || tokens_changed
     }
 
-    fn scales(&self) -> DisplayScales {
-        self.scales
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone()
+    #[cfg(test)]
+    async fn set_display_scales(&self, scales: DisplayScales) -> Result<bool, String> {
+        self.queue_display_report(DisplayReport {
+            scales,
+            ..Default::default()
+        });
+        Ok(self.apply_display_report().await)
     }
 
     /// `table` resolved for drawing: tokens, the fonts directory, the
     /// primary monitor's px per dp and that of each zone placed on a
     /// secondary monitor.
-    fn resolve(&self, table: &DesignTokenMap) -> DesignTokenMap {
+    fn resolve(&self, table: &DesignTokenMap, scales: &DisplayScales) -> DesignTokenMap {
         let mut resolved = resolve_config_tokens(table);
         // The Windows preferences are re-read on each reload (hud-ljhku.13);
         // there is no live OS watch.
         tze_hud_config::tokens::apply_os_preferences(&mut resolved, table, &(self.read_os)());
         crate::scene_startup::resolve_font_dir(&mut resolved, self.config_parent.as_deref());
-        let scales = self.scales();
-        tze_hud_config::tokens::set_px_scale(&mut resolved, scales.primary);
-        for (zone, scale) in &scales.zones {
-            tze_hud_config::tokens::set_zone_px_scale(&mut resolved, zone, *scale);
-        }
+        scale_tokens(&mut resolved, scales);
         resolved
     }
 
     /// Restyle with `table` under the current display scales.
-    async fn restyle(&self, table: DesignTokenMap) -> Result<bool, String> {
-        let resolved = self.resolve(&table);
+    async fn restyle(
+        &self,
+        table: DesignTokenMap,
+        applied: &mut AppliedAppearance,
+    ) -> Result<bool, String> {
+        let mut resolved = self.resolve(&table, &applied.displays.scales);
         let previous = self.live.resolved();
         if resolved == *previous {
             // Only the table's spelling changed (e.g. an override equal to
@@ -286,11 +344,11 @@ impl Appearance {
         let svgs_changed = without_scales(&resolved) != without_scales(&previous);
         drop(previous);
         // Bundles are files: read them off the async workers.
-        let svgs = if svgs_changed {
+        let widget_bundles = if svgs_changed {
             let roots = self.bundle_roots.clone();
             let tokens = resolved.clone();
             tokio::task::spawn_blocking(move || {
-                crate::widget_startup::widget_svg_assets(&roots, &tokens)
+                crate::widget_startup::reload_widget_bundles(&roots, &tokens)
             })
             .await
             .map_err(|e| format!("Widget bundles could not be re-read: {e}"))?
@@ -299,15 +357,36 @@ impl Appearance {
         };
         {
             let mut scene = self.scene.lock().await;
+            // A newer target may have arrived while assets were being read.
+            // Apply it even if the proposed row shape will be refused.
+            self.apply_pending_display(applied, &mut scene);
+            scale_tokens(&mut resolved, &applied.displays.scales);
+            let extents = applied.dock.as_ref().map(|dock| dock.extents.clone());
+            let widgets = crate::widget_startup::prepare_widget_restyle(
+                &scene,
+                widget_bundles,
+                extents.unwrap_or_default(),
+            );
+            if let Some(dock) = &mut applied.dock {
+                dock.config
+                    .validate_bundles(
+                        resolved
+                            .get(tze_hud_config::dock::ROW_HEIGHT_TOKEN)
+                            .map(String::as_str),
+                        &widgets.dock_extents,
+                    )
+                    .and_then(|()| dock.config.validate_row_text(&widgets.row_misfits))
+                    .map_err(|error| error.to_string())?;
+                dock.extents.clone_from(&widgets.dock_extents);
+                dock.project(&mut scene, &resolved, applied.displays.dock.as_ref());
+            }
             restyle_zones(&mut scene.zone_registry, &resolved);
             // Widget boxes are display fractions: zoom (Windows text size ×
             // `ui.scale`) alone resizes them.
             scene.widget_registry.zoom = tze_hud_config::tokens::effective_scale(&resolved);
             scene.widget_registry.reduce_motion =
                 tze_hud_config::tokens::os_reduce_motion(&resolved);
-            for (widget_type, file, bytes) in svgs {
-                scene.enqueue_widget_svg_asset(&widget_type, &file, bytes);
-            }
+            widgets.apply(&mut scene);
             scene.version += 1;
             tracing::info!(
                 theme = tze_hud_config::themes::selected_theme_name(&table),
@@ -373,13 +452,13 @@ impl Appearance {
     /// Re-read the Windows preferences under the tokens in effect, restyling
     /// only when one changed. Returns whether anything changed.
     async fn refresh_os_preferences(&self) -> Result<bool, String> {
-        let _one_at_a_time = self.applying.lock().await;
+        let mut applied = self.applying.lock().await;
         let table = self.live.table();
-        if self.resolve(&table) == *self.live.resolved() {
+        if self.resolve(&table, &applied.displays.scales) == *self.live.resolved() {
             return Ok(false);
         }
         tracing::info!("appearance: Windows preferences changed");
-        self.restyle(table).await
+        self.restyle(table, &mut applied).await
     }
 
     /// The Windows preferences in effect, for `/admin/status` `os_prefs`.
@@ -453,6 +532,15 @@ pub(crate) fn restyle_zones(registry: &mut ZoneRegistry, tokens: &DesignTokenMap
                 });
             *margin_px = bottom * tze_hud_config::tokens::px_scale(&on_its_monitor);
         }
+    }
+}
+
+fn scale_tokens(tokens: &mut DesignTokenMap, scales: &DisplayScales) {
+    use tze_hud_config::tokens::{PX_SCALE_KEY, set_px_scale, set_zone_px_scale};
+    tokens.retain(|key, _| !key.starts_with(PX_SCALE_KEY));
+    set_px_scale(tokens, scales.primary);
+    for (zone, scale) in &scales.zones {
+        set_zone_px_scale(tokens, zone, *scale);
     }
 }
 
@@ -828,7 +916,7 @@ mod tests {
             async { drop(busy) },
         );
         assert_eq!((first, second), (Ok(true), Ok(false)));
-        assert_eq!(appearance.scales(), newer);
+        assert_eq!(appearance.applying.lock().await.displays.scales, newer);
         assert_eq!(
             tze_hud_config::tokens::px_scale(&appearance.live.resolved()),
             2.0

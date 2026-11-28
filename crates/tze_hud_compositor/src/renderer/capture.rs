@@ -97,8 +97,19 @@ impl Compositor {
         target: &crate::display::FrameTarget,
         format: wgpu::TextureFormat,
     ) -> Result<CapturedFrame, CaptureError> {
+        self.capture_windowed_display(build, target, None, format)
+    }
+
+    /// Capture the chosen secondary by its verified name.
+    pub fn capture_windowed_display(
+        &mut self,
+        build: &WindowedFrameBuild,
+        target: &crate::display::FrameTarget,
+        display: Option<&str>,
+        format: wgpu::TextureFormat,
+    ) -> Result<CapturedFrame, CaptureError> {
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            self.capture_inner(build, target, format)
+            self.capture_inner(build, target, display, format)
         }))
         .unwrap_or_else(|_| {
             tracing::error!("admin capture panicked in the GPU path; request failed");
@@ -110,6 +121,7 @@ impl Compositor {
         &mut self,
         build: &WindowedFrameBuild,
         frame_target: &crate::display::FrameTarget,
+        display: Option<&str>,
         format: wgpu::TextureFormat,
     ) -> Result<CapturedFrame, CaptureError> {
         let (width, height) = (frame_target.width, frame_target.height);
@@ -133,7 +145,8 @@ impl Compositor {
             view_formats: &[],
         });
         let view = target.create_view(&wgpu::TextureViewDescriptor::default());
-        let (mut encoder, _, _) = self.encode_windowed_passes(build, frame_target, &view, false);
+        let (mut encoder, _, _) =
+            self.encode_windowed_passes(build, frame_target, display, &view, false);
 
         let bytes_per_row = (width * 4).div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT)
             * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;

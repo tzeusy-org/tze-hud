@@ -14,6 +14,7 @@ discovery.
 |---|---|---|
 | Zone | `zone:<name>`, e.g. `zone:subtitle` | MCP, gRPC |
 | Widget instance | `widget:<name>`, e.g. `widget:gauge` | MCP, gRPC |
+| Dock widget (one per type per session) | `dock:<type>`, e.g. `dock:progress-bar` ([Widget dock](#widget-dock)) | MCP |
 | Portal projection | `portal:<projection_id>` | MCP |
 
 | Stage | MCP tool | gRPC message | Notes |
@@ -52,6 +53,7 @@ milliseconds, named `*_ms`, everywhere.
   {"s":"zone:subtitle","accepts":"text","one":true},
   {"s":"zone:notification-area","accepts":"notification","max":5,"held":true,"expires_in_ms":4200},
   {"s":"widget:gauge","params":{"level":"number 0..1","label":"string<=12"}},
+  {"s":"dock:progress-bar","params":{"progress":"number 0..1","label":"string<=32","severity":"enum info|warning|error"},"held":true,"expires_in_ms":840000},
   {"s":"portal:claude-main","state":"attached","pending_input":1,"unread":3}
 ]}
 ```
@@ -84,6 +86,7 @@ refusal of such a count reads `<widget>.<param> must be an integer in lo..hi`.
 Widget discovery includes only parameters with `audience = "model"` (the
 manifest default). `owner` and `runtime` parameters remain declared for local
 configuration/rendering but are rejected atomically on both agent transports.
+`dock:` entries follow [Widget dock](#widget-dock).
 
 In `tools/list`, only `hud_surfaces` has `readOnlyHint:true`. Only `hud_hold`
 and `hud_clear` have `idempotentHint:true`; publish/input make neither claim.
@@ -528,7 +531,8 @@ presentation. A visible
 notification's fade moves with it; a held one never fades.
 Positive zone/widget Hold TTLs use saturating millisecond conversion and absolute
 expiry arithmetic across the admitted `u64` range; they cannot wrap to a short
-lifetime. The widget owner's auto-clear limit still applies.
+lifetime. The widget owner's auto-clear limit still applies; a dock widget
+holds within the dock's limit ([Widget dock](#widget-dock)).
 While agents are paused, fresh MCP and gRPC Hold requests return
 `SAFE_MODE_ACTIVE` before changing active or delayed content, expiry or leases.
 A request waiting for the scene lock rechecks pause when it acquires it;
@@ -540,7 +544,7 @@ portal is degraded after 30 s with no publish, poll, or hold, and reclaimed
 30 s later.
 
 **`hud_clear`** `{surface*, key?}` releases a zone publication, a widget
-instance, or a portal (detach). With a nonempty key, it clears only that
+instance, the caller session's dock widget, or a portal (detach). With a nonempty key, it clears only that
 publisher's matching notification in a notification-capable zone, including
 matching delayed notification publishes. Sibling keys, foreign publishers and
 nonnotification content in mixed zones or other scheduled publications survive.
@@ -619,6 +623,90 @@ The gRPC `Hold` and `Clear` behave the same on zones. An internal scene
   turn, inside the ordinary 100 ms output pacing slot. Refused replies add no
   accepted input or success echo; their truthful local feedback is also urgent.
   Scene readiness is separate from physical display presentation.
+
+### Widget dock
+
+With a `[dock]` table in the config ([Configuration](#configuration)), each
+session can show its own widgets in a runtime-owned column: one row per
+session, at most one instance of each accepted type per row, addressed as
+`dock:<type>` for each type in `[dock] accepts`. Without the table there is
+no dock and no `dock:` entry. `production.toml` has no `[dock]` table yet, so
+production discovery is unchanged.
+
+- **Identity.** An instance is (agent, session, type). A session's first
+  `hud_publish` to `dock:<type>` creates its instance; later publishes update
+  it in place with widget semantics (typed `params`, partial updates,
+  transitions, `clipped`). There is no caller key: a session that needs two of
+  one type uses a card. Calls without `Mcp-Session-Id` are the agent's one
+  unscoped session, with a row of their own and no caption. gRPC has no dock
+  addressing, and no `widget:` name reaches a dock instance on either plane.
+- **Permission.** The `widget:*` class (or `*`) grants every `dock:<type>`; a
+  single-widget grant does not. Without it discovery lists no `dock:` entry
+  and calls return `NOT_ALLOWED` naming `widget:*`.
+- **Discover.** One entry per accepted type, in `accepts` order, with the
+  bundle's model parameters rendered as on a widget entry. The caller
+  session's live instance adds `held:true` and `expires_in_ms`. Other
+  sessions' instances are invisible and never make an entry `busy`.
+- **Publish.** Only `params` and `ttl_ms` apply. `key`, `display_name`,
+  `content`, `status`, `expects_reply`, `wait_ms` and a positive `delay_ms`
+  return `INVALID_ARGUMENT` ([Errors](#errors)); dock publishes are immediate.
+- **Lifetime.** Each publish expires its instance `[dock] auto_clear_ms`
+  later (default 15 min), with the widget "Clears after" rule: a shorter
+  `ttl_ms` wins, and `ttl_ms` 0 or longer is capped. The limit is read at each
+  publish, so a changed setting applies from an instance's next publish. A
+  republish that omits a countdown's `ends_in_ms` keeps its deadline, so a
+  longer countdown is kept by republishing within the limit. `hud_hold` works
+  as on a widget inside that limit: `ttl_ms` 0 keeps the time left to publish
+  + limit, a shorter `ttl_ms` re-times to now + `ttl_ms`; with no live
+  instance it returns `NOT_HELD`. `hud_clear {"surface":"dock:<type>"}`
+  releases only the caller session's instance; with none it succeeds.
+  `DELETE /mcp` and the 64-session eviction release a session's instances at
+  once; a crashed client's expire on the limit. The Agents card's Clear and
+  Unpair remove them in every session. Safe mode pauses their TTL and refuses
+  publish and hold with `SAFE_MODE_ACTIVE`. Hiding the widgets class, or Hide
+  all, hides the whole dock including captions; publishes keep landing
+  (invariant 10).
+- **Layout.** Runtime-owned. Rows keep the order in which each session's
+  first live instance appeared, so a new session's row appends at the bottom.
+  A row is `dock.row.height` tall: a `dock.caption.width` caption with the
+  session's current label (with its ` (2)` suffix) in `type.label.m` and
+  `color.on_surface.variant`, ellipsized and vertically centred (blank for an
+  unscoped or unlabeled session), then its instances in arrival order, each
+  scaled to the row height with its aspect kept. Items and rows are `space.s`
+  apart. A row leaves with its last instance. When a row or instance leaves,
+  what follows moves up or left once over `motion.exit.ms` with
+  `motion.exit.easing` (a snap with Windows animations off); while the pointer
+  is inside the column the move waits and the vacated slot stays reserved, so
+  nothing moves under the pointer. A new row that would land past the
+  column's end closes those slots at once, unless the pointer is inside. The
+  column starts at x 5%, y 12% of its display, spans 73% of its height, and
+  is as wide as the widest possible row (caption plus one of each accepted
+  type). If that exceeds 35% of the display width the whole dock scales down
+  uniformly (`/admin/status` `dock.scale`). Sizes follow the display scale ×
+  the zoom (Windows text size × `ui.scale`). Each instance has its own
+  runtime hover, as a placed widget does. An empty dock draws nothing.
+- **Capacity.** As many rows as fit the column's height, at most `max_rows`.
+  A publish that needs a new row when none is free (including slots held
+  vacant while the pointer is inside the column) fails `CONTENT_REJECTED`
+  with `dock full; show this in a card` and changes nothing; a new instance in
+  an existing row and updates always land. No instance is evicted to admit
+  another session's. If a display or scale change later leaves too little
+  room, the bottom rows stop drawing and `/admin/status` `dock.overflow` lists
+  them until room returns (invariant 6). With no display for the dock, new
+  rows are refused and live ones are kept undrawn.
+- **Countdown.** `dock:countdown` draws the bundle's compact 160×52 dp dock
+  presentation with the same params, deadline and tick schedule as the
+  standalone 360×124 dp countdown, which is unchanged. The label
+  (`type.body.m`) is on the first line and the readout (`type.readout`) on the
+  second, both `color.on_surface` and inset by `space.s`; warning adds a
+  `color.caution` triangle and error a `color.error` diamond at the end of the
+  readout line. A long label ends in an ellipsis on a grapheme boundary and
+  `clipped` reports it; the readout is never cut. Hovering a clipped label for
+  180 ms shows the full label in a surface-token tooltip beside the column
+  (outside when it fits, else inside, kept in the work area); it closes when
+  the pointer leaves, the label fits, or the dock is hidden. Any bundle may
+  ship such an alternate as `[[dock.layers]]` in its `widget.toml`, sharing
+  its schema; the row-shape rule then measures it.
 
 ### Identity and permissions
 
@@ -853,6 +941,12 @@ agents until one is paired.
   A widget entry has `s` (`widget:<instance>`), its snapped drawn `rect`,
   `display`, `hover_target` (the runtime's declared trigger rect, or `null`)
   and `tooltip_visible` (the current runtime parameter is at least 0.5).
+  A dock instance's entry also has `session` (its row's caption, or `null`
+  when unscoped or unlabeled). With a `[dock]` table, top-level `dock` is
+  `{rows, capacity, overflow, scale}`: live rows, rows the column can draw
+  (0 with no display), the undrawn rows as `{agent, session}`, and the
+  uniform scale factor (`null` with no display). Owner hiding does not change
+  it.
   Rects use `{x, y, w, h}` in scene pixels, and `display` indexes `displays`.
   `cursor` (top level) is the pointer shape the runtime last applied:
   `arrow`, `hand`, `ibeam`, `grab`, `grabbing`, `ew-resize`, `ns-resize`,
@@ -940,6 +1034,14 @@ unknown PSK) is a JSON-RPC error.
   and its required type/range; invalid urgency/status entries/inner TTL return
   `INVALID_ARGUMENT`. Mixed valid/invalid updates reject whole before changing
   publications, current parameters, transitions or MCP lease renewals.
+- Dock refusals change nothing. A `key` field on a dock publish or clear is
+  `INVALID_ARGUMENT` `one dock widget per type per session; no key`; another
+  field that does not apply reads `<field> doesn't apply to dock widgets`, and
+  a positive `delay_ms` reads `dock widgets publish immediately; omit
+  delay_ms`. A type not in `accepts` is `WIDGET_NOT_FOUND` with
+  `dock accepts: <types>`. A new row with none free is `CONTENT_REJECTED`
+  `dock full; show this in a card`. A dock hint that would pass 60 bytes is
+  replaced by a fixed one that points at `hud_surfaces`.
 - A sequence-valid post-handshake gRPC `ClientMessage` with no recognized request payload returns `RequestResult{ok: false, code: INVALID_ARGUMENT}` with a hint to use the current schema and a supported request. This covers empty envelopes and requests containing only unknown or removed fields. Protobuf discards those fields, so the server cannot identify the discarded request tag or name. Unknown fields alongside a recognized request keep its normal behavior.
 - Codes are a closed set shared by both planes (invariant 8;
   `crates/tze_hud_scene/src/error_codes.rs` `ERROR_CODES`, kept in sync with
@@ -952,9 +1054,9 @@ unknown PSK) is a JSON-RPC error.
 | `NOT_ALLOWED` | The agent's `allow` list doesn't cover the surface, or another of its sessions owns the portal id |
 | `NOT_HELD` | `hud_hold` with nothing to extend (including a portal the viewer dismissed); `hud_clear` on a portal this agent never attached (a dismissed portal's `hud_clear` is an ok no-op) |
 | `ZONE_NOT_FOUND` | No such zone |
-| `WIDGET_NOT_FOUND` | No such widget instance |
+| `WIDGET_NOT_FOUND` | No such widget instance, or a type the dock does not accept |
 | `WIDGET_PARAMETER_INVALID` | Unknown widget param, or a value of the wrong type or range |
-| `CONTENT_REJECTED` | The zone doesn't accept this content, or is full; a portal publish or input too large |
+| `CONTENT_REJECTED` | The zone doesn't accept this content, or is full; the dock is full; a portal publish or input too large |
 | `LEASE_NOT_ACTIVE` | The agent's lease lapsed mid-call; retry |
 | `SAFE_MODE_ACTIVE` | The human paused agents |
 | `TIMESTAMP_TOO_FUTURE` | `delay_ms` beyond the scheduling horizon |
@@ -1156,6 +1258,21 @@ pill without changing the shared scrim role. `stroke.subtitle.text` and
 `color.subtitle.outline` control the optional text outline. The retired
 `typography.subtitle.*`, `color.outline.default` and `stroke.outline.width`
 keys no longer style subtitles. Owner policy overrides still win.
+
+The optional `[dock]` table turns on the [widget dock](#widget-dock):
+`accepts` (widget bundle type ids, at most 6), `max_rows` (default 16,
+1–32; a hard cap on session rows, invariant 7) and `auto_clear_ms` (1 ms
+to 1 h, default 900000 = 15 min). Each accepted type must load from
+a bundle and pass the row-shape rule: its natural height (its dock
+presentation's, if it has one) is at most 4/3 of `dock.row.height`, so it
+draws at 75% or more of its designed size. An unknown type, a seventh entry
+or a failing type (the gauge or status-indicator) is a config error naming it
+and, for the shape rule, the height limit. So is a countdown whose type
+tokens or `space.s` leave its two dock text lines no room to draw.
+`dock.row.height` (default 52) and `dock.caption.width` (default 96) are logical-pixel tokens; the gaps use
+`space.s`. `[displays."<key>"] zones = ["dock"]` moves the column to that
+display like a zone (it stays on the primary when the key matches no
+monitor), but `dock` is not a zone: `hud_surfaces` never lists `zone:dock`.
 
 `[runtime]` also holds the launch settings the control panel edits:
 `mcp_port` (default 9090) and `grpc_port` (50051), 0 disabling either and
@@ -1525,7 +1642,12 @@ not fit on the display is refused); "Clears after" (Never, 5 s ... 1 h)
 caps each publication at that long after it was published, including what
 shows now, unless the agent asked for less. Both are saved into the
 widget's own `[[tabs.widgets]]` entry with the file's comments kept; when the
-save fails the change lasts the session and the row says so. The
+save fails the change lasts the session and the row says so. With a
+`[dock]` table the card adds "Dock accepts" (the accepted types, read-only)
+and "Dock clears after" (5 s ... 1 h, no Never; default 15 min). The
+latter applies live from each instance's next publish, live instances keep
+their expiry, and it saves to `[dock] auto_clear_ms` (Reset removes the
+key). Dock instances get no per-widget rows. The
 Layout card also gives each zone a display choice. Choose a connected monitor
 by its current key to move the zone on the next frame and save it under
 `[displays."<key>"]`, keeping the file's comments and other zone assignments.
@@ -1942,7 +2064,7 @@ distinguishes arguments from responses and partial configuration examples.
 
 | Measure | Before T5 (wire) | Wire | Model-visible | Budget (model-visible) |
 |---|---|---|---|---|
-| `tools/list` | 4,418 | 684 | 647 | ≤ 900 |
+| `tools/list` | 4,418 | 692 | 655 | ≤ 900 |
 | Discover (default scene) | ~430 (`list_zones`) | 194 | 126 | ≤ 150 |
 | Zone publish | ~197 | 90 | 39 | ≤ 80 |
 | Four-option notification ask + returned answer + ACK | — | 273 | 114 | ≤ 120 |
@@ -1960,6 +2082,11 @@ flow bytes or ceilings. The owner-approved progress and copy baseline measures
 2,749 model-visible bytes and 635 tokens. The typed reply schema raises
 `tools/list` to the approved 2,806 model-visible bytes and 647 tokens
 (2,908 wire bytes and 684 wire tokens).
+Naming the dock surface in `tools/list` ("Zone/widget/dock from
+hud_surfaces", "Widget/dock: typed params") moves it to the approved 2,826
+model-visible bytes and 655 tokens (2,928 wire bytes and 692 wire tokens). The
+other canonical flows keep identical bytes, and production discovery is
+unchanged because `production.toml` has no `[dock]` table.
 
 - `notification_choice` publishes Ship/Hold/Skip/Open, activates Skip through
   `SceneGraph::activate_notification` (the shared pointer/keyboard producer),
