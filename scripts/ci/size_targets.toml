@@ -136,7 +136,7 @@ approval = "hud-ljhku.10 design field, owner-signed 2026-11-10 (funnel-10-dock-s
 signed_at = "2026-11-10"
 decision = "hud-3n24e.32"
 target = "core"
-rust = 1176
+rust = 1186
 rust_test = 837
 
 [[inflight_allowances]]
@@ -154,7 +154,7 @@ approval = "hud-ljhku.10 design field, owner-signed 2026-11-10 (funnel-10-dock-s
 signed_at = "2026-11-10"
 decision = "hud-3n24e.32"
 target = "render"
-rust = 1275
+rust = 1279
 rust_test = 3015
 
 [[inflight_allowances]]
@@ -164,7 +164,7 @@ signed_at = "2026-11-10"
 decision = "hud-3n24e.32"
 target = "ui_and_shell"
 rust = 1659
-rust_test = 2443
+rust_test = 2445
 
 [[inflight_allowances]]
 feature = "hud-ljhku.10.1"
