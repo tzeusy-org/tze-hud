@@ -68,6 +68,33 @@ markdown = 900
 # "Git / GitHub Workflow" in AGENTS.md gives the cutoff and review procedure.
 # Later comparisons keep the original entry as evidence and apply no credit.
 
+# hud-rf026.3.2 sibling MCP scope and hook cards: measured against the tested base.
+[[inflight_allowances]]
+feature = "hud-rf026.3.2"
+approval = "hud-rf026.3 G6 slice (b), owner-signed funnel-rf026-3-identity-spec = A"
+signed_at = "2026-11-10T15:12:00Z"
+decision = "hud-3n24e.32"
+target = "ui_and_shell"
+rust = 17
+rust_test = 388
+
+[[inflight_allowances]]
+feature = "hud-rf026.3.2"
+approval = "hud-rf026.3 G6 slice (b), owner-signed funnel-rf026-3-identity-spec = A"
+signed_at = "2026-11-10T15:12:00Z"
+decision = "hud-3n24e.32"
+target = "api"
+rust_test = 5
+
+[[inflight_allowances]]
+feature = "hud-rf026.3.2"
+approval = "hud-rf026.3 G6 slice (b), owner-signed funnel-rf026-3-identity-spec = A"
+signed_at = "2026-11-10T15:12:00Z"
+decision = "hud-3n24e.32"
+target = "client_skills"
+python = 517
+markdown = 26
+
 [[inflight_allowances]]
 feature = "hud-66nb0.1"
 approval = "hud-66nb0.1 design field: owner-signed spec, questionnaire item funnel-r4-1-overlay-shell-spec (packet tze-hud-2026-11-21-funnel, option A)"
