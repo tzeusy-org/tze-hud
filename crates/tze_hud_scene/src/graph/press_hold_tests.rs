@@ -155,6 +155,24 @@ fn answer_window_press_holds_card_until_release() {
     clock.advance(600);
     assert_eq!(scene.drain_expired_zone_publications(), 0);
     assert!(shown(&scene, "q"), "the press holds the past-due card");
+    // Its link, Go To and reveal feedback stay with it.
+    let id = button.publication_id;
+    scene.overlay.notification_link_attempts.insert((id, 0), 1);
+    scene.overlay.notification_go_to.insert(
+        id,
+        crate::graph::overlay::NotificationGoTo {
+            available: true,
+            ..Default::default()
+        },
+    );
+    scene.prune_notification_feedback();
+    assert!(
+        scene
+            .overlay
+            .notification_link_attempts
+            .contains_key(&(id, 0))
+    );
+    assert!(scene.overlay.notification_go_to.contains_key(&id));
     // One wake, at the bound, while it holds.
     assert_eq!(
         scene.next_publication_expiry_wall_us(),
@@ -456,4 +474,136 @@ fn a_press_schedules_no_wake_until_it_holds_a_card() {
     assert_eq!(scene.next_publication_expiry_wall_us(), Some(deadline));
     scene.drain_expired_zone_publications();
     assert!(!shown(&scene, "q"));
+}
+
+/// A card with one callback action ("Ship") and one reply action ("Other…").
+fn reply_question(text: &str) -> ZoneContent {
+    let ZoneContent::Notification(mut payload) = card(text, &["Ship"]) else {
+        unreachable!()
+    };
+    payload.actions.push(NotificationAction {
+        label: "Other…".into(),
+        reply: Some("other".into()),
+        ..Default::default()
+    });
+    ZoneContent::Notification(payload)
+}
+
+fn reply_view(id: SceneId, text: &str) -> crate::graph::overlay::NotificationReplyView {
+    crate::graph::overlay::NotificationReplyView {
+        publication_id: id,
+        action_index: 1,
+        text: text.into(),
+        cursor_byte: text.len(),
+        selection_anchor: text.len(),
+        at_capacity: false,
+    }
+}
+
+#[test]
+fn press_opened_reply_field_keeps_a_past_deadline_card_until_closed() {
+    // "Other…" pressed with 100 ms left and released after the deadline: the
+    // press's own activation opens the field, and the field keeps the card,
+    // empty or not, until it closes.
+    let (mut scene, clock) = scene();
+    ask(&mut scene, reply_question("q"), None, true);
+    let other = control(&mut scene, "q", ZoneInteractionKind::Action { index: 1 });
+    clock.advance(900);
+    scene.begin_notification_press(&other);
+    clock.advance(200);
+    assert_eq!(scene.drain_expired_zone_publications(), 0);
+    assert!(matches!(
+        scene.activate_notification(&other, EXIT_MS),
+        Some(crate::graph::NotificationActivation::Reply(_))
+    ));
+    assert!(
+        scene.overlay.notification_reply.is_some(),
+        "the field opens"
+    );
+    scene.end_notification_press();
+    scene.drain_expired_zone_publications();
+    assert!(shown(&scene, "q"), "the open field keeps the card");
+    assert_eq!(scene.next_publication_expiry_wall_us(), None);
+    // Typing redraws keep it; Esc closes the field and the card expires.
+    assert!(scene.set_notification_reply_view(Some(reply_view(other.publication_id, "a"))));
+    assert!(scene.set_notification_reply_view(Some(reply_view(other.publication_id, ""))));
+    assert!(shown(&scene, "q"));
+    assert!(scene.set_notification_reply_view(None));
+    assert!(!shown(&scene, "q"), "Esc: the normal expiry applies");
+
+    // Submitting from that field answers once, then the card leaves by the
+    // answered exit.
+    let (mut scene, clock) = self::scene();
+    ask(&mut scene, reply_question("q"), None, true);
+    let other = control(&mut scene, "q", ZoneInteractionKind::Action { index: 1 });
+    clock.advance(900);
+    scene.begin_notification_press(&other);
+    clock.advance(200);
+    assert!(scene.activate_notification(&other, EXIT_MS).is_some());
+    scene.end_notification_press();
+    assert!(
+        scene
+            .submit_notification_reply(&other, "staging".into(), EXIT_MS)
+            .is_some()
+    );
+    assert_eq!(
+        answers(&mut scene),
+        [PendingActionKind::Reply {
+            callback_id: "other".into(),
+            text: "staging".into()
+        }]
+    );
+    clock.advance(u64::from(EXIT_MS));
+    scene.drain_expired_zone_publications();
+    assert!(!shown(&scene, "q"));
+}
+
+#[test]
+fn reply_and_press_holds_overlap_and_either_can_end_first() {
+    for reply_ends_first in [true, false] {
+        let (mut scene, clock) = scene();
+        ask(&mut scene, reply_question("q"), None, true);
+        let deadline = record(&scene, "q").unwrap().expires_at_wall_us.unwrap();
+        let ship = ship(&mut scene, "q");
+        let other = control(&mut scene, "q", ZoneInteractionKind::Action { index: 1 });
+        // A nonempty field is open, then a press begins on "Ship" with
+        // 100 ms left and stays down past the deadline.
+        assert!(
+            scene.set_notification_reply_view(Some(reply_view(other.publication_id, "staging")))
+        );
+        clock.advance(900);
+        scene.begin_notification_press(&ship);
+        clock.advance(200);
+        assert_eq!(scene.drain_expired_zone_publications(), 0);
+        assert!(shown(&scene, "q"));
+        assert_eq!(
+            scene.next_publication_expiry_wall_us(),
+            None,
+            "the field holds it"
+        );
+        if reply_ends_first {
+            assert!(scene.set_notification_reply_view(None));
+            assert!(shown(&scene, "q"), "the press still holds it");
+            assert_eq!(
+                scene.next_publication_expiry_wall_us(),
+                Some(deadline + NOTIFICATION_PRESS_HOLD_MAX_US)
+            );
+            // Only a press on another control holds it: no reply is accepted.
+            assert!(
+                scene
+                    .submit_notification_reply(&other, "staging".into(), EXIT_MS)
+                    .is_none()
+            );
+            assert!(scene.end_notification_press());
+            assert!(!shown(&scene, "q"));
+        } else {
+            scene.end_notification_press();
+            scene.drain_expired_zone_publications();
+            assert!(shown(&scene, "q"), "the field still holds it");
+            assert_eq!(scene.next_publication_expiry_wall_us(), None);
+            assert!(scene.set_notification_reply_view(None));
+            assert!(!shown(&scene, "q"));
+        }
+        assert!(answers(&mut scene).is_empty());
+    }
 }

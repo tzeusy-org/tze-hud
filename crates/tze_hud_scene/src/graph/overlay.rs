@@ -208,6 +208,11 @@ pub struct RuntimeOverlayState {
     /// The open reply field. This local presentation never enters snapshots.
     #[serde(skip, default)]
     pub notification_reply: Option<NotificationReplyView>,
+    /// The card whose reply field a press held past its deadline opened.
+    /// That field keeps the card even while empty (docs/invariants.md §1:
+    /// the press's own activation is accepted) until it closes.
+    #[serde(skip, default)]
+    pub notification_reply_press_opened: Option<SceneId>,
     /// The destructive action being held, if any ([`NotificationHold`]).
     /// Local only: the agent sees nothing until the hold completes.
     #[serde(skip, default)]
@@ -446,7 +451,10 @@ impl RuntimeOverlayState {
     pub(super) fn notification_reply_holding_expiry(&self) -> Option<SceneId> {
         self.notification_reply
             .as_ref()
-            .filter(|reply| !reply.text.is_empty())
+            .filter(|reply| {
+                !reply.text.is_empty()
+                    || self.notification_reply_press_opened == Some(reply.publication_id)
+            })
             .map(|reply| reply.publication_id)
     }
 }

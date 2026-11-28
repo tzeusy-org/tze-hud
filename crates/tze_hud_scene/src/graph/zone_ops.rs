@@ -1,4 +1,3 @@
-use super::notification_reply::zone_publication_expiry;
 use super::notification_wait::is_unanswered_question;
 use super::*;
 use std::collections::hash_map::Entry;
@@ -1554,16 +1553,17 @@ impl SceneGraph {
                         .notification_reply
                         .as_ref()
                         .is_none_or(|reply| reply.publication_id != key)
-                        && !self.set_notification_reply_view(Some(
-                            super::overlay::NotificationReplyView {
+                        && !self.set_notification_reply_view_from(
+                            Some(super::overlay::NotificationReplyView {
                                 publication_id: key,
                                 action_index: *index,
                                 text: String::new(),
                                 cursor_byte: 0,
                                 selection_anchor: 0,
                                 at_capacity: false,
-                            },
-                        ))
+                            }),
+                            pressed,
+                        )
                     {
                         return None;
                     }
@@ -1654,6 +1654,7 @@ impl SceneGraph {
             .is_some_and(|reply| reply.publication_id == key)
         {
             self.overlay.notification_reply = None;
+            self.overlay.notification_reply_press_opened = None;
         }
         self.finish_notification_wait(key, super::NotificationOutcome::Answered);
         if matches!(region.kind, ZoneInteractionKind::Dismiss) || exit_ms == 0 {
@@ -1739,9 +1740,19 @@ impl SceneGraph {
             })
         {
             self.overlay.notification_reply = None;
+            self.overlay.notification_reply_press_opened = None;
             self.version += 1;
         }
-        let reply_holding_expiry = self.overlay.notification_reply_holding_expiry();
+        // Showing publications, including one a reply field or a press holds
+        // past its deadline.
+        let live_ids: std::collections::HashSet<SceneId> = self
+            .zone_registry
+            .active_publishes
+            .values()
+            .flatten()
+            .filter(|r| self.publication_live(r, now))
+            .map(|r| r.publication_id)
+            .collect();
         let live = |zone: &str, id: SceneId, publisher: &str| {
             self.zone_registry.active_for_zone(zone).iter().any(|r| {
                 r.publication_id == id
@@ -1788,11 +1799,7 @@ impl SceneGraph {
                     .active_publishes
                     .values()
                     .flatten()
-                    .any(|r| {
-                        r.publication_id == *id
-                            && zone_publication_expiry(r, reply_holding_expiry)
-                                .is_none_or(|expiry| expiry > now)
-                    })
+                    .any(|r| r.publication_id == *id && live_ids.contains(id))
                     && !keys.contains(id)
             });
         self.overlay.notification_go_to.retain(|id, _| {
@@ -1802,11 +1809,7 @@ impl SceneGraph {
                     .active_publishes
                     .values()
                     .flatten()
-                    .any(|record| {
-                        record.publication_id == *id
-                            && zone_publication_expiry(record, reply_holding_expiry)
-                                .is_none_or(|expiry| expiry > now)
-                    })
+                    .any(|record| record.publication_id == *id && live_ids.contains(id))
         });
         self.overlay
             .notification_choices
@@ -1823,11 +1826,7 @@ impl SceneGraph {
                     .active_publishes
                     .values()
                     .flatten()
-                    .any(|record| {
-                        record.publication_id == id
-                            && zone_publication_expiry(record, reply_holding_expiry)
-                                .is_none_or(|expiry| expiry > now)
-                    })
+                    .any(|record| record.publication_id == id && live_ids.contains(&id))
         });
         if self.overlay.notification_reveal.is_some_and(|request| {
             !self
