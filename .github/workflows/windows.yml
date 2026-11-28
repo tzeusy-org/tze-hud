@@ -313,6 +313,29 @@ jobs:
           path: ${{ runner.temp }}/gestures/
           if-no-files-found: warn
 
+      # Dock tier W mirror (hud-ljhku.10.1): two scoped sessions publish
+      # dock:progress-bar under a test [dock] config, hover one, then exit one.
+      # Informational only; it never gates windows-build or the dev release.
+      - name: Dock progress witness (informational)
+        id: dock-witness
+        if: steps.changes.outputs.gestures == 'true' && env.HUD_BUILD_PROFILE != 'release'
+        continue-on-error: true
+        timeout-minutes: 4
+        shell: pwsh
+        run: |
+          $sha = git rev-parse HEAD
+          python scripts/ci/hud_gestures.py --injector sendinput --exe "target/$env:HUD_BUILD_PROFILE/tze_hud.exe" --out "$env:RUNNER_TEMP/dock-witness" --expected-dock-build-sha $sha dock-progress-hover
+          exit $LASTEXITCODE
+
+      - name: Upload dock witness evidence
+        if: always() && steps.dock-witness.outcome != 'skipped'
+        continue-on-error: true
+        uses: actions/upload-artifact@v6
+        with:
+          name: dock-witness
+          path: ${{ runner.temp }}/dock-witness/
+          if-no-files-found: warn
+
       - name: Resident raster upload and compositor capture (informational)
         id: resident-raster
         if: steps.changes.outputs.resident_raster == 'true' && env.HUD_BUILD_PROFILE != 'release'

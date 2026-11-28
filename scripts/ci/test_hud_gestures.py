@@ -58,7 +58,7 @@ class DockTooltipWitnessTests(unittest.TestCase):
     def test_scope_and_scratch_configuration(self) -> None:
         self.assertNotIn(g.DOCK_TOOLTIP_SCENARIO, g.SCENARIOS)
         self.assertEqual(list(g.EXPLICIT_SCENARIOS), [g.DOCK_TOOLTIP_SCENARIO, g.DOCK_PROGRESS_SCENARIO])
-        self.assertEqual(g.OVERLAY_SCENARIOS, ("tray", "go-to-session", "overlay-pointer", "tray-answer"))
+        self.assertEqual(g.OVERLAY_SCENARIOS, ("tray", "go-to-session", "overlay-pointer", "tray-answer", "overlay-shell"))
         original = g.CONFIG.read_text(encoding="utf-8")
         scratch = tomllib.loads(g.dock_tooltip_config(original))
         self.assertNotIn("dock", tomllib.loads(original))
