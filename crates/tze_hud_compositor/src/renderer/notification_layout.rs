@@ -163,7 +163,9 @@ pub(super) struct NotificationLayoutCache {
     entries: HashMap<(String, SceneId), (LayoutInputs, NotificationActionLayout, bool)>,
     config: Option<crate::fonts::FontConfig>,
     fonts: Option<glyphon::FontSystem>,
-    reply_line: Option<(String, f32, tze_hud_input::ComposerVisualLayout)>,
+    /// Whether the reply layout came from the rasterizer's fonts, which hold
+    /// the lazily loaded system fallback faces (CJK, emoji).
+    reply_line: Option<(String, f32, tze_hud_input::ComposerVisualLayout, bool)>,
     pub(super) shapes: u64,
 }
 impl NotificationLayoutCache {
@@ -173,6 +175,13 @@ impl NotificationLayoutCache {
         &mut self,
         tokens: &HashMap<String, String>,
     ) -> &mut glyphon::FontSystem {
+        let config = self.sync_config(tokens);
+        self.fonts
+            .get_or_insert_with(|| crate::fonts::build_font_system(&config).0)
+    }
+
+    /// Drop everything shaped under a different font configuration.
+    fn sync_config(&mut self, tokens: &HashMap<String, String>) -> crate::fonts::FontConfig {
         let config = crate::fonts::FontConfig::from_token_map(tokens).normalized();
         if self.config.as_ref() != Some(&config) {
             self.entries.clear();
@@ -180,31 +189,38 @@ impl NotificationLayoutCache {
             self.reply_line = None;
             self.config = Some(config.clone());
         }
-        self.fonts
-            .get_or_insert_with(|| crate::fonts::build_font_system(&config).0)
+        config
     }
 
+    /// The reply draft's layout. The commit-time prime passes the
+    /// rasterizer's `actual` fonts, so later reads match the drawn glyphs.
     pub(super) fn reply_line(
         &mut self,
         tokens: &HashMap<String, String>,
         text: &str,
         font_size: f32,
+        actual: Option<&mut glyphon::FontSystem>,
     ) -> &tze_hud_input::ComposerVisualLayout {
-        self.fallback_fonts(tokens);
+        self.sync_config(tokens);
         if self
             .reply_line
             .as_ref()
-            .is_none_or(|(content, size, _)| content != text || *size != font_size)
+            .is_none_or(|(content, size, _, from_actual)| {
+                content != text || *size != font_size || (actual.is_some() && !from_actual)
+            })
         {
+            let from_actual = actual.is_some();
+            let fonts = match actual {
+                Some(fonts) => fonts,
+                None => self.fallback_fonts(tokens),
+            };
             let layout = crate::text::measure_editor_line(
-                self.fonts
-                    .as_mut()
-                    .expect("notification font system initialized"),
+                fonts,
                 text,
                 font_size,
                 crate::text::LINE_HEIGHT_MULTIPLIER,
             );
-            self.reply_line = Some((text.to_owned(), font_size, layout));
+            self.reply_line = Some((text.to_owned(), font_size, layout, from_actual));
         }
         &self.reply_line.as_ref().expect("reply layout primed").2
     }
@@ -233,13 +249,7 @@ impl NotificationLayoutCache {
         if payload.actions.is_empty() {
             return NotificationActionLayout::default();
         }
-        let config = crate::fonts::FontConfig::from_token_map(tokens).normalized();
-        if self.config.as_ref() != Some(&config) {
-            self.entries.clear();
-            self.fonts = None;
-            self.reply_line = None;
-            self.config = Some(config.clone());
-        }
+        let config = self.sync_config(tokens);
         let labels = payload
             .actions
             .iter()

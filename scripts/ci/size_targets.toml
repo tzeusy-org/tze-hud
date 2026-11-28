@@ -192,3 +192,15 @@ signed_at = "2026-11-09"
 decision = "hud-3n24e.32"
 target = "client_skills"
 markdown = 107
+
+# hud-ljhku.11 typed reply, owner-check correction (2026-11-28): the reply caret
+# is measured with the fonts the draft is drawn with (CJK fallback faces).
+# Measured growth against origin/main bd9dee4c.
+[[inflight_allowances]]
+feature = "hud-ljhku.11-caret"
+approval = "hud-ljhku.11 design field, owner-signed 2026-11-09, amended by hud-ohgc9.4 owner-signed 2026-11-20"
+signed_at = "2026-11-20"
+decision = "hud-3n24e.32"
+target = "render"
+rust = 21
+rust_test = 61

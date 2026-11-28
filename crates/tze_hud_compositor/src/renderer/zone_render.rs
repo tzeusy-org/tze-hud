@@ -617,6 +617,17 @@ impl Compositor {
                     width,
                     Some(rasterizer.font_system_mut()),
                 );
+                if let Some(reply) = &scene.overlay.notification_reply
+                    && reply.publication_id == record.publication_id
+                {
+                    let style = super::notification_reply::reply_style(&tokens);
+                    cache.reply_line(
+                        &tokens,
+                        &reply.text,
+                        style.font_size_px,
+                        Some(rasterizer.font_system_mut()),
+                    );
+                }
             }
         }
     }
