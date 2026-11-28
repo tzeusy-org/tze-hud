@@ -621,11 +621,11 @@ impl Compositor {
                     && reply.publication_id == record.publication_id
                 {
                     let style = super::notification_reply::reply_style(&tokens);
-                    cache.prime_reply_line(
+                    cache.reply_line(
                         &tokens,
                         &reply.text,
                         style.font_size_px,
-                        rasterizer.font_system_mut(),
+                        Some(rasterizer.font_system_mut()),
                     );
                 }
             }

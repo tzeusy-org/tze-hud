@@ -45,7 +45,7 @@ pub(super) fn line_geometry(
         (field.width - inset * 2.0).max(1.0),
         line_height,
     );
-    let layout = cache.reply_line(tokens, &draft.text, style.font_size_px);
+    let layout = cache.reply_line(tokens, &draft.text, style.font_size_px, None);
     let caret_x = layout.x_at_cursor(draft.cursor_byte);
     let content_width = layout.x_at_cursor(draft.text.len());
     let scroll = composer_scroll_offset(caret_x, content_width, clip.width, inset);
