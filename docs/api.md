@@ -1268,8 +1268,8 @@ presentation's, if it has one) is at most 4/3 of `dock.row.height`, so it
 draws at 75% or more of its designed size. An unknown type, a seventh entry
 or a failing type (the gauge or status-indicator) is a config error naming it
 and, for the shape rule, the height limit. So is a countdown whose type
-tokens or `space.s` leave its two dock text lines no room to draw. `dock.row.height` (default 52) and
-`dock.caption.width` (default 96) are logical-pixel tokens; the gaps use
+tokens or `space.s` leave its two dock text lines no room to draw.
+`dock.row.height` (default 52) and `dock.caption.width` (default 96) are logical-pixel tokens; the gaps use
 `space.s`. `[displays."<key>"] zones = ["dock"]` moves the column to that
 display like a zone (it stays on the primary when the key matches no
 monitor), but `dock` is not a zone: `hud_surfaces` never lists `zone:dock`.

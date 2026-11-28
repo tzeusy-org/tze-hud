@@ -857,7 +857,17 @@ impl SceneGraph {
             admitted,
             dock.rows.iter().position(|row| row.namespace == namespace),
         ) {
-            (Some(DockAdmission(row)), _) => row,
+            (Some(DockAdmission(row)), existing) => {
+                debug_assert_eq!(
+                    match row {
+                        DockRowAdmission::Existing(index) => Some(index),
+                        DockRowAdmission::New(_) => None,
+                    },
+                    existing,
+                    "admission reused outside the scene lock it was validated under"
+                );
+                row
+            }
             (None, Some(index)) => DockRowAdmission::Existing(index),
             (None, None) => {
                 DockRowAdmission::New(dock.next_row_slot().ok_or(DockPublishError::Full)?)

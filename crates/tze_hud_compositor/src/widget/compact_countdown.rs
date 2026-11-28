@@ -124,19 +124,23 @@ fn geometry(svg: &str) -> Option<Geometry> {
     let positive = [g.inset, g.body_height, g.readout_height, g.width, g.height]
         .iter()
         .all(|v| v.is_finite() && *v > 0.0);
-    (positive && g.inset * 2.0 < g.width && g.body_height + g.readout_height <= g.height)
+    // A warning readout reserves one line-height for its mark inside the insets.
+    (positive
+        && g.inset * 2.0 + g.readout_height < g.width
+        && g.body_height + g.readout_height <= g.height)
         .then_some(g)
 }
 
 /// Whether the resolved dock countdown draws in its row, so a token override
 /// that would hide it is a configuration error instead. It lays out a label
-/// that cannot fit: drawing it needs at least the ellipsis, which every label
-/// can fall back to, and a warning readout that reserves its mark.
+/// at the 24-byte admission bound that cannot fit, so drawing it needs at
+/// least the ellipsis every label can fall back to. The geometry check keeps
+/// room for the warning mark a long readout reserves.
 pub fn compact_countdown_fits(svg: &str, bindings: &[WidgetBinding]) -> bool {
     let probe = HashMap::from([
         (
             "label".to_owned(),
-            WidgetParameterValue::String("M".repeat(64)),
+            WidgetParameterValue::String("W".repeat(24)),
         ),
         (
             "severity".to_owned(),

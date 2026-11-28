@@ -775,11 +775,13 @@ mod tests {
         let mut live = SceneGraph::new(1920.0, 1080.0);
         init_widget_registry(&mut live, &raw, None, &HashMap::new(), &default_tokens())
             .expect("default tokens fit the countdown row");
-        // Line heights that overfill the row, and a glyph size its line
-        // height cannot hold, both leave the countdown nothing to draw.
+        // Each leaves the countdown nothing to draw: line heights that
+        // overfill the row, a glyph its line cannot hold, and insets with no
+        // room for the warning mark.
         for (token, value) in [
             ("type.readout.line_height", "40"),
             ("type.body.m.size", "40"),
+            ("space.s", "70"),
         ] {
             let mut tokens = default_tokens();
             tokens.insert(token.into(), value.into());
