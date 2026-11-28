@@ -7,183 +7,55 @@ metadata:
     - Claude
     - OpenAI Codex
   status: active
-  last_reviewed: "2026-11-05"
+  last_reviewed: "2026-11-28"
 ---
 
 # HUD Publish
 
-Publish glanceable content through the five MCP verbs. The runtime owns layout,
-styling and contention. Follow [the API](../../../docs/api.md) for contracts and
-[invariants](../../../docs/invariants.md) for lifecycle evidence. Discover the
-running build before using features added after its release; accepted requests
-prove admission, not owner visual acceptance.
+One call per intent. Tokens are measured model-visible costs (`docs/api.md`
+Token budgets). Detail for every row: [full guide](references/guide.md).
 
-Use for requests such as "show this on my HUD", "notify me when tests finish",
-"ask me on screen", and "update my allocated progress widget". Use
-[hud-projection](../hud-projection/SKILL.md) for session attachment, transcripts
-and portal replies; [user-test](../user-test/SKILL.md) for screenshots, logs,
-updates or end-to-end Windows validation.
+| Intent | Call | Tokens |
+|---|---|--:|
+| What can I use? | `hud_surfaces {}` | 126 |
+| Notify | `hud_publish {"surface":"zone:notification-area","content":{"title":"Tests","body":"Passed","urgency":0},"key":"<session>:tests","ttl_ms":10000}` | 39 |
+| Ask, wait for the answer | add `"actions":[{"label":"Run","callback_id":"<session>:q1:run"},…]` to `content` and `"wait_ms":30000` | 77 |
+| Typed answer | an action `{"label":"Other…","reply":"<session>:q1:other"}` | — |
+| Progress / copy / link | `content.progress` 0–1; action `{"label":"Copy","copy":"…"}`; action `{"label":"PR","url":"https://…"}` | — |
+| Update a widget | `hud_publish {"surface":"widget:<name>","params":{…discovered params…}}` | 22 |
+| Status entry | `{"entries":{"<session>":"testing"}}` on a status bar, with a `key` | — |
+| Extend | `hud_hold {"surface":"…","ttl_ms":15000}` | — |
+| Collect input | `hud_input {"wait_ms":30000}`, then `hud_input {"ack":["<id>"]}` | 114 for ask + answer + ACK |
+| Remove my card | `hud_clear {"surface":"zone:notification-area","key":"<session>:tests"}` | — |
 
-## Choose a surface
+## Routing
 
-1. Call `hud_surfaces {}` for allowed zones, accepted content and typed widget
-   params. Names and available widgets are instance-specific. `held` marks your
-   holdings, including scheduled content; expiry may include presentation delay.
-   `one` marks a single occupant, `max` a stack depth, and `busy` a foreign
-   occupant on a single zone. `string<=N` is an explicit UTF-8 byte limit.
-2. Use a brief notification for a milestone or actionable question. Keep one
-   work item under a unique session/work `key`; replace it on meaningful changes.
-   A card carries one question and at most a couple of short lines. Put depth in
-   chat or a PR and name that destination. A notification action may use an HTTPS
-   `url` instead of `callback_id` to link to a PR or artifact; never supply both.
-3. Follow [repository instructions](../../../AGENTS.md) and owner presentation
-   constraints. Current owner dogfooding rejects the status bar's large slab
-   and default portal presentation; prefer
-   finite milestone notifications until those surfaces are accepted. Use a widget
-   only when allocated to this work and its discovered params fit.
-4. Set a finite, appropriate `ttl_ms`; let owned content expire or clear only
-   your keyed notification. Avoid heartbeat updates and repeated empty polling.
+- Start with `hud_surfaces`; zone, widget and param names are per instance.
+- Card = one milestone or one question, at most a couple of short lines. Put
+  depth in chat, a PR or an artifact, and link to it.
+- Use a widget only when it is allocated to this work.
+- Session transcript, portal or replies → [hud-projection](../hud-projection/SKILL.md).
+- Screenshots, logs, updates, Windows validation → [user-test](../user-test/SKILL.md).
+- Tools absent → [connection setup](references/connection.md), or the
+  [CLI fallback](references/guide.md#cli-fallback) (`scripts/publish.py`).
+- HUD unreachable or rejecting → continue in chat; say so once.
+- Owner presentation rules in [AGENTS.md](../../../AGENTS.md) win; prefer
+  finite milestone notifications.
 
-If the tools are absent, read [connection setup](references/connection.md) for
-pairing, the MCP adapter, and the CLI's explicit host requirement. If the HUD is
-unreachable or rejects the call, continue in chat and report the limitation once.
+## Rules
 
-## Publish and maintain
-
-`hud_publish` takes `surface` plus zone `content` or widget `params`:
-
-<!-- tool: hud_publish -->
-```json
-{"surface":"zone:notification-area","content":{"title":"Tests","body":"All checks passed","urgency":0},"key":"session-a:tests","ttl_ms":10000}
-```
-
-| Surface accepts | Payload |
-|---|---|
-| `text` | `"Build passed"` as `content` |
-| `notification` | `{"title":"Tests","body":"Passed","urgency":0}` as `content` |
-| Short typed answer | `{"body":"Which database?","actions":[{"label":"Other…","reply":"session-a:db:other"}]}` as `content` |
-| `status_bar` | `{"entries":{"session-a":"testing"}}` as `content`, with a work `key` |
-| `solid_color` | `{"r":0.05,"g":0.1,"b":0.2,"a":1.0}` as `content` |
-| Widget `params` declaration | `{"progress":0.5,"label":"Tests"}` as `params`, using discovered names/types |
-| Countdown `deadline<=24h` | `{"ends_in_ms":300000,"label":"Tests","severity":"info"}`; relative integer ms, starts at presentation |
-| KPI bundle | `{"value":"3 fail","label":"Tests","trend":"down","severity":"error"}` |
-| Stepper bundle | `{"step":2,"total":5,"state":"blocked","label":"Deploy"}`; whole counts only (`2.5` is refused); a step above total fills every dot |
-
-- Structured zone `type` is inferred from the zone; set it explicitly when
-  selecting another accepted type in a mixed zone. Unknown fields are rejected.
-  Notifications need a nonempty title or body; `text` is an alias for `body`.
-  Urgency is an integer 0–3 (default 1). TTL belongs at the publish top level.
-- A nonempty notification `key` replaces that publisher's card in the same zone
-  and slot, including fresh content/expiry. Missing or empty keys append. Keys
-  are exact, case-sensitive UTF-8, at most 256 bytes. This replacement contract
-  is specific to notifications; other surfaces retain their own merge policies.
-- For a long job, publish `"progress":0.4` inside notification content and
-  republish the same key as it advances. Use a number from 0 through 1.
-- For a short command or ID, add a local button such as
-  `{"label":"Copy command","copy":"cargo test -p example"}`. Copy text is
-  limited to 2048 UTF-8 bytes without NUL. The card stays and the button
-  queues no reply.
-- For a short typed answer, use `{"label":"Other…","reply":"session-a:question:other"}`.
-  One reply action fits within the four-action limit. Enter sends up to 280
-  UTF-8 bytes as `action` and `text`. The card keeps an unsent draft when the
-  owner collapses the field.
-- Zone TTL defaults to 60000 ms. Action cards instead default to the owner's
-  live answer window (currently 60000 ms by default). Explicit `ttl_ms`, including
-  `0` for held content, wins; later settings changes do not retime admitted cards.
-  Zone-only `delay_ms` is 0–300000; TTL counts from presentation.
-- Widgets are durable unless given a TTL; the owner's "Clears after" limit can
-  cap even held content. F32 params must be finite and in their declared bounds;
-  colors are `#RRGGBB` or numeric `{r,g,b,a?}` channels in 0–1. No geometry or
-  transition parameter belongs in an MCP publish. Use only discovered model
-  parameters: gauge/progress `severity` selects info/warning/error colors.
-  `fill_color` and status `theme` are owner `initial_params`; `tooltip_visible`
-  is runtime hover state. Agent attempts reject the whole map.
-- Status entries require string values. An empty string removes that entry;
-  remove only this session's entry on a shared status surface.
-
-`hud_hold {"surface":"zone:notification-area","ttl_ms":15000}` resets the
-holding's expiry without resending. It has no key selector: on a notification
-zone it can affect sibling cards held by the same agent. Prefer republishing
-one key when extending only that card. Owner widget limits still apply.
-
-`hud_clear {"surface":"zone:notification-area","key":"session-a:tests"}`
-clears only that publisher's matching active and delayed notifications; a missing
-match succeeds. Omitted/empty keys clear **all this agent's content** in that
-zone, including pending publishes. A nonempty clear key is only supported for
-notification-capable zones. Never use a broad clear on a shared pairing's zone.
-
-## Questions and input ownership
-
-Offer buttons only with safe answer routing and an active consumer. Notifications
-accept at most **four** actions, including one reply action. A fixed answer
-needs nonempty `label` and `callback_id` strings. Use explicit labels such as
-Yes / No / Later. Callback ids must identify
-the session, question and fresh generation; a reusable visual key is not a nonce.
-
-<!-- tool: hud_publish -->
-```json
-{"surface":"zone:notification-area","content":{"title":"Release tests","body":"Run the soak now?","actions":[{"label":"Run","callback_id":"session-a:soak:q1:run"},{"label":"Later","callback_id":"session-a:soak:q1:later"}]},"key":"session-a:soak"}
-```
-
-`hud_input {"wait_ms":30000,"max_items":20}` returns `items` and `remaining`.
-Items have `id`, `s`, and `action` (or portal `text`); keyed notification events
-also carry `key`. Typed replies carry both `action` and `text`. A human × has
-`action:"dismiss", kind:"dismiss"`; a callback
-named `dismiss` has no `kind`. Timeout, silence, expiry and dismiss are not consent.
-
-On a running build that discovers `hud_publish.wait_ms`, prefer a one-call
-question: publish callback actions with `wait_ms:30000` (CLI: add
-`--wait-ms 30000` to the question publish). A returned `action`
-is already consumed and needs no ACK; human × includes `kind:"dismiss"`.
-`gone:expired|replaced|displaced|cleared` ends an unanswered card and is not
-consent. An ordinary reply without action/gone means the wait ended: continue
-with the same safely routed `hud_input` consumer. Cancellation leaves accepted
-input queued. Earlier builds retain the three-call path below; discover
-before using the new argument.
-
-Route by surface **and** the current callback identity, handle once, then send
-`hud_input {"ack":["<handled-id>"]}`. Unacked input repeats with stable ids;
-ACKs are idempotent. Input covers every surface this MCP session holds:
-another session on the pairing never receives or ACKs your answers, and a
-keyless clear removes only your cards. Through the stdio adapter your cards
-carry a caption with your folder name; `display_name` on a zone publish
-renames it. `wait_ms` defaults to 0 and caps at
-30000; a CLI/network timeout does not establish a user's answer.
-
-Unanswered questions appear before other cards in a regular notification stack;
-newest-first order is retained within each group. Answered cards lose that priority.
-A full notification stack keeps unanswered questions and trims the oldest
-other card. When your trimmed card was never answered, `hud_input` returns one
-`kind:"displaced"` item (with `key` if keyed) to you alone; republish only if it
-still matters, and key cards whose displacement you care about. An armed
-`wait_ms` gets `gone:"displaced"` instead.
-
-A publish reply may carry `clipped` (`title`, `body`, `actions`, or widget
-parameter names): the HUD would cut that text. Shorten it and republish the
-same key, or move the detail behind a link action. No `clipped` means it fits.
-
-Clicking an action disables its card and starts its exit locally. Replacement,
-clear and TTL never retract accepted input: validate the callback generation
-even if its old card has disappeared. Safe mode returns `SAFE_MODE_ACTIVE` for
-mutations; polling remains available. Do not replay uncertain publishes blindly.
-
-## CLI fallback
-
-Use [scripts/publish.py](scripts/publish.py) when native tools are unavailable;
-it reads the paired key internally and supports zones, widgets, hold, selective
-clear and explicit input ACKs. Requires Python 3.10+ and a reachable paired HUD.
-Run from the repo root with `HUD_HOST` set (or pass `--host`). `uv run` also
-works. See `--help` for flags and batch format.
-
-```bash
-export HUD_HOST=hud-host.example
-S=.claude/skills/th-hud-publish/scripts/publish.py
-python3 "$S" --list-surfaces
-python3 "$S" --zone notification-area --content '{"title":"Tests","body":"Passed","urgency":0}' --key session-a:tests --ttl-ms 10000
-python3 "$S" --zone notification-area --clear --key session-a:tests
-```
-
-Tool failures carry `isError:true` and `{code,hint}`. Follow the hint; rediscover
-for missing zones/widgets, fix fields for `INVALID_ARGUMENT` or
-`WIDGET_PARAMETER_INVALID`, and respect `NOT_ALLOWED`. The CLI exits nonzero
-on discovery or mutation failure. See the API for the complete error set.
+- At most four actions per card, one of them a reply. Callback ids name the
+  session, question and generation.
+- An answered `wait_ms` returns a consumed `action`, so don't ACK it.
+- A `gone` result, a timeout or a dismiss is not consent.
+- ACK each handled `hud_input` id once. Validate the callback generation even
+  after the card is gone.
+- Never send a keyless `hud_clear` on a shared zone: it clears all of this
+  agent's content there.
+- `hud_hold` has no key: it can extend sibling cards.
+- Set a finite `ttl_ms`. Send no heartbeats and no empty polling loops.
+- `clipped` in a reply: shorten and republish the same key, or link out.
+  `kind:"displaced"`: republish only if it still matters.
+- Errors are `{code,hint}`: follow the hint, rediscover on missing names, and
+  stop on `NOT_ALLOWED` or `SAFE_MODE_ACTIVE`.
+- Never replay an uncertain publish blindly.

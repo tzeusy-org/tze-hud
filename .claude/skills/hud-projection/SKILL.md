@@ -16,186 +16,53 @@ metadata:
     - tze
     - OpenAI Codex
   status: active
-  last_reviewed: "2026-10-04"
+  last_reviewed: "2026-11-28"
 ---
 
 # HUD Projection
 
-Opt an already-running LLM session into a tze_hud text-stream portal: the
-session publishes its output, the human reads it on the HUD and types replies
-into the portal composer, and the session collects those replies.
+The session publishes its output to a text-stream portal `portal:<id>`, the
+human replies in the portal composer, and the session collects the replies.
+The portal costs 137 model-visible tokens for attach, publish, hold, poll,
+ACK and clear (`docs/api.md` Token budgets). Detail for every row is in the
+[full guide](references/guide.md).
 
-Hard boundaries:
-- Cooperative opt-in. The session calls the tools on purpose, or the owner
-  explicitly installs the optional [Claude Code hooks](references/claude-code-hooks.md)
-  to mirror safe tool progress and opted-in final replies without model calls.
-- Not PTY, tmux, shell, or terminal capture.
-- Not a document viewer. Publish status and short answers; put long reports,
-  diffs and reviews on a page built for reading (a claude.ai artifact, a PR)
-  and publish its link.
-- The portal authority runs in-process in the runtime and holds only
-  ephemeral state (visible transcript window, pending input, lifecycle). The
-  session owns its own history.
-
-On Windows, a notification card offers **Go to** when its scoped label
-(the folder or `display_name`) matches exactly one eligible top-level window
-title as a whole token. An explicit owner press raises that window. Windows
-Terminal exposes only the active tab's title, and a matching tmux terminal can
-only be raised as a whole window. A session without a window on the HUD
-machine has no match. A locally displayed remote terminal can match when its title carries the label. Set `CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1` to preserve a
-shell's folder-based title at the cost of Claude Code's conversation titles
-and status glyph.
-
-## Tools
-
-A portal is the surface `portal:<projection_id>`. It uses the same MCP verbs as
-zones and widgets (`docs/api.md`):
-
-| Step | Call |
+| Intent | Call |
 |---|---|
-| Attach + publish | `hud_publish {"surface": "portal:my-session", "content": "Working on it", "status": "active"}` |
-| Publish more | `hud_publish {"surface": "portal:my-session", "content": "Tests pass. Ship it?", "expects_reply": true}` |
-| Collect replies | `hud_input {"wait_ms": 30000}` → `{"items":[{"id":"i7","s":"portal:my-session","text":"yes"}],"remaining":0}` |
-| Ack + keep polling | `hud_input {"ack": ["i7"], "wait_ms": 30000}` |
-| Detach | `hud_clear {"surface": "portal:my-session"}` |
+| Attach + publish | `hud_publish {"surface":"portal:<id>","content":"Working on it","status":"active"}` |
+| Ask for a reply | `hud_publish {"surface":"portal:<id>","content":"Ship it?","expects_reply":true}` |
+| Collect replies | `hud_input {"wait_ms":30000}` |
+| ACK + keep polling | `hud_input {"ack":["i7"],"wait_ms":30000}` |
+| Stay attached while quiet | `"ttl_ms":600000` on a publish, or `hud_hold {"surface":"portal:<id>","ttl_ms":600000}` |
+| Detach | `hud_clear {"surface":"portal:<id>"}` |
+| Wait without model calls | run `scripts/portal_client.py poll --wait-ms 30000 --rounds 120 --ack` in the background ([waiting](references/guide.md#waiting-for-a-human-reply)) |
+| Ask, keep working | run `scripts/portal_client.py ask --title … --action Ship=ship` in the background ([background ask](references/background-ask.md)) |
 
-- The first `hud_publish` to a portal attaches it (`display_name` is optional
-  and defaults to the id). The portal is keyed by your agent identity (the
-  PSK); no call carries a token.
-- `content` **appends** an output fragment. Send only the new text each turn.
-- `key` coalesces: publishes with the same key replace each other in place
-  (progress lines).
-- `status` labels agent activity: `active` or `degraded`; it can be sent
-  without content. Omit content and status for a bare attach; `hud_clear` detaches.
-- `expects_reply: true` arms the composer.
-- `ttl_ms` on publish holds the portal in that same call, just like `hud_hold`
-  (0 = until clear). `delay_ms` is not valid for portals.
-- Publish returns `reattached` (true after runtime reclaim) and `pending_input`
-  (queued replies); poll `hud_input` to collect them. It adds `unread:N` when
-  the viewer had not yet reached N output units before this publish (also on
-  the `hud_surfaces` portal entry). Check it before raising a separate
-  notification: unread output means the viewer has not caught up yet.
-- `hud_input` returns input from every surface this session holds, oldest
-  first, including notification action presses. Each MCP session is its own
-  owner: other sessions on the same pairing never see your replies, and your
-  portal header shows your folder name until you set `display_name`.
-  Unacked items are redelivered, so ack each one once handled; the ack rides
-  on your next poll.
-- `hud_surfaces` lists your attached portals with `state` and
-  `pending_input`.
-- A portal you stop calling degrades after 30 s and is reclaimed 30 s later,
-  transcript included. Publishing or polling keeps it; for quiet stretches
-  include `ttl_ms` in publish or call
-  `hud_hold {"surface": "portal:my-session", "ttl_ms": 600000}`
-  (`ttl_ms: 0` holds until `hud_clear`).
-- If the runtime restarts, the next `hud_publish` attaches a fresh portal;
-  republish whatever context the human needs.
+## Routing
 
-Errors are tool results with `isError: true` and `{"code", "hint"}`. Portal
-rejections use the same codes (`docs/api.md` lists them all).
+- A one-shot card, status or widget → [th-hud-publish](../th-hud-publish/SKILL.md).
+- Pairing, `HUD_HOST`, the `.mcp.json` stdio adapter → [connect](references/guide.md#connect)
+  and [MCP client](references/guide.md#mcp-client).
+- No MCP tools available → the [deterministic client](references/guide.md#deterministic-client).
+- Mirror tool progress without model calls (`TZE_HUD_MIRROR=1`) →
+  [Claude Code hooks](references/claude-code-hooks.md); usage gauge →
+  [usage](references/claude-code-usage.md).
+- The **Go to** button on Windows cards, and window titles → [full guide](references/guide.md).
+- Code owners and wiring → [MCP facade](references/mcp-facade.md).
 
-## Waiting for a human reply
+## Rules
 
-Each `hud_input` call from the model is a full model request: the payload is
-~10-25 tokens, but the request re-reads the whole conversation. Polling every
-30 s while the human is away costs a context read per poll. When a reply may
-take more than a poll or two, wait in a background process instead, so the
-model makes no requests until input arrives:
-
-```bash
-# Claude Code: run with run_in_background; it exits (and wakes you) on the
-# first reply, or after rounds x 30 s with exit 3. HUD_HOST is optional
-# here: it joins this session's HUD.
-python3 .claude/skills/hud-projection/scripts/portal_client.py \
-  poll --wait-ms 30000 --rounds 120 --ack
-```
-
-- Each round polls, so the waiter also keeps the portal from degrading.
-- `--ack` acks what it prints; read the replies from its output. Don't also
-  poll from the model while it runs, or the two consumers race for items.
-- Exit 3 means no reply within the window: republish or wait again.
-- It joins this session's HUD session (the adapter keeps a private record in
-  `~/.config/tze-hud/sessions/`), so it sees the portal you attached through
-  the MCP tools. Start it from this Claude session, not another terminal.
-
-## Connect
-
-Set `HUD_HOST` to the HUD's host, `host:port`, or HTTP URL (bracket IPv6 literals).
-The client uses the selected HTTP port or 9090 and reads your PSK from
-`~/.config/tze-hud/<hostname>.psk`; the hostname excludes brackets and port.
-If that file is missing, pair once with the 6-digit code the HUD shows on screen
-(`.claude/skills/user-test/scripts/hud_pair.py --code <code>`); the PSK is
-written to the file and never printed. The paired agent gets `allow = ["*"]`,
-which includes `portal`.
-
-## Deterministic client
-
-Outside an MCP client, drive the same calls with
-`.claude/skills/hud-projection/scripts/portal_client.py`:
-
-```bash
-CLIENT=.claude/skills/hud-projection/scripts/portal_client.py
-python3 $CLIENT publish --id my-session --display-name "My Session" --state active --text "hello" --ttl-ms 600000
-python3 $CLIENT publish --id my-session --text "Ship it?" --expects-reply
-python3 $CLIENT poll    --wait-ms 30000 --rounds 6      # NDJSON items; exit 3 if none
-python3 $CLIENT ack     --input-id i7
-python3 $CLIENT status  --id my-session --state degraded
-python3 $CLIENT surfaces
-python3 $CLIENT clear   --id my-session
-```
-
-`poll` stops at the first batch of input; `--ack` acks every item it prints.
-
-## Optional Claude Code mirroring
-
-[Claude Code hooks](references/claude-code-hooks.md) provides a session-state
-settings block for Linux and WSL2. Set `TZE_HUD_MIRROR=1` to mirror the
-main conversation in that workspace. It uses the
-same paired client and portal; it installs nothing automatically. Progress
-contains fixed tool labels, never tool inputs/results. Final replies are the
-owner's explicit privacy opt-in. The reference describes finite quiet holds,
-bounded delivery, prompt ordering limits and the required live owner proof.
-Explicit model/client publication and input collection remain available.
-
-## MCP client
-
-The repo's `.mcp.json` defines `tze-hud` (template: `mcp.template.json`) as a
-Linux/WSL stdio adapter to the existing authenticated HTTP server. Claude supplies
-`CLAUDE_PROJECT_DIR` inside the child after ordinary project approval; no shell
-URL interpolation or secret sits in the config. One paired private key filename
-selects the HUD without `HUD_HOST`; explicit `HUD_HOST` wins, and multiple keys
-require explicit selection. With none, run:
-
-```bash
-python3 .claude/skills/user-test/scripts/hud_pair.py --host <HUD-address[:port]> --code <on-screen-code>
-```
-
-New pairs store the actual port in private nonsecret endpoint metadata. Old
-keys without metadata use 9090; an old custom port needs explicit selection or
-re-pairing. Invalid/stale metadata is refused. Existing local/user same-name
-MCP entries can shadow the project entry; use normal client controls to resolve
-that, without overwriting trust/settings. Verify a fresh authenticated
-`initialize`/`tools/list` and all five actual tools, not cached status alone.
-The adapter owns at most four HTTP children, with absolute 60s deadlines and
-one global 1s TERM plus 1s KILL/reap cleanup budget. EOF/cancellation stops local
-work; already accepted remote mutations remain uncertain and are never replayed.
-Abrupt Linux parent death terminates workers through the kernel; the dead parent
-cannot reap them. Startup/OS scheduling and native Windows/macOS lifetime remain
-qualified. Client frames/replies and output queues are bounded; stalled stdout
-stops the adapter. Ordinary explicit CLI publication above is unchanged.
-
-## Source of truth
-
-- MCP verbs: `crates/tze_hud_mcp/src/tools.rs`; contract: `docs/api.md`.
-- In-process portal state and renderer: `crates/tze_hud_portal/`;
-  `PortalDriver` in `crates/tze_hud_runtime/src/portal.rs` applies scene data.
-  MCP and the driver share `PortalHandle` in `crates/tze_hud_mcp/src/server.rs`.
-- `.claude/skills/hud-projection/references/mcp-facade.md`: wiring and boundary rules.
-
-## Safety
-
-- Don't publish secrets into the portal.
-- Keep fragments small; never resend the whole transcript.
-- Treat `NOT_ALLOWED` on a portal as a stop: your `[agents.<id>] allow`
-  list lacks `portal`; ask the user. (Portal ids are per agent, so another
-  agent's `portal:<id>` never blocks yours.)
+- Projection is opt-in. It is not PTY, tmux, shell or terminal capture.
+- `content` appends: send only the new text, never the whole transcript. The
+  same `key` replaces that line in place.
+- Put long reports, diffs and reviews on a page built for reading, and publish
+  its link.
+- Check `unread:N` before raising a separate notification.
+- ACK each handled input once. Unacked input repeats.
+- Never run a background waiter and model polling at once.
+- A silent portal degrades after 30 s and is reclaimed 30 s later. After
+  `reattached` or a restart, republish the context the human needs.
+- Never publish secrets.
+- `NOT_ALLOWED` on a portal means the `allow` list lacks `portal`: stop and
+  ask the user.
+- Errors are `{code,hint}`: follow the hint.
