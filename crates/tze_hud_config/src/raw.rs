@@ -218,6 +218,8 @@ pub struct RawConfig {
     pub agents: Option<AnyValue>,
     /// Optional widget bundle directories to scan at startup.
     pub widget_bundles: Option<RawWidgetBundles>,
+    /// Optional per-session widget dock. Its absence disables the surface.
+    pub dock: Option<crate::dock::DockConfig>,
     /// Optional runtime widget asset store configuration.
     pub widget_runtime_assets: Option<RawWidgetRuntimeAssets>,
     /// Optional design token overrides.

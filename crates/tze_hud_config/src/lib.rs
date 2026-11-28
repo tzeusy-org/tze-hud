@@ -13,6 +13,7 @@ pub mod agents_file;
 pub mod allow;
 pub mod config_write;
 pub mod displays;
+pub mod dock;
 pub mod loader;
 pub mod policy_builder;
 pub mod portal_tokens;
@@ -32,7 +33,7 @@ pub use agents_file::{
 pub use allow::Grant;
 pub use config_write::{
     ConfigWriteError, RuntimeUpdate, TokenUpdate, WidgetUpdate, check_token_update,
-    set_design_tokens, set_runtime, set_widget, set_zone_display,
+    set_design_tokens, set_dock_auto_clear, set_runtime, set_widget, set_zone_display,
 };
 pub use loader::{
     DEFAULT_FPS, DEFAULT_GRPC_PORT, DEFAULT_LOG_LEVEL, DEFAULT_MCP_PORT, LOG_LEVELS, TzeHudConfig,

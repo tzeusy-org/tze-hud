@@ -81,6 +81,7 @@ pub(crate) fn validate_displays(raw: &RawConfig, errors: &mut Vec<ConfigError>) 
     };
     let known = ZoneRegistry::with_defaults();
     let mut known_names: Vec<&str> = known.zones.keys().map(String::as_str).collect();
+    known_names.push(ZoneRegistry::DOCK_PLACEMENT);
     known_names.sort_unstable();
     let mut seen: HashSet<&str> = HashSet::new();
     let mut names: Vec<&String> = displays.keys().collect();
@@ -95,13 +96,13 @@ pub(crate) fn validate_displays(raw: &RawConfig, errors: &mut Vec<ConfigError>) 
         }
         for zone in &displays[display].zones {
             let field_path = format!("displays.{display}.zones");
-            if !known.zones.contains_key(zone) {
+            if zone != ZoneRegistry::DOCK_PLACEMENT && !known.zones.contains_key(zone) {
                 errors.push(ConfigError {
                     code: ConfigErrorCode::Other("CONFIG_UNKNOWN_DISPLAY_ZONE".into()),
                     field_path,
                     expected: format!("one of: {}", known_names.join(", ")),
                     got: format!("{zone:?}"),
-                    hint: "list zone names as agents publish to them".into(),
+                    hint: "list the names of zones or the dock placement".into(),
                 });
             } else if !seen.insert(zone.as_str()) {
                 errors.push(ConfigError {
@@ -125,6 +126,24 @@ mod tests {
         let mut errors = Vec::new();
         validate_displays(&raw, &mut errors);
         errors
+    }
+
+    #[test]
+    fn dock_uses_display_assignment_without_becoming_a_zone() {
+        let config = r#"[displays."SCREEN@LEFT"]
+zones = ["dock"]
+"#;
+        assert!(errors_for(config).is_empty());
+        let raw: RawConfig = toml::from_str(config).unwrap();
+        assert_eq!(zone_display_assignments(&raw)["dock"], "SCREEN@LEFT");
+        assert!(!ZoneRegistry::with_defaults().zones.contains_key("dock"));
+        let duplicate = format!("{config}[displays.RIGHT]\nzones = [\"dock\"]\n");
+        let errors = errors_for(&duplicate);
+        assert_eq!(errors.len(), 1);
+        assert_eq!(
+            errors[0].code,
+            ConfigErrorCode::Other("CONFIG_DUPLICATE_DISPLAY_ZONE".into())
+        );
     }
 
     #[test]

@@ -201,6 +201,10 @@ impl TzeHudConfig {
             widgets::validate_widget_instances(&self.raw, &known, &type_map, &mut errors);
         }
 
+        if let Some(dock) = &self.raw.dock {
+            dock.validate(&mut errors);
+        }
+
         // ── (13b) Runtime widget asset durable budget relationship ───────────
         runtime_widget_assets::validate_runtime_widget_asset_budgets(&self.raw, &mut errors);
 

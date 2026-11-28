@@ -313,6 +313,29 @@ jobs:
           path: ${{ runner.temp }}/gestures/
           if-no-files-found: warn
 
+      # Dock tier W mirror (hud-ljhku.10.1): two scoped sessions publish
+      # dock:progress-bar under a test [dock] config, hover one, then exit one.
+      # Informational only; it never gates windows-build or the dev release.
+      - name: Dock progress witness (informational)
+        id: dock-witness
+        if: steps.changes.outputs.gestures == 'true' && env.HUD_BUILD_PROFILE != 'release'
+        continue-on-error: true
+        timeout-minutes: 4
+        shell: pwsh
+        run: |
+          $sha = git rev-parse HEAD
+          python scripts/ci/hud_gestures.py --injector sendinput --exe "target/$env:HUD_BUILD_PROFILE/tze_hud.exe" --out "$env:RUNNER_TEMP/dock-witness" --expected-dock-build-sha $sha dock-progress-hover
+          exit $LASTEXITCODE
+
+      - name: Upload dock witness evidence
+        if: always() && steps.dock-witness.outcome != 'skipped'
+        continue-on-error: true
+        uses: actions/upload-artifact@v6
+        with:
+          name: dock-witness
+          path: ${{ runner.temp }}/dock-witness/
+          if-no-files-found: warn
+
       - name: Resident raster upload and compositor capture (informational)
         id: resident-raster
         if: steps.changes.outputs.resident_raster == 'true' && env.HUD_BUILD_PROFILE != 'release'
@@ -458,6 +481,13 @@ jobs:
             --target "$GITHUB_SHA" \
             --title "dev ${GITHUB_SHA::7}" \
             --notes "Rolling build of main at ${GITHUB_SHA}. Verify: minisign -Vm tze_hud.exe -p minisign.pub"
+          # A draft is invisible to the HUD's self-update and to doctor. On
+          # 2026-11-28 a successful create still left the release a draft, so
+          # publish it explicitly and fail if it is still a draft.
+          if [ "$(gh release view dev --json isDraft -q .isDraft)" = true ]; then
+            gh release edit dev --draft=false --prerelease --latest=false
+          fi
+          test "$(gh release view dev --json isDraft -q .isDraft)" = false
 
       - name: Publish tagged release
         if: startsWith(github.ref, 'refs/tags/v')

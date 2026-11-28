@@ -102,6 +102,9 @@ pub struct SceneGraph {
     pub zone_registry: ZoneRegistry,
     /// Widget registry.
     pub widget_registry: WidgetRegistry,
+    /// Dock policy and ownership in arrival order.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) dock: Option<crate::dock::DockState>,
     /// Display area (the viewport dimensions).
     pub display_area: Rect,
     /// Monotonic version counter, incremented on every mutation.
@@ -295,6 +298,7 @@ impl SceneGraph {
             hit_region_states: HashMap::new(),
             zone_registry: ZoneRegistry::new(),
             widget_registry: WidgetRegistry::new(),
+            dock: None,
             display_area: Rect::new(0.0, 0.0, width, height),
             version: 0,
             geometry_epoch: 0,
@@ -333,6 +337,15 @@ impl SceneGraph {
             Some(label) => self.session_labels.insert(namespace.to_owned(), label),
             None => self.session_labels.remove(namespace),
         };
+    }
+
+    /// Current scoped session caption. Unscoped dock rows reserve the same space without text.
+    pub fn dock_caption(&self, namespace: &str) -> Option<&str> {
+        if !namespace.contains(crate::scope::SCOPE_SEPARATOR) {
+            return None;
+        }
+        let caption = &self.session_labels.get(namespace)?.caption;
+        (!caption.trim().is_empty()).then_some(caption.as_str())
     }
 
     /// Register input readiness for a publisher before checking its pending queue.
@@ -455,6 +468,8 @@ mod tests;
 // Behavior suites share fixtures only in lib-test builds.
 #[cfg(test)]
 mod behavior_tests;
+#[cfg(test)]
+mod dock_tests;
 #[cfg(test)]
 mod limits_tests;
 #[cfg(test)]

@@ -283,13 +283,16 @@ mod win32 {
     }
 
     fn monitor_name(monitor: HMONITOR) -> Option<String> {
-        let info = monitor_info(monitor)?;
+        Some(device_name(&monitor_info(monitor)?))
+    }
+
+    fn device_name(info: &MONITORINFOEXW) -> String {
         let len = info
             .szDevice
             .iter()
             .position(|c| *c == 0)
             .unwrap_or(info.szDevice.len());
-        Some(String::from_utf16_lossy(&info.szDevice[..len]))
+        String::from_utf16_lossy(&info.szDevice[..len])
     }
 
     fn is_shell_desktop(window: HWND) -> bool {
@@ -301,6 +304,27 @@ mod win32 {
     }
 
     impl super::Win32Probe {
+        /// Real monitor and taskbar-excluding work area of this owned drawable.
+        pub(crate) fn drawable_work_area(
+            hwnd: HWND,
+        ) -> Option<(String, tze_hud_scene::Rect, tze_hud_scene::Rect)> {
+            // SAFETY: the caller retains the owned window during this read.
+            let info = monitor_info(unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONULL) })?;
+            let rect = |r: RECT| {
+                tze_hud_scene::Rect::new(
+                    r.left as f32,
+                    r.top as f32,
+                    (r.right - r.left) as f32,
+                    (r.bottom - r.top) as f32,
+                )
+            };
+            Some((
+                device_name(&info),
+                rect(info.monitorInfo.rcMonitor),
+                rect(info.monitorInfo.rcWork),
+            ))
+        }
+
         /// The monitor at a tray activation's desktop click point.
         pub(crate) fn display_at(point: POINT) -> Option<String> {
             // SAFETY: MonitorFromPoint takes values only.

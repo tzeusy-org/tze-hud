@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="160" height="52" viewBox="0 0 160 52" data-inset="{{token.space.s}}" data-body-line-height="{{token.type.body.m.line_height}}" data-readout-line-height="{{token.type.readout.line_height}}">
+<rect id="card" data-role="backdrop" x="0.5" y="0.5" width="159" height="51" rx="{{token.shape.m}}" fill="{{token.color.surface.container.high}}" fill-opacity="{{token.opacity.surface}}" stroke="{{token.color.outline.variant}}" stroke-width="{{token.stroke.border.width}}"/>
+<text id="label" x="0" y="0" font-family="{{token.type.body.m.family}}, sans-serif" font-size="{{token.type.body.m.size}}" font-weight="{{token.type.body.m.weight}}" fill="{{token.color.on_surface}}"></text>
+<text id="value" x="0" y="0" font-family="{{token.type.readout.family}}, sans-serif" font-size="{{token.type.readout.size}}" font-weight="{{token.type.readout.weight}}" fill="{{token.color.on_surface}}">0:00</text>
+<path id="warning" d="M 0 -6 L 6 5 L -6 5 Z" transform="translate(0 0)" fill="{{token.color.caution}}" opacity="0"/>
+<path id="error" d="M 0 -6 L 6 0 L 0 6 L -6 0 Z" transform="translate(0 0)" fill="{{token.color.error}}" opacity="0"/>
+</svg>

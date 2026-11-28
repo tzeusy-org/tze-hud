@@ -61,6 +61,11 @@ impl SceneGraph {
         {
             return false;
         }
+        match self.dock_widget_slot(&instance.instance_name) {
+            crate::dock::DockWidgetSlot::Placed(_) => return true,
+            crate::dock::DockWidgetSlot::Hidden => return false,
+            crate::dock::DockWidgetSlot::Registry => {}
+        }
         self.widget_registry
             .drawn_geometry(instance)
             .is_some_and(|geometry| {
@@ -79,6 +84,14 @@ impl SceneGraph {
 
     /// Only published, drawn widgets may ask for a display-change wake.
     pub fn next_widget_deadline_wall_us(&self) -> Option<u64> {
+        self.next_widget_deadline_wall_us_where(|_| true)
+    }
+
+    /// Callers can exclude instances whose committed display is not drawable.
+    pub fn next_widget_deadline_wall_us_where(
+        &self,
+        mut drawable: impl FnMut(&crate::WidgetInstance) -> bool,
+    ) -> Option<u64> {
         if !self.widgets_shown() || self.widget_time_paused() {
             return None;
         }
@@ -86,7 +99,7 @@ impl SceneGraph {
         self.widget_registry
             .instances
             .values()
-            .filter(|instance| self.widget_visible(instance))
+            .filter(|instance| drawable(instance) && self.widget_visible(instance))
             .flat_map(|instance| instance.current_params.values())
             .filter_map(|value| match value {
                 WidgetParameterValue::Deadline(d) => d.next_change_wall_us(now),

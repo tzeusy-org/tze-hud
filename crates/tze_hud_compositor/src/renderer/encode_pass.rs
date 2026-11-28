@@ -8,7 +8,7 @@
 //! - `clear_color` — returns the wgpu clear color (transparent in overlay, dark in fullscreen)
 //!
 //! **Encode passes**:
-//! - `encode_widget_pass` — composites widget textures into the frame
+//! - `encode_widget_pass_prepared` — composites widget textures into the frame
 //! - `encode_drag_handle_pass` — chrome pass for drag-handle quads
 //! - `encode_image_pass` — textured image quad render pass
 //!
@@ -113,90 +113,12 @@ impl super::Compositor {
         }
     }
 
-    /// Encode a widget render pass that composites all widget textures into the frame.
-    ///
-    /// Widget tiles use z_order >= WIDGET_TILE_Z_MIN (0x9000_0000), placing them
-    /// above zone tiles but below chrome.
-    ///
-    /// This is a no-op when the widget renderer is not initialized or the registry
-    /// has no instances with cached textures.
-    pub(super) fn encode_widget_pass(
-        &self,
-        encoder: &mut wgpu::CommandEncoder,
-        frame_view: &wgpu::TextureView,
-        registry: &WidgetRegistry,
-        surf_w: f32,
-        surf_h: f32,
-    ) {
-        let wr = match &self.widget_renderer {
-            Some(r) => r,
-            None => return,
-        };
-
-        // Check if there are any active widget instances with cached textures.
-        if registry.active_publishes.is_empty() {
-            return;
-        }
-
-        let any_textured = registry
-            .active_publishes
-            .iter()
-            .any(|(name, publishes)| !publishes.is_empty() && wr.texture_entry(name).is_some());
-        if !any_textured {
-            return;
-        }
-
-        // Begin a LoadOp::Load render pass — widgets composite on top of scene content.
-        let mut widget_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("widget_pass"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: frame_view,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Load, // preserve content pixels under widgets
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            depth_stencil_attachment: None,
-            timestamp_writes: None,
-            occlusion_query_set: None,
-        });
-
-        wr.composite_widgets(&mut widget_pass, registry, surf_w, surf_h, &self.device);
-    }
-
-    /// Collect the scene-side widget draw geometry.
-    ///
-    /// Thin Compositor-level wrapper over
-    /// [`crate::widget::WidgetRenderer::collect_widget_draw_quads`] that also
-    /// handles the "no widget renderer" case. Called in the windowed build phase
-    /// (under the scene lock) so the widget pass can be encoded lock-free from the
-    /// returned owned quads.
-    pub(super) fn collect_widget_draw_geometry(
-        &self,
-        scene: &SceneGraph,
-        surf_w: f32,
-        surf_h: f32,
-    ) -> Vec<crate::widget::WidgetDrawQuad> {
-        match &self.widget_renderer {
-            Some(wr) if scene.widgets_shown() => {
-                wr.collect_widget_draw_quads(&scene.widget_registry, surf_w, surf_h)
-            }
-            _ => Vec::new(),
-        }
-    }
-
-    /// Encode the widget pass from precomputed, scene-free quads.
-    ///
-    /// The scene-free counterpart to [`Self::encode_widget_pass`]. Consumes the
-    /// owned [`crate::widget::WidgetDrawQuad`]s produced by
-    /// [`Self::collect_widget_draw_geometry`] so the windowed present path never
-    /// touches `&scene.widget_registry` after the lock is dropped.
+    /// Composite the owned quads prepared before the scene lock was released.
     pub(super) fn encode_widget_pass_prepared(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         frame_view: &wgpu::TextureView,
-        quads: &[crate::widget::WidgetDrawQuad],
+        quads: [&[crate::widget::WidgetDrawQuad]; 2],
         surf_w: f32,
         surf_h: f32,
     ) {
@@ -204,7 +126,7 @@ impl super::Compositor {
             Some(r) => r,
             None => return,
         };
-        if quads.is_empty() {
+        if quads.iter().all(|group| group.is_empty()) {
             return;
         }
 

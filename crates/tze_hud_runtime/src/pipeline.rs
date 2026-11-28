@@ -42,6 +42,7 @@ pub(crate) enum FrameDemand {
 pub(crate) struct FrameTurnRequest {
     pub demand: FrameDemand,
     pub repaint: bool,
+    pub windowed_dock: bool,
     pub degradation: Option<tze_hud_compositor::CompositorDegradationPolicy>,
 }
 
@@ -126,6 +127,7 @@ impl FrameTurnState {
         let mut submitted = false;
         let mut needs_render = false;
         let work = compositor.as_mut().map(|renderer| {
+            let dock_moving = renderer.advance_dock_compaction(scene, request.windowed_dock);
             self.fallback_repaint_pending |= renderer.poll_font_fallback();
             let start = std::time::Instant::now();
             renderer.prime_markdown_cache(scene);
@@ -134,12 +136,15 @@ impl FrameTurnState {
             // The drain consumes one-shot echo/blur/hover observations. Keep
             // their repaint owed across capture, lock misses and failed submits.
             self.local_repaint_pending |= renderer.drain_local_composer_and_needs_render();
+            if request.windowed_dock {
+                self.local_repaint_pending |= renderer.poll_dock_tooltip();
+            }
             self.widget_repaint_pending &= scene.widgets_shown() && !scene.widget_time_paused();
             self.widget_repaint_pending |= renderer.widget_deadline_needs_render(scene);
             needs_render = frame_needs_render(
                 scene.version != self.last_rendered.0,
                 scene.geometry_epoch != self.last_rendered.1,
-                renderer.has_inflight_animation(scene),
+                dock_moving || renderer.has_inflight_animation(scene),
                 self.local_repaint_pending,
                 request.repaint || self.widget_repaint_pending || self.fallback_repaint_pending,
             ) || matches!(request.demand, FrameDemand::Readback);
@@ -245,6 +250,8 @@ pub struct HitTestSnapshot {
     pub context_menu: Option<Rect>,
     pub notification_reveals: Vec<tze_hud_scene::graph::overlay::NotificationRevealRegion>,
     pub notification_reveal_panel: Option<tze_hud_scene::graph::overlay::NotificationRevealPanel>,
+    pub dock_passive_column: Option<tze_hud_scene::dock::DockPassiveColumn>,
+    pub dock_hover: Option<Arc<tze_hud_compositor::renderer::DockHoverFrame>>,
 }
 
 /// One entry in the hit-test snapshot.
@@ -299,6 +306,8 @@ impl HitTestSnapshot {
             context_menu: None,
             notification_reveals: Vec::new(),
             notification_reveal_panel: None,
+            dock_passive_column: None,
+            dock_hover: None,
         }
     }
 
@@ -373,6 +382,8 @@ impl HitTestSnapshot {
                 .and_then(|m| m.reset_button_rect),
             notification_reveals: scene.overlay.notification_reveal_regions.clone(),
             notification_reveal_panel: scene.overlay.notification_reveal_panel,
+            dock_passive_column: scene.dock_passive_column().cloned(),
+            dock_hover: None,
         }
     }
 
