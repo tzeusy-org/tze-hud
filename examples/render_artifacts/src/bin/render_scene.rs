@@ -442,7 +442,7 @@ async fn render_fixture(args: &Args, raw: &RawConfig) -> Result<(CapturedFrame, 
         config_parent,
         &mut scene,
         tze_hud_config::tokens::OsPreferences::default(),
-    );
+    )?;
     let server = server(scene, &startup.global_tokens);
     compositor.set_token_map(startup.global_tokens);
     let renderer = compositor
@@ -526,7 +526,7 @@ async fn render_widget(args: &Args, raw: &RawConfig) -> Result<(CapturedFrame, V
         None,
         &mut scene,
         tze_hud_config::tokens::OsPreferences::default(),
-    );
+    )?;
     let bundle = match load_bundle_dir_with_tokens(path, &startup.global_tokens) {
         BundleScanResult::Ok(bundle) => bundle,
         BundleScanResult::Err(err) => return Err(error(format!("invalid widget bundle: {err}"))),

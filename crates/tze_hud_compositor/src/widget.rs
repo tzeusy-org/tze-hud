@@ -30,12 +30,16 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex, OnceLock};
 
+mod compact_countdown;
+pub use compact_countdown::compact_countdown_fits;
+
 use ab_glyph::{Font, ScaleFont};
-use tze_hud_scene::DegradationLevel;
+use tze_hud_scene::dock::DockPresentation;
 use tze_hud_scene::types::{
     GeometryPolicy, Rgba, WidgetBinding, WidgetBindingMapping, WidgetDefinition,
-    WidgetParameterValue, WidgetRegistry,
+    WidgetParameterValue, WidgetRegistry, WidgetSvgLayer,
 };
+use tze_hud_scene::{DegradationLevel, Rect};
 
 // ─── SVG render plans ────────────────────────────────────────────────────────
 
@@ -48,6 +52,7 @@ use tze_hud_scene::types::{
 /// `resvg` fallback.
 pub struct WidgetRenderPlan {
     layers: Vec<WidgetRenderPlanLayer>,
+    builtin_countdown_layout: bool,
 }
 
 struct WidgetRenderPlanLayer {
@@ -69,7 +74,10 @@ impl WidgetRenderPlan {
                 primitive_plan: PrimitiveSvgLayerPlan::parse(svg_text),
             })
             .collect();
-        Self { layers }
+        Self {
+            layers,
+            builtin_countdown_layout: false,
+        }
     }
 }
 
@@ -1836,6 +1844,14 @@ pub struct WidgetTextureEntry {
     /// Parameters used for the last successful rasterization.
     /// Compared against current scene params to detect changes from MCP publishes.
     pub last_rendered_params: HashMap<String, WidgetParameterValue>,
+    /// The alternate whose pixels were successfully uploaded.
+    pub(crate) dock_presentation: Option<Arc<DockPresentation>>,
+    /// Fingerprint of the last successful RGBA upload for a dock-owned instance.
+    pub(crate) dock_pixels: Option<blake3::Hash>,
+    /// Whether the current dock raster succeeded, even if older pixels remain drawable.
+    pub(crate) dock_raster_current: bool,
+    /// Full label when the last successful compact upload drew a clipped prefix.
+    pub(crate) clipped_compact_label: Option<std::sync::Arc<str>>,
     /// Animation state: start time, duration, starting params, target params.
     pub(crate) animation: Option<WidgetAnimationState>,
 }
@@ -2447,6 +2463,21 @@ fn composed_widget_cache_key(
     }
 }
 
+/// The built-in compact label's actual grapheme-safe displayed prefix.
+pub(crate) fn compact_countdown_clipped(
+    svg_layers: &[(&str, &[WidgetBinding])],
+    constraints: &HashMap<String, (f32, f32)>,
+    params: &HashMap<String, WidgetParameterValue>,
+) -> Vec<(String, usize)> {
+    let [(svg, bindings)] = svg_layers else {
+        return Vec::new();
+    };
+    compact_countdown::prepare(svg, bindings, constraints, params)
+        .filter(|prepared| prepared.clipped)
+        .map(|prepared| vec![("label".into(), prepared.prefix_chars)])
+        .unwrap_or_default()
+}
+
 /// String params whose bound text would run past the widget canvas,
 /// laid out by the same usvg text engine and widget font set that draw it,
 /// each with the number of its characters that fit (the smallest across
@@ -2505,6 +2536,19 @@ fn bound_widget_tree(
     param_constraints: &HashMap<String, (f32, f32)>,
     params: &HashMap<String, WidgetParameterValue>,
 ) -> Option<resvg::usvg::Tree> {
+    resvg::usvg::Tree::from_str(
+        &bound_widget_svg(svg, bindings, param_constraints, params),
+        &widget_usvg_options(),
+    )
+    .ok()
+}
+
+fn bound_widget_svg(
+    svg: &str,
+    bindings: &[WidgetBinding],
+    param_constraints: &HashMap<String, (f32, f32)>,
+    params: &HashMap<String, WidgetParameterValue>,
+) -> String {
     let mut bound = svg.to_owned();
     for binding in bindings {
         if let Some(value) = resolve_binding_value(binding, params, param_constraints) {
@@ -2521,7 +2565,7 @@ fn bound_widget_tree(
             );
         }
     }
-    resvg::usvg::Tree::from_str(&bound, &widget_usvg_options()).ok()
+    bound
 }
 
 /// Whether text element `element` runs past the canvas edges.
@@ -2717,6 +2761,26 @@ pub fn rasterize_svg_layers(
     rasterize_widget_render_plan(&plan, param_constraints, params, pixel_width, pixel_height)
 }
 
+fn rasterize_compact_countdown(
+    plan: &WidgetRenderPlan,
+    constraints: &HashMap<String, (f32, f32)>,
+    params: &HashMap<String, WidgetParameterValue>,
+    width: u32,
+    height: u32,
+) -> Option<(tiny_skia::Pixmap, bool)> {
+    let [layer] = plan.layers.as_slice() else {
+        return None;
+    };
+    let prepared =
+        compact_countdown::prepare(&layer.svg_text, &layer.bindings, constraints, params)?;
+    let mut raster = None;
+    composite_layer(
+        &mut raster,
+        RasterizedSvgLayer::Shared(rasterize_cached_text_svg(&prepared.svg, width, height)?),
+    );
+    Some((raster?, prepared.clipped))
+}
+
 /// Rasterize a retained widget render plan.
 ///
 /// Static layers use the static layer cache, bound layers use a digest of the
@@ -2729,6 +2793,16 @@ pub fn rasterize_widget_render_plan(
     pixel_width: u32,
     pixel_height: u32,
 ) -> Option<tiny_skia::Pixmap> {
+    if plan.builtin_countdown_layout {
+        return rasterize_compact_countdown(
+            plan,
+            param_constraints,
+            params,
+            pixel_width,
+            pixel_height,
+        )
+        .map(|(pixels, _)| pixels);
+    }
     let resolved_layers: Vec<ResolvedLayerBindings> = plan
         .layers
         .iter()
@@ -2845,19 +2919,16 @@ pub fn rasterize_widget_render_plan(
 
 // ─── WidgetRenderer (GPU state) ───────────────────────────────────────────────
 
-/// Precomputed, scene-free draw geometry for a single widget instance.
-///
-/// Produced by [`WidgetRenderer::collect_widget_draw_quads`] under the scene lock
-/// and consumed by [`WidgetRenderer::composite_prepared`] after the lock drops.
-/// Carries only the resolved pixel origin plus the instance name used to look up
-/// the (compositor-owned) cached texture at draw time.
+/// Scene-free widget geometry, in the target window's pixels.
 pub(crate) struct WidgetDrawQuad {
-    /// Widget instance name — the key into `WidgetRenderer::textures`.
     pub(crate) instance_name: String,
-    /// Resolved (pre-snap) pixel x origin.
-    pub(crate) raw_x: f32,
-    /// Resolved (pre-snap) pixel y origin.
-    pub(crate) raw_y: f32,
+    pub(crate) geometry: WidgetDrawGeometry,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum WidgetDrawGeometry {
+    Registry { x: f32, y: f32 },
+    Dock(Rect),
 }
 
 /// The compositor-owned widget rendering state.
@@ -2870,7 +2941,7 @@ pub struct WidgetRenderer {
     snap_on_show: bool,
     /// Widget types whose SVG changed since the last sync (a live theme
     /// change re-resolves their tokens): their instances re-raster.
-    restyled_types: std::collections::HashSet<String>,
+    restyled_files: HashMap<String, std::collections::HashSet<String>>,
     /// Raw SVG bytes keyed by (widget_type_id, svg_filename).
     /// Stored at widget type registration time.
     svgs: HashMap<(String, String), Vec<u8>>,
@@ -2882,7 +2953,7 @@ pub struct WidgetRenderer {
     textures: HashMap<String, WidgetTextureEntry>,
 
     /// Cumulative SVG rasterizations per instance (survives texture eviction).
-    raster_counts: HashMap<String, u64>,
+    raster_counts: HashMap<String, WidgetRasterCount>,
 
     /// Instances rasterized by the most recent `sync_widget_textures` pass.
     rasterized_last_sync: Vec<String>,
@@ -2890,9 +2961,11 @@ pub struct WidgetRenderer {
     /// Opt-in cumulative widget RGBA submissions; never counts atlas/resource uploads.
     #[cfg(any(test, feature = "dev-mode"))]
     rgba_upload_count: u64,
+    #[cfg(any(test, feature = "dev-mode"))]
+    raster_invocation_count: u64,
 
-    /// Retained CPU render plans keyed by widget type id.
-    render_plans: HashMap<String, WidgetRenderPlan>,
+    /// Retained CPU render plans keyed by type and presentation.
+    render_plans: HashMap<String, WidgetRenderPlans>,
 
     /// Bind group layout for the texture pipeline.
     texture_bind_group_layout: wgpu::BindGroupLayout,
@@ -2902,6 +2975,28 @@ pub struct WidgetRenderer {
 
     /// Render pipeline for compositing widget textures.
     texture_pipeline: wgpu::RenderPipeline,
+}
+
+struct WidgetRasterCount {
+    invocations: u64,
+    dock_owned: bool,
+}
+
+#[derive(Default)]
+struct WidgetRenderPlans {
+    default: Option<WidgetRenderPlan>,
+    dock: Option<(Arc<DockPresentation>, WidgetRenderPlan)>,
+}
+
+pub(crate) fn same_dock_presentation(
+    a: Option<&Arc<DockPresentation>>,
+    b: Option<&Arc<DockPresentation>>,
+) -> bool {
+    match (a, b) {
+        (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+        (None, None) => true,
+        _ => false,
+    }
 }
 
 fn reserve_widget_source(
@@ -2993,7 +3088,7 @@ impl WidgetRenderer {
 
         Self {
             snap_on_show: false,
-            restyled_types: std::collections::HashSet::new(),
+            restyled_files: HashMap::new(),
             resident_ledger: None,
             svgs: HashMap::new(),
             text_fit: None,
@@ -3003,6 +3098,8 @@ impl WidgetRenderer {
             rasterized_last_sync: Vec::new(),
             #[cfg(any(test, feature = "dev-mode"))]
             rgba_upload_count: 0,
+            #[cfg(any(test, feature = "dev-mode"))]
+            raster_invocation_count: 0,
             render_plans: HashMap::new(),
             texture_bind_group_layout,
             sampler,
@@ -3097,7 +3194,10 @@ impl WidgetRenderer {
         if let Some(old) = self.svgs.insert(key.clone(), svg_bytes)
             && Some(&old) != self.svgs.get(&key)
         {
-            self.restyled_types.insert(widget_type_id.to_owned());
+            self.restyled_files
+                .entry(widget_type_id.to_owned())
+                .or_default()
+                .insert(svg_filename.to_owned());
         }
         if let Some(old_id) = self.resident_ledger.as_ref().and_then(|_| {
             self.svg_resident_allocation_ids
@@ -3229,14 +3329,25 @@ impl WidgetRenderer {
         queue: &wgpu::Queue,
         instance_name: &str,
         widget_def: &WidgetDefinition,
+        dock_owned: bool,
+        dock: Option<&Arc<DockPresentation>>,
         params: &HashMap<String, WidgetParameterValue>,
         pixel_width: u32,
         pixel_height: u32,
-    ) {
-        *self
+    ) -> bool {
+        let count = self
             .raster_counts
-            .entry(instance_name.to_string())
-            .or_insert(0) += 1;
+            .entry(instance_name.to_owned())
+            .or_insert(WidgetRasterCount {
+                invocations: 0,
+                dock_owned,
+            });
+        count.invocations += 1;
+        count.dock_owned = dock_owned;
+        #[cfg(any(test, feature = "dev-mode"))]
+        {
+            self.raster_invocation_count += 1;
+        }
         self.rasterized_last_sync.push(instance_name.to_string());
 
         // Build a map from param name to (f32_min, f32_max) for linear binding normalization.
@@ -3254,11 +3365,19 @@ impl WidgetRenderer {
             })
             .collect();
 
-        if !self.render_plans.contains_key(&widget_def.id) {
-            let mut svg_layers: Vec<(&str, &[WidgetBinding])> =
-                Vec::with_capacity(widget_def.layers.len());
+        let plans = self.render_plans.entry(widget_def.id.clone()).or_default();
+        let needs_plan = match dock {
+            Some(dock) => plans
+                .dock
+                .as_ref()
+                .is_none_or(|(previous, _)| !Arc::ptr_eq(previous, dock)),
+            None => plans.default.is_none(),
+        };
+        if needs_plan {
+            let layers = dock.map_or(widget_def.layers.as_slice(), |dock| dock.layers.as_slice());
+            let mut svg_layers: Vec<(&str, &[WidgetBinding])> = Vec::with_capacity(layers.len());
 
-            for layer in &widget_def.layers {
+            for layer in layers {
                 let key = (widget_def.id.clone(), layer.svg_file.clone());
                 let svg_bytes = match self.svgs.get(&key) {
                     Some(b) => b,
@@ -3268,27 +3387,50 @@ impl WidgetRenderer {
                             svg_file = layer.svg_file,
                             "SVG bytes not registered for widget layer"
                         );
+                        if dock.is_some() {
+                            return false;
+                        }
                         continue;
                     }
                 };
+                if dock.is_some_and(|dock| !dock.matches_source(&layer.svg_file, svg_bytes)) {
+                    tracing::debug!(
+                        widget = instance_name,
+                        "dock SVG source does not match its descriptor"
+                    );
+                    return false;
+                }
                 match std::str::from_utf8(svg_bytes) {
                     Ok(s) => {
                         svg_layers.push((s, &layer.bindings));
                     }
                     Err(e) => {
                         tracing::warn!(error = %e, "widget SVG not valid UTF-8");
+                        if dock.is_some() {
+                            return false;
+                        }
                     }
                 }
             }
 
-            self.render_plans.insert(
-                widget_def.id.clone(),
-                WidgetRenderPlan::compile(&svg_layers),
-            );
+            let mut compiled = WidgetRenderPlan::compile(&svg_layers);
+            compiled.builtin_countdown_layout =
+                dock.is_some_and(|dock| dock.uses_builtin_countdown_layout());
+            match dock {
+                Some(dock) => plans.dock = Some((Arc::clone(dock), compiled)),
+                None => plans.default = Some(compiled),
+            }
         }
+        let plan = if dock.is_some() {
+            &plans.dock.as_ref().expect("dock plan compiled above").1
+        } else {
+            plans.default.as_ref().expect("default plan compiled above")
+        };
 
-        // Delegate to the CPU-only rasterization path (shared with benchmarks/tests).
-        let composed = self.render_plans.get(&widget_def.id).and_then(|plan| {
+        // Keep the same clipping decision as the pixels from the compact plan.
+        let composed = if plan.builtin_countdown_layout {
+            rasterize_compact_countdown(plan, &param_constraints, params, pixel_width, pixel_height)
+        } else {
             rasterize_widget_render_plan(
                 plan,
                 &param_constraints,
@@ -3296,18 +3438,16 @@ impl WidgetRenderer {
                 pixel_width,
                 pixel_height,
             )
-        });
+            .map(|pixels| (pixels, false))
+        };
 
-        let pixmap = match composed {
-            Some(p) => p,
-            None => {
-                tracing::debug!(widget = instance_name, "no layers rendered for widget");
-                return;
-            }
+        let Some((pixmap, clipped_label)) = composed else {
+            tracing::debug!(widget = instance_name, "no layers rendered for widget");
+            return false;
         };
 
         // Upload to GPU texture (or create a new texture if size changed).
-        self.upload_texture(
+        let uploaded = self.upload_texture(
             device,
             queue,
             instance_name,
@@ -3316,12 +3456,28 @@ impl WidgetRenderer {
             pixel_height,
         );
 
-        tracing::trace!(
-            widget = instance_name,
-            width = pixel_width,
-            height = pixel_height,
-            "widget rasterized and uploaded"
-        );
+        if uploaded {
+            if dock_owned {
+                let entry = self
+                    .textures
+                    .get_mut(instance_name)
+                    .expect("uploaded texture");
+                entry.dock_pixels = Some(blake3::hash(pixmap.data()));
+                entry.clipped_compact_label = match params.get("label") {
+                    Some(WidgetParameterValue::String(label)) if clipped_label => {
+                        Some(std::sync::Arc::from(label.as_str()))
+                    }
+                    _ => None,
+                };
+            }
+            tracing::trace!(
+                widget = instance_name,
+                width = pixel_width,
+                height = pixel_height,
+                "widget rasterized and uploaded"
+            );
+        }
+        uploaded
     }
 
     /// Upload RGBA pixel data to a wgpu texture (creating or replacing the cached entry).
@@ -3337,7 +3493,7 @@ impl WidgetRenderer {
         rgba_data: &[u8],
         width: u32,
         height: u32,
-    ) {
+    ) -> bool {
         let allocation_id =
             tze_hud_resource::AllocationId(format!("widget:{instance_name}:{width}x{height}"));
         if let Some(ledger) = &self.resident_ledger
@@ -3350,7 +3506,7 @@ impl WidgetRenderer {
                 .is_err()
         {
             tracing::warn!(instance_name, "widget raster cache admission denied");
-            return;
+            return false;
         }
         if let Some(entry) = self.textures.get_mut(instance_name)
             && entry.width == width
@@ -3367,7 +3523,7 @@ impl WidgetRenderer {
             {
                 self.rgba_upload_count += 1;
             }
-            return;
+            return true;
         }
 
         let texture = device.create_texture(&wgpu::TextureDescriptor {
@@ -3428,6 +3584,10 @@ impl WidgetRenderer {
                 height,
                 dirty: false,
                 last_rendered_params: HashMap::new(),
+                dock_presentation: None,
+                dock_pixels: None,
+                dock_raster_current: false,
+                clipped_compact_label: None,
                 animation,
             },
         );
@@ -3437,166 +3597,90 @@ impl WidgetRenderer {
         {
             ledger.release_evicted(tze_hud_resource::ResidentClass::WidgetRaster, &id);
         }
+        true
     }
 
-    /// Composite widget textures into the current render pass.
-    ///
-    /// Called from the compositor's frame render path. Widget tiles use
-    /// z_order >= WIDGET_TILE_Z_MIN (0x9000_0000) so they appear above zone
-    /// tiles when they overlap.
-    ///
-    /// # Arguments
-    ///
-    /// - `render_pass` — the active render pass to draw into
-    /// - `registry` — the widget registry (instances + definitions)
-    /// - `surf_w` / `surf_h` — surface dimensions for NDC conversion
-    pub(crate) fn composite_widgets<'rp>(
-        &'rp self,
-        render_pass: &mut wgpu::RenderPass<'rp>,
-        registry: &WidgetRegistry,
-        surf_w: f32,
-        surf_h: f32,
-        device: &wgpu::Device,
-    ) {
-        use wgpu::util::DeviceExt;
-
-        // Every widget shares WIDGET_TILE_Z_MIN, so overlapping widgets draw
-        // in instance-name order: stable across frames, unlike HashMap order.
-        let mut instances: Vec<&tze_hud_scene::types::WidgetInstance> = registry
-            .instances
-            .values()
-            .filter(|instance| {
-                registry
-                    .active_publishes
-                    .get(&instance.instance_name)
-                    .is_some_and(|publishes| !publishes.is_empty())
-            })
-            .collect();
-        instances.sort_unstable_by(|a, b| a.instance_name.cmp(&b.instance_name));
-
-        render_pass.set_pipeline(&self.texture_pipeline);
-
-        for instance in instances {
-            let entry = match self.textures.get(&instance.instance_name) {
-                Some(e) => e,
-                None => continue,
-            };
-
-            // Resolve pixel geometry from the instance's geometry policy.
-            let (raw_x, raw_y, _pw, _ph) =
-                resolve_pixel_geometry(&registry.drawn_geometry(instance), surf_w, surf_h)
-                    .unwrap_or((0.0, 0.0, surf_w, surf_h));
-            // Pixel-snap widget quads so text-heavy SVGs remain crisp on screen.
-            let (px, py, pw, ph) = snap_composite_rect(
-                raw_x,
-                raw_y,
-                entry.width as f32,
-                entry.height as f32,
-                surf_w,
-                surf_h,
-            );
-
-            // Build NDC quad vertices with UV coordinates.
-            let vertices = widget_quad_vertices(px, py, pw, ph, surf_w, surf_h);
-            let vertex_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("widget_quad_buf"),
-                contents: bytemuck::cast_slice(&vertices),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
-
-            render_pass.set_bind_group(0, &entry.bind_group, &[]);
-            render_pass.set_vertex_buffer(0, vertex_buf.slice(..));
-            render_pass.draw(0..6, 0..1);
-        }
-    }
-
-    /// Precompute the per-instance draw geometry for the widget pass.
-    ///
-    /// This is the scene-reading half of [`Self::composite_widgets`]: it resolves
-    /// each drawable instance's pixel origin from the registry (instance geometry
-    /// override, with a definition-default / full-screen fallback) into an owned
-    /// [`WidgetDrawQuad`]. Only instances that have an active publish AND a cached
-    /// texture are emitted — matching the `continue` / `any_textured` gating of
-    /// the original single-pass compositing.
-    ///
-    /// The matching draw half is [`Self::composite_prepared`], which needs only
-    /// these owned quads (no `&WidgetRegistry`) and so runs after the scene lock
-    /// is dropped.
-    pub(crate) fn collect_widget_draw_quads(
+    pub(crate) fn collect_registry_widget_quads(
         &self,
         registry: &WidgetRegistry,
         surf_w: f32,
         surf_h: f32,
+        names: Vec<&str>,
     ) -> Vec<WidgetDrawQuad> {
-        let mut instances: Vec<&tze_hud_scene::types::WidgetInstance> = registry
-            .instances
-            .values()
-            .filter(|instance| {
-                registry
-                    .active_publishes
-                    .get(&instance.instance_name)
-                    .is_some_and(|publishes| !publishes.is_empty())
+        let mut quads: Vec<_> = names
+            .into_iter()
+            .filter_map(|instance_name| {
+                self.textures.get(instance_name)?;
+                let instance = registry.instances.get(instance_name)?;
+                let (x, y, _, _) =
+                    resolve_pixel_geometry(&registry.drawn_geometry(instance), surf_w, surf_h)
+                        .unwrap_or((0.0, 0.0, surf_w, surf_h));
+                Some(WidgetDrawQuad {
+                    instance_name: instance_name.to_owned(),
+                    geometry: WidgetDrawGeometry::Registry { x, y },
+                })
             })
             .collect();
-        instances.sort_unstable_by(|a, b| a.instance_name.cmp(&b.instance_name));
-
-        let mut quads = Vec::new();
-        for instance in instances {
-            // Only instances with a cached texture are drawable (composite_widgets
-            // `continue`s otherwise); skip them here so the draw half never needs
-            // to consult the registry.
-            if !self.textures.contains_key(&instance.instance_name) {
-                continue;
-            }
-            let (raw_x, raw_y, _pw, _ph) =
-                resolve_pixel_geometry(&registry.drawn_geometry(instance), surf_w, surf_h)
-                    .unwrap_or((0.0, 0.0, surf_w, surf_h));
-            quads.push(WidgetDrawQuad {
-                instance_name: instance.instance_name.clone(),
-                raw_x,
-                raw_y,
-            });
-        }
+        // All widgets share a z-order; preserve instance-name order when they overlap.
+        quads.sort_unstable_by(|a, b| a.instance_name.cmp(&b.instance_name));
         quads
     }
 
-    /// Draw precomputed widget quads into an already-open render pass.
-    ///
-    /// The scene-free counterpart to [`Self::composite_widgets`]: it looks up each
-    /// quad's cached texture entry (compositor-owned, not scene state), pixel-snaps
-    /// against the texture dimensions, and draws. Geometry was resolved earlier by
-    /// [`Self::collect_widget_draw_quads`].
+    /// Use the same current cache entry for drawing, geometry and signatures.
+    pub(crate) fn drawable_widget(
+        &self,
+        quad: &WidgetDrawQuad,
+        surf_w: f32,
+        surf_h: f32,
+    ) -> Option<(&WidgetTextureEntry, Rect)> {
+        let entry = self.textures.get(&quad.instance_name)?;
+        let bounds = match quad.geometry {
+            WidgetDrawGeometry::Registry { x, y } => {
+                let (x, y, w, h) = snap_composite_rect(
+                    x,
+                    y,
+                    entry.width as f32,
+                    entry.height as f32,
+                    surf_w,
+                    surf_h,
+                );
+                Rect::new(x, y, w, h)
+            }
+            WidgetDrawGeometry::Dock(bounds)
+                if (entry.width, entry.height) == (bounds.width as u32, bounds.height as u32)
+                    && entry.dock_pixels.is_some() =>
+            {
+                bounds
+            }
+            WidgetDrawGeometry::Dock(_) => return None,
+        };
+        Some((entry, bounds))
+    }
+
+    /// Draw the owned widget quads after the scene lock is released.
     pub(crate) fn composite_prepared<'rp>(
         &'rp self,
         render_pass: &mut wgpu::RenderPass<'rp>,
-        quads: &[WidgetDrawQuad],
+        quads: [&[WidgetDrawQuad]; 2],
         surf_w: f32,
         surf_h: f32,
         device: &wgpu::Device,
     ) {
         use wgpu::util::DeviceExt;
 
-        if quads.is_empty() {
-            return;
-        }
         render_pass.set_pipeline(&self.texture_pipeline);
-
-        for quad in quads {
-            let entry = match self.textures.get(&quad.instance_name) {
-                Some(e) => e,
-                None => continue,
+        for quad in quads.into_iter().flatten() {
+            let Some((entry, bounds)) = self.drawable_widget(quad, surf_w, surf_h) else {
+                continue;
             };
-            // Pixel-snap widget quads so text-heavy SVGs remain crisp on screen.
-            let (px, py, pw, ph) = snap_composite_rect(
-                quad.raw_x,
-                quad.raw_y,
-                entry.width as f32,
-                entry.height as f32,
+            let vertices = widget_quad_vertices(
+                bounds.x,
+                bounds.y,
+                bounds.width,
+                bounds.height,
                 surf_w,
                 surf_h,
             );
-
-            let vertices = widget_quad_vertices(px, py, pw, ph, surf_w, surf_h);
             let vertex_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("widget_quad_buf"),
                 contents: bytemuck::cast_slice(&vertices),
@@ -3612,7 +3696,9 @@ impl WidgetRenderer {
     /// Get a reference to the texture entry for an instance (for testing / inspection).
     /// Total SVG rasterizations performed for `instance_name` so far.
     pub fn raster_count(&self, instance_name: &str) -> u64 {
-        self.raster_counts.get(instance_name).copied().unwrap_or(0)
+        self.raster_counts
+            .get(instance_name)
+            .map_or(0, |count| count.invocations)
     }
 
     /// Cumulative existing per-instance invocation counts and actual widget
@@ -3620,7 +3706,7 @@ impl WidgetRenderer {
     /// deltas include failed attempts without treating them as uploads.
     #[cfg(any(test, feature = "dev-mode"))]
     pub(crate) fn work_totals(&self) -> (u64, u64) {
-        (self.raster_counts.values().sum(), self.rgba_upload_count)
+        (self.raster_invocation_count, self.rgba_upload_count)
     }
 
     /// Instances re-rasterized since the last [`Self::begin_sync`].
@@ -3633,14 +3719,16 @@ impl WidgetRenderer {
         self.rasterized_last_sync.clear();
     }
 
-    /// Whether `widget_type`'s SVG changed since the last shown sync.
-    pub(crate) fn restyled(&self, widget_type: &str) -> bool {
-        self.restyled_types.contains(widget_type)
+    /// Whether any source for the selected layers changed since the last shown sync.
+    pub(crate) fn restyled(&self, widget_type: &str, layers: &[WidgetSvgLayer]) -> bool {
+        self.restyled_files
+            .get(widget_type)
+            .is_some_and(|files| layers.iter().any(|layer| files.contains(&layer.svg_file)))
     }
 
     /// A shown sync re-rastered every restyled instance.
     pub(crate) fn end_sync(&mut self) {
-        self.restyled_types.clear();
+        self.restyled_files.clear();
     }
 
     pub fn texture_entry(&self, instance_name: &str) -> Option<&WidgetTextureEntry> {
@@ -3659,6 +3747,19 @@ impl WidgetRenderer {
             && let (Some(ledger), Some(id)) = (&self.resident_ledger, entry.resident_allocation_id)
         {
             ledger.release_evicted(tze_hud_resource::ResidentClass::WidgetRaster, &id);
+        }
+    }
+
+    pub(crate) fn retire_absent_dock_instances(&mut self, registry: &WidgetRegistry) {
+        let retired: Vec<_> = self
+            .raster_counts
+            .iter()
+            .filter(|(name, count)| count.dock_owned && !registry.instances.contains_key(*name))
+            .map(|(name, _)| name.clone())
+            .collect();
+        for name in retired {
+            self.remove_texture(&name);
+            self.raster_counts.remove(&name);
         }
     }
 }

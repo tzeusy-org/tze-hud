@@ -1456,7 +1456,8 @@ mod tests {
             None,
             &mut graph,
             tze_hud_config::tokens::OsPreferences::default(),
-        );
+        )
+        .unwrap();
         let startup = StartupDiagnostics::new(boot.startup_warnings);
         let pending = diagnostics::render(None, None, Some(&startup));
         assert_eq!(pending.0["state"], "unavailable");
@@ -2433,13 +2434,15 @@ mod tests {
             raw.widget_bundles = Some(tze_hud_config::raw::RawWidgetBundles {
                 paths: vec![missing_root.to_string_lossy().into_owned()],
             });
-            let (_, warnings) = crate::widget_startup::init_widget_registry(
+            let warnings = crate::widget_startup::init_widget_registry(
                 &mut s,
                 &raw,
                 None,
                 &std::collections::HashMap::new(),
                 &tze_hud_config::themes::resolve_config_tokens(&Default::default()),
-            );
+            )
+            .unwrap()
+            .warnings;
             startup = crate::operator::diagnostics::StartupDiagnostics::new(warnings);
             let mut second = s.widget_registry.instances["motion-gauge"].clone();
             second.instance_name = "second-gauge".into();

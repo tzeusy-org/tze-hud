@@ -183,6 +183,8 @@ impl Drop for FramePacingTimerGuard {
 mod answer_focus;
 mod config;
 mod displays;
+mod dock_param_hover;
+mod dock_tooltip;
 mod frame_work;
 #[cfg(target_os = "windows")]
 mod global_hotkey;
@@ -412,6 +414,8 @@ struct WindowedRuntimeState {
     static_hit_regions: Vec<HitRegion>,
     /// Runtime-managed widget hover trackers keyed by widget instance_name.
     widget_hover_trackers: std::collections::HashMap<String, WidgetHoverTracker>,
+    dock_tooltip: dock_tooltip::DockTooltipVisit,
+    dock_param_hover: dock_param_hover::DockParamHover,
     /// Pending widget SVG assets to register with the compositor after
     /// `init_widget_renderer` is called. Consumed once during first `resumed()`.
     pending_widget_svgs: Vec<crate::widget_startup::WidgetSvgAsset>,
@@ -830,6 +834,16 @@ impl WinitApp {
             .scheduled_main_deadline
             .filter(|deadline| deadline.at <= now)
         else {
+            if self
+                .state
+                .dock_tooltip
+                .next_due()
+                .is_some_and(|due| due <= now)
+            {
+                self.state.wake.counters().record_main_wakeup(
+                    crate::idle_efficiency::RuntimeWakeupSource::AnimationDeadline,
+                );
+            }
             return;
         };
         self.state.scheduled_main_deadline = None;
@@ -876,7 +890,8 @@ impl WinitApp {
     /// complete while retained input still waits on a lock that another
     /// thread (such as an availability waiter) briefly holds.
     fn has_deferred_scene_work(&self, drain: &PortalProjectionDrain) -> bool {
-        drain.is_deferred()
+        self.state.dock_param_hover.has_debt()
+            || drain.is_deferred()
             || !self.state.pending_keyboard_events.is_empty()
             || !self.state.pending_scroll.is_empty()
             || self.state.pending_pointer_move
@@ -1041,9 +1056,13 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         if std::mem::take(&mut self.state.cursor_entry.tick) {
             if let CursorEntryTurn::Quiet { next } = self.cursor_entry_turn() {
                 self.state.scheduled_main_deadline = next;
-                event_loop.set_control_flow(next.map_or(ControlFlow::Wait, |deadline| {
-                    ControlFlow::WaitUntil(deadline.at)
-                }));
+                let wake_at = next
+                    .into_iter()
+                    .map(|deadline| deadline.at)
+                    .chain(self.state.dock_tooltip.next_due())
+                    .min();
+                event_loop
+                    .set_control_flow(wake_at.map_or(ControlFlow::Wait, ControlFlow::WaitUntil));
                 return;
             }
         }
@@ -1064,17 +1083,18 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         self.sync_design_tokens();
         self.sync_capture_exclusion();
         if displays::take_dirty(&self.state.displays_dirty) {
+            self.invalidate_dock_cursor();
             self.sync_displays(event_loop);
         }
         self.sync_zone_assignments();
-        self.refresh_cursor_position_from_os();
+        let dock_contact_changed = self.refresh_cursor_position_from_os();
         self.synthesize_left_release_if_physically_up();
         self.refresh_widget_hover_tracking();
         self.update_overlay_cursor_hittest();
         // The cursor follows controls that appear or leave under a resting pointer.
         self.update_portal_cursor_icon();
         let portal_drain = self.settle_scene_work();
-        let settled_scene_changed = portal_drain.scene_changed();
+        let mut settled_scene_changed = portal_drain.scene_changed() || dock_contact_changed;
 
         // ── Per-frame ticks + present poll ────────────────────
         // Moved here from the `RedrawRequested` handler so the main loop no
@@ -1090,6 +1110,8 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         self.maybe_present_frame();
 
         let now = Instant::now();
+        settled_scene_changed |= self.settle_dock_tooltip(now);
+        settled_scene_changed |= self.settle_dock_param_hover(now);
         let counters = Arc::clone(self.state.wake.counters());
         let quiescent_completion = self
             .state
@@ -1138,6 +1160,12 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
 
         let deadline_crossed_during_settle = self.claim_due_scheduled_main_deadline(now);
         let mut deadlines = Vec::new();
+        if let Some(at) = self.state.dock_param_hover.next_due() {
+            deadlines.push(Deadline::new(
+                at,
+                crate::idle_efficiency::RuntimeWakeupSource::AnimationDeadline,
+            ));
+        }
         if let Some(at) =
             crate::widget_hover::next_hover_deadline(&self.state.widget_hover_trackers)
         {
@@ -1238,10 +1266,13 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
             .quiescent_efficiency
             .as_ref()
             .and_then(WindowedQuiescentEfficiencyRunState::next_deadline);
-        let control_flow = match (
-            control_flow_for_deadlines(now, deadlines),
-            quiescent_deadline,
-        ) {
+        // Dwell is main-owned. Only a tooltip that can actually show/hide
+        // needs to take the normal post-settle compositor wake.
+        let main_only = quiescent_deadline
+            .into_iter()
+            .chain(self.state.dock_tooltip.next_due())
+            .min();
+        let control_flow = match (control_flow_for_deadlines(now, deadlines), main_only) {
             (ControlFlow::Wait, Some(deadline)) => ControlFlow::WaitUntil(deadline),
             (ControlFlow::WaitUntil(main_deadline), Some(deadline)) => {
                 ControlFlow::WaitUntil(main_deadline.min(deadline))
@@ -1329,6 +1360,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                             width: cfg_width,
                             height: cfg_height,
                             scale: 1.0,
+                            dock_bounds_observed: false,
                         }
                     }
                 };
@@ -1576,6 +1608,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         self.state.resize_grip_hover_state = Arc::clone(&compositor.resize_grip_hover_state);
         self.state.tile_close_hover_state = Arc::clone(&compositor.tile_close_hover_state);
         self.state.drag_handle_hover_state = Arc::clone(&compositor.drag_handle_hover_state);
+        self.state.dock_tooltip.output = Arc::clone(&compositor.dock_tooltip);
         // Reverse channel: read the compositor's per-frame wrapped-line layout for
         // soft-wrap vertical caret movement.
         self.state.composer_visual_layout = Arc::clone(&compositor.composer_visual_layout);
@@ -1962,6 +1995,17 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                                         crate::idle_efficiency::RuntimeWakeupSource::TtlDeadline,
                                     )
                                 });
+                            if let Some(build) = &render {
+                                // A secondary retry can be the first successful
+                                // compact draw. Retain unrelated hit geometry.
+                                let snapshot = hit_test_snapshot.load();
+                                if snapshot.dock_hover.is_some() || build.dock_hover().is_some() {
+                                    let mut next = (**snapshot).clone();
+                                    next.dock_hover = build.dock_hover().cloned();
+                                    next.dock_passive_column = scene.dock_passive_column().cloned();
+                                    hit_test_snapshot.store(Arc::new(next));
+                                }
+                            }
                             let question_wakes = scene.take_notification_wait_notifiers();
                             drop(scene);
                             for wake in question_wakes {
@@ -2048,7 +2092,8 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                             if match_presented_windows {
                                 build.bind_notification_candidates(&scene);
                             }
-                            let new_snap = crate::pipeline::HitTestSnapshot::from_scene(&scene);
+                            let mut new_snap = crate::pipeline::HitTestSnapshot::from_scene(&scene);
+                            new_snap.dock_hover = build.dock_hover().cloned();
                             hit_test_snapshot.store(Arc::new(new_snap));
                             let built_scene_version = scene.version;
                             let built_geometry_epoch = scene.geometry_epoch;
@@ -2171,16 +2216,19 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                             capture.finish_with(|build, display| {
                                 let (w, h) = build.size();
                                 let target = match display {
-                                    None => Some(tze_hud_compositor::FrameTarget::primary(w, h)),
+                                    None => {
+                                        Some((tze_hud_compositor::FrameTarget::primary(w, h), None))
+                                    }
                                     Some(name) => secondaries
                                         .iter()
                                         .find(|t| t.name == name)
-                                        .map(|t| t.frame_target()),
+                                        .map(|t| (t.frame_target(), Some(t.name.as_str()))),
                                 };
                                 match target {
-                                    Some(target) => compositor.capture_windowed_frame(
+                                    Some((target, name)) => compositor.capture_windowed_display(
                                         build,
                                         &target,
+                                        name,
                                         surface_for_compositor.format(),
                                     ),
                                     None => Err(tze_hud_compositor::CaptureError::NoSuchDisplay(
@@ -2299,6 +2347,22 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         self.state.cursor_entry.tick = false;
         let wake_source = main_work_source_for_window_event(&event);
         let secondary = displays::secondary_index(&self.state.secondaries, window_id);
+        let own_window = secondary.is_some()
+            || self
+                .state
+                .window
+                .as_ref()
+                .is_some_and(|w| w.id() == window_id);
+        if own_window
+            && matches!(
+                &event,
+                WindowEvent::Moved(_)
+                    | WindowEvent::Resized(_)
+                    | WindowEvent::ScaleFactorChanged { .. }
+            )
+        {
+            self.invalidate_dock_cursor();
+        }
         #[cfg(target_os = "windows")]
         if let WindowEvent::Resized(size) = &event
             && self.restore_minimized_overlay(window_id, secondary, *size)
@@ -2438,6 +2502,9 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                 self.state.cursor_y = y;
                 self.state.cursor_window = Some(window_id);
                 self.state.cursor_left_window = false;
+                if own_window {
+                    self.observe_dock_cursor((x, y), window_id);
+                }
                 if self.panel_pointer_moved(secondary) {
                     self.update_overlay_cursor_hittest();
                     return;
@@ -2458,6 +2525,9 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                 // CursorLeft after the new one's CursorMoved.
                 if self.state.cursor_window.is_none_or(|id| id == window_id) {
                     self.state.cursor_left_window = true;
+                    if own_window {
+                        self.dock_cursor_left(window_id);
+                    }
                     self.cancel_chrome_feedback();
                 }
             }
@@ -2766,6 +2836,7 @@ impl WindowedRuntime {
         let (
             shared_scene,
             startup_compositor_tokens,
+            dock_policy,
             runtime_widget_store,
             startup_element_store,
             startup_element_store_path,
@@ -2799,23 +2870,23 @@ impl WindowedRuntime {
 
             // Scene startup: design tokens, config tabs, widget bundles, and
             // token-derived zone rendering policies.
-            let compositor_tokens = if let Some(raw) = &raw_config_for_startup {
+            let (compositor_tokens, dock) = if let Some(raw) = &raw_config_for_startup {
                 let startup_result = run_scene_startup(
                     raw,
                     config_parent_buf.as_deref(),
                     &mut scene,
                     crate::os_prefs::read(),
-                );
+                )?;
                 // Stash SVG assets for compositor registration after init_widget_renderer.
                 pending_widget_svgs = startup_result.widget_svg_assets;
                 startup_diagnostics = Some(crate::operator::diagnostics::StartupDiagnostics::new(
                     startup_result.startup_warnings,
                 ));
-                startup_result.global_tokens
+                (startup_result.global_tokens, startup_result.dock)
             } else {
                 // No config provided — bootstrap with canonical zone defaults (no token derivation).
                 scene.zone_registry = tze_hud_scene::types::ZoneRegistry::with_defaults();
-                std::collections::HashMap::new()
+                (std::collections::HashMap::new(), None)
             };
 
             if std::env::var("TZE_HUD_SIM_SUBTITLES").as_deref() == Ok("1") {
@@ -2841,6 +2912,7 @@ impl WindowedRuntime {
             (
                 Arc::new(Mutex::new(scene)),
                 compositor_tokens,
+                dock,
                 runtime_widget_store,
                 element_store_bootstrap.store,
                 element_store_bootstrap.path,
@@ -2883,15 +2955,18 @@ impl WindowedRuntime {
             Arc::clone(&placement_layout),
             Arc::clone(&display_probe),
         );
-        let appearance = Arc::new(crate::appearance::Appearance::for_startup(
-            raw_config_for_startup.as_ref(),
-            cfg.config_file_path.as_deref().map(std::path::Path::new),
-            startup_compositor_tokens.clone(),
-            Arc::clone(&shared_scene),
-            render_wake.clone(),
-            wake.main_work_notifier(),
-            crate::os_prefs::read,
-        ));
+        let appearance = Arc::new(
+            crate::appearance::Appearance::for_startup(
+                raw_config_for_startup.as_ref(),
+                cfg.config_file_path.as_deref().map(std::path::Path::new),
+                startup_compositor_tokens.clone(),
+                Arc::clone(&shared_scene),
+                render_wake.clone(),
+                wake.main_work_notifier(),
+                crate::os_prefs::read,
+            )
+            .with_dock_policy(dock_policy),
+        );
         let cfg_agents_empty = cfg.agents.load().is_empty();
         let agent_store = Arc::new(
             crate::agent_store::AgentStore::open(
@@ -3356,6 +3431,8 @@ impl WindowedRuntime {
             overlay_capturing: false,
             static_hit_regions: Vec::new(),
             widget_hover_trackers: std::collections::HashMap::new(),
+            dock_tooltip: dock_tooltip::DockTooltipVisit::default(),
+            dock_param_hover: dock_param_hover::DockParamHover::default(),
             pending_widget_svgs,
             startup_diagnostics,
             text_fit,

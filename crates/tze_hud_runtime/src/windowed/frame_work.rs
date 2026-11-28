@@ -65,6 +65,7 @@ impl WindowedFrameWork {
             Some(compositor),
             FrameTurnRequest {
                 repaint: triggers.surface,
+                windowed_dock: true,
                 degradation: triggers.degradation,
                 ..Default::default()
             },

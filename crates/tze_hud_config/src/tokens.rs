@@ -1139,6 +1139,16 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         default_value: "4",
     },
     CanonicalToken {
+        key: crate::dock::ROW_HEIGHT_TOKEN,
+        description: "Widget dock row height in logical pixels",
+        default_value: "52",
+    },
+    CanonicalToken {
+        key: crate::dock::CAPTION_WIDTH_TOKEN,
+        description: "Widget dock session-caption width in logical pixels",
+        default_value: "96",
+    },
+    CanonicalToken {
         key: "space.s",
         description: "Small spacing",
         default_value: "8",

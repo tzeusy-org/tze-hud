@@ -67,6 +67,10 @@ pub(crate) fn build_hover_trackers(
     }
 
     for (instance_name, instance) in &scene.widget_registry.instances {
+        // Dock hover uses its actual placed and presented card, never default geometry.
+        if scene.is_dock_widget(instance_name) {
+            continue;
+        }
         let Some(definition) = scene
             .widget_registry
             .definitions

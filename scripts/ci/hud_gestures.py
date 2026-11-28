@@ -73,6 +73,10 @@ LAVAPIPE = next((p for p in (Path("/usr/share/vulkan/icd.d/lvp_icd.x86_64.json")
                              Path("/usr/share/vulkan/icd.d/lvp_icd.json")) if p.exists()),
                 Path("/usr/share/vulkan/icd.d/lvp_icd.json"))
 SCREEN = (1280, 800)
+DOCK_TOOLTIP_SCENARIO = "dock-countdown-tooltip"
+DOCK_PROGRESS_SCENARIO = "dock-progress-hover"
+DOCK_POPUP_RGB = (255, 208, 0)
+DOCK_INK_RGB = (16, 24, 48)
 SETTLE_S = 5.0  # bound on any one observed transition
 # A focused composer's caret blink presents about every 530 ms, so the HUD
 # counts as settled once nothing has presented for this long (docs/api.md).
@@ -245,15 +249,20 @@ class XTest:
 
     name = "xtest"
 
-    def __init__(self, display: str, guard: Callable[[], None]) -> None:
+    def __init__(self, display: str, guard: Callable[[], None], authority: Path | None = None) -> None:
         self.display = display
         self.guard = guard
+        self.authority = authority
         self.calls = 0
 
     def _run(self, *args: object) -> None:
         self.guard()
         env = dict(os.environ, DISPLAY=self.display)
-        subprocess.run(["xdotool", *map(str, args)], env=env, check=True, capture_output=True)
+        opts = {}
+        if self.authority is not None:
+            env["XAUTHORITY"] = str(self.authority)
+            opts["timeout"] = 2
+        subprocess.run(["xdotool", *map(str, args)], env=env, check=True, capture_output=True, **opts)
         self.calls += 1  # logged, never an assertion
 
     def move_abs(self, x: int, y: int) -> None:
@@ -275,7 +284,8 @@ class XTest:
 # ── Owned processes ──────────────────────────────────────────────────────────
 
 
-def start_xvfb(first: int = 90, last: int = 199) -> tuple[subprocess.Popen, str]:
+def start_xvfb(first: int = 90, last: int = 199, *,
+               authority_dir: Path | None = None) -> tuple[subprocess.Popen, str]:
     """Start Xvfb on the first free display number; return it once it is ready.
 
     Xvfb's own `-displayfd` search fails where the socket directory is
@@ -286,13 +296,25 @@ def start_xvfb(first: int = 90, last: int = 199) -> tuple[subprocess.Popen, str]
     for number in range(first, last + 1):
         if Path(f"/tmp/.X{number}-lock").exists():
             continue
+        auth_args = []
+        if authority_dir is not None:
+            from hud_x11_capture import write_authority
+
+            authority = authority_dir / f"Xauthority-{number}"
+            write_authority(authority, number)
+            auth_args = ["-auth", str(authority), "-noreset"]
         read_fd, write_fd = os.pipe()
-        proc = subprocess.Popen(
-            ["Xvfb", f":{number}", "-displayfd", str(write_fd), "-screen", "0",
-             f"{SCREEN[0]}x{SCREEN[1]}x24", "-nolisten", "tcp"],
-            pass_fds=(write_fd,), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        )
-        os.close(write_fd)
+        try:
+            proc = subprocess.Popen(
+                ["Xvfb", f":{number}", "-displayfd", str(write_fd), "-screen", "0",
+                 f"{SCREEN[0]}x{SCREEN[1]}x24", "-nolisten", "tcp", *auth_args],
+                pass_fds=(write_fd,), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+        except OSError:
+            os.close(read_fd)
+            raise
+        finally:
+            os.close(write_fd)
         with os.fdopen(read_fd) as pipe:
             ready, _, _ = select.select([pipe], [], [], 15)
             reported = pipe.readline().strip() if ready else ""  # empty when Xvfb exits (display taken)
@@ -309,6 +331,16 @@ def free_port() -> int:
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         return sock.getsockname()[1]
+
+
+def private_x11_geometry(output: str, window: str) -> tuple[int, int, int, int]:
+    match = re.fullmatch(
+        rf"WINDOW={re.escape(window)}\nX=(-?\d+)\nY=(-?\d+)\nWIDTH=([1-9]\d*)\nHEIGHT=([1-9]\d*)\nSCREEN=0\n?",
+        output,
+    )
+    if not match:
+        raise Refused("private HUD client geometry is unavailable")
+    return tuple(map(int, match.groups()))
 
 
 def pid_alive(pid: int) -> bool:
@@ -455,6 +487,25 @@ class MouseReceiptCapture:
         return evidence
 
 
+def dock_tooltip_config(config: str) -> str:
+    """Set distinct pixel colors and enable only the dock in this scratch copy."""
+    marker = "[design_tokens]\n"
+    if config.count(marker) != 1 or re.search(r"^\s*\[dock\]", config, re.M):
+        raise Refused("unexpected source configuration for the dock witness")
+    tokens = ('"color.surface.container.high" = "#FFD000"\n'
+              '"color.on_surface" = "#101830"\n'
+              '"opacity.surface" = "1"\n')
+    return config.replace(marker, marker + tokens, 1) + '\n[dock]\naccepts = ["countdown"]\nmax_rows = 2\n'
+
+
+def dock_progress_config(config: str) -> str:
+    """Enable only the dock and leave the shipped theme and artwork intact."""
+    stock_theme = '[design_tokens]\ntheme = "tonal-glass"\n'
+    if config.count(stock_theme) != 1 or re.search(r"^\s*\[dock\]", config, re.M):
+        raise Refused("unexpected source configuration for the progress witness")
+    return config + '\n[dock]\naccepts = ["progress-bar"]\nmax_rows = 2\n'
+
+
 @dataclass
 class Run:
     exe: Path
@@ -482,6 +533,9 @@ class Run:
     publications: set[tuple[str, str | None]] = field(default_factory=set)
     grpc_port: int = field(default=0, init=False)
     mouse_receipts: MouseReceiptCapture | None = None
+    dock_build_sha: str | None = None
+    dock_scenario: str = DOCK_TOOLTIP_SCENARIO
+    xauthority: Path | None = field(default=None, init=False)
 
     @property
     def pid(self) -> int | None:
@@ -490,6 +544,16 @@ class Run:
     # Lifecycle ───────────────────────────────────────────────────────────
 
     def start(self, *, resident_raster: bool = False) -> None:
+        if self.dock_build_sha:
+            if self.injector == "sendinput":
+                if (not WINDOWS or self.dock_scenario != DOCK_PROGRESS_SCENARIO
+                        or self.window_mode != "fullscreen" or resident_raster
+                        or os.environ.get("GITHUB_ACTIONS") != "true"
+                        or os.environ.get("RUNNER_ENVIRONMENT") != "github-hosted"):
+                    raise Refused("Windows dock progress needs private fullscreen SendInput on a GitHub-hosted VM")
+            elif (sys.platform != "linux" or self.injector != "xtest" or self.window_mode != "fullscreen"
+                  or resident_raster or not LAVAPIPE.is_file()):
+                raise Refused("dock witness needs Linux, private fullscreen XTEST and llvmpipe")
         if self.injector == "sendinput":
             if os.environ.get("GITHUB_ACTIONS") != "true":
                 raise Refused("tier W drives the real desktop; it runs only on a CI VM (GITHUB_ACTIONS=true)")
@@ -498,12 +562,21 @@ class Run:
                 raise Refused(f"tze_hud.exe is already running (pid {running}); this harness owns its HUD")
         self.home = Path(tempfile.mkdtemp(prefix="hud_gestures_home_"))
         if self.injector == "xtest":
-            self.xvfb, self.display = start_xvfb()
+            if self.dock_build_sha:
+                self.xvfb, self.display = start_xvfb(authority_dir=self.home)
+                self.xauthority = self.home / f"Xauthority-{self.display[1:]}"
+            else:
+                self.xvfb, self.display = start_xvfb()
             (self.home / ".config").mkdir()
             env = dict(os.environ, DISPLAY=self.display, WAYLAND_DISPLAY="", HOME=str(self.home),
                        XDG_CONFIG_HOME=str(self.home / ".config"))
             if LAVAPIPE.exists():
                 env["VK_ICD_FILENAMES"] = str(LAVAPIPE)
+            if self.xauthority:
+                env.update(XAUTHORITY=str(self.xauthority), VK_DRIVER_FILES=str(LAVAPIPE),
+                           WINIT_X11_SCALE_FACTOR="1", TZE_HUD_LOG_DIR=str(self.home))
+                for key in ("WAYLAND_DISPLAY", "WAYLAND_SOCKET", "TZE_HUD_FILE_LOG"):
+                    env.pop(key, None)
         else:
             for name in ("LocalAppData", "AppData"):
                 (self.home / name).mkdir()
@@ -524,6 +597,9 @@ class Run:
             self.port = free_port()
         config = seed_config(CONFIG, self.psk)
         self.config_dir = config.parent
+        if self.dock_build_sha:
+            configure = dock_progress_config if self.dock_scenario == DOCK_PROGRESS_SCENARIO else dock_tooltip_config
+            config.write_text(configure(config.read_text(encoding="utf-8")), encoding="utf-8")
         if self.go_to_probe:
             seeded = config.read_text(encoding="utf-8")
             config.write_text(seeded.replace("[runtime]\n",
@@ -534,7 +610,7 @@ class Run:
         with open(config.parent / "agents.toml", "a", encoding="utf-8") as agents:
             agents.write(f'\n[agents.{FOREIGN_AGENT}]\npsk_sha256 = "{digest}"\nallow = ["*"]\n')
         self.config = config
-        self.log = self.out / "hud.log"
+        self.log = (self.home if self.dock_build_sha else self.out) / "hud.log"
         dimensions = (["--width", str(SCREEN[0]), "--height", str(SCREEN[1])]
                       if self.window_mode == "fullscreen" else [])
         if self.mouse_receipts:
@@ -556,16 +632,75 @@ class Run:
                     or (self.injector == "xtest" and (not self.xvfb or self.xvfb.poll() is not None))):
                 raise Refused("raster witness did not reach its owned HUD and display")
             return
-        self.inj = XTest(self.display, self.guard) if self.injector == "xtest" else WIN.SendInput(self.guard)
+        self.inj = (XTest(self.display, self.guard, self.xauthority) if self.injector == "xtest"
+                    else WIN.SendInput(self.guard))
         if self.injector == "sendinput":
             self._check_identity_mapping()
         if self.window_mode == "fullscreen":
             self.guard()
+            if self.dock_build_sha and self.injector == "xtest":
+                self.fit_private_dock_client()
         else:
             # An overlay may start without activation. No input is sent until
             # scenario 11 foregrounds its owned helper and the normal guard passes.
             if self.status().get("pid") != self.pid:
                 raise Refused("overlay status is not the owned HUD")
+
+    def fit_private_dock_client(self) -> None:
+        """Apply borderless fullscreen client geometry on our bare Xvfb root."""
+        from hud_x11_capture import Capture, CaptureError
+
+        if self.xvfb is None or self.xauthority is None or self.pid is None:
+            raise Refused("private HUD window setup requires Xvfb ownership")
+        self.guard()
+        env = {"DISPLAY": self.display, "XAUTHORITY": str(self.xauthority),
+               "HOME": str(self.xauthority.parent), "PATH": os.defpath}
+
+        def xdo(*args: str) -> str:
+            self.guard()
+            try:
+                return subprocess.run(["xdotool", *args], env=env, check=True, capture_output=True,
+                                      text=True, timeout=2).stdout
+            except (OSError, subprocess.SubprocessError, UnicodeError):
+                raise Refused("could not configure the owned X11 HUD client") from None
+
+        try:
+            capture = Capture(self.xvfb, self.display, self.xauthority, configure=True)
+        except (CaptureError, OSError, EOFError, TimeoutError):
+            raise Refused("could not verify the private X11 root for window setup") from None
+        expected = (0, 0, *SCREEN)
+        try:
+            window = xdo("search", "--onlyvisible", "--pid", str(self.pid)).strip()
+            if not re.fullmatch(r"[1-9]\d{0,9}", window):
+                raise Refused("expected one visible X11 window for the owned HUD")
+
+            def client_geometry():
+                return private_x11_geometry(xdo("getwindowgeometry", "--shell", window), window)
+
+            geometry = client_geometry()
+            if geometry[2:] != SCREEN:
+                # Bare Xvfb has no WM to honor winit's borderless fullscreen
+                # request. Resize the actual window before notifying the client.
+                xdo("windowsize", "--sync", window, *map(str, SCREEN))
+            # Real moves invalidate winit's cached root-relative position. A
+            # verified synthetic ConfigureNotify then supplies the WM position.
+            if geometry[:2] != (1, 1):
+                xdo("windowmove", "--sync", window, "1", "1")
+            xdo("windowmove", "--sync", window, "0", "0")
+            if client_geometry() != expected:
+                raise Refused("actual private HUD client does not fill the owned root")
+            capture.publish_client_geometry(int(window), self.pid)
+        finally:
+            if capture.close() != {"returncode": 0, "forced": False, "reaped": True}:
+                raise Refused("private X11 window setup probe did not exit cleanly")
+
+        def reported(status):
+            displays = status.get("displays") or []
+            return (status.get("pid") == self.pid and status.get("sha") == self.dock_build_sha
+                    and len(displays) == 1 and displays[0].get("primary") is True
+                    and tuple(displays[0].get(k) for k in ("x", "y", "width", "height")) == expected)
+
+        self.expect("owned fullscreen client and reported display fill the private X11 root", reported)
 
     def _check_identity_mapping(self) -> None:
         """Status rects are scene pixels; SendInput takes physical ones. Run only where they agree."""
@@ -602,25 +737,40 @@ class Run:
     def stop(self) -> list[str]:
         """Terminate everything this run started; return what survived."""
         survivors = []
+        windows_dock = self.dock_build_sha and self.injector == "sendinput"
         if self.hud and self.hud.poll() is None:
             self.hud.terminate()
             try:
                 self.hud.wait(15)
             except subprocess.TimeoutExpired:
                 self.hud.kill()
-        for pid in self.owned_pids + self.helper_pids:
+                if windows_dock:
+                    try:
+                        self.hud.wait(2)
+                    except subprocess.TimeoutExpired:
+                        pass
+        tracked = [] if windows_dock else self.owned_pids + self.helper_pids
+        for pid in tracked:
             if pid_alive(pid):
                 kill_pid(pid)
         deadline = time.monotonic() + 10
-        while time.monotonic() < deadline and any(pid_alive(p) for p in self.owned_pids + self.helper_pids):
+        while time.monotonic() < deadline and any(pid_alive(p) for p in tracked):
             time.sleep(0.1)
         if self.hud:
             self.hud.poll()  # reap our direct child
-        survivors += [f"hud pid {p}" for p in self.owned_pids if pid_alive(p) and not self._zombie(p)]
-        survivors += [f"helper pid {p}" for p in self.helper_pids if pid_alive(p)]
+        if windows_dock:
+            if self.hud and self.hud.poll() is None:
+                survivors.append("owned Windows dock HUD")
+        else:
+            survivors += [f"hud pid {p}" for p in self.owned_pids if pid_alive(p) and not self._zombie(p)]
+            survivors += [f"helper pid {p}" for p in self.helper_pids if pid_alive(p)]
         # A replacement HUD that never answered was never recorded; find it by
         # this run's private HOME, which nothing else uses.
         for pid in self._strays():
+            if windows_dock:
+                # This witness cannot restart the HUD. Its only process is the owned handle above.
+                survivors.append("unexpected unowned HUD")
+                break
             kill_pid(pid)
             survivors.append(f"unrecorded hud pid {pid}")
         if self.xvfb:
@@ -629,7 +779,13 @@ class Run:
                 self.xvfb.wait(10)
             except subprocess.TimeoutExpired:
                 self.xvfb.kill()
-                survivors.append(f"Xvfb pid {self.xvfb.pid}")
+                if self.dock_build_sha:
+                    try:
+                        self.xvfb.wait(2)
+                    except subprocess.TimeoutExpired:
+                        survivors.append(f"Xvfb pid {self.xvfb.pid}")
+                else:
+                    survivors.append(f"Xvfb pid {self.xvfb.pid}")
         for path in (self.home, self.config_dir):
             if path:
                 shutil.rmtree(path, ignore_errors=True)
@@ -1314,6 +1470,683 @@ class SessionSmoke(Smoke):
                 return resp.status
         except urllib.error.HTTPError as err:
             return err.code
+
+
+def dock_rect(entry: dict) -> tuple[int, int, int, int]:
+    rect = entry["rect"]
+    return tuple(round(rect[key]) for key in ("x", "y", "w", "h"))
+
+
+def dock_crop(rgba: bytes, frame: tuple[int, ...], roi: tuple[int, ...]) -> bytes:
+    x, y, w, h = roi
+    fx, fy, fw, fh = frame
+    if not (fx <= x < x + w <= fx + fw and fy <= y < y + h <= fy + fh):
+        raise ValueError("dock crop lies outside the native frame")
+    first = 4 * ((y - fy) * fw + x - fx)
+    return b"".join(rgba[offset:offset + 4 * w]
+                    for offset in range(first, first + 4 * fw * h, 4 * fw))
+
+
+def dock_popup_pixels(pixels: bytes, width: int) -> tuple[bool | None, dict]:
+    """Absent, complete rectangle plus interior ink, or ambiguous."""
+    if width <= 0:
+        raise ValueError("invalid popup ROI width")
+    height = len(pixels) // (4 * width)
+    if height == 0 or len(pixels) != 4 * width * height:
+        raise ValueError("invalid popup ROI dimensions")
+    fill = bytes(DOCK_POPUP_RGB) + b"\xff"
+    matches = [i // 4 for i in range(0, len(pixels), 4) if pixels.startswith(fill, i)]
+    count = len(matches)
+    if not count:
+        return False, {"fill": 0, "ink": 0}
+    left, right = min(i % width for i in matches), max(i % width for i in matches)
+    top, bottom = matches[0] // width, matches[-1] // width
+    ink_mask = bytearray()
+    for y in range(top + 3, bottom - 2):
+        for x in range(left + 3, right - 2):
+            offset = 4 * (y * width + x)
+            pixel = pixels[offset:offset + 3]
+            ink_mask.append(all(abs(a - b) <= 16 for a, b in zip(pixel, DOCK_INK_RGB)))
+    ink = sum(ink_mask)
+    continuous = count >= (right - left + 1) * (bottom - top + 1) * 0.5
+    complete = right - left >= 50 and bottom - top >= 12 and continuous and ink >= 16
+    return True if complete else None, {
+        "fill": count, "ink": ink, "bounds": [left, top, right, bottom],
+        "ink_mask_sha256": hashlib.sha256(ink_mask).hexdigest(),
+    }
+
+
+def dock_early_observation(image: dict, move: tuple[int, int], hovered: int) -> bool:
+    return (image["pointer_ns"][0] >= move[1]
+            and image["acquisition_ns"][1] <= move[0] + 150_000_000
+            and image["popup"][hovered] is False)
+
+
+def dock_build_evidence(run: Run) -> dict:
+    """Project only stable identity and the actual GPU adapter from private logs."""
+    with run.log.open("rb") as log:
+        lines = log.read(65_536).splitlines()
+    adapter = None
+    for line in lines:
+        try:
+            fields = json.loads(line).get("fields", {})
+        except (UnicodeError, ValueError):
+            continue
+        if fields.get("message") == "windowed: GPU adapter selected":
+            adapter = fields
+            break
+    if (not adapter or adapter.get("backend") != "Vulkan"
+            or not str(adapter.get("device_name", "")).lower().startswith("llvmpipe")):
+        raise Refused("dock witness did not establish actual Vulkan llvmpipe")
+    checkout, tree = subprocess.run(
+        ["git", "rev-parse", "HEAD", "HEAD^{tree}"], cwd=REPO, check=True, capture_output=True, text=True, timeout=3
+    ).stdout.splitlines()
+    with run.exe.open("rb") as binary:
+        digest = hashlib.file_digest(binary, "sha256").hexdigest()
+    return {"harness_commit": checkout, "harness_tree": tree, "expected_build": run.dock_build_sha,
+            "exe_sha256": digest, "config_sha256": hashlib.sha256(run.config.read_bytes()).hexdigest(),
+            "backend": "Vulkan", "software_device": "llvmpipe", "hud_pid": run.pid}
+
+
+def scenario_dock_countdown_tooltip(run: Run) -> None:
+    """Tier L opt-in: observe two independent dock countdown visits in native root pixels."""
+    from hud_x11_capture import Capture, CaptureError, NS, inside
+
+    surface = "dock:countdown"
+    captions = ("dock-tooltip-a", "dock-tooltip-b")
+    labels = ("WWWWWWWWWWWWWWWWWWWW-A", "MMMMMMMMMMMMMMMMMMe\u0301B")
+    outside = (10, 10)
+    samples, moves, publishes = [], {}, []
+    report = {"schema": 1, "samples": samples, "moves": moves, "publishes": publishes}
+    sessions, images = [], {}
+    capture = None
+    stage = "owned startup"
+    failure = None
+
+    def require(condition, message):
+        if not condition:
+            raise ScenarioFailed(message, {"stage": stage})
+
+    def project_status(status):
+        displays = status.get("displays") or []
+        require(status.get("pid") == run.pid and status.get("sha") == run.dock_build_sha,
+                "the executable build and owned status PID must match")
+        require(len(displays) == 1 and displays[0].get("primary") is True
+                and tuple(displays[0].get(k) for k in ("x", "y", "width", "height")) == (0, 0, *SCREEN),
+                "the status display must be the full private root at origin zero")
+        dock = status.get("dock") or {}
+        require(dock.get("capacity", 0) == 2 and dock.get("scale") == 1,
+                "the scratch dock must admit two full-size rows")
+        return status
+
+    def move(phase, point):
+        # The lower bound precedes the incumbent authenticated pre-motion guard.
+        before = time.monotonic_ns()
+        run.glide(*point)
+        interval = before, time.monotonic_ns()
+        moves[phase] = {"point": point, "interval_ns": interval}
+        return interval
+
+    def cards(status):
+        entries = []
+        for caption in captions:
+            matches = [entry for entry in status.get("widgets") or [] if entry.get("session") == caption]
+            require(len(matches) == 1 and matches[0].get("display") == 0
+                    and isinstance(matches[0].get("s"), str),
+                    "scope must resolve to exactly one drawn primary widget")
+            entries.append(matches[0])
+        return entries
+
+    def publish(index, label, clipped):
+        is_error, reply = sessions[index].call(
+            "hud_publish", {"surface": surface, "ttl_ms": 60_000,
+                            "params": {"label": label, "ends_in_ms": 60_000}}, timeout_s=3
+        )
+        cut = (reply.get("clipped") or {}).get("label")
+        expires = reply.get("expires_in_ms")
+        accepted = not is_error and reply.get("ok") is True
+        publishes.append({"card": "AB"[index], "label": label, "accepted": accepted,
+                          "label_characters_drawn": cut if type(cut) is int else None,
+                          "expires_in_ms": expires if type(expires) is int else None})
+        require(accepted and type(expires) is int and 0 < expires <= 60_000,
+                "scoped countdown publish must be accepted with a finite TTL")
+        require((type(cut) is int and 0 <= cut < len(label)) if clipped else "clipped" not in reply,
+                "publication must establish the expected label fit")
+
+    def sample(point, deadline):
+        require(run.hud.poll() is None, "owned HUD disappeared during root sampling")
+        meta, rgba = capture.sample(frame, point, deadline)
+        pixels = [dock_popup_pixels(dock_crop(rgba, frame, roi), roi[2]) for roi in rois]
+        entry = {**meta, "stage": stage, "popup": [state for state, _ in pixels],
+                 "roi_pixels": [counts for _, counts in pixels], "rgba_sha256": hashlib.sha256(rgba).hexdigest()}
+        samples.append(entry)
+        images["last"] = (entry, rgba)
+        return entry, rgba
+
+    def observe(point, expected, *, minimum=0, limit, label):
+        while time.monotonic_ns() < limit:
+            entry, rgba = sample(point, limit)
+            require(entry["popup"] != [True, True], "both dock popups appeared in the same root image")
+            start, end = entry["acquisition_ns"]
+            if minimum and any(value is True for value, want in zip(entry["popup"], expected) if want):
+                require(end >= minimum, "a complete popup appeared before 180 ms")
+                require(start >= minimum, "the first positive XGetImage bracket overlaps 180 ms")
+            if entry["popup"] == expected and start >= minimum:
+                images[label] = (entry, rgba)
+                return rgba
+            time.sleep(0.020)
+        raise ScenarioFailed("bounded native observation did not reach expected pixels", {"stage": stage})
+
+    def visit(point, hovered, label):
+        interval = move(label, point)
+        # Capture once after proven arrival. A late or partial early frame
+        # cannot be used as evidence of absence.
+        entry, rgba = sample(point, interval[0] + 150_000_000)
+        images[f"{label}-early"] = (entry, rgba)
+        require(not entry["popup"][hovered], "a complete popup appeared before 180 ms")
+        require(dock_early_observation(entry, interval, hovered),
+                "no unambiguous early negative by move-start plus 150 ms")
+        return observe(point, [hovered == 0, hovered == 1], minimum=interval[0] + 180_000_000,
+                       limit=interval[0] + 1_500_000_000, label=f"{label}-shown")
+
+    try:
+        run.expect("dock startup reports full capacity", lambda st: (st.get("dock") or {}).get("capacity") == 2)
+        project_status(run.status())
+        report.update(dock_build_evidence(run))
+        capture = Capture(run.xvfb, run.display, run.xauthority)
+        report["x11"] = {"display": run.display, **capture.ready}
+        stage = "publish and identify the two scoped cards"
+        move("outside", outside)
+        for index, caption in enumerate(captions):
+            sessions.append(SessionSmoke(run.smoke.url, run.psk, caption))
+            run.mark()
+            publish(index, labels[index], clipped=True)
+        initial = project_status(run.settle())
+        entries = cards(initial)
+        require((initial["dock"]["rows"], initial["dock"]["overflow"]) == (2, []),
+                "both independently published rows must be visible")
+        require(entries[0]["s"] != entries[1]["s"], "two scopes must have different actual card identities")
+        bounds = [dock_rect(entry) for entry in entries]
+        require(all(inside(rect) and rect[2:] == (160, 52) for rect in bounds),
+                "the root must contain both actual compact card bounds")
+        a, b = bounds
+        require(a[0] == b[0] and a[0] < SCREEN[0] // 4 and a[1] + a[3] <= b[1],
+                "the two ordered, nonoverlapping narrow cards must be at the left edge")
+        points = [(x + w // 2, y + h // 2) for x, y, w, h in bounds]
+        roi_x, division = max(x + w for x, y, w, h in bounds) + 1, (points[0][1] + points[1][1]) // 2
+        capture_right = min(SCREEN[0], roi_x + 512)
+        frame = a[0], a[1], capture_right - a[0], b[1] + b[3] - a[1]
+        rois = [(roi_x, a[1], capture_right - roi_x, division - a[1]),
+                (roi_x, division, capture_right - roi_x, b[1] + b[3] - division)]
+        title_areas = [(x + 8, y + 4, w - 16, 20) for x, y, w, _ in bounds]
+        report.update(cards=bounds, regions=rois, title_areas=title_areas)
+        stage = "settled native card pixels, no popup"
+        baseline = observe(outside, [False, False], limit=time.monotonic_ns() + NS, label="baseline")
+        require(all(dock_crop(baseline, frame, rect).count(bytes(DOCK_POPUP_RGB) + b"\xff") >= 100
+                    for rect in bounds), "both compact cards must have real root pixels")
+
+        stage = "first hover A"
+        shown_a = visit(points[0], 0, "a")
+        stage = "leave A"
+        move("leave", outside)
+        observe(outside, [False, False], limit=time.monotonic_ns() + NS, label="left")
+        stage = "fresh reentry A"
+        shown_a_again = visit(points[0], 0, "a-reentry")
+        require(dock_crop(shown_a, frame, rois[0]) == dock_crop(shown_a_again, frame, rois[0]),
+                "A reentry must restore the same full native popup pixels")
+        stage = "direct transfer A to B"
+        shown_b = visit(points[1], 1, "b-transfer")
+        a_ink = images["a-shown"][0]["roi_pixels"][0]["ink_mask_sha256"]
+        b_ink = images["b-transfer-shown"][0]["roi_pixels"][1]["ink_mask_sha256"]
+        require(a_ink != b_ink, "the two scoped labels must produce distinct native popup ink")
+
+        stage = "fit B while stationary and keep A"
+        publish(1, "Fit", clipped=False)
+        report["fit_reply_ns"] = time.monotonic_ns()
+        observe(points[1], [False, False], limit=report["fit_reply_ns"] + NS, label="b-fit-dismissed")
+        time.sleep(0.220)
+        check, fitted = sample(points[1], time.monotonic_ns() + NS)
+        images["b-fit-settled"] = (check, fitted)
+        require(check["popup"] == [False, False], "fitting label must stay hidden while pointer is stationary")
+        prior_titles = [dock_crop(shown_b, frame, roi) for roi in title_areas]
+        final_titles = [dock_crop(fitted, frame, roi) for roi in title_areas]
+        report["title_sha256"] = [[hashlib.sha256(pixels).hexdigest() for pixels in pair]
+                                  for pair in zip(prior_titles, final_titles)]
+        require(prior_titles[0] == final_titles[0] and prior_titles[1] != final_titles[1],
+                "A's title must stay unchanged while B's fitting title visibly updates")
+        final = project_status(run.status())
+        require([(entry["s"], dock_rect(entry)) for entry in cards(final)]
+                == [(entry["s"], dock_rect(entry)) for entry in entries],
+                "both scoped identities and card bounds must survive the fitting update")
+        with run.exe.open("rb") as binary:
+            require(hashlib.file_digest(binary, "sha256").hexdigest() == report["exe_sha256"],
+                    "the executable digest changed during the run")
+        window_activations = [status.get("window_activations") for status in (initial, final)]
+        require(window_activations[0] == window_activations[1], "passive movement raised the HUD activation count")
+        report["window_activations"] = window_activations
+        require(run.inj.calls == 5, "expected exactly five guarded XTEST moves and no other input")
+        report["xtest_moves"] = run.inj.calls
+        report["final_build"] = final["sha"]
+    except ScenarioFailed as err:
+        # The generic expectation/settle last-status values are never archived here.
+        failure = ScenarioFailed(err.step, {"stage": stage})
+    except Exception as err:  # A third-party response or environment string is not evidence.
+        detail = str(err) if isinstance(err, CaptureError) else type(err).__name__
+        failure = ScenarioFailed(f"{stage}: {detail}", {"stage": stage})
+    finally:
+        cleanup = {"sessions": []}
+        if capture:
+            try:
+                cleanup["capture"] = capture.close()
+            except Exception as err:
+                cleanup["capture"] = {"error": type(err).__name__}
+        for session in reversed(sessions):
+            try:
+                cleanup["sessions"].append(session.end())
+            except Exception as err:
+                cleanup["sessions"].append(type(err).__name__)
+        report["cleanup"] = cleanup
+        capture_clean = cleanup.get("capture") == {"returncode": 0, "forced": False, "reaped": True}
+        if failure is None and (cleanup["sessions"] != [202, 202] or not capture_clean):
+            failure = ScenarioFailed("capture or scoped cleanup was incomplete", {"stage": "cleanup"})
+        report["verdict"] = "FAIL" if failure else "PASS"
+        report["failure"] = failure.step if failure else None
+        for name, (entry, rgba) in images.items():
+            png = encode_png_rgba(*entry["rect"][2:], rgba)
+            path = run.out / f"{DOCK_TOOLTIP_SCENARIO}.{name}.png"
+            path.write_bytes(png)
+            entry.setdefault("images", []).append({"name": path.name, "bytes": len(png),
+                                                    "sha256": hashlib.sha256(png).hexdigest()})
+        (run.out / f"{DOCK_TOOLTIP_SCENARIO}.json").write_text(json.dumps(report, indent=1), encoding="utf-8")
+    if failure:
+        raise failure
+
+
+def dock_progress_entry(status: dict, caption: str) -> tuple[str, tuple[int, int, int, int], bool] | None:
+    entries = status.get("widgets")
+    if not isinstance(entries, list):
+        raise ScenarioFailed("drawn widget entries unavailable", None)
+    matches = [entry for entry in entries if entry.get("session") == caption]
+    if not matches:
+        return None
+    entry = matches[0]
+    identity, visible = entry.get("s"), entry.get("tooltip_visible")
+    if (len(matches) != 1 or entry.get("display") != 0 or not isinstance(identity, str)
+            or not identity.startswith("widget:") or type(visible) is not bool):
+        raise ScenarioFailed("scoped progress did not identify one primary widget", None)
+    return identity, dock_rect(entry), visible
+
+
+def dock_progress_tint(before: bytes, after: bytes) -> tuple[int, int]:
+    """Count pixels that brighten coherently in the stock on-surface layer."""
+    if not before or len(before) != len(after) or len(before) % 4:
+        raise ValueError("progress pixel pairs have different bounds")
+    brighter = sum(all(after[i + c] - before[i + c] >= 4 for c in range(3))
+                   for i in range(0, len(before), 4))
+    return brighter, len(before) // 4
+
+
+def scenario_dock_progress_hover(run: Run) -> None:
+    """Tier L opt-in: hover one's shipped progress layer, then release only that scope."""
+    from hud_x11_capture import Capture, CaptureError, NS, inside
+
+    captions = ("dock-progress-a", "dock-progress-b")
+    outside = (10, 10)
+    sessions: dict[int, SessionSmoke] = {}
+    replies: list[int | str | None] = [None, None]
+    images: dict[str, tuple[dict, bytes]] = {}
+    report: dict = {"schema": 1, "captions": captions, "publishes": []}
+    capture = None
+    stage = "owned startup"
+    failure = None
+
+    def require(condition, message):
+        if not condition:
+            raise ScenarioFailed(message, {"stage": stage})
+
+    def entries(status, rows):
+        displays = status.get("displays") or []
+        require(status.get("pid") == run.pid and status.get("sha") == run.dock_build_sha
+                and len(displays) == 1 and displays[0].get("primary") is True
+                and tuple(displays[0].get(k) for k in ("x", "y", "width", "height")) == (0, 0, *SCREEN),
+                "owned progress build must match the private primary root")
+        require(status.get("dock") == {"rows": rows, "capacity": 2, "overflow": [], "scale": 1},
+                "the scratch dock must draw the expected rows at full scale")
+        return tuple(dock_progress_entry(status, caption) for caption in captions)
+
+    def sample(point, deadline):
+        require(run.hud.poll() is None, "owned HUD disappeared during progress root sampling")
+        meta, rgba = capture.sample(frame, point, deadline)
+        images["last"] = (meta, rgba)
+        return meta, rgba
+
+    def crops(rgba):
+        return tuple(dock_crop(rgba, frame, card) for card in bounds)
+
+    try:
+        run.expect("dock startup reports progress capacity", lambda st: (st.get("dock") or {}).get("capacity") == 2)
+        require(entries(run.settle(), 0) == (None, None), "progress fixture must begin empty")
+        report.update(dock_build_evidence(run))
+        run.glide(*outside)
+        capture = Capture(run.xvfb, run.display, run.xauthority)
+        report["x11"] = {"display": run.display, **capture.ready}
+        root = (0, 0, *SCREEN)
+        blank_meta, blank_root = capture.sample(root, outside, time.monotonic_ns() + NS)
+
+        stage = "publish two independent progress rows"
+        for index, (caption, progress) in enumerate(zip(captions, (0.25, 0.75))):
+            sessions[index] = SessionSmoke(run.smoke.url, run.psk, caption)
+            run.mark()
+            sent_ns = time.monotonic_ns()
+            is_error, reply = sessions[index].call("hud_publish", {
+                "surface": "dock:progress-bar", "ttl_ms": 60_000,
+                "params": {"label": ("Alpha", "Beta")[index], "progress": progress},
+            }, timeout_s=3)
+            expires = reply.get("expires_in_ms")
+            accepted = not is_error and reply.get("ok") is True
+            report["publishes"].append({"card": "AB"[index], "progress": progress, "accepted": accepted,
+                                        "sent_ns": sent_ns,
+                                        "expires_in_ms": expires if type(expires) is int else None})
+            require(accepted and type(expires) is int and 0 < expires <= 60_000,
+                    "scoped progress publish must have finite accepted lifetime")
+        require(sessions[0].session != sessions[1].session, "progress publishes must use two real scopes")
+        initial = run.settle()
+        a, b = entries(initial, 2)
+        require(a is not None and b is not None and a[0] != b[0] and not (a[2] or b[2]),
+                "both scopes need distinct inactive drawn instances")
+        card_a, card_b = bounds = (a[1], b[1])
+        x, y, w, h = card_a
+        require(all(inside(card) and abs(card[2] - 6.4 * card[3]) <= 7 for card in bounds)
+                and x == card_b[0] and card_a[2:] == card_b[2:] and y + h <= card_b[1],
+                "drawn progress rows must be separate, ordered, and preserve shipped geometry")
+        frame = (x, y, w, card_b[1] + h - y)
+        # Stay within the authored state layer, below the stock track and away from corners.
+        patch = (x + w // 5, y + round(h * 0.82), w // 4, max(2, h // 12))
+        pointer = (x + w // 2, y + h // 2)
+        report.update(cards=bounds, tint_patch=patch, distinct_instances=True, distinct_scopes=True)
+
+        stage = "establish settled baseline pixels"
+        blank = dock_crop(blank_root, root, frame)
+        images["blank"] = (blank_meta, blank)
+        del blank_root
+        blank_cards = crops(blank)
+        baseline_meta, baseline = sample(outside, time.monotonic_ns() + NS)
+        images["baseline"] = (baseline_meta, baseline)
+        source_a, source_b = crops(baseline)
+        for source, empty in zip((source_a, source_b), blank_cards):
+            require(sum(max(abs(source[i + c] - empty[i + c]) for c in range(3)) >= 8
+                        for i in range(0, len(source), 4)) >= w * h // 2,
+                    "an admitted progress card did not establish substantial root pixels")
+        reference = dock_crop(baseline, frame, patch)
+
+        stage = "hover only the first shipped progress state layer"
+        start = time.monotonic_ns()
+        run.glide(*pointer)
+        arrived = time.monotonic_ns()
+        report["hover_motion"] = {"point": pointer, "interval_ns": [start, arrived]}
+        early, pixels = sample(pointer, start + 150_000_000)
+        images["a-early"] = (early, pixels)
+        require(early["pointer_ns"][0] >= arrived and early["acquisition_ns"][1] <= start + 150_000_000
+                and crops(pixels) == (source_a, source_b), "progress early sample was late or changed")
+        due, limit = start + 180_000_000, start + 1_500_000_000
+        while time.monotonic_ns() < limit:
+            meta, pixels = sample(pointer, limit)
+            current_a, current_b = crops(pixels)
+            require(current_b == source_b, "hovering A changed the peer B card pixels")
+            require(current_a == source_a or meta["acquisition_ns"][0] >= due,
+                    "progress card changed before its authored dwell was proven")
+            latest = dock_crop(pixels, frame, patch)
+            brighter, total = dock_progress_tint(reference, latest)
+            report["tint"] = {"brightened": brighter, "pixels": total,
+                              "first_pair_rgba": [list(reference[:4]), list(latest[:4])]}
+            if brighter * 10 >= total * 9:
+                require(due <= meta["acquisition_ns"][0] <= meta["acquisition_ns"][1] <= limit,
+                        "authored progress tint appeared outside its proven dwell bracket")
+                images["a-due"] = (meta, pixels)
+                break
+            time.sleep(0.020)
+        require("a-due" in images, "did not observe A's authored progress tint")
+        require(entries(run.status(), 2) == ((*a[:2], True), b),
+                "only A's original live progress state may become active")
+        report["hover_flags"] = [True, False]
+
+        stage = "release A through its real scoped transport"
+        # The reply floors remaining milliseconds after our send, making
+        # each send-time-plus-remaining value a conservative expiry bound.
+        expiry_floor = min(publish["sent_ns"] + publish["expires_in_ms"] * 1_000_000
+                           for publish in report["publishes"])
+        start = time.monotonic_ns()
+        limit = start + NS
+        report["exit_deadline_ns"] = limit
+        report["earliest_expiry_bound_ns"] = expiry_floor
+        require(limit < expiry_floor, "natural expiry could overlap the one-second scoped exit witness")
+        session_a = sessions.pop(0)
+        try:
+            replies[0] = session_a.end()
+        finally:
+            report["a_delete"] = {"status": replies[0], "interval_ns": [start, time.monotonic_ns()]}
+        require(replies[0] == 202 and report["a_delete"]["interval_ns"][1] <= limit,
+                "A's scoped DELETE did not complete within one second")
+        while time.monotonic_ns() < limit:
+            meta, pixels = sample(pointer, limit)
+            current_a, current_b = crops(pixels)
+            require(current_b == source_b, "A's exit moved or repainted the surviving peer card")
+            if current_a == blank_cards[0]:
+                images["a-exit"] = (meta, pixels)
+                break
+            time.sleep(0.020)
+        require("a-exit" in images, "A's exited row did not clear the original root slot")
+        final = run.status()
+        report["exit_status_ns"] = time.monotonic_ns()
+        require(report["exit_status_ns"] <= limit and entries(final, 1) == (None, b),
+                "A must disappear and preserve B's exact drawn identity and slot within one second")
+        report["same_b_instance_and_rect"] = True
+        activations = [status.get("window_activations") for status in (initial, final)]
+        require(type(activations[0]) is int and activations[0] == activations[1] and run.inj.calls == 2,
+                "progress proof must use two guarded passive moves and no activation")
+        with run.exe.open("rb") as binary:
+            require(hashlib.file_digest(binary, "sha256").hexdigest() == report["exe_sha256"],
+                    "the executable digest changed during the run")
+        report.update(window_activations=activations, xtest_moves=run.inj.calls, final_build=final["sha"])
+    except ScenarioFailed as err:
+        failure = ScenarioFailed(err.step, {"stage": stage})
+    except Exception as err:
+        detail = str(err) if isinstance(err, CaptureError) else type(err).__name__
+        failure = ScenarioFailed(f"{stage}: {detail}", {"stage": stage})
+    finally:
+        cleanup: dict = {"sessions": replies}
+        if capture is not None:
+            try:
+                cleanup["capture"] = capture.close()
+            except Exception as err:
+                cleanup["capture"] = {"error": type(err).__name__}
+        for index, session in reversed(list(sessions.items())):
+            try:
+                replies[index] = session.end()
+            except Exception as err:
+                replies[index] = type(err).__name__
+        if failure is None and (replies != [202, 202]
+                or cleanup.get("capture") != {"returncode": 0, "forced": False, "reaped": True}):
+            failure = ScenarioFailed("capture or scoped cleanup was incomplete", {"stage": "cleanup"})
+        report.update(cleanup=cleanup, verdict="FAIL" if failure else "PASS",
+                      failure=failure.step if failure else None)
+        report["images"] = {}
+        for name, (meta, rgba) in images.items():
+            png = encode_png_rgba(*frame[2:], rgba)
+            path = run.out / f"{DOCK_PROGRESS_SCENARIO}.{name}.png"
+            path.write_bytes(png)
+            report["images"][name] = {"capture": meta, "crop": frame, "name": path.name, "bytes": len(png),
+                                      "png_sha256": hashlib.sha256(png).hexdigest(),
+                                      "rgba_sha256": hashlib.sha256(rgba).hexdigest()}
+        (run.out / f"{DOCK_PROGRESS_SCENARIO}.json").write_text(json.dumps(report, indent=1), encoding="utf-8")
+    if failure:
+        raise failure
+
+
+def scenario_windows_dock_progress_hover(run: Run) -> None:
+    """Tier W opt-in: observe scoped progress hover and exit on the owned desktop."""
+    captions = ("dock-progress-a", "dock-progress-b")
+    second = 1_000_000_000
+    sessions: dict[int, SessionSmoke] = {}
+    deletes: list[int | None] = [None, None]
+    report: dict = {"schema": 1, "captions": captions, "moves": [], "publishes": []}
+    failure = None
+
+    def require(condition: bool, step: str) -> None:
+        if not condition:
+            raise ScenarioFailed(step, None)
+
+    def entries(status: dict, rows: int) -> tuple:
+        displays = status.get("displays") or []
+        require(run.hud.poll() is None and status.get("pid") == run.pid
+                and status.get("sha") == run.dock_build_sha and WIN.screen_size() == screen
+                and len(displays) == 1 and displays[0].get("primary") is True
+                and tuple(displays[0].get(k) for k in ("x", "y", "width", "height")) == (0, 0, *screen),
+                "owned Windows dock PID, build or display changed")
+        dock = status.get("dock") or {}
+        scale = dock.get("scale")
+        require(dock.get("rows") == rows and dock.get("capacity") == 2 and dock.get("overflow") == []
+                and type(scale) in (float, int) and abs(scale - fit) <= 0.001,
+                "Windows progress dock did not keep its measured capacity and fit")
+        return tuple(dock_progress_entry(status, caption) for caption in captions)
+
+    def owns(point: tuple[int, int]) -> bool:
+        return (run.hud.poll() is None and WIN.screen_size() == screen and WIN.system_dpi() == 96
+                and WIN.fullscreen_window(run.pid) == owner["hwnd"]
+                and WIN.foreground_identity() == owner and WIN.window_at(point) == owner)
+
+    def at(point: tuple[int, int]) -> bool:
+        x, y = WIN.cursor_position()
+        return abs(x - point[0]) <= 1 and abs(y - point[1]) <= 1 and WIN.window_at((x, y)) == owner
+
+    def move(point: tuple[int, int], origin: tuple[int, int] | None = None) -> int:
+        started = None
+
+        def before_send() -> None:
+            nonlocal started
+            require(owns(point) and (origin is None or at(origin)),
+                    "Windows dock did not own the physical move before SendInput")
+            started = time.monotonic_ns()
+
+        prior = len(run.inj.calls)
+        run.inj.move_abs(*point, before_send=before_send)
+        receipts = run.inj.calls[prior:]
+        require(started is not None and len(receipts) == 1
+                and receipts[0]["what"] == f"move {point[0]},{point[1]}"
+                and receipts[0]["requested"] == receipts[0]["sent"] == 1,
+                "Windows dock move was not submitted once in full")
+        deadline = started + 150_000_000
+        while not at(point) and time.monotonic_ns() < deadline:
+            require(owns(point), "Windows dock lost physical ownership before cursor arrival")
+            time.sleep(0.005)
+        arrived = time.monotonic_ns()
+        require(owns(point) and at(point) and arrived <= deadline,
+                "Windows dock did not own the verified physical cursor arrival")
+        report["moves"].append({"point": point, "interval_ns": [started, arrived], "receipt": receipts[0]})
+        return started
+
+    try:
+        screen = WIN.screen_size()
+        hwnd = WIN.fullscreen_window(run.pid)
+        require(hwnd is not None and WIN.system_dpi() == 96 and min(screen) > 20,
+                "Windows dock requires an owned fullscreen primary with identity scale")
+        owner = {"hwnd": hwnd, "pid": run.pid}
+        # Shipped 320×50 progress art, 52dp row, 96dp caption, 8dp gap.
+        fit = min(1.0, 0.35 * screen[0] / (96 + 8 + 52 * 6.4))
+        require(entries(run.settle(), 0) == (None, None), "Windows dock must start with no scoped rows")
+        with run.exe.open("rb") as binary:
+            digest = hashlib.file_digest(binary, "sha256").hexdigest()
+        report.update(pid=run.pid, screen=screen, dock_scale=fit, exe_sha256=digest, build=run.dock_build_sha)
+        outside = (10, 10)
+        move(outside)
+
+        for index, (caption, progress) in enumerate(zip(captions, (0.25, 0.75))):
+            sessions[index] = SessionSmoke(run.smoke.url, run.psk, caption)
+            run.mark()
+            sent_ns = time.monotonic_ns()
+            error, payload = sessions[index].call("hud_publish", {
+                "surface": "dock:progress-bar", "ttl_ms": 60_000,
+                "params": {"label": ("Alpha", "Beta")[index], "progress": progress},
+            }, timeout_s=3)
+            ttl = payload.get("expires_in_ms")
+            require(not error and payload.get("ok") is True and type(ttl) is int and 0 < ttl <= 60_000,
+                    "Windows progress publish did not return finite accepted lifetime")
+            report["publishes"].append({"sent_ns": sent_ns, "expires_in_ms": ttl})
+        require(sessions[0].session != sessions[1].session, "Windows progress publishes shared a scope")
+
+        initial = run.settle()
+        a, b = entries(initial, 2)
+        presented = initial.get("frames_presented")
+        require(a is not None and b is not None and a[0] != b[0] and not (a[2] or b[2]),
+                "Windows progress did not draw two independently scoped, inactive instances")
+        require(type(presented) is int and presented > 0, "Windows progress baseline has no presentation")
+        x, y, w, h = a[1]
+        bx, by, bw, bh = b[1]
+        require(x == bx and (w, h) == (bw, bh) and 0 <= y < y + h <= by < by + bh <= screen[1]
+                and 0 <= x < x + w <= screen[0] and abs(h - 52 * fit) <= 1 and abs(w - 52 * fit * 6.4) <= 1
+                and not (x <= outside[0] < x + w and y <= outside[1] < by + bh),
+                "Windows progress quads do not match separate rows in the live primary")
+        report.update(rects=[a[1], b[1]], distinct_scopes=True, distinct_instances=True)
+        target = (x + w // 2, y + h // 2)
+        start = move(target, outside)
+        deadline = start + 1_500_000_000
+        while time.monotonic_ns() < deadline:
+            status = run.status()
+            current_a, current_b = entries(status, 2)
+            observed = time.monotonic_ns()
+            require(owns(target) and at(target) and current_a is not None and current_a[:2] == a[:2]
+                    and current_b == b, "Windows progress hover lost its target or changed B")
+            if current_a[2] and status.get("frames_presented", 0) > presented:
+                require(observed <= deadline, "Windows progress hovered frame missed its observation deadline")
+                presented = status["frames_presented"]
+                report.update(hover_flags=[True, False], hover_observed_ns=observed, hover_presented=presented)
+                break
+            time.sleep(0.020)
+        require("hover_flags" in report, "Windows progress never presented an A-only hover")
+
+        expiry_floor = min(item["sent_ns"] + item["expires_in_ms"] * 1_000_000 for item in report["publishes"])
+        start = time.monotonic_ns()
+        deadline = start + second
+        report.update(exit_deadline_ns=deadline, earliest_expiry_bound_ns=expiry_floor)
+        require(deadline < expiry_floor, "natural expiry could overlap the Windows scoped exit witness")
+        deletes[0] = sessions.pop(0).end()
+        closed = time.monotonic_ns()
+        report["a_delete"] = {"status": deletes[0], "interval_ns": [start, closed]}
+        require(deletes[0] == 202 and closed <= deadline, "Windows A did not complete scoped DELETE in one second")
+        while time.monotonic_ns() < deadline:
+            status = run.status()
+            rows = (status.get("dock") or {}).get("rows")
+            require(rows in (1, 2), "Windows scoped exit changed the dock unexpectedly")
+            current_a, current_b = entries(status, rows)
+            observed = time.monotonic_ns()
+            require(owns(target) and at(target) and current_b == b, "Windows scoped exit changed the peer or cursor")
+            if rows == 1 and current_a is None and status.get("frames_presented", 0) > presented:
+                require(observed <= deadline, "Windows A did not leave its drawn slot in one second")
+                report.update(exit_observed_ns=observed, exit_presented=status["frames_presented"],
+                              same_b_instance_and_rect=True)
+                break
+            time.sleep(0.020)
+        require("exit_observed_ns" in report, "Windows scoped exit left A drawn")
+        require(type(initial.get("window_activations")) is int
+                and initial["window_activations"] == status.get("window_activations") and len(run.inj.calls) == 2,
+                "Windows dock witness exceeded passive input custody")
+        with run.exe.open("rb") as binary:
+            require(hashlib.file_digest(binary, "sha256").hexdigest() == digest,
+                    "Windows dock witness executable changed")
+    except Exception as error:
+        failure = error.step if isinstance(error, ScenarioFailed) else type(error).__name__
+    finally:
+        for index, session in reversed(list(sessions.items())):
+            try:
+                deletes[index] = session.end()
+            except (OSError, RequestFailure):
+                pass
+        if deletes != [202, 202]:
+            failure = failure or "Windows progress scoped cleanup was incomplete"
+        report.update(deletes=deletes, verdict="FAIL" if failure else "PASS", failure=failure)
+        (run.out / f"{DOCK_PROGRESS_SCENARIO}.json").write_text(json.dumps(report, indent=1), encoding="utf-8")
+    if failure:
+        raise ScenarioFailed(failure, None)
 
 
 def entry_held(surfaces: dict, surface: str) -> bool:
@@ -3161,15 +3994,26 @@ def git_sha() -> str:
         return "unknown"
 
 
+EXPLICIT_SCENARIOS = {
+    DOCK_TOOLTIP_SCENARIO: scenario_dock_countdown_tooltip,
+    DOCK_PROGRESS_SCENARIO: scenario_dock_progress_hover,
+}
+
+
 def run_scenarios(run: Run, names: list[str]) -> list[dict]:
     results = []
     for name in names:
         run.step(f"begin {name}")
         started = time.monotonic()
-        run.snapshot(f"{name}.before")
-        result = {"scenario": name, "doc": (SCENARIOS[name].__doc__ or "").strip()}
+        explicit = name in EXPLICIT_SCENARIOS
+        scenario = EXPLICIT_SCENARIOS[name] if explicit else SCENARIOS[name]
+        if name == DOCK_PROGRESS_SCENARIO and run.injector == "sendinput":
+            scenario = scenario_windows_dock_progress_hover
+        if not explicit:
+            run.snapshot(f"{name}.before")
+        result = {"scenario": name, "doc": (scenario.__doc__ or "").strip()}
         try:
-            SCENARIOS[name](run)
+            scenario(run)
             result["outcome"] = "PASS"
         except ScenarioFailed as failure:
             result.update(outcome="FAIL", step=failure.step, last=failure.last)
@@ -3182,29 +4026,31 @@ def run_scenarios(run: Run, names: list[str]) -> list[dict]:
             err.results = results
             raise
         except subprocess.CalledProcessError as err:
-            stderr = err.stderr or ""
+            stderr = "" if explicit else err.stderr or ""
             if isinstance(stderr, bytes):
                 stderr = stderr.decode("utf-8", errors="replace")
             program = err.cmd[0] if isinstance(err.cmd, (list, tuple)) else "command"
             result.update(outcome="FAIL", step=f"CalledProcessError: {program} exited {err.returncode}",
                           last={"exit_code": err.returncode, "stderr": stderr[-4096:]})
         except Exception as err:  # noqa: BLE001 - every scenario reports, the run continues
-            result.update(outcome="FAIL", step=f"{type(err).__name__}: {err}", last=None)
+            step = type(err).__name__ if explicit else f"{type(err).__name__}: {err}"
+            result.update(outcome="FAIL", step=step, last=None)
         result["seconds"] = round(time.monotonic() - started, 2)
-        if result["outcome"] == "FAIL":
+        if not explicit and result["outcome"] == "FAIL":
             try:
                 run.screen_grab(f"{name}.after")
             except Exception as err:  # noqa: BLE001 - retain the original scenario failure
                 result["diagnostic_error"] = f"{type(err).__name__}: {err}"
-        try:
-            run.snapshot(f"{name}.after")
-            stray = run.clear_publications()
-            if stray and result["outcome"] == "PASS":
-                result.update(outcome="FAIL", step="input nobody took (duplicate or stray submit)",
-                              last={"items": [i.get("text") for i in stray]})
-        except (AssertionError, RequestFailure) as err:
-            result.setdefault("cleanup", str(err))
-        result["artifacts"] = str(run.out / name) + ".*"
+        if not explicit:
+            try:
+                run.snapshot(f"{name}.after")
+                stray = run.clear_publications()
+                if stray and result["outcome"] == "PASS":
+                    result.update(outcome="FAIL", step="input nobody took (duplicate or stray submit)",
+                                  last={"items": [i.get("text") for i in stray]})
+            except (AssertionError, RequestFailure) as err:
+                result.setdefault("cleanup", str(err))
+        result["artifacts"] = f"{name}.*" if explicit else str(run.out / name) + ".*"
         results.append(result)
         line = f"{result['outcome']}  {name} ({result['seconds']}s)"
         if result["outcome"] == "FAIL":
@@ -3227,13 +4073,31 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--required", type=required_names, metavar="NAMES",
                         help="comma-separated scenarios whose failure fails the run; the rest become "
                              "informational (listed, exit 0). Without it every scenario is required.")
-    parser.add_argument("scenarios", nargs="*", help="scenario names (default: all)")
+    parser.add_argument("--expected-dock-build-sha", metavar="SHA",
+                        help="required full executable source commit for an opt-in dock witness")
+    parser.add_argument("scenarios", nargs="*", help="scenario names (default: standard scenarios)")
     args = parser.parse_args(argv)
     if args.list:
-        for name, fn in SCENARIOS.items():
+        available = SCENARIOS | EXPLICIT_SCENARIOS if sys.platform == "linux" else SCENARIOS
+        for name, fn in available.items():
             print(f"{name:20} {(fn.__doc__ or '').strip().splitlines()[0]}")
         return 0
-    unknown = [n for n in args.scenarios + (args.required or []) if n not in SCENARIOS]
+    named = args.scenarios + (args.required or [])
+    dock_scenario = next((name for name in named if name in EXPLICIT_SCENARIOS), None)
+    dock_witness = dock_scenario is not None
+    windows_dock = (dock_scenario == DOCK_PROGRESS_SCENARIO and WINDOWS and args.injector == "sendinput")
+    linux_dock = sys.platform == "linux" and args.injector == "xtest"
+    if dock_witness and (
+        not (linux_dock or windows_dock) or args.window_mode != "fullscreen"
+        or args.scenarios != [dock_scenario] or args.mouse_receipt_diagnostics
+        or args.required not in (None, [dock_scenario])
+        or not re.fullmatch(r"[0-9a-f]{40}", args.expected_dock_build_sha or "")
+    ):
+        parser.error(f"{dock_scenario} must run alone and required, in fullscreen with --expected-dock-build-sha "
+                     "(Linux XTEST or Windows SendInput for dock progress)")
+    if args.expected_dock_build_sha and not dock_witness:
+        parser.error("--expected-dock-build-sha requires an explicit dock witness")
+    unknown = [n for n in named if n not in SCENARIOS and n not in EXPLICIT_SCENARIOS]
     if unknown:
         parser.error(f"unknown scenario(s): {', '.join(unknown)}; see --list")
     if (args.injector == "sendinput") != WINDOWS:
@@ -3264,18 +4128,22 @@ def main(argv: list[str] | None = None) -> int:
     sha = git_sha()
     # The pid keeps parallel runs started in the same second apart.
     out = args.out or REPO / "test_results/gestures" / sha / f"{time.strftime('%Y%m%dT%H%M%S')}-{os.getpid()}"
-    out.mkdir(parents=True, exist_ok=True)
+    out.mkdir(parents=True, exist_ok=not dock_witness)
     run = Run(exe=args.exe.resolve(), out=out, injector=args.injector, window_mode=args.window_mode,
-              go_to_probe="go-to-session" in names)
+              go_to_probe="go-to-session" in names, dock_build_sha=args.expected_dock_build_sha,
+              dock_scenario=dock_scenario or DOCK_TOOLTIP_SCENARIO)
     if args.mouse_receipt_diagnostics:
         run.mouse_receipts = MouseReceiptCapture(out)
     started = time.monotonic()
     results: list[dict] = []
     failure = None
     partial_button_batch = False
+    screen = None if windows_dock else SCREEN
     try:
         run.start()
         status = run.status()
+        if windows_dock:
+            screen = WIN.screen_size()
         if args.mouse_receipt_diagnostics:
             run.mouse_receipts.observe(status, run.pid)
         # Gesture scenarios read desktop pixels: a HUD excluded from capture
@@ -3284,15 +4152,16 @@ def main(argv: list[str] | None = None) -> int:
             raise Refused("Hide from screen capture is on; gesture scenarios read desktop pixels")
         run.step(f"owned HUD pid {run.pid} on display {run.display or 'primary'} via {args.injector}")
         results = run_scenarios(run, names)
-        unacked = run.smoke.ok("hud_input", {"max_items": 0}).get("remaining", 0)
+        unacked = 0 if dock_witness else run.smoke.ok("hud_input", {"max_items": 0}).get("remaining", 0)
         if unacked:
             failure = f"{unacked} un-acked hud_input item(s) at exit"
     except Refused as err:
-        failure = f"refused: {err}"
+        failure = "private dock guard refused" if dock_witness else f"refused: {err}"
         partial_button_batch = isinstance(err, PartialButtonBatch)
         results = getattr(err, "results", results)
     except Exception as err:  # noqa: BLE001
-        failure = f"harness: {type(err).__name__}: {err}"
+        failure = (f"harness: {type(err).__name__}" if dock_witness
+                   else f"harness: {type(err).__name__}: {err}")
     finally:
         if args.mouse_receipt_diagnostics:
             run.mouse_receipts.end_interval()
@@ -3301,7 +4170,8 @@ def main(argv: list[str] | None = None) -> int:
             failure = (failure + "; " if failure else "") + "left running: " + ", ".join(survivors)
         timeline = {
             "sha": sha, "profile": run.exe.parent.name,
-            "exe": str(run.exe), "injector": args.injector, "window_mode": args.window_mode, "screen": SCREEN,
+            "exe": run.exe.name if dock_witness else str(run.exe),
+            "injector": args.injector, "window_mode": args.window_mode, "screen": screen,
             "display": run.display, "mcp_port": run.port,
             "geometry": (status.get("displays") if "status" in locals() else None),
             "theme_scale": ({k: status.get(k) for k in ("theme", "ui_scale") if k in status} if "status" in locals() else None),
@@ -3312,8 +4182,19 @@ def main(argv: list[str] | None = None) -> int:
         }
         if args.mouse_receipt_diagnostics:
             timeline["mouse_receipts"] = run.mouse_receipts.finish(run.owned_pids, survivors)
+        if dock_witness:
+            cleanup = {"hud_reaped": run.hud is None or run.hud.poll() is not None,
+                       "xvfb_reaped": run.xvfb is None or run.xvfb.poll() is not None,
+                       "scratch_removed": all(p is None or not p.exists() for p in (run.home, run.config_dir))}
+            timeline["dock_cleanup"] = cleanup
+            if not all(cleanup.values()) or survivors:
+                failure = failure or "private dock process or scratch cleanup failed"
+                timeline["failure"] = failure
+                for result in results:
+                    if result["outcome"] == "PASS":
+                        result.update(outcome="FAIL", step=failure, last=None)
         (out / "timeline.json").write_text(json.dumps(timeline, indent=1))
-        if run.log and run.log.exists():
+        if not dock_witness and run.log and run.log.exists():
             tail = run.log.read_text(errors="replace").splitlines()[-200:]
             (out / "hud.log.tail").write_text("\n".join(tail))
     for result in results:

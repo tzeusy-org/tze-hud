@@ -259,24 +259,33 @@ impl tze_hud_scene::TextFit for TextFitMeasurer {
         if state.tokens.is_none() {
             return Vec::new();
         }
+        let Some(instance) = scene.widget_registry.instances.get(widget) else {
+            return Vec::new();
+        };
         let Some(def) = scene
             .widget_registry
-            .instances
-            .get(widget)
-            .and_then(|i| scene.widget_registry.definitions.get(&i.widget_type_name))
+            .definitions
+            .get(&instance.widget_type_name)
         else {
             return Vec::new();
         };
-        let layers: Vec<(&str, &[WidgetBinding])> = def
-            .layers
+        let dock = scene.widget_dock_presentation(instance);
+        let selected = dock.map_or(def.layers.as_slice(), |dock| dock.layers.as_slice());
+        let layers: Vec<(&str, &[WidgetBinding])> = selected
             .iter()
             .filter_map(|layer| {
                 state
                     .widget_svgs
                     .get(&(def.id.clone(), layer.svg_file.clone()))
+                    .filter(|svg| {
+                        dock.is_none_or(|dock| dock.matches_source(&layer.svg_file, svg.as_bytes()))
+                    })
                     .map(|svg| (svg.as_str(), layer.bindings.as_slice()))
             })
             .collect();
+        if dock.is_some() && layers.len() != selected.len() {
+            return Vec::new();
+        }
         let constraints: HashMap<String, (f32, f32)> = def
             .parameter_schema
             .iter()
@@ -289,7 +298,11 @@ impl tze_hud_scene::TextFit for TextFitMeasurer {
                 })
             })
             .collect();
-        crate::widget::clipped_text_params(&layers, &constraints, params)
+        if dock.is_some_and(|dock| dock.uses_builtin_countdown_layout()) {
+            crate::widget::compact_countdown_clipped(&layers, &constraints, params)
+        } else {
+            crate::widget::clipped_text_params(&layers, &constraints, params)
+        }
     }
 
     fn status_bar(

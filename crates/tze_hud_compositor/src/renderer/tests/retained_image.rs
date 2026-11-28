@@ -365,8 +365,18 @@ async fn resident_raster_stale_draw_denies_revoked_source_with_live_same_hash_pe
     // keeps the shared GPU cache entry after A is revoked before encoding.
     directory.with_agents_of(Default::default());
     let frame = surface.acquire_frame().unwrap();
-    let (mut encoder, _, _, signature_current) =
-        compositor.encode_frame(&[], &frame.view, &scene, &commands, 128, 64, false, 0, 0);
+    let (mut encoder, _, _, signature_current) = compositor.encode_frame(
+        &[],
+        &frame.view,
+        &scene,
+        &commands,
+        128,
+        64,
+        false,
+        0,
+        0,
+        &[],
+    );
     assert!(
         !signature_current,
         "denied stale draw invalidates predicted presentation signature"

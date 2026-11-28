@@ -18,21 +18,22 @@
 //!
 //! ## Bundle errors
 //!
-//! "A rejected bundle
-//! MUST NOT prevent other valid bundles from loading; the runtime SHALL log
-//! the error and continue."  Bundle load errors are logged at WARN level and
-//! do not abort startup.
+//! A rejected bundle does not prevent other valid bundles from loading. Once
+//! the winners are known, a configured dock type must have an eligible viewport.
 //!
 
 use std::collections::HashMap;
 use std::path::Path;
 
+use tze_hud_config::dock::{DockValidationErrors, ROW_HEIGHT_TOKEN};
 use tze_hud_config::raw::RawConfig;
 use tze_hud_config::widgets::{LoadedWidgetType, build_widget_instance, resolve_bundle_path};
+use tze_hud_scene::dock::{DockPresentation, WidgetBundleOrigin};
 use tze_hud_scene::graph::SceneGraph;
 use tze_hud_scene::types::SceneId;
 use tze_hud_widget::loader::{
-    BundleScanResult, load_bundle_from_files, scan_bundle_dirs_with_diagnostics,
+    BundleScanResult, LoadedBundle, LoadedDockPresentation, authored_svg_extent,
+    load_bundle_from_files, scan_bundle_dirs_with_diagnostics,
 };
 
 // ─── Built-in bundles ─────────────────────────────────────────────────────────
@@ -57,7 +58,7 @@ const BUILTIN_BUNDLES: &[(&str, BundleFiles)] = &[
     builtin_bundle!("gauge", ["background.svg", "fill.svg"]),
     builtin_bundle!("progress-bar", ["track.svg", "fill.svg"]),
     builtin_bundle!("status-indicator", ["indicator.svg"]),
-    builtin_bundle!("countdown", ["card.svg"]),
+    builtin_bundle!("countdown", ["card.svg", "dock.svg"]),
     builtin_bundle!("elapsed", ["card.svg"]),
     builtin_bundle!("kpi", ["card.svg"]),
     builtin_bundle!("stepper", ["card.svg"]),
@@ -76,8 +77,8 @@ const BUILTIN_BUNDLES: &[(&str, BundleFiles)] = &[
 ///    (needed to bind widget instances to tab IDs).
 /// 5. Creates `WidgetInstance` records for each `[[tabs.widgets]]` entry.
 ///
-/// Errors are logged at WARN level but never abort startup (Widget
-/// Asset Bundle Format).
+/// Individual bundle load errors are logged. Invalid dock selections abort
+/// startup according to the selected bundles that actually loaded.
 ///
 /// # Arguments
 ///
@@ -94,6 +95,7 @@ const BUILTIN_BUNDLES: &[(&str, BundleFiles)] = &[
 ///   bundles resolve against the global token map.
 ///
 /// SVG asset from a loaded widget bundle: `(widget_type_id, svg_filename, svg_bytes)`.
+/// Includes owner-authored dock files under distinct names.
 pub(crate) type WidgetSvgAsset = (String, String, Vec<u8>);
 
 /// The on-disk bundle roots `[widget_bundles].paths` names, relative to
@@ -149,25 +151,173 @@ fn scan_all_bundles_with_diagnostics(
     (scan_results, warnings)
 }
 
-/// The SVGs of every loadable bundle with placeholders resolved against
-/// `token_map`, first bundle of a name winning as at startup: what a live
-/// token change re-registers so widgets restyle.
-pub(crate) fn widget_svg_assets(
+/// Reload the same winning bundles as startup, keeping art and its descriptor together.
+pub(crate) fn reload_widget_bundles(
     roots: &[std::path::PathBuf],
     token_map: &HashMap<String, String>,
-) -> Vec<WidgetSvgAsset> {
+) -> Vec<LoadedBundle> {
     let mut seen = std::collections::HashSet::new();
-    let mut assets = Vec::new();
-    for result in scan_all_bundles(roots, token_map) {
-        if let BundleScanResult::Ok(bundle) = result
-            && seen.insert(bundle.definition.id.clone())
-        {
-            for (file, bytes) in bundle.svg_contents {
-                assets.push((bundle.definition.id.clone(), file, bytes));
+    scan_all_bundles(roots, token_map)
+        .into_iter()
+        .filter_map(|result| match result {
+            BundleScanResult::Ok(bundle) if seen.insert(bundle.definition.id.clone()) => {
+                Some(bundle)
             }
+            _ => None,
+        })
+        .collect()
+}
+
+fn dock_presentation(
+    loaded: LoadedDockPresentation,
+    origin: &tze_hud_scene::dock::WidgetBundleOrigin,
+    svg_contents: &HashMap<String, Vec<u8>>,
+) -> DockPresentation {
+    let presentation = DockPresentation::new(
+        loaded.layers,
+        loaded.width,
+        loaded.height,
+        loaded.hover_behavior,
+        svg_contents,
+    );
+    if *origin == tze_hud_scene::dock::WidgetBundleOrigin::embedded("builtin:countdown") {
+        presentation.with_builtin_countdown_layout()
+    } else {
+        presentation
+    }
+}
+
+pub(crate) type DockExtents = HashMap<String, Option<(f32, f32)>>;
+
+/// The built-in compact countdown lays its two text lines out itself; a token
+/// override that leaves them no room would draw an empty row.
+fn countdown_misfit(
+    presentation: &DockPresentation,
+    svg_contents: &HashMap<String, Vec<u8>>,
+) -> bool {
+    presentation.uses_builtin_countdown_layout()
+        && presentation.layers.iter().any(|layer| {
+            svg_contents
+                .get(&layer.svg_file)
+                .and_then(|bytes| std::str::from_utf8(bytes).ok())
+                .is_none_or(|svg| {
+                    !tze_hud_compositor::widget::compact_countdown_fits(svg, &layer.bindings)
+                })
+        })
+}
+
+pub(crate) struct WidgetRestyle {
+    assets: Vec<WidgetSvgAsset>,
+    alternates: Vec<(String, WidgetBundleOrigin, DockPresentation)>,
+    pub(crate) dock_extents: DockExtents,
+    /// Refreshed dock alternates whose text cannot fit one row.
+    pub(crate) row_misfits: Vec<String>,
+}
+
+impl WidgetRestyle {
+    pub(crate) fn apply(self, scene: &mut SceneGraph) {
+        for (kind, origin, presentation) in self.alternates {
+            scene
+                .widget_registry
+                .set_dock_presentation(&kind, origin, Some(presentation));
+        }
+        for (kind, file, bytes) in self.assets {
+            scene.enqueue_widget_svg_asset(&kind, &file, bytes);
         }
     }
-    assets
+}
+
+/// Decide which bytes and alternate descriptors will be committed. Eligibility
+/// checks must use the same selection before any live asset or token changes.
+pub(crate) fn prepare_widget_restyle(
+    scene: &SceneGraph,
+    bundles: Vec<LoadedBundle>,
+    mut dock_extents: DockExtents,
+) -> WidgetRestyle {
+    let mut assets = Vec::new();
+    let mut alternates = Vec::new();
+    let mut row_misfits = Vec::new();
+    for bundle in bundles {
+        let widget_type = &bundle.definition.id;
+        let registry = &scene.widget_registry;
+        let incoming_dock = bundle.dock.filter(|dock| {
+            registry.dock_presentation_origin(widget_type) == Some(&bundle.origin)
+                && registry.get_definition(widget_type).is_some_and(|live| {
+                    let candidate = &bundle.definition.parameter_schema;
+                    let unchanged_schema = live.parameter_schema.len() == candidate.len()
+                        && live.parameter_schema.iter().zip(candidate).all(|(a, b)| {
+                            a.name == b.name
+                                && a.param_type == b.param_type
+                                && a.audience == b.audience
+                                && a.constraints == b.constraints
+                        });
+                    unchanged_schema
+                        && !live.layers.iter().any(|default| {
+                            dock.layers
+                                .iter()
+                                .any(|layer| layer.svg_file == default.svg_file)
+                        })
+                })
+        });
+        let refresh_dock = incoming_dock.is_some();
+        let retained_dock = registry.dock_presentation(widget_type);
+        let selected_dock = if let Some(dock) = incoming_dock {
+            let presentation = dock_presentation(dock, &bundle.origin, &bundle.svg_contents);
+            if countdown_misfit(&presentation, &bundle.svg_contents) {
+                row_misfits.push(widget_type.clone());
+            }
+            let extent = Some((presentation.width, presentation.height));
+            alternates.push((widget_type.clone(), bundle.origin, presentation));
+            extent
+        } else {
+            retained_dock.map(|dock| (dock.width, dock.height))
+        };
+        let mut available = bundle.svg_contents;
+        // Continue default-layer restyles while shielding live alternate
+        // files from a fallback or incompatible manifest.
+        if !refresh_dock {
+            available.retain(|file, _| {
+                bundle
+                    .definition
+                    .layers
+                    .iter()
+                    .any(|layer| &layer.svg_file == file)
+                    && !retained_dock
+                        .is_some_and(|dock| dock.layers.iter().any(|layer| &layer.svg_file == file))
+            });
+        }
+        if let Some(current) = dock_extents.get_mut(widget_type) {
+            *current = selected_dock.or_else(|| {
+                // The renderer keeps the live definition even when a fallback
+                // supplies bytes. Unreplaced layers retain their common extent.
+                let live = registry.get_definition(widget_type)?;
+                let mut extents = live.layers.iter().map(|layer| {
+                    available
+                        .get(&layer.svg_file)
+                        .map_or(*current, |bytes| authored_svg_extent(bytes))
+                });
+                let extent = extents.next()??;
+                extents.all(|next| next == Some(extent)).then_some(extent)
+            });
+        }
+        assets.extend(
+            available
+                .into_iter()
+                .map(|(file, bytes)| (widget_type.clone(), file, bytes)),
+        );
+    }
+    WidgetRestyle {
+        assets,
+        alternates,
+        dock_extents,
+        row_misfits,
+    }
+}
+
+pub(crate) struct WidgetStartup {
+    pub(crate) assets: Vec<WidgetSvgAsset>,
+    pub(crate) warnings: tze_hud_scene::startup_diagnostics::StartupWarnings,
+    pub(crate) dock: Option<crate::scene_startup::DockPolicy>,
 }
 
 pub(crate) fn init_widget_registry(
@@ -176,10 +326,7 @@ pub(crate) fn init_widget_registry(
     config_parent: Option<&Path>,
     tab_name_to_id: &HashMap<String, SceneId>,
     token_map: &HashMap<String, String>,
-) -> (
-    Vec<WidgetSvgAsset>,
-    tze_hud_scene::startup_diagnostics::StartupWarnings,
-) {
+) -> Result<WidgetStartup, DockValidationErrors> {
     // Steps 1-2: on-disk bundles, then the built-ins they do not override.
     let (scan_results, mut warnings) =
         scan_all_bundles_with_diagnostics(&bundle_roots(raw, config_parent), token_map);
@@ -190,6 +337,8 @@ pub(crate) fn init_widget_registry(
     let mut registered_names: HashMap<String, ()> = HashMap::new();
     let mut type_map: HashMap<String, LoadedWidgetType> = HashMap::new();
     let mut svg_assets: Vec<WidgetSvgAsset> = Vec::new();
+    let mut dock_extents = HashMap::new();
+    let mut row_misfits = Vec::new();
 
     for (bundle_index, result) in scan_results.into_iter().enumerate() {
         match result {
@@ -208,6 +357,14 @@ pub(crate) fn init_widget_registry(
                     continue;
                 }
                 registered_names.insert(name.clone(), ());
+
+                if raw
+                    .dock
+                    .as_ref()
+                    .is_some_and(|dock| dock.accepts.contains(&name))
+                {
+                    dock_extents.insert(name.clone(), bundle.dock_authored_extent());
+                }
 
                 // Build the LoadedWidgetType entry for instance creation.
                 let loaded = LoadedWidgetType {
@@ -229,6 +386,19 @@ pub(crate) fn init_widget_registry(
                     svg_count = bundle.svg_contents.len(),
                     "widget_startup: registered widget type"
                 );
+                let presentation = bundle
+                    .dock
+                    .map(|loaded| dock_presentation(loaded, &bundle.origin, &bundle.svg_contents));
+                if presentation.as_ref().is_some_and(|presentation| {
+                    countdown_misfit(presentation, &bundle.svg_contents)
+                }) {
+                    row_misfits.push(name.clone());
+                }
+                scene.widget_registry.set_dock_presentation(
+                    &name,
+                    bundle.origin.clone(),
+                    presentation,
+                );
                 scene.widget_registry.register_definition(bundle.definition);
             }
             BundleScanResult::Err(err) => {
@@ -240,6 +410,14 @@ pub(crate) fn init_widget_registry(
                 );
             }
         }
+    }
+
+    if let Some(dock) = &raw.dock {
+        dock.validate_bundles(
+            token_map.get(ROW_HEIGHT_TOKEN).map(String::as_str),
+            &dock_extents,
+        )?;
+        dock.validate_row_text(&row_misfits)?;
     }
 
     tracing::info!(
@@ -361,7 +539,17 @@ pub(crate) fn init_widget_registry(
         "widget_startup: widget instance creation complete"
     );
 
-    (svg_assets, warnings)
+    Ok(WidgetStartup {
+        assets: svg_assets,
+        warnings,
+        dock: raw
+            .dock
+            .clone()
+            .map(|config| crate::scene_startup::DockPolicy {
+                config,
+                extents: dock_extents,
+            }),
+    })
 }
 
 // ─── Unit tests ───────────────────────────────────────────────────────────────
@@ -406,8 +594,10 @@ mod tests {
             },
         ] {
             let mut scene = SceneGraph::new(1920.0, 1080.0);
-            let (_, warnings) =
-                init_widget_registry(&mut scene, &raw, None, &HashMap::new(), &default_tokens());
+            let warnings =
+                init_widget_registry(&mut scene, &raw, None, &HashMap::new(), &default_tokens())
+                    .unwrap()
+                    .warnings;
             assert_eq!(
                 warnings.items().len(),
                 usize::from(raw.widget_bundles.is_some())
@@ -417,6 +607,13 @@ mod tests {
                 assert_eq!(warnings.items()[0].subject.as_deref(), Some("root:0"));
             }
             assert_eq!(registered_types(&scene), expected);
+            let compact = scene
+                .widget_registry
+                .dock_presentation("countdown")
+                .unwrap();
+            assert!(compact.uses_builtin_countdown_layout());
+            assert_eq!((compact.width, compact.height), (160.0, 52.0));
+            assert_eq!(compact.layers[0].svg_file, "dock.svg");
         }
         let mut raw: RawConfig = toml::from_str(
             r#"
@@ -442,8 +639,10 @@ mod tests {
                 .collect(),
         });
         let mut scene = SceneGraph::new(1920.0, 1080.0);
-        let (_, warnings) =
-            init_widget_registry(&mut scene, &raw, None, &HashMap::new(), &default_tokens());
+        let warnings =
+            init_widget_registry(&mut scene, &raw, None, &HashMap::new(), &default_tokens())
+                .unwrap()
+                .warnings;
         assert_eq!(warnings.items().len(), 64);
         assert_eq!(warnings.omitted_events(), 38); // 100 real roots + two rejected declarations
         assert!(
@@ -465,8 +664,10 @@ mod tests {
         assert_eq!(complete["state"], "complete");
         assert_eq!(complete["omitted_events"], 38);
         assert!(serde_json::to_vec(&complete).unwrap().len() <= 16_000);
-        let (_, again) =
-            init_widget_registry(&mut scene, &raw, None, &HashMap::new(), &default_tokens());
+        let again =
+            init_widget_registry(&mut scene, &raw, None, &HashMap::new(), &default_tokens())
+                .unwrap()
+                .warnings;
         startup.finish_fonts(again);
         assert_eq!(
             crate::operator::diagnostics::render(None, None, Some(&startup)).1,
@@ -474,10 +675,203 @@ mod tests {
         );
     }
 
+    #[test]
+    fn owner_countdown_alternate_keeps_its_authored_layout() {
+        let root = tempfile::tempdir().unwrap();
+        let custom = root.path().join("countdown");
+        std::fs::create_dir(&custom).unwrap();
+        for (file, bytes) in BUILTIN_BUNDLES
+            .iter()
+            .find(|(name, _)| *name == "countdown")
+            .unwrap()
+            .1
+        {
+            let bytes = if *file == "dock.svg" {
+                String::from_utf8(bytes.to_vec())
+                    .unwrap()
+                    .replace("160 52", "160 64")
+                    .replace(
+                        "id=\"label\" x=\"0\" y=\"0\"",
+                        "id=\"label\" x=\"11\" y=\"19\"",
+                    )
+                    .replace(
+                        "id=\"value\" x=\"0\" y=\"0\"",
+                        "id=\"value\" x=\"11\" y=\"39\"",
+                    )
+                    .into_bytes()
+            } else {
+                bytes.to_vec()
+            };
+            std::fs::write(custom.join(file), bytes).unwrap();
+        }
+        let raw = RawConfig {
+            widget_bundles: Some(RawWidgetBundles {
+                paths: vec![root.path().to_string_lossy().into_owned()],
+            }),
+            dock: Some(tze_hud_config::dock::DockConfig {
+                accepts: vec!["countdown".into()],
+                ..Default::default()
+            }),
+            design_tokens: Some(tze_hud_config::raw::RawDesignTokens(HashMap::from([
+                (ROW_HEIGHT_TOKEN.into(), "48".into()),
+                ("ui.scale".into(), "1.25".into()),
+            ]))),
+            ..RawConfig::default()
+        };
+        let mut scene = SceneGraph::new(800.0, 600.0);
+        let startup =
+            crate::scene_startup::run_scene_startup(&raw, None, &mut scene, Default::default())
+                .unwrap();
+        assert!(startup.startup_warnings.items().is_empty());
+        let dock = scene
+            .widget_registry
+            .dock_presentation("countdown")
+            .unwrap();
+        assert_eq!((dock.width, dock.height), (160.0, 64.0));
+        assert!(
+            !dock.uses_builtin_countdown_layout(),
+            "type and filename alone must not select built-in layout"
+        );
+        let bytes = &startup
+            .widget_svg_assets
+            .iter()
+            .find(|(kind, file, _)| kind == "countdown" && file == "dock.svg")
+            .unwrap()
+            .2;
+        assert!(
+            std::str::from_utf8(bytes)
+                .unwrap()
+                .contains("id=\"label\" x=\"11\" y=\"19\"")
+        );
+        assert!(dock.matches_source("dock.svg", bytes));
+
+        let dock_file = custom.join("dock.svg");
+        let too_tall = std::fs::read_to_string(&dock_file)
+            .unwrap()
+            .replace("160 64", "160 64.125");
+        std::fs::write(dock_file, too_tall).unwrap();
+        let Err(DockValidationErrors(errors)) = crate::scene_startup::run_scene_startup(
+            &raw,
+            None,
+            &mut SceneGraph::new(800.0, 600.0),
+            Default::default(),
+        ) else {
+            panic!("the winning owner alternate exceeds the logical 75% row fit");
+        };
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].field_path, "dock.accepts");
+        assert_eq!(errors[0].got, "countdown (64.125 dp, limit 64.000 dp)");
+    }
+
+    #[test]
+    fn dock_countdown_text_that_cannot_fit_a_row_is_a_config_error() {
+        let raw = RawConfig {
+            dock: Some(tze_hud_config::dock::DockConfig {
+                accepts: vec!["countdown".into()],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let mut live = SceneGraph::new(1920.0, 1080.0);
+        init_widget_registry(&mut live, &raw, None, &HashMap::new(), &default_tokens())
+            .expect("default tokens fit the countdown row");
+        // Each leaves the countdown nothing to draw: line heights that
+        // overfill the row, a glyph its line cannot hold, and insets with no
+        // room for the warning mark.
+        for (token, value) in [
+            ("type.readout.line_height", "40"),
+            ("type.body.m.size", "40"),
+            ("space.s", "70"),
+        ] {
+            let mut tokens = default_tokens();
+            tokens.insert(token.into(), value.into());
+            let mut scene = SceneGraph::new(1920.0, 1080.0);
+            let Err(DockValidationErrors(errors)) =
+                init_widget_registry(&mut scene, &raw, None, &HashMap::new(), &tokens)
+            else {
+                panic!("{token} = {value}: a countdown that would draw nothing is refused");
+            };
+            assert_eq!(errors.len(), 1);
+            assert_eq!(errors[0].got, "countdown");
+            assert_eq!(errors[0].expected, "dock text lines that fit one row");
+        }
+        let mut tokens = default_tokens();
+        tokens.insert("type.readout.line_height".into(), "40".into());
+        // A restyle to the same tokens refreshes the live alternate and is refused.
+        let restyle =
+            prepare_widget_restyle(&live, reload_widget_bundles(&[], &tokens), HashMap::new());
+        assert_eq!(restyle.row_misfits, ["countdown"]);
+        assert!(
+            raw.dock
+                .unwrap()
+                .validate_row_text(&restyle.row_misfits)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn dock_default_restyle_measures_only_effective_live_layers() {
+        let raw = RawConfig {
+            dock: Some(tze_hud_config::dock::DockConfig {
+                accepts: vec!["progress-bar".into()],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let tokens = default_tokens();
+        let mut scene = SceneGraph::new(1920.0, 1080.0);
+        let startup = init_widget_registry(&mut scene, &raw, None, &HashMap::new(), &tokens)
+            .unwrap()
+            .dock
+            .unwrap();
+        let mut fallback = reload_widget_bundles(&[], &tokens)
+            .into_iter()
+            .find(|bundle| bundle.definition.id == "progress-bar")
+            .unwrap();
+        assert_eq!(startup.extents["progress-bar"], Some((320.0, 50.0)));
+        assert_eq!(fallback.definition.layers.len(), 2);
+        let file = fallback.definition.layers[0].svg_file.clone();
+        let replaced = &mut fallback.definition.layers[1].svg_file;
+        *replaced = "other.svg".into();
+        let change = br#"<svg viewBox="0 0 480 50"/>"#.to_vec();
+        fallback
+            .svg_contents
+            .insert(replaced.clone(), change.clone());
+        assert_eq!(
+            fallback.dock_authored_extent(),
+            None,
+            "incoming manifest differs"
+        );
+        let proposal =
+            prepare_widget_restyle(&scene, vec![fallback.clone()], startup.extents.clone());
+        assert_eq!(proposal.dock_extents, startup.extents);
+
+        // Now one actually refreshed live file has a new extent. The second
+        // live filename remains installed at its old extent and must agree.
+        fallback.svg_contents.insert(file, change);
+        assert_eq!(fallback.dock_authored_extent(), Some((480.0, 50.0)));
+        let proposal = prepare_widget_restyle(&scene, vec![fallback], startup.extents);
+        assert_eq!(proposal.dock_extents["progress-bar"], None);
+        assert!(
+            startup
+                .config
+                .validate_bundles(Some("52"), &proposal.dock_extents)
+                .is_err()
+        );
+        assert!(
+            scene.drain_pending_widget_svg_assets().is_empty(),
+            "preflight is read-only"
+        );
+    }
+
     /// WHEN an on-disk bundle has the same type name as a built-in THEN the
     /// on-disk bundle wins and the type is registered once.
-    #[test]
-    fn on_disk_bundle_overrides_builtin_by_type_name() {
+    #[tokio::test]
+    async fn on_disk_bundle_overrides_builtin_by_type_name() {
+        use std::sync::Arc;
+        use tze_hud_config::tokens::{DesignTokenMap, OsPreferences};
+        use tze_hud_scene::render_wake::RenderWakeNotifier;
+
         let root = std::env::temp_dir().join(format!("tze_hud_override_{}", std::process::id()));
         let bundle = root.join("my-gauge");
         std::fs::create_dir_all(&bundle).unwrap();
@@ -496,8 +890,57 @@ mod tests {
             }
             std::fs::write(bundle.join(file), bytes).unwrap();
         }
+        // The selected owner's alternate uses the same schema. Loading it must
+        // neither create another widget type nor replace default gauge layers.
+        let manifest = bundle.join("widget.toml");
+        let alternate = r#"
+[[dock.layers]]
+svg_file = "dock.svg"
+[[dock.layers.bindings]]
+param = "level"
+target_element = "bar"
+target_attribute = "height"
+mapping = "linear"
+attr_max = 52
+[dock.hover_behavior]
+delay_ms = 180
+visibility_param = "tooltip_visible"
+[dock.hover_behavior.trigger_rect]
+x_pct = 0
+y_pct = 0
+width_pct = 1
+height_pct = 1
+"#;
+        std::fs::write(
+            &manifest,
+            format!("{}{alternate}", std::fs::read_to_string(&manifest).unwrap()),
+        )
+        .unwrap();
+        std::fs::write(
+            bundle.join("dock.svg"),
+            r#"<svg viewBox="0 0 160 {{token.dock.row.height}}"><rect id="bar"/></svg>"#,
+        )
+        .unwrap();
+
+        let tokens = default_tokens();
+        let catalog = scan_all_bundles(std::slice::from_ref(&root), &tokens);
+        let selected = catalog
+            .iter()
+            .find_map(|result| match result {
+                BundleScanResult::Ok(bundle) if bundle.definition.id == "gauge" => Some(bundle),
+                _ => None,
+            })
+            .unwrap();
+        let dock = selected.dock.as_ref().unwrap();
+        assert_eq!((dock.width, dock.height), (160.0, 52.0));
+        assert_eq!(dock.hover_behavior.as_ref().unwrap().delay_ms, 180);
+        assert_eq!(selected.definition.layers.len(), 2);
 
         let raw = RawConfig {
+            dock: Some(tze_hud_config::dock::DockConfig {
+                accepts: vec!["gauge".into()],
+                ..Default::default()
+            }),
             widget_bundles: Some(RawWidgetBundles {
                 paths: vec![root.to_string_lossy().into_owned()],
             }),
@@ -505,8 +948,12 @@ mod tests {
         };
         std::fs::create_dir_all(root.join("private-broken-sibling")).unwrap();
         let mut scene = SceneGraph::new(1920.0, 1080.0);
-        let (_, warnings) =
-            init_widget_registry(&mut scene, &raw, None, &HashMap::new(), &default_tokens());
+        let WidgetStartup {
+            assets,
+            warnings,
+            dock,
+        } = init_widget_registry(&mut scene, &raw, None, &HashMap::new(), &default_tokens())
+            .unwrap();
         assert_eq!(warnings.items().len(), 1);
         assert_eq!(warnings.items()[0].code, "WIDGET_BUNDLE_NO_MANIFEST");
         assert!(
@@ -514,6 +961,100 @@ mod tests {
                 .unwrap()
                 .contains("private-broken-sibling")
         );
+        let dock_source = |assets: &[WidgetSvgAsset]| {
+            assets
+                .iter()
+                .find(|(kind, file, _)| kind == "gauge" && file == "dock.svg")
+                .map(|(_, _, bytes)| String::from_utf8(bytes.clone()).unwrap())
+                .expect("selected owner dock source is in the asset catalog")
+        };
+        assert!(dock_source(&assets).contains("160 52"));
+        let startup_dock = scene.widget_registry.dock_presentation("gauge").unwrap();
+        assert_eq!(startup_dock.height, 52.0);
+        assert!(!startup_dock.uses_builtin_countdown_layout());
+        assert!(startup_dock.matches_source("dock.svg", dock_source(&assets).as_bytes()));
+        let fallback_root = root.join("fallback");
+        let scene = Arc::new(tokio::sync::Mutex::new(scene));
+        let appearance = crate::appearance::Appearance::new(
+            Arc::new(crate::appearance::LiveTokens::new(
+                DesignTokenMap::new(),
+                tokens,
+                RenderWakeNotifier::default(),
+                RenderWakeNotifier::default(),
+            )),
+            scene.clone(),
+            None,
+            vec![root.clone(), fallback_root.clone()],
+            OsPreferences::default,
+        )
+        .with_dock_policy(dock);
+        appearance.queue_display_report(crate::appearance::DisplayReport {
+            dock: Some(crate::scene_startup::DockDisplay {
+                target: "DISPLAY-MOCK".into(),
+                rect: tze_hud_scene::Rect::new(0.0, 0.0, 1920.0, 1080.0),
+                scale: 1.0,
+            }),
+            ..Default::default()
+        });
+        assert!(appearance.apply_display_report().await);
+        let height = |value: &str| DesignTokenMap::from([("dock.row.height".into(), value.into())]);
+        assert_eq!(appearance.apply(height("60")).await, Ok(true));
+        let (restyled, owner_dock) = {
+            let mut scene = scene.lock().await;
+            (
+                scene.drain_pending_widget_svg_assets(),
+                scene
+                    .widget_registry
+                    .dock_presentation("gauge")
+                    .unwrap()
+                    .clone(),
+            )
+        };
+        assert_eq!(owner_dock.height, 60.0);
+        assert!(dock_source(&restyled).contains("160 60"));
+        assert!(owner_dock.matches_source("dock.svg", dock_source(&restyled).as_bytes()));
+        let bytes = |assets: &[WidgetSvgAsset], file: &str| {
+            assets
+                .iter()
+                .find(|(kind, name, _)| kind == "gauge" && name == file)
+                .map(|(_, _, bytes)| bytes.clone())
+        };
+        for file in ["background.svg", "fill.svg"] {
+            assert!(bytes(&restyled, file).is_some());
+            assert_eq!(bytes(&assets, file), bytes(&restyled, file));
+        }
+
+        let fallback = fallback_root.join("my-gauge");
+        std::fs::create_dir_all(&fallback).unwrap();
+        for file in ["widget.toml", "background.svg", "fill.svg"] {
+            std::fs::copy(bundle.join(file), fallback.join(file)).unwrap();
+        }
+        // The incoming alternate must not change accepted fit. Its disjoint
+        // default files still follow the normal reload path.
+        let fallback_dock = br#"<svg viewBox="0 0 160 200"><rect id="bar" fill="orange"/></svg>"#;
+        std::fs::write(fallback.join("dock.svg"), fallback_dock).unwrap();
+        assert!(!owner_dock.matches_source("dock.svg", fallback_dock));
+        let mut fallback_fill = std::fs::read_to_string(fallback.join("fill.svg")).unwrap();
+        fallback_fill.push_str("<!-- fallback default -->");
+        std::fs::write(fallback.join("fill.svg"), fallback_fill).unwrap();
+        std::fs::remove_file(bundle.join("dock.svg")).unwrap();
+        assert_eq!(appearance.apply(height("66")).await, Ok(true));
+        let mut scene = scene.lock().await;
+        let restyled = scene.drain_pending_widget_svg_assets();
+        assert_eq!(
+            scene.dock_projection().unwrap().aspect_ratios[0].1,
+            160.0 / 60.0
+        );
+        assert!(bytes(&restyled, "dock.svg").is_none());
+        assert!(
+            std::str::from_utf8(&bytes(&restyled, "fill.svg").unwrap())
+                .unwrap()
+                .contains("<!-- fallback default -->")
+        );
+        assert!(Arc::ptr_eq(
+            scene.widget_registry.dock_presentation("gauge").unwrap(),
+            &owner_dock,
+        ));
         std::fs::remove_dir_all(&root).ok();
 
         assert_eq!(

@@ -238,6 +238,102 @@ async fn truncation_primes_before_render_and_after_settled_resize() {
         compositor.prime_truncation_cache(&scene);
         assert_eq!(compositor.truncation_cache_scene_version, expected);
     }
+
+    // One rename wake must also prime its new caption when the portal prime defers.
+    use crate::display::{DisplayLayout, DisplayRect, FrameTarget};
+    use std::num::NonZeroU64;
+    use tze_hud_scene::dock::{DockLayout, DockMetrics, DockProjection};
+    use tze_hud_scene::scope::scoped_namespace;
+    use tze_hud_scene::types::WidgetDefinition;
+
+    compositor.init_widget_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+    let display = DisplayRect {
+        name: "MAIN".into(),
+        rect: Rect::new(0.0, 0.0, 64.0, 64.0),
+        primary: true,
+    };
+    compositor.set_display_layout(DisplayLayout::new(
+        vec![display.clone()],
+        &Default::default(),
+    ));
+    scene.widget_registry.register_definition(WidgetDefinition {
+        id: "fixture".into(),
+        name: "Fixture".into(),
+        description: String::new(),
+        parameter_schema: Vec::new(),
+        layers: Vec::new(),
+        default_geometry_policy: GeometryPolicy::Relative {
+            x_pct: 0.0,
+            y_pct: 0.0,
+            width_pct: 1.0,
+            height_pct: 1.0,
+        },
+        default_rendering_policy: RenderingPolicy::default(),
+        default_contention_policy: ContentionPolicy::LatestWins,
+        max_publishers: WidgetDefinition::default_max_publishers(),
+        ephemeral: false,
+        hover_behavior: None,
+    });
+    scene.set_dock_projection(
+        &["fixture".into()],
+        Some(DockProjection {
+            target: Some(display.name.clone()),
+            layout: DockLayout::new(
+                display.rect,
+                1,
+                DockMetrics {
+                    row_height: 24.0,
+                    caption_width: 20.0,
+                    gap: 0.0,
+                },
+                [0.25],
+            ),
+            pixels_per_dp: 0.75,
+            aspect_ratios: vec![("fixture".into(), 0.25)],
+        }),
+        NonZeroU64::new(60_000).unwrap(),
+    );
+    let namespace = scoped_namespace("agent", "reply");
+    let lease = scene.grant_lease(&namespace, 60_000);
+    scene
+        .publish_to_dock("fixture", HashMap::new(), &namespace, Some(lease), 0, 0)
+        .unwrap();
+    compositor.resize_reprime_last_at = now.checked_sub(hour);
+    compositor.prime_truncation_cache(&scene);
+    let before_rename = compositor.truncation_cache_scene_version;
+    assert_eq!(before_rename, scene.version);
+
+    scene.renew_lease(lease, 60_000).unwrap();
+    scene.set_session_label(&namespace, Some("A\u{0301}".repeat(10)));
+    compositor.resize_reprime_last_at = Some(now + hour);
+    let accepted = compositor
+        .dock_draw_display(&scene, &FrameTarget::primary(64, 64))
+        .unwrap();
+    let captions = compositor.dock_caption_items(&scene, accepted);
+    let [caption] = captions.as_slice() else {
+        panic!("exactly one dock caption")
+    };
+    let key = crate::text::effective_truncation_key(caption).unwrap();
+    assert!(
+        compositor
+            .text_rasterizer
+            .as_ref()
+            .unwrap()
+            .truncation_cache
+            .get_by_key(&key)
+            .is_none()
+    );
+
+    compositor.prime_truncation_cache(&scene);
+    assert_eq!(compositor.truncation_cache_scene_version, before_rename);
+    let cached = compositor
+        .text_rasterizer
+        .as_ref()
+        .unwrap()
+        .truncation_cache
+        .get_by_key(&key)
+        .unwrap();
+    assert!(cached.was_truncated && cached.text.ends_with('…'));
 }
 
 #[tokio::test]

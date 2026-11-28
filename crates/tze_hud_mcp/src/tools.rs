@@ -25,13 +25,15 @@ use tze_hud_portal::hub::{
 use tze_hud_scene::{
     Publication, Publisher, SceneId, ValidationError,
     config::AgentIdentity,
+    dock::DockPublishError,
     graph::{NotificationOutcome, PendingActionKind, SceneGraph},
     render_wake::RenderWakeNotifier,
     types::{
         ACTION_TARGET_HINT, ActionRole, LeaseState, NOTIFICATION_PROGRESS_HINT, NotificationAction,
-        NotificationPayload, Rgba, StatusBarPayload, WidgetParamType, WidgetParameterValue,
-        ZoneContent, ZoneMediaType,
+        NotificationPayload, Rgba, StatusBarPayload, WidgetDefinition, WidgetParamType,
+        WidgetParameterValue, ZoneContent, ZoneMediaType,
     },
+    widget_deadline::widget_params_at,
 };
 
 /// Default content lifetime for a zone publish without `ttl_ms`.
@@ -106,6 +108,14 @@ impl McpState {
         f(agents.entry(agent.to_string()).or_default())
     }
 
+    fn lease(&self, owner: &str) -> Option<SceneId> {
+        self.agents
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .get(owner)?
+            .lease
+    }
+
     /// Drop a released session's lease record and un-ACKed actions.
     pub(crate) fn forget(&self, owner: &str) {
         let mut agents = self.agents.lock().unwrap_or_else(|p| p.into_inner());
@@ -175,11 +185,17 @@ fn check_not_safe_mode(ctx: &ToolCtx<'_>) -> McpResult<()> {
 
 // ─── Surfaces ────────────────────────────────────────────────────────────────
 
+const DOCK_PERMISSION: &str = "publish_widget:*";
+const DOCK_KEY_HINT: &str = "one dock widget per type per session; no key";
+// A small byte ceiling also bounds tokenization of arbitrary names.
+const DOCK_HINT_MAX_BYTES: usize = 60;
+
 /// A parsed surface string.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Surface {
     Zone(String),
     Widget(String),
+    Dock(String),
     Portal(String),
 }
 
@@ -194,6 +210,7 @@ impl Surface {
         match kind {
             "zone" => Ok(Self::Zone(name.into())),
             "widget" => Ok(Self::Widget(name.into())),
+            "dock" => Ok(Self::Dock(name.into())),
             "portal" => Ok(Self::Portal(name.into())),
             _ => Err(bad()),
         }
@@ -204,6 +221,7 @@ impl Surface {
         match self {
             Self::Zone(n) => (format!("publish_zone:{n}"), format!("zone:{n}")),
             Self::Widget(n) => (format!("publish_widget:{n}"), format!("widget:{n}")),
+            Self::Dock(_) => (DOCK_PERMISSION.into(), "widget:*".into()),
             Self::Portal(_) => ("resident_mcp".into(), "portal".into()),
         }
     }
@@ -250,6 +268,19 @@ fn widget_expires_in(
         .map(|r| scene.widget_expiry(r))
         .chain(scene.scheduled_widget_publication_expiries(widget, ns))
         .filter_map(|expiry| remaining_ms(expiry, now))
+        .max()
+}
+
+fn dock_expiry(scene: &SceneGraph, kind: &str, owner: &str) -> Option<u64> {
+    let instance = scene.dock_instance(owner, kind)?;
+    scene
+        .widget_registry
+        .active_publishes
+        .get(&instance.instance_name)
+        .into_iter()
+        .flatten()
+        .filter(|record| record.publisher_namespace == owner)
+        .filter_map(|record| scene.widget_expiry(record))
         .max()
 }
 
@@ -305,14 +336,19 @@ fn accepts(types: &[ZoneMediaType]) -> String {
         .join("|")
 }
 
-fn widget_params(scene: &SceneGraph, instance: &str) -> Value {
-    let mut out = Map::new();
-    let Some(def) = scene
+fn named_widget_definition<'a>(
+    scene: &'a SceneGraph,
+    instance: &str,
+) -> Option<&'a WidgetDefinition> {
+    let instance = scene.widget_registry.instances.get(instance)?;
+    scene
         .widget_registry
-        .instances
-        .get(instance)
-        .and_then(|i| scene.widget_registry.definitions.get(&i.widget_type_name))
-    else {
+        .get_definition(&instance.widget_type_name)
+}
+
+fn widget_params(definition: Option<&WidgetDefinition>) -> Value {
+    let mut out = Map::new();
+    let Some(def) = definition else {
         return Value::Object(out);
     };
     for d in &def.parameter_schema {
@@ -430,7 +466,13 @@ pub async fn hud_surfaces(ctx: &ToolCtx<'_>) -> McpResult<Value> {
             }
             surfaces.push(Value::Object(o));
         }
-        let mut widgets: Vec<_> = scene.widget_registry.instances.keys().cloned().collect();
+        let mut widgets: Vec<_> = scene
+            .widget_registry
+            .instances
+            .keys()
+            .filter(|name| !scene.is_dock_widget(name))
+            .cloned()
+            .collect();
         widgets.sort();
         for w in widgets {
             let surface = Surface::Widget(w.clone());
@@ -439,7 +481,10 @@ pub async fn hud_surfaces(ctx: &ToolCtx<'_>) -> McpResult<Value> {
             }
             let mut o = Map::new();
             o.insert("s".into(), json!(format!("widget:{w}")));
-            o.insert("params".into(), widget_params(&scene, &w));
+            o.insert(
+                "params".into(),
+                widget_params(named_widget_definition(&scene, &w)),
+            );
             let mine: Vec<_> = scene
                 .widget_registry
                 .active_publishes
@@ -455,6 +500,21 @@ pub async fn hud_surfaces(ctx: &ToolCtx<'_>) -> McpResult<Value> {
                 }
             }
             surfaces.push(Value::Object(o));
+        }
+        if ctx.agent.allows(DOCK_PERMISSION) {
+            let owner_live = check_scope_live(ctx).is_ok();
+            for (kind, def) in scene.dock_types() {
+                let mut entry =
+                    json!({ "s": format!("dock:{kind}"), "params": widget_params(Some(def)) });
+                if owner_live
+                    && let Some(expiry) =
+                        dock_expiry(&scene, kind, ns).filter(|expiry| *expiry > now)
+                {
+                    entry["held"] = json!(true);
+                    entry["expires_in_ms"] = json!(remaining_ms(Some(expiry), now));
+                }
+                surfaces.push(entry);
+            }
         }
     }
     if portals_enabled(ctx) {
@@ -509,16 +569,27 @@ pub fn parse_args<T: for<'de> Deserialize<'de>>(args: Value) -> McpResult<T> {
 /// Publish to a surface: zone content, widget params, or portal output.
 pub(crate) async fn hud_publish<'a>(ctx: &ToolCtx<'a>, args: Value) -> McpResult<PublishReply<'a>> {
     let started = tokio::time::Instant::now();
+    let has_key = args.get("key").is_some();
+    let has_display_name = args.get("display_name").is_some();
     let p: PublishParams = parse_args(args)?;
     let surface = Surface::parse(&p.surface)?;
     check_allowed(ctx, &surface)?;
     check_not_safe_mode(ctx)?;
+    if matches!(surface, Surface::Dock(_)) {
+        if has_key {
+            return Err(invalid(DOCK_KEY_HINT));
+        }
+        if has_display_name {
+            return Err(invalid("display_name doesn't apply to dock widgets"));
+        }
+    }
     check_fields(&surface, &p, ctx.scope.is_some())?;
     match surface {
         Surface::Zone(zone) => publish_zone(ctx, &zone, p, started).await,
         Surface::Widget(widget) => publish_widget(ctx, &widget, p)
             .await
             .map(PublishReply::plain),
+        Surface::Dock(kind) => publish_dock(ctx, &kind, p).await.map(PublishReply::plain),
         Surface::Portal(pid) => publish_portal(ctx, &pid, p).await.map(PublishReply::plain),
     }
 }
@@ -536,7 +607,7 @@ fn check_fields(surface: &Surface, p: &PublishParams, scoped: bool) -> McpResult
         ]
         .into_iter()
         .find(|(_, set)| *set),
-        Surface::Widget(_) => [
+        Surface::Widget(_) | Surface::Dock(_) => [
             ("wait_ms", p.wait_ms.is_some()),
             ("content", p.content.is_some()),
             ("status", p.status.is_some()),
@@ -554,6 +625,9 @@ fn check_fields(surface: &Surface, p: &PublishParams, scoped: bool) -> McpResult
         .find(|(_, set)| *set),
     };
     match misplaced {
+        Some((field, _)) if matches!(surface, Surface::Dock(_)) => {
+            Err(invalid(format!("{field} doesn't apply to dock widgets")))
+        }
         Some((field, _)) => Err(invalid(format!("{field} doesn't apply to {}", p.surface))),
         None => Ok(()),
     }
@@ -562,7 +636,7 @@ fn check_fields(surface: &Surface, p: &PublishParams, scoped: bool) -> McpResult
 /// Check the current lease without renewing or granting one. Hold must refuse
 /// a suspended lease before changing content, even if the pause atomic is stale.
 fn existing_lease(ctx: &ToolCtx<'_>, scene: &SceneGraph) -> McpResult<Option<SceneId>> {
-    let existing = ctx.state.with(ctx.owner, |s| s.lease);
+    let existing = ctx.state.lease(ctx.owner);
     if existing
         .and_then(|id| scene.leases.get(&id))
         .is_some_and(|lease| lease.state == LeaseState::Suspended)
@@ -1033,19 +1107,13 @@ async fn publish_widget(ctx: &ToolCtx<'_>, widget: &str, p: PublishParams) -> Mc
         .ok_or_else(|| invalid("widget publish needs params; see params in hud_surfaces"))?;
     let mut scene = ctx.scene.lock().await;
     check_scope_live(ctx)?;
-    if !scene.widget_registry.instances.contains_key(widget) {
+    if scene.is_dock_widget(widget) || !scene.widget_registry.instances.contains_key(widget) {
         return Err(tool_err(
             "WIDGET_NOT_FOUND",
             format!("no widget {widget}; call hud_surfaces"),
         ));
     }
-    let mut typed = HashMap::new();
-    for (name, value) in &params {
-        typed.insert(
-            name.clone(),
-            json_to_widget_param_value(value, name, &scene, widget)?,
-        );
-    }
+    let typed = typed_widget_params(&params, named_widget_definition(&scene, widget), widget)?;
     let typed = scene
         .validate_widget_params(widget, &typed)
         .map_err(|e| scene_error(&e))?;
@@ -1133,6 +1201,101 @@ async fn publish_widget(ctx: &ToolCtx<'_>, widget: &str, p: PublishParams) -> Mc
         )),
         &clipped,
     ))
+}
+
+fn unknown_dock_type(scene: &SceneGraph) -> McpError {
+    let accepts = scene
+        .dock_types()
+        .map(|(kind, _)| kind)
+        .collect::<Vec<_>>()
+        .join(", ");
+    let hint = format!("dock accepts: {accepts}");
+    if accepts.is_empty() || hint.len() > DOCK_HINT_MAX_BYTES {
+        tool_err(
+            "WIDGET_NOT_FOUND",
+            "dock type unavailable; see dock types in hud_surfaces",
+        )
+    } else {
+        tool_err("WIDGET_NOT_FOUND", hint)
+    }
+}
+
+fn dock_param_error(error: McpError) -> McpError {
+    let McpError::Tool { code, hint } = &error;
+    if *code == "WIDGET_PARAMETER_INVALID" && hint.len() > DOCK_HINT_MAX_BYTES {
+        tool_err(
+            "WIDGET_PARAMETER_INVALID",
+            "check the parameter names and types in hud_surfaces",
+        )
+    } else {
+        error
+    }
+}
+
+fn dock_publish_error(scene: &SceneGraph, error: DockPublishError) -> McpError {
+    match error {
+        DockPublishError::Full => tool_err("CONTENT_REJECTED", "dock full; show this in a card"),
+        DockPublishError::Widget(ValidationError::WidgetNotFound { .. }) => {
+            unknown_dock_type(scene)
+        }
+        DockPublishError::Widget(error) => dock_param_error(scene_error(&error)),
+    }
+}
+
+async fn publish_dock(ctx: &ToolCtx<'_>, kind: &str, p: PublishParams) -> McpResult<Value> {
+    if p.delay_ms.unwrap_or(0) > 0 {
+        return Err(invalid("dock widgets publish immediately; omit delay_ms"));
+    }
+    let params = p
+        .params
+        .ok_or_else(|| invalid("dock publish needs params; see hud_surfaces"))?;
+    let mut scene = ctx.scene.lock().await;
+    check_scope_live(ctx)?;
+    check_not_safe_mode(ctx)?;
+    existing_lease(ctx, &scene)?;
+    let definition = scene
+        .dock_definition(kind)
+        .ok_or_else(|| unknown_dock_type(&scene))?;
+    let typed =
+        typed_widget_params(&params, Some(definition), &p.surface).map_err(dock_param_error)?;
+    let admitted = scene
+        .validate_dock_publish(kind, &typed, ctx.owner)
+        .map_err(|e| dock_publish_error(&scene, e))?;
+    let lease_id = ensure_lease(ctx, &mut scene)?;
+    let transition_ms = widget_transition_ms(&scene, ctx);
+    scene
+        .publish_admitted_to_dock(
+            Some(admitted),
+            kind,
+            typed,
+            ctx.owner,
+            Some(lease_id),
+            transition_ms,
+            p.ttl_ms.unwrap_or(0),
+        )
+        .map_err(|e| dock_publish_error(&scene, e))?;
+    let instance = scene
+        .dock_instance(ctx.owner, kind)
+        .expect("accepted dock widget");
+    let clipped = ctx
+        .text_fit
+        .filter(|_| !params.is_empty() && scene.widget_visible(instance))
+        .map(|fit| {
+            let drawn = widget_params_at(&instance.current_params, now_us(&scene));
+            fit.widget(&scene, &instance.instance_name, &drawn)
+                .into_iter()
+                .filter(|(param, _)| params.contains_key(param))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let expires = published_expires_in(
+        &scene,
+        &instance.instance_name,
+        ctx.owner,
+        None,
+        now_us(&scene),
+    );
+    Ok(with_clipped(ok_with_expiry(expires), &clipped))
 }
 
 /// Whether this agent may hold portals and the portal driver is wired, so
@@ -1358,6 +1521,27 @@ pub async fn hud_hold(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
             let now = now_us(&scene);
             result = ok_with_expiry(widget_expires_in(&scene, &widget, &ns, now));
         }
+        Surface::Dock(kind) => {
+            let mut scene = ctx.scene.lock().await;
+            check_scope_live(ctx)?;
+            check_not_safe_mode(ctx)?;
+            existing_lease(ctx, &scene)?;
+            scene
+                .dock_definition(&kind)
+                .ok_or_else(|| unknown_dock_type(&scene))?;
+            let now = now_us(&scene);
+            if dock_expiry(&scene, &kind, &ns).is_none_or(|expiry| expiry <= now)
+                || !scene.hold_dock_widget(&ns, &kind, p.ttl_ms)
+            {
+                return Err(tool_err(
+                    "NOT_HELD",
+                    "you hold no such dock widget; hud_publish first",
+                ));
+            }
+            ensure_lease(ctx, &mut scene)?;
+            let now = now_us(&scene);
+            result = ok_with_expiry(remaining_ms(dock_expiry(&scene, &kind, &ns), now));
+        }
         Surface::Portal(pid) => {
             // The runtime keeps a held portal (and its transcript) past the
             // idle reclaim until the hold lapses or hud_clear.
@@ -1388,9 +1572,13 @@ pub struct ClearParams {
 
 /// Release a zone publication, a widget publication, or a portal (detach).
 pub async fn hud_clear(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
+    let has_key = args.get("key").is_some();
     let p: ClearParams = parse_args(args)?;
     let surface = Surface::parse(&p.surface)?;
     check_allowed(ctx, &surface)?;
+    if has_key && matches!(surface, Surface::Dock(_)) {
+        return Err(invalid(DOCK_KEY_HINT));
+    }
     let key = p.key.as_deref().filter(|key| !key.is_empty());
     if key.is_some() && !matches!(&surface, Surface::Zone(_)) {
         return Err(invalid("keyed clear requires a notification zone"));
@@ -1410,6 +1598,14 @@ pub async fn hud_clear(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
             scene
                 .clear_widget_for_publisher(&widget, &ns)
                 .map_err(|e| scene_error(&e))?;
+        }
+        Surface::Dock(kind) => {
+            let mut scene = ctx.scene.lock().await;
+            check_scope_live(ctx)?;
+            scene
+                .dock_definition(&kind)
+                .ok_or_else(|| unknown_dock_type(&scene))?;
+            scene.clear_dock_widget(&ns, &kind);
         }
         Surface::Portal(pid) => {
             with_portals(ctx, |hub, _| {
@@ -1938,11 +2134,25 @@ fn parse_zone_content(content: &Value) -> Result<ZoneContent, McpError> {
     }
 }
 
-/// Convert a JSON value to a typed widget parameter per the instance's schema.
+fn typed_widget_params(
+    params: &Map<String, Value>,
+    definition: Option<&WidgetDefinition>,
+    widget_name: &str,
+) -> McpResult<HashMap<String, WidgetParameterValue>> {
+    params
+        .iter()
+        .map(|(name, value)| {
+            json_to_widget_param_value(value, name, definition, widget_name)
+                .map(|typed| (name.clone(), typed))
+        })
+        .collect()
+}
+
+/// Convert a JSON value to a typed widget parameter per the installed schema.
 fn json_to_widget_param_value(
     v: &Value,
     param_name: &str,
-    scene: &SceneGraph,
+    definition: Option<&WidgetDefinition>,
     widget_name: &str,
 ) -> McpResult<WidgetParameterValue> {
     let bad = |want: &str| {
@@ -1951,11 +2161,7 @@ fn json_to_widget_param_value(
             format!("{widget_name}.{param_name} must be {want}"),
         )
     };
-    let decl = scene
-        .widget_registry
-        .instances
-        .get(widget_name)
-        .and_then(|i| scene.widget_registry.definitions.get(&i.widget_type_name))
+    let decl = definition
         .and_then(|d| d.parameter_schema.iter().find(|d| d.name == param_name))
         .ok_or_else(|| {
             tool_err(
