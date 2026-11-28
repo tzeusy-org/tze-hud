@@ -117,7 +117,7 @@ starting another window or exposing the PSK:
 ```
 
 Use the actual dev path and `--config` for an in-place build. See the
-[projection skill's MCP client instructions](../.claude/skills/hud-projection/SKILL.md#mcp-client)
+[projection skill's MCP client instructions](../.claude/skills/hud-projection/references/guide.md#mcp-client)
 for the current adapter and selection behavior.
 
 ## 4. Attach the session to a portal
