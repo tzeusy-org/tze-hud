@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-from hud_session import HOLD_MS, PENDING_LIMIT, STATE_METHOD, SessionPresence
+from hud_session import CARD_SURFACE, HOLD_MS, PENDING_LIMIT, STATE_METHOD, CardWait, HookCards, SessionPresence
 
 PROMPT = "e53cb2ed-891a-4c88-9a7b-c64a41f06cf2"
 NEXT = "5f1116d5-223b-48ab-a028-00ae7a2d005c"
@@ -157,3 +157,46 @@ def test_restart_can_adopt_a_final_and_priority_state_overtakes_pending_progress
     state.event(event("Notification", notice="idle_prompt"))
     assert state.take().params == {"state": "done"}
     assert state.take().params["content"] == "Read: running"
+
+
+def card(kind, nonce):
+    request = {"kind": kind, "title": "Choose", "body": "", "actions": ["dismiss", "Keep"]}
+    return CardWait(request, object(), nonce, 1)
+
+
+@pytest.mark.parametrize("stale_dismiss", [False, True])
+def test_option_d_keeps_callbacks_generation_bound(stale_dismiss):
+    cards = HookCards()
+    old, new = card("question", "old"), card("question", "new")
+    cards.admit(old, 0, 100)
+    assert cards.admit(new, 1, 100) is old
+    assert "ttl_ms" not in new.publish_arguments()
+    assert new.publish_arguments()["content"]["actions"][0] == {
+        "label": "dismiss", "callback_id": "new.0",
+    }
+    input_item = {"s": CARD_SURFACE, "key": "question"}
+    callback = {**input_item, "id": "a1", "action": "old.0"}
+    assert cards.input([callback, callback]) == (["a1"], [])
+    if stale_dismiss:
+        answer = {**input_item, "id": "a2", "action": "dismiss", "kind": "dismiss"}
+        expected = {"end": "dismissed"}
+    else:
+        answer = {**input_item, "id": "a2", "action": "new.0"}
+        expected = {"end": "answer", "index": 0}
+    assert cards.input([answer]) == (["a2"], [(new, expected)])
+    assert not cards.live
+
+
+def test_held_zone_extends_only_the_due_waiters():
+    cards = HookCards()
+    question = card("question", "one")
+    permission = card("permission", "two")
+    cards.admit(question, 1, 750)
+    cards.admit(permission, 1, 5750)
+    assert cards.wait_ms(1) == 1000
+    assert cards.due(2) == [question]
+    assert cards.observe_zone(cards.due(2), 2, True, 4000) == []
+    assert question.deadline == 6.25
+    assert permission.deadline == 7
+    assert cards.observe_zone(cards.due(6.25), 6.25, False, None) == [question]
+    assert list(cards.live.values()) == [permission]

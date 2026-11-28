@@ -588,11 +588,11 @@ The gRPC `Hold` and `Clear` behave the same on zones. An internal scene
   records. Retention is in memory, with no crash/disk durability claim. Portal
   replies keep their existing admission bounds, TTL, clear and reclaim rules.
   A key identifies a reusable visual slot, not an answer-generation nonce.
-  Under owner option D, an old accepted human-X or delayed keyed clear may
-  cancel a replacement card, but must never answer it. Broker callback-nonce
-  routing, cancelled-question terminal fallback, cancelled-nudge silence and
-  the executing stale-X/old-callback race proof belong to `hud-bz9bv.7`;
-  this key API adds no revision, conditional clear or input-retirement rule.
+  Under owner option D, an old accepted human × or delayed keyed clear may
+  cancel a replacement card. The stdio adapter routes answers by callback
+  nonce and owns the stale-cancellation race tests (`hud-rf026.3.2`).
+  A cancelled question falls through to the terminal and a cancelled nudge
+  stays silent. The API keeps the existing key-only routing contract.
 - `ack` confirms earlier items once per call; unacked items are redelivered.
   `max_items` limits the result and `remaining` reports the retained backlog;
   zero returns the backlog without consuming it. Notification FIFO items precede
@@ -816,8 +816,13 @@ agents until one is paired.
   a bare `404` before anything runs; the client re-initializes. An agent
   holds at most 64 sessions; opening another releases the least-recently-
   called one, preferring one with nothing held, as on `DELETE`. Session
-  start and end are logged, and `/admin/status` `sessions` lists each live
-  one as `{agent, label, holdings}`. A script that calls `initialize` but
+  start and end are logged, and `/admin/status` `sessions` lists each primary
+  as `{agent, label, holdings}` plus its optional `sibling` entry. A fresh
+  `initialize` may pass `params._meta["tze.hud/parent"]` with a live primary
+  session id for the same agent. A primary may have one sibling, which takes
+  its label at creation, owns its own content and input, counts toward the
+  64-session bound and ends when the primary ends. Invalid links return
+  JSON-RPC `-32602`. A script that calls `initialize` but
   never sends the header back opens a session it never uses; it shows there
   unlabeled with no holdings, and the bound releases such sessions first.
 - `admin` is an operator entry, outside the model surface: it opens

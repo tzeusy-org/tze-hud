@@ -10,6 +10,8 @@ import struct
 import hud_env
 
 MAX_PACKET = 16 * 1024
+CARD_KINDS = {"question", "permission", "nudge"}
+CARD_TTL_MS = 600_000
 TOOL_EVENTS = {"PreToolUse", "PostToolUse", "PostToolUseFailure"}
 TOOL_LABELS = frozenset({
     "Bash", "Read", "Write", "Edit", "Grep", "Glob", "WebFetch", "WebSearch",
@@ -70,18 +72,49 @@ def valid_event(event):
     return False
 
 
+def valid_card(message):
+    if not isinstance(message, dict) or type(message.get("v")) is not int or message["v"] != 1:
+        return False
+    if message.get("op") != "card" or not isinstance(message.get("kind"), str):
+        return False
+    if message["kind"] not in CARD_KINDS:
+        return False
+    required = {"v", "op", "kind", "title", "body", "actions"}
+    if message.keys() not in (required, required | {"ttl_ms"}):
+        return False
+    title, body, actions = message["title"], message["body"], message["actions"]
+    if not isinstance(title, str) or not isinstance(body, str) or not (title.strip() or body.strip()):
+        return False
+    if not isinstance(actions, list) or not 1 <= len(actions) <= 4:
+        return False
+    if not all(isinstance(label, str) and label.strip() for label in actions):
+        return False
+    ttl_ms = message.get("ttl_ms", CARD_TTL_MS)
+    return type(ttl_ms) is int and 1 <= ttl_ms <= CARD_TTL_MS
+
+
+def packet_bytes(message):
+    packet = json.dumps(message, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    if len(packet) > MAX_PACKET:
+        raise ValueError("hook packet too large")
+    return packet
+
+
+def send_packet(peer, packet):
+    """Connect once to the immediate parent's same-UID socket and send one packet."""
+    path = hud_env.runtime_socket(os.getppid())
+    if path is None:
+        return False
+    peer.setblocking(False)
+    peer.connect(os.fspath(path))
+    return peer_uid(peer) == os.getuid() and peer.send(packet) == len(packet)
+
+
 def send_event(event):
     """Attempt one packet on the immediate parent's socket without waiting."""
     try:
-        path = hud_env.runtime_socket(os.getppid())
-        if path is not None:
-            packet = json.dumps(event, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-            if len(packet) <= MAX_PACKET:
-                with socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET) as peer:
-                    peer.setblocking(False)
-                    peer.connect(os.fspath(path))
-                    if peer_uid(peer) == os.getuid():
-                        peer.send(packet)
+        with socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET) as peer:
+            send_packet(peer, packet_bytes(event))
     except (OSError, ValueError, TypeError):
         pass
 
@@ -91,7 +124,7 @@ def peer_uid(peer):
     return PEER_CREDENTIALS.unpack(credentials)[1]
 
 
-def receive_event(peer):
+def receive_event(peer, *, allow_card=False):
     """Return one valid packet, or None. An unreadable peer stays nonblocking."""
     try:
         if peer_uid(peer) != os.getuid():
@@ -100,6 +133,10 @@ def receive_event(peer):
         if not packet or flags & (socket.MSG_TRUNC | socket.MSG_CTRUNC):
             return None
         event = json.loads(packet.decode("utf-8"))
+        if allow_card and valid_card(event):
+            # JSON escapes can encode lone surrogates despite valid wire UTF-8.
+            packet_bytes(event)
+            return event
         return event if valid_event(event) else None
     except BlockingIOError:
         raise

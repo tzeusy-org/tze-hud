@@ -29,6 +29,8 @@ pub struct Scope {
     pub agent: String,
     /// The namespace this session owns content under.
     pub namespace: String,
+    /// The primary session id, for a linked sibling.
+    pub parent: Option<String>,
     label: Mutex<Option<SessionLabel>>,
     last_call: AtomicU64,
     last_call_ms: AtomicU64,
@@ -74,6 +76,7 @@ pub struct ScopeSummary {
     pub agent: String,
     pub label: Option<String>,
     pub namespace: String,
+    pub parent_namespace: Option<String>,
     pub last_call_ms: u64,
     pub presence: Option<ScopePresence>,
 }
@@ -115,16 +118,28 @@ impl Scopes {
 
     /// The live scope `id` of `agent`, marked as just called. Another
     /// agent's id is unknown to this one.
-    pub fn touch(&self, agent: &str, id: &str) -> Option<Arc<Scope>> {
-        let scope = self.live().get(id).filter(|s| s.agent == agent).cloned()?;
+    #[cfg(test)]
+    pub(crate) fn touch(&self, agent: &str, id: &str) -> Option<Arc<Scope>> {
+        let scope = self.find(agent, id)?;
+        self.record_call(&scope);
+        Some(scope)
+    }
+
+    pub(crate) fn find(&self, agent: &str, id: &str) -> Option<Arc<Scope>> {
+        self.live().get(id).filter(|s| s.agent == agent).cloned()
+    }
+
+    pub(crate) fn record_call(&self, scope: &Scope) {
         scope.last_call.fetch_max(self.tick(), Ordering::Relaxed);
         scope
             .last_call_ms
             .fetch_max(self.clock.now_millis(), Ordering::Relaxed);
-        Some(scope)
     }
 
     pub(crate) fn report_presence(&self, scope: &Scope, params: &serde_json::Value) {
+        if scope.parent.is_some() {
+            return;
+        }
         let (state, reason) = match (
             params.get("state").and_then(serde_json::Value::as_str),
             params.get("reason"),
@@ -151,47 +166,71 @@ impl Scopes {
         }
     }
 
-    /// Open a scope for `agent` with a sanitized, de-duplicated `label`.
-    /// Returns it and, when the agent is at its bound, the scope to release
-    /// first: the least-recently-called among those `idle` says hold nothing,
-    /// else the least-recently-called of all.
+    /// Open an ordinary scope with a sanitized, de-duplicated label.
     pub fn open(
         &self,
         agent: &str,
         label: Option<&str>,
         idle: impl Fn(&Scope) -> bool,
-    ) -> (Arc<Scope>, Option<Arc<Scope>>) {
+    ) -> (Arc<Scope>, Vec<Arc<Scope>>) {
+        self.open_with_parent(agent, label, None, idle)
+            .expect("opening an ordinary scope cannot reject a parent")
+    }
+
+    /// Open a scope and return any scopes released to make room.
+    /// Linking validates the parent and its single sibling slot under the
+    /// same lock as the insertion. Invalid links leave the table unchanged.
+    pub(crate) fn open_with_parent(
+        &self,
+        agent: &str,
+        label: Option<&str>,
+        parent: Option<&str>,
+        idle: impl Fn(&Scope) -> bool,
+    ) -> Option<(Arc<Scope>, Vec<Arc<Scope>>)> {
         let mut live = self.live();
+        let parent = match parent {
+            Some(id) => {
+                let primary = live
+                    .get(id)
+                    .filter(|s| s.agent == agent && s.parent.is_none())?;
+                if live.values().any(|s| s.parent.as_deref() == Some(id)) {
+                    return None;
+                }
+                Some(Arc::clone(primary))
+            }
+            None => None,
+        };
         let mine: Vec<&Arc<Scope>> = live.values().filter(|s| s.agent == agent).collect();
-        let evict = (mine.len() >= MAX_SCOPES_PER_AGENT)
-            .then(|| {
-                let oldest = |pool: Vec<&Arc<Scope>>| {
-                    pool.into_iter()
-                        .min_by_key(|s| s.last_call.load(Ordering::Relaxed))
-                        .cloned()
-                };
-                oldest(mine.iter().copied().filter(|s| idle(s)).collect())
-                    .or_else(|| oldest(mine.clone()))
-            })
-            .flatten();
-        if let Some(evicted) = &evict {
-            evicted.released.store(true, Ordering::SeqCst);
-            live.remove(&evicted.id);
-        }
-        let taken: Vec<String> = live
-            .values()
-            .filter(|s| s.agent == agent)
-            .filter_map(|s| s.label())
-            .collect();
-        let label = label.and_then(sanitize_label).map(|mut label| {
-            label.caption = unique_label(&label.caption, &taken);
-            label
-        });
+        let evicted = if mine.len() >= MAX_SCOPES_PER_AGENT {
+            // A sibling admission cannot release the parent it just validated.
+            let evict = mine
+                .into_iter()
+                .filter(|s| parent.as_ref().is_none_or(|p| s.id != p.id))
+                .min_by_key(|s| (!idle(s), s.last_call.load(Ordering::Relaxed)))
+                .cloned()
+                .expect("the table bound leaves other eviction candidates");
+            Self::remove(&mut live, &evict.id)
+        } else {
+            Vec::new()
+        };
+        let label = match &parent {
+            Some(primary) => primary.session_label(),
+            None => label.and_then(sanitize_label).map(|mut label| {
+                let taken: Vec<String> = live
+                    .values()
+                    .filter(|s| s.agent == agent && s.parent.is_none())
+                    .filter_map(|s| s.label())
+                    .collect();
+                label.caption = unique_label(&label.caption, &taken);
+                label
+            }),
+        };
         let id = new_session_id();
         let scope = Arc::new(Scope {
             namespace: tze_hud_scene::scope::scoped_namespace(agent, &id),
             id: id.clone(),
             agent: agent.to_owned(),
+            parent: parent.map(|p| p.id.clone()),
             label: Mutex::new(label),
             last_call: AtomicU64::new(self.tick()),
             last_call_ms: AtomicU64::new(self.clock.now_millis()),
@@ -199,16 +238,32 @@ impl Scopes {
             released: AtomicBool::new(false),
         });
         live.insert(id, Arc::clone(&scope));
-        (scope, evict)
+        Some((scope, evicted))
     }
 
-    /// End scope `id` of `agent`; `None` if it is not live.
-    pub fn close(&self, agent: &str, id: &str) -> Option<Arc<Scope>> {
+    /// End scope `id` of `agent` and its sibling, if any.
+    pub fn close(&self, agent: &str, id: &str) -> Vec<Arc<Scope>> {
         let mut live = self.live();
-        live.get(id).filter(|s| s.agent == agent)?;
-        let scope = live.remove(id)?;
-        scope.released.store(true, Ordering::SeqCst);
-        Some(scope)
+        if live.get(id).is_some_and(|s| s.agent == agent) {
+            Self::remove(&mut live, id)
+        } else {
+            Vec::new()
+        }
+    }
+
+    fn remove(live: &mut HashMap<String, Arc<Scope>>, id: &str) -> Vec<Arc<Scope>> {
+        let mut released = live.remove(id).into_iter().collect::<Vec<_>>();
+        let sibling = live
+            .values()
+            .find(|s| s.parent.as_deref() == Some(id))
+            .map(|s| s.id.clone());
+        if let Some(sibling) = sibling.and_then(|s| live.remove(&s)) {
+            released.push(sibling);
+        }
+        for scope in &released {
+            scope.released.store(true, Ordering::SeqCst);
+        }
+        released
     }
 
     /// The live scope owning `namespace`, if any.
@@ -229,6 +284,10 @@ impl Scopes {
                 agent: s.agent.clone(),
                 label: s.label(),
                 namespace: s.namespace.clone(),
+                parent_namespace: s
+                    .parent
+                    .as_ref()
+                    .map(|parent| tze_hud_scene::scope::scoped_namespace(&s.agent, parent)),
                 last_call_ms: s.last_call_ms.load(Ordering::Relaxed),
                 presence: *s.presence.lock().unwrap_or_else(|p| p.into_inner()),
             })
@@ -321,7 +380,7 @@ mod tests {
             Some("tze-hud (2)")
         );
         assert_eq!(open("tze-hud").label().as_deref(), Some("tze-hud (3)"));
-        scopes.close("claude", &first.id).unwrap();
+        assert_eq!(scopes.close("claude", &first.id).len(), 1);
         assert_eq!(open("tze-hud").label().as_deref(), Some("tze-hud"));
         // Another agent's labels never collide.
         let other = scopes.open("codex", Some("tze-hud"), |_| true).0;
@@ -332,7 +391,7 @@ mod tests {
     fn ids_are_per_agent_and_closing_releases() {
         let scopes = Scopes::default();
         let (scope, evicted) = scopes.open("claude", None, |_| true);
-        assert!(evicted.is_none());
+        assert!(evicted.is_empty());
         assert_eq!(scope.id.len(), 32);
         assert!(
             scopes.touch("codex", &scope.id).is_none(),
@@ -340,10 +399,10 @@ mod tests {
         );
         assert!(scopes.touch("claude", &scope.id).is_some());
         assert!(scopes.by_namespace(&scope.namespace).is_some());
-        assert!(scopes.close("codex", &scope.id).is_none());
-        assert!(scopes.close("claude", &scope.id).unwrap().is_released());
+        assert!(scopes.close("codex", &scope.id).is_empty());
+        assert!(scopes.close("claude", &scope.id)[0].is_released());
         assert!(scopes.touch("claude", &scope.id).is_none());
-        assert!(scopes.close("claude", &scope.id).is_none());
+        assert!(scopes.close("claude", &scope.id).is_empty());
     }
 
     #[test]
@@ -356,13 +415,15 @@ mod tests {
         scopes.touch("claude", &all[1].id).unwrap();
         let busy = all[0].id.clone();
         let (_, evicted) = scopes.open("claude", None, |s| s.id != busy);
-        let evicted = evicted.unwrap();
+        let [evicted] = evicted.as_slice() else {
+            panic!("expected one released scope");
+        };
         assert_eq!(evicted.id, all[2].id);
         assert!(evicted.is_released());
         assert_eq!(scopes.list().len(), MAX_SCOPES_PER_AGENT);
         // With nothing idle, the least-recently-called goes.
         let (_, evicted) = scopes.open("claude", None, |_| false);
-        assert_eq!(evicted.unwrap().id, busy);
+        assert_eq!(evicted[0].id, busy);
     }
 
     #[test]
@@ -370,7 +431,9 @@ mod tests {
         let clock = tze_hud_scene::clock::TestClock::new(100);
         let scopes = Scopes::with_clock(Arc::new(clock.clone()));
         let (scope, _) = scopes.open("claude", None, |_| true);
-        let (sibling_client, _) = scopes.open("claude", None, |_| true);
+        let (sibling_client, _) = scopes
+            .open_with_parent("claude", None, Some(&scope.id), |_| true)
+            .unwrap();
         let working = serde_json::json!({"state": "working"});
         for absent in [
             serde_json::json!({"state": "unknown"}),
@@ -379,6 +442,7 @@ mod tests {
         ] {
             scopes.report_presence(&scope, &absent);
         }
+        scopes.report_presence(&sibling_client, &working);
         assert!(scopes.list().iter().all(|row| row.presence.is_none()));
         clock.advance(25);
         scopes.touch("claude", &scope.id).unwrap();
@@ -400,7 +464,7 @@ mod tests {
                 .presence
                 .is_none()
         );
-        scopes.close("claude", &scope.id).unwrap();
-        assert_eq!(scopes.list().len(), 1);
+        assert_eq!(scopes.close("claude", &scope.id).len(), 2);
+        assert!(scopes.list().is_empty());
     }
 }
